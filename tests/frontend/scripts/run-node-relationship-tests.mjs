@@ -15,6 +15,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentPresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectRelationshipGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/updatesSelection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkGrouping.test.js"),

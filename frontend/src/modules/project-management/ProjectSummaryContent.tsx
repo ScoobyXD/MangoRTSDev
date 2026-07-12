@@ -66,6 +66,7 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
@@ -91,6 +92,17 @@ import {
   type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "./projectManagementApi.js";
+import {
+  buildProjectRelationshipGroupingModel,
+  buildVisibleProjectLogicGateIndex,
+  collectProjectRelationshipGroupIDs,
+  DEFAULT_PROJECT_RELATIONSHIP_GROUPINGS,
+  flattenVisibleProjectRelationshipLeafRows,
+  normalizeProjectRelationshipGroupingStack,
+  PROJECT_RELATIONSHIP_GROUPING_FIELDS,
+  type ProjectRelationshipGroupingSetting,
+  type ProjectRelationshipNestedGroup,
+} from "./projectRelationshipGrouping.js";
 
 type ProjectSummaryContentProps = {
   projectID: string;
@@ -111,11 +123,6 @@ type ProjectTextBlockDraft = {
   attachments: EditorChatAttachment[];
   createdTimestamp: string;
   updatedTimestamp: string;
-};
-
-type ProjectRelationshipGroup = {
-  gate: ProjectRelationshipProjection;
-  nodes: ProjectRelationshipProjection[];
 };
 
 type ProjectSummaryWorkspaceSnapshot = {
@@ -179,6 +186,7 @@ const PROJECT_SUMMARY_SPLIT_MIN = 42;
 const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
+const PROJECT_RELATIONSHIP_GROUPING_STORAGE_KEY = "mangorts-project-relationship-groupings-v1";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
   if (typeof window === "undefined") return;
@@ -202,6 +210,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
+  const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
+  const relationshipGroupingSignatureRef = useRef("");
   const projectFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
@@ -241,7 +251,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
   const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
-  const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
+  const [relationshipGroupings, setRelationshipGroupings] = useState<ProjectRelationshipGroupingSetting[]>(() => (
+    DEFAULT_PROJECT_RELATIONSHIP_GROUPINGS.map((grouping) => ({ ...grouping }))
+  ));
+  const [expandedRelationshipGroupIDs, setExpandedRelationshipGroupIDs] = useState<Set<string>>(() => new Set());
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
   const [selectedRelationshipNodeIDs, setSelectedRelationshipNodeIDs] = useState<Set<string>>(() => new Set());
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
@@ -309,6 +322,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [projectID]);
 
   useEffect(() => {
+    if (!companyID || !currentUserID) return;
+    setRelationshipGroupings(readProjectRelationshipGroupingPreference(companyID, currentUserID));
+  }, [companyID, currentUserID]);
+
+  useEffect(() => {
     if (refreshToken === refreshTokenRef.current) return;
     refreshTokenRef.current = refreshToken;
     void loadProject({ showLoading: false });
@@ -351,24 +369,65 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     };
   }, [relationshipContextMenu]);
 
-  const relationshipGroups = useMemo(() => buildRelationshipGroups(relationships), [relationships]);
-  const ungroupedNodes = useMemo(() => {
-    const groupedNodeIDs = new Set(relationshipGroups.flatMap((group) => group.nodes.map((node) => node.relationship_id)));
-    return relationships
-      .filter((item) => item.resource_type === "node" && !groupedNodeIDs.has(item.relationship_id))
-      .sort(compareRelationshipProjection);
-  }, [relationshipGroups, relationships]);
-  const visibleRelationshipNodeIDs = useMemo(() => {
-    const ordered: string[] = [];
-    for (const group of relationshipGroups) {
-      if (collapsedGateRelationshipIDs.has(group.gate.relationship_id)) continue;
-      ordered.push(...group.nodes.map((node) => node.relationship_id));
+  const relationshipGroupingModel = useMemo(
+    () => buildProjectRelationshipGroupingModel(relationships, relationshipGroupings),
+    [relationshipGroupings, relationships],
+  );
+  const visibleProjectLogicGateByID = useMemo(
+    () => buildVisibleProjectLogicGateIndex(relationships),
+    [relationships],
+  );
+  const relationshipNodeCountByGateID = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const relationship of relationships) {
+      if (relationship.resource_type !== "node") continue;
+      const gateID = relationship.logic_gate_id?.trim() ?? "";
+      if (!gateID || !visibleProjectLogicGateByID.has(gateID)) continue;
+      counts.set(gateID, (counts.get(gateID) ?? 0) + 1);
     }
-    ordered.push(...ungroupedNodes.map((node) => node.relationship_id));
-    return ordered;
-  }, [collapsedGateRelationshipIDs, relationshipGroups, ungroupedNodes]);
+    return counts;
+  }, [relationships, visibleProjectLogicGateByID]);
+  const visibleRelationshipRows = useMemo(
+    () => flattenVisibleProjectRelationshipLeafRows(relationshipGroupingModel, expandedRelationshipGroupIDs),
+    [expandedRelationshipGroupIDs, relationshipGroupingModel],
+  );
+  const visibleRelationshipNodeIDs = useMemo(
+    () => visibleRelationshipRows
+      .filter(({ row }) => row.resource_type === "node")
+      .map(({ row }) => row.relationship_id),
+    [visibleRelationshipRows],
+  );
+  const relationshipGroupingSignature = useMemo(
+    () => relationshipGroupings.map((grouping) => grouping.field + ":" + grouping.direction).join("|"),
+    [relationshipGroupings],
+  );
   const currentCriticalStep = useMemo(() => criticalPath.find((step) => step.is_current) ?? null, [criticalPath]);
   const currentCriticalRelationshipID = currentCriticalStep?.relationship_id?.trim() ?? "";
+
+  useEffect(() => {
+    const nextGroupIDs = new Set(collectProjectRelationshipGroupIDs(relationshipGroupingModel.groups));
+    const previousGroupIDs = relationshipGroupIDsRef.current;
+    const groupingChanged = relationshipGroupingSignatureRef.current !== relationshipGroupingSignature;
+    setExpandedRelationshipGroupIDs((current) => {
+      if (groupingChanged || previousGroupIDs.size === 0) return nextGroupIDs;
+      const next = new Set(Array.from(current).filter((groupID) => nextGroupIDs.has(groupID)));
+      for (const groupID of nextGroupIDs) {
+        if (!previousGroupIDs.has(groupID)) next.add(groupID);
+      }
+      return next;
+    });
+    relationshipGroupIDsRef.current = nextGroupIDs;
+    relationshipGroupingSignatureRef.current = relationshipGroupingSignature;
+  }, [relationshipGroupingModel.groups, relationshipGroupingSignature]);
+
+  useEffect(() => {
+    const visibleIDs = new Set(visibleRelationshipNodeIDs);
+    setSelectedRelationshipNodeIDs((current) => {
+      const next = new Set(Array.from(current).filter((relationshipID) => visibleIDs.has(relationshipID)));
+      return next.size === current.size ? current : next;
+    });
+    setSelectionAnchorRelationshipNodeID((current) => (current && !visibleIDs.has(current) ? "" : current));
+  }, [visibleRelationshipNodeIDs]);
 
   useEffect(() => {
     if (!selectedCriticalPathNode) return;
@@ -921,12 +980,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setRelationships((current) => current.filter((item) => !removedRelationshipIDs.has(item.relationship_id)));
       setSelectedRelationshipNodeIDs((current) => new Set(Array.from(current).filter((relationshipID) => !removedRelationshipIDs.has(relationshipID))));
       setSelectionAnchorRelationshipNodeID((current) => (removedRelationshipIDs.has(current) ? "" : current));
-      setCollapsedGateRelationshipIDs((current) => {
-        if (!Array.from(removedRelationshipIDs).some((relationshipID) => current.has(relationshipID))) return current;
-        const next = new Set(current);
-        for (const relationshipID of removedRelationshipIDs) next.delete(relationshipID);
-        return next;
-      });
     } catch (removeError) {
       const label = target.resourceType === "logic_gate" ? "logic gate" : "node";
       setError(removeError instanceof Error ? removeError.message : `Failed to remove ${label} from project`);
@@ -1114,14 +1167,22 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     await saveCriticalPathStep(step, { isCurrent: true });
   }, [saveCriticalPathStep]);
 
-  const toggleGateCollapsed = useCallback((relationshipID: string) => {
-    setCollapsedGateRelationshipIDs((current) => {
+  const toggleRelationshipGroup = useCallback((groupID: string) => {
+    setExpandedRelationshipGroupIDs((current) => {
       const next = new Set(current);
-      if (next.has(relationshipID)) next.delete(relationshipID);
-      else next.add(relationshipID);
+      if (next.has(groupID)) next.delete(groupID);
+      else next.add(groupID);
       return next;
     });
   }, []);
+
+  const updateRelationshipGroupings = useCallback((nextStack: ProjectRelationshipGroupingSetting[]) => {
+    const normalized = normalizeProjectRelationshipGroupingStack(nextStack);
+    setRelationshipGroupings(normalized);
+    if (companyID && currentUserID) {
+      storeProjectRelationshipGroupingPreference(companyID, currentUserID, normalized);
+    }
+  }, [companyID, currentUserID]);
 
   const startSummarySplitResize = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = bodyRef.current?.getBoundingClientRect();
@@ -1137,6 +1198,181 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     openAppPathInNewTab(path);
     setRelationshipContextMenu(null);
   };
+
+  const openRelationshipGateContextMenu = (event: React.MouseEvent<HTMLElement>, gate: ProjectRelationshipProjection) => {
+    const logicGateID = (gate.logic_gate_id || gate.resource_id || "").trim();
+    if (!logicGateID) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setRelationshipContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      logicGateID,
+      relationship: {
+        relationshipID: gate.relationship_id,
+        resourceType: "logic_gate",
+        resourceID: logicGateID,
+        displayTitle: gate.display_title,
+      },
+    });
+  };
+
+  const handleRelationshipGateDragOver = (event: React.DragEvent<HTMLElement>, logicGateID: string) => {
+    if (!logicGateID) return;
+    const isTriageDrag = hasTriageMessageDrag(event.dataTransfer);
+    if (!isTriageDrag && !Array.from(event.dataTransfer.types).includes(PROJECT_RELATIONSHIP_NODE_DRAG_MIME)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = isTriageDrag ? "copy" : "move";
+  };
+
+  const handleRelationshipGateDrop = (event: React.DragEvent<HTMLElement>, logicGateID: string) => {
+    if (!logicGateID) return;
+    const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+    if (triageMessageDrag.messageIDs.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      void convertTriageMessagesToProject(triageMessageDrag, logicGateID);
+      return;
+    }
+    const payload = readProjectRelationshipNodeDragPayload(event.dataTransfer);
+    if (!payload) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void moveRelationshipNodeToGate(payload, logicGateID, (relationshipNodeCountByGateID.get(logicGateID) ?? 0) + 1);
+  };
+
+  const renderRelationshipRows = (rows: ProjectRelationshipProjection[], depth: number): React.ReactNode => (
+    <div style={relationshipRowsStyle}>
+      {rows.map((relationship) => {
+        const isCurrentCritical = currentCriticalRelationshipID === relationship.relationship_id;
+        if (relationship.resource_type === "logic_gate") {
+          const logicGateID = (relationship.logic_gate_id || relationship.resource_id || "").trim();
+          return (
+            <div
+              key={relationship.relationship_id}
+              role="row"
+              data-project-relationship-row="true"
+              style={relationshipLogicGateRowStyle(depth)}
+              onContextMenu={(event) => openRelationshipGateContextMenu(event, relationship)}
+              onDragOver={(event) => handleRelationshipGateDragOver(event, logicGateID)}
+              onDrop={(event) => handleRelationshipGateDrop(event, logicGateID)}
+            >
+              <span style={relationshipResourceIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+              <span
+                title={logicGateID ? "Double-click to open logic gate" : undefined}
+                style={relationshipResourceTitleStyle}
+                onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID)}
+              >
+                {relationship.display_title}
+              </span>
+              <CriticalPulseBeacon visible={isCurrentCritical} compact />
+            </div>
+          );
+        }
+
+        const nodeID = (relationship.node_id || relationship.resource_id || "").trim();
+        const referencedGateID = relationship.logic_gate_id?.trim() ?? "";
+        const visibleGateID = referencedGateID && visibleProjectLogicGateByID.has(referencedGateID) ? referencedGateID : "";
+        return (
+          <button
+            key={relationship.relationship_id}
+            type="button"
+            role="row"
+            data-project-relationship-row="true"
+            draggable={Boolean(nodeID && visibleGateID)}
+            style={relationshipNodeRowStyle(depth, hoveredRelationshipNodeID === relationship.relationship_id, selectedRelationshipNodeIDs.has(relationship.relationship_id))}
+            onClick={(event) => selectRelationshipNode(relationship.relationship_id, event)}
+            onDragStart={(event) => startProjectRelationshipNodeDrag(event, relationship, visibleGateID)}
+            onMouseEnter={() => setHoveredRelationshipNodeID(relationship.relationship_id)}
+            onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === relationship.relationship_id ? "" : current)}
+            onDoubleClick={() => nodeID && onNodeOpen?.(nodeID)}
+            onContextMenu={(event) => openRelationshipNodeContextMenu(event, relationship, visibleGateID)}
+          >
+            <span style={relationshipResourceIconStyle}><ExplorerRowIcon kind="node" /></span>
+            <span style={relationshipResourceTitleStyle}>{relationship.display_title}</span>
+            <span
+              title={relationship.created_from_email ? "Email node" : undefined}
+              aria-label={relationship.created_from_email ? "Email node" : undefined}
+              style={relationshipNodeEmailIconStyle}
+            >
+              {relationship.created_from_email ? <MailIcon color="#64748b" /> : null}
+            </span>
+            <CriticalPulseBeacon visible={isCurrentCritical} compact />
+            {relationship.status ? <span style={nodeStatusDotStyle(relationship.status)} /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const renderRelationshipGroups = (nestedGroups: ProjectRelationshipNestedGroup[]): React.ReactNode => (
+    <div style={relationshipGroupListStyle}>
+      {nestedGroups.map((group) => {
+        const open = expandedRelationshipGroupIDs.has(group.id);
+        const hasDescendants = group.groups.length > 0 || group.rows.length > 0;
+        const gateRelationship = group.field === "logic_gate" && group.key !== "none"
+          ? visibleProjectLogicGateByID.get(group.key) ?? null
+          : null;
+        const logicGateID = gateRelationship
+          ? (gateRelationship.logic_gate_id || gateRelationship.resource_id || "").trim()
+          : "";
+        const gateIsCurrentCritical = Boolean(
+          gateRelationship && currentCriticalRelationshipID === gateRelationship.relationship_id,
+        );
+        return (
+          <div key={group.id} style={relationshipGroupBlockStyle}>
+            <div
+              role="row"
+              data-project-relationship-row="true"
+              style={relationshipGroupHeaderStyle(group.depth, Boolean(gateRelationship))}
+              onContextMenu={(event) => gateRelationship && openRelationshipGateContextMenu(event, gateRelationship)}
+              onDragOver={(event) => handleRelationshipGateDragOver(event, logicGateID)}
+              onDrop={(event) => handleRelationshipGateDrop(event, logicGateID)}
+            >
+              {hasDescendants ? (
+                <button
+                  type="button"
+                  aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
+                  aria-expanded={open}
+                  style={relationshipGroupDisclosureButtonStyle}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleRelationshipGroup(group.id);
+                  }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                >
+                  <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
+                </button>
+              ) : <span aria-hidden="true" style={relationshipGroupDisclosurePlaceholderStyle} />}
+              {gateRelationship ? (
+                <button
+                  type="button"
+                  style={relationshipGroupResourceButtonStyle}
+                  title="Double-click to open logic gate"
+                  onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && logicGateID) onLogicGateOpen?.(logicGateID);
+                  }}
+                >
+                  <ExplorerRowIcon kind="logic_gate" />
+                  <span style={relationshipGroupLabelStyle}>{group.label}</span>
+                  <CriticalPulseBeacon visible={gateIsCurrentCritical} compact />
+                </button>
+              ) : (
+                <span style={relationshipGroupStaticContentStyle}>
+                  <ProjectRelationshipGroupIcon group={group} />
+                  <span style={relationshipGroupLabelStyle}>{group.label}</span>
+                </span>
+              )}
+            </div>
+            {open && group.groups.length > 0 ? renderRelationshipGroups(group.groups) : null}
+            {open && group.rows.length > 0 ? renderRelationshipRows(group.rows, group.depth + 1) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   if (loading) {
     return <div style={summaryLoadingStyle}>Loading</div>;
@@ -1495,7 +1731,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         </section>
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
         <aside style={relationshipsColumnStyle(summarySplitPct)}>
-          <div style={columnToolbarStyle}>
+          <div style={projectWorkPanelToolbarStyle}>
             <div role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
               <button
                 type="button"
@@ -1516,19 +1752,30 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 Logic Gates / Nodes
               </button>
             </div>
+            {activeRightPanelTab === "relationships" ? (
+              <UniversalGroupingControls
+                groupings={relationshipGroupings}
+                fieldOptions={PROJECT_RELATIONSHIP_GROUPING_FIELDS}
+                onChange={updateRelationshipGroupings}
+                buttonLabel="Group"
+                popoverLabel="Project relationship grouping"
+                emptyLabel="Relationships are shown as a flat list"
+                accent={accent}
+              />
+            ) : null}
           </div>
           {activeRightPanelTab === "relationships" ? (
           <div
             className="kanban-board-scroll"
             style={relationshipScrollStyle(relationshipDropActive)}
             onContextMenu={(event) => {
-              if (event.target !== event.currentTarget) return;
+              if (projectRelationshipEventTargetsRow(event.target)) return;
               event.preventDefault();
               event.stopPropagation();
               setRelationshipContextMenu({ x: event.clientX, y: event.clientY });
             }}
             onMouseDown={(event) => {
-              if (event.button !== 0 || event.target !== event.currentTarget) return;
+              if (event.button !== 0 || projectRelationshipEventTargetsRow(event.target)) return;
               setSelectedRelationshipNodeIDs(new Set());
               setSelectionAnchorRelationshipNodeID("");
             }}
@@ -1557,135 +1804,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               void addRelationshipTargets(targets);
             }}
           >
-            {relationshipGroups.map((group) => {
-              const collapsed = collapsedGateRelationshipIDs.has(group.gate.relationship_id);
-              const gateLogicGateID = group.gate.logic_gate_id?.trim() ?? "";
-              const gateIsCurrentCritical = currentCriticalRelationshipID === group.gate.relationship_id;
-              return (
-                <div
-                  key={group.gate.relationship_id}
-                  style={gateGroupStyle(collapsed)}
-                  onContextMenu={(event) => {
-                    if (!gateLogicGateID) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setRelationshipContextMenu({
-                      x: event.clientX,
-                      y: event.clientY,
-                      logicGateID: gateLogicGateID,
-                      relationship: {
-                        relationshipID: group.gate.relationship_id,
-                        resourceType: "logic_gate",
-                        resourceID: gateLogicGateID,
-                        displayTitle: group.gate.display_title,
-                      },
-                    });
-                  }}
-                  onDragOver={(event) => {
-                    const isTriageDrag = hasTriageMessageDrag(event.dataTransfer);
-                    if (!isTriageDrag && !Array.from(event.dataTransfer.types).includes(PROJECT_RELATIONSHIP_NODE_DRAG_MIME)) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.dataTransfer.dropEffect = isTriageDrag ? "copy" : "move";
-                  }}
-                  onDrop={(event) => {
-                    if (!gateLogicGateID) return;
-                    const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
-                    if (triageMessageDrag.messageIDs.length > 0) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void convertTriageMessagesToProject(triageMessageDrag, gateLogicGateID);
-                      return;
-                    }
-                    const payload = readProjectRelationshipNodeDragPayload(event.dataTransfer);
-                    if (!payload) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void moveRelationshipNodeToGate(payload, gateLogicGateID, group.nodes.length + 1);
-                  }}
-                >
-                  <div style={logicGateCardHeaderStyle}>
-                    <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-                    <span
-                      title={group.gate.logic_gate_id ? "Double-click to open logic gate" : undefined}
-                      style={logicGateCardTitleStyle}
-                      onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
-                    >
-                      {group.gate.display_title}
-                    </span>
-                    <CriticalPulseBeacon visible={gateIsCurrentCritical} />
-                    <button
-                      type="button"
-                      aria-label={collapsed ? "Expand logic gate" : "Collapse logic gate"}
-                      aria-expanded={!collapsed}
-                      title={collapsed ? "Expand logic gate" : "Collapse logic gate"}
-                      style={logicGateDisclosureButtonStyle}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleGateCollapsed(group.gate.relationship_id);
-                      }}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                    >
-                      <ExplorerDisclosureIcon open={!collapsed} color="rgba(15, 23, 42, 0.62)" />
-                    </button>
-                  </div>
-                  {!collapsed ? (
-                    <div style={logicGateNodeListStyle}>
-                      {group.nodes.map((node) => {
-                        const nodeIsCurrentCritical = currentCriticalRelationshipID === node.relationship_id;
-                        return (
-                        <button
-                          key={node.relationship_id}
-                          type="button"
-                          draggable={Boolean(node.node_id || node.resource_id)}
-                          style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id, selectedRelationshipNodeIDs.has(node.relationship_id))}
-                          onClick={(event) => selectRelationshipNode(node.relationship_id, event)}
-                          onDragStart={(event) => startProjectRelationshipNodeDrag(event, node, gateLogicGateID)}
-                          onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
-                          onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
-                          onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
-                          onContextMenu={(event) => openRelationshipNodeContextMenu(event, node, gateLogicGateID)}
-                        >
-                          <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
-                          <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
-                          <span title={node.created_from_email ? "Email node" : undefined} aria-label={node.created_from_email ? "Email node" : undefined} style={relationshipNodeEmailIconStyle}>{node.created_from_email ? <MailIcon color="#64748b" /> : null}</span>
-                          <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
-                          {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
-                        </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-            {ungroupedNodes.length > 0 ? (
-              <div style={gateGroupStyle(false)}>
-                <div style={ungroupedHeaderStyle}>Nodes</div>
-                {ungroupedNodes.map((node) => {
-                  const nodeIsCurrentCritical = currentCriticalRelationshipID === node.relationship_id;
-                  return (
-                  <button
-                    key={node.relationship_id}
-                    type="button"
-                    style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id, selectedRelationshipNodeIDs.has(node.relationship_id))}
-                    onClick={(event) => selectRelationshipNode(node.relationship_id, event)}
-                    onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
-                    onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
-                    onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
-                    onContextMenu={(event) => openRelationshipNodeContextMenu(event, node)}
-                  >
-                    <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
-                    <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
-                    <span title={node.created_from_email ? "Email node" : undefined} aria-label={node.created_from_email ? "Email node" : undefined} style={relationshipNodeEmailIconStyle}>{node.created_from_email ? <MailIcon color="#64748b" /> : null}</span>
-                    <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
-                    {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
-                  </button>
-                  );
-                })}
-              </div>
-            ) : null}
-            {relationshipGroups.length === 0 && ungroupedNodes.length === 0 ? (
+            {relationshipGroupingModel.groups.length > 0
+              ? renderRelationshipGroups(relationshipGroupingModel.groups)
+              : renderRelationshipRows(relationshipGroupingModel.ungroupedRows, 0)}
+            {relationships.length === 0 ? (
               <div style={emptyRelationshipStyle}>No relationships</div>
             ) : null}
           </div>
@@ -2250,6 +2372,20 @@ function CriticalPulseBeacon({ visible, compact = false }: { visible: boolean; c
   );
 }
 
+function ProjectRelationshipGroupIcon({ group }: { group: ProjectRelationshipNestedGroup }) {
+  if (group.field === "logic_gate") return <ExplorerRowIcon kind="logic_gate" />;
+  if (group.field === "type" && (group.key === "logic_gate" || group.key === "node")) {
+    return <ExplorerRowIcon kind={group.key} />;
+  }
+  if (group.field === "status") return <span aria-hidden="true" style={nodeStatusDotStyle(group.label)} />;
+  if (group.field === "email_origin" && group.key === "email") return <MailIcon color="#64748b" />;
+  return (
+    <span aria-hidden="true" style={relationshipGroupBadgeStyle}>
+      {group.field === "date_added" ? "D" : group.field === "email_origin" ? "N" : "T"}
+    </span>
+  );
+}
+
 function orderCriticalPathSteps(steps: ProjectCriticalPathStep[]): ProjectCriticalPathStep[] {
   return [...steps].sort((left, right) => (
     (Number.isFinite(Number(left.position)) ? Number(left.position) : 0) -
@@ -2278,22 +2414,42 @@ function compareRelationshipProjection(left: ProjectRelationshipProjection, righ
     || left.relationship_id.localeCompare(right.relationship_id);
 }
 
-function buildRelationshipGroups(relationships: ProjectRelationshipProjection[]): ProjectRelationshipGroup[] {
-  const gates = relationships
-    .filter((item) => item.resource_type === "logic_gate" && item.logic_gate_id)
-    .sort(compareRelationshipProjection);
-  const nodesByGateID = new Map<string, ProjectRelationshipProjection[]>();
-  for (const node of relationships.filter((item) => item.resource_type === "node")) {
-    const gateID = node.logic_gate_id?.trim() ?? "";
-    if (!gateID) continue;
-    const bucket = nodesByGateID.get(gateID) ?? [];
-    bucket.push(node);
-    nodesByGateID.set(gateID, bucket);
+function projectRelationshipGroupingPreferenceKey(companyID: string, currentUserID: string): string {
+  return [
+    PROJECT_RELATIONSHIP_GROUPING_STORAGE_KEY,
+    companyID.trim() || "company",
+    currentUserID.trim() || "user",
+  ].join(":");
+}
+
+function projectRelationshipEventTargetsRow(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("[data-project-relationship-row='true']"));
+}
+
+function readProjectRelationshipGroupingPreference(
+  companyID: string,
+  currentUserID: string,
+): ProjectRelationshipGroupingSetting[] {
+  try {
+    const raw = localStorage.getItem(projectRelationshipGroupingPreferenceKey(companyID, currentUserID));
+    if (!raw) return normalizeProjectRelationshipGroupingStack(undefined);
+    return normalizeProjectRelationshipGroupingStack(JSON.parse(raw));
+  } catch {
+    return normalizeProjectRelationshipGroupingStack(undefined);
   }
-  return gates.map((gate) => ({
-    gate,
-    nodes: [...(nodesByGateID.get(gate.logic_gate_id ?? "") ?? [])].sort(compareRelationshipProjection),
-  }));
+}
+
+function storeProjectRelationshipGroupingPreference(
+  companyID: string,
+  currentUserID: string,
+  groupings: ProjectRelationshipGroupingSetting[],
+): void {
+  try {
+    localStorage.setItem(
+      projectRelationshipGroupingPreferenceKey(companyID, currentUserID),
+      JSON.stringify(normalizeProjectRelationshipGroupingStack(groupings)),
+    );
+  } catch {}
 }
 
 function mergeProjectRelationships(
@@ -2947,6 +3103,13 @@ const columnToolbarStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 10,
   flexShrink: 0,
+};
+
+const projectWorkPanelToolbarStyle: React.CSSProperties = {
+  ...columnToolbarStyle,
+  flexWrap: "wrap",
+  alignContent: "center",
+  padding: "4px 0",
 };
 
 const columnTitleStyle: React.CSSProperties = {
@@ -3731,11 +3894,9 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   flex: "1 1 auto",
   overflow: "auto",
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
-  gridAutoRows: "auto",
   alignContent: "start",
-  gap: 12,
-  padding: 12,
+  gap: 2,
+  padding: "6px 10px 24px 2px",
   border: dropActive ? "1px dashed rgba(91, 141, 239, 0.58)" : "1px dashed rgba(148, 163, 184, 0.34)",
   borderRadius: 8,
   background: dropActive ? "rgba(239, 246, 255, 0.76)" : "rgba(255, 255, 255, 0.54)",
@@ -3779,99 +3940,162 @@ const relationshipContextMenuDangerButtonStyle: React.CSSProperties = {
   color: "#dc2626",
 };
 
-const gateGroupStyle = (collapsed: boolean): React.CSSProperties => ({
-  display: "flex",
-  flexDirection: "column",
-  gap: collapsed ? 0 : 10,
+const relationshipGroupListStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: collapsed ? 52 : 190,
-  border: "1px solid rgba(226, 232, 240, 0.92)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#0f172a",
-  padding: collapsed ? "10px 12px" : 12,
-  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.05)",
-  alignSelf: "start",
-});
-
-const logicGateCardHeaderStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 40,
   display: "grid",
-  gridTemplateColumns: "28px minmax(0, 1fr) auto 42px",
-  alignItems: "center",
-  gap: 8,
-  padding: 0,
-  textAlign: "left",
-  cursor: "default",
+  alignContent: "start",
+  gap: 2,
 };
 
-const logicGateIconBadgeStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 7,
-  border: "1px solid rgba(34, 197, 94, 0.68)",
-  background: "#f0fdf4",
-  color: "#16a34a",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-
-const logicGateCardTitleStyle: React.CSSProperties = {
+const relationshipGroupBlockStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "#0f172a",
-  fontSize: 12,
-  lineHeight: 1.2,
-  fontWeight: 850,
-  cursor: "pointer",
-  overflow: "hidden",
-  display: "-webkit-box",
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: "vertical",
+  display: "grid",
+  alignContent: "start",
+  gap: 1,
 };
 
-const logicGateDisclosureButtonStyle: React.CSSProperties = {
-  width: 42,
-  height: 40,
+function relationshipGroupHeaderStyle(depth: number, isLogicGate: boolean): React.CSSProperties {
+  const leftOffset = Math.max(0, depth) * 28;
+  return {
+    width: "calc(100% - " + leftOffset + "px)",
+    minWidth: 0,
+    minHeight: 32,
+    display: "grid",
+    gridTemplateColumns: "16px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: leftOffset,
+    borderBottom: "1px solid rgba(148, 163, 184, 0.25)",
+    background: isLogicGate ? "rgba(240, 253, 244, 0.48)" : "transparent",
+    color: "#111827",
+    padding: "0 8px 0 3px",
+    boxSizing: "border-box",
+  };
+}
+
+const relationshipGroupDisclosureButtonStyle: React.CSSProperties = {
+  width: 16,
+  height: 26,
+  minWidth: 16,
   border: "none",
-  borderRadius: 8,
   background: "transparent",
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   display: "grid",
   placeItems: "center",
   padding: 0,
-  justifySelf: "end",
 };
 
-const logicGateNodeListStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-  paddingTop: 2,
-  minWidth: 0,
+const relationshipGroupDisclosurePlaceholderStyle: React.CSSProperties = {
+  width: 16,
+  height: 26,
+  display: "block",
 };
 
-const logicGateNodeRowStyle = (hovered: boolean, selected: boolean): React.CSSProperties => ({
-  minHeight: 24,
+const relationshipGroupResourceButtonStyle: React.CSSProperties = {
   minWidth: 0,
-  border: `1px solid ${selected ? "#2563eb" : hovered ? "#19a8ff" : "transparent"}`,
-  borderRadius: 6,
-  background: selected ? "#eff6ff" : hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
-  color: "#111827",
+  minHeight: 30,
   display: "grid",
-  gridTemplateColumns: "16px minmax(0, 1fr) auto auto auto",
+  gridTemplateColumns: "16px minmax(0, 1fr) auto",
   alignItems: "center",
-  gap: 4,
-  padding: "3px 5px",
+  gap: 6,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  padding: 0,
   textAlign: "left",
-  cursor: "grab",
-  boxShadow: selected ? "0 0 0 1px rgba(37, 99, 235, 0.12)" : hovered ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "none",
-  transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
-});
+  cursor: "pointer",
+};
 
-const relationshipNodeIconStyle: React.CSSProperties = {
+const relationshipGroupStaticContentStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 30,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+};
+
+const relationshipGroupLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  color: "#111827",
+  fontSize: 13,
+  fontWeight: 800,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const relationshipGroupBadgeStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  borderRadius: 4,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(148, 163, 184, 0.14)",
+  color: "#475569",
+  fontSize: 9,
+  fontWeight: 900,
+};
+
+const relationshipRowsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+};
+
+function relationshipRowLeftOffset(depth: number): number {
+  return depth > 0 ? depth * 28 + 20 : 0;
+}
+
+function relationshipLogicGateRowStyle(depth: number): React.CSSProperties {
+  const leftOffset = relationshipRowLeftOffset(depth);
+  return {
+    width: "calc(100% - " + leftOffset + "px)",
+    minWidth: 0,
+    minHeight: 34,
+    display: "grid",
+    gridTemplateColumns: "16px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 7,
+    marginLeft: leftOffset,
+    borderBottom: "1px solid rgba(148, 163, 184, 0.24)",
+    background: "rgba(255, 255, 255, 0.78)",
+    color: "#111827",
+    padding: "0 8px",
+    boxSizing: "border-box",
+  };
+}
+
+function relationshipNodeRowStyle(depth: number, hovered: boolean, selected: boolean): React.CSSProperties {
+  const leftOffset = relationshipRowLeftOffset(depth);
+  return {
+    width: "calc(100% - " + leftOffset + "px)",
+    minWidth: 0,
+    minHeight: 36,
+    display: "grid",
+    gridTemplateColumns: "16px minmax(0, 1fr) 16px auto auto",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: leftOffset,
+    border: selected ? "1px solid rgba(37, 99, 235, 0.55)" : "1px solid transparent",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.26)",
+    borderRadius: selected ? 5 : 0,
+    background: selected ? "rgba(37, 99, 235, 0.08)" : hovered ? "rgba(15, 23, 42, 0.035)" : "#ffffff",
+    color: "#111827",
+    font: "inherit",
+    padding: "0 8px",
+    textAlign: "left",
+    cursor: "pointer",
+    boxSizing: "border-box",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    transition: "background 120ms ease, border-color 120ms ease",
+  };
+}
+
+const relationshipResourceIconStyle: React.CSSProperties = {
   width: 16,
   height: 16,
   display: "inline-flex",
@@ -3880,13 +4104,14 @@ const relationshipNodeIconStyle: React.CSSProperties = {
   color: "#38bdf8",
 };
 
-const relationshipNodeTitleStyle: React.CSSProperties = {
+const relationshipResourceTitleStyle: React.CSSProperties = {
   minWidth: 0,
-  fontSize: 11,
-  fontWeight: 600,
+  fontSize: 12,
+  fontWeight: 700,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  cursor: "pointer",
 };
 
 const relationshipNodeEmailIconStyle: React.CSSProperties = {
@@ -3917,14 +4142,6 @@ const nodeStatusDotStyle = (status?: string | null): React.CSSProperties => {
     borderRadius: 999,
     background,
   };
-};
-
-const ungroupedHeaderStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 12,
-  fontWeight: 850,
-  textTransform: "uppercase",
-  letterSpacing: 0,
 };
 
 const emptyRelationshipStyle: React.CSSProperties = {

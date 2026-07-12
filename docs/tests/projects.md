@@ -1,10 +1,10 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Projects Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, and collapsed visible-node order; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -40,6 +40,11 @@ P29 - Project text-box creation and formatting controls must match the shared no
 P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and personal email-drop conversions store the active `account_email`, while shared-inbox conversions retain both `shared_inbox_id` and `account_email`; the project reader uses that scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
+P33 - The Project Logic Gates / Nodes tab renders visible Logic Gates and nodes as one recursive row list, not as a multi-column set of Logic Gate cards with embedded node lists.
+P34 - The project relationship grouper supports Logic Gate, Type, Status, Date Added, and Email Origin levels. Levels can be added, removed, reordered, and sorted ascending or descending; an explicitly empty stack is valid and renders all visible relationships as flat rows. The compatibility default is Logic Gate ascending. This project-local control stores one browser preference per company/current user and applies it across that user's projects; it is not a named My Work/Updates Key View.
+P35 - Group headers and resource rows indent by grouping depth. Disclosure toggles expansion without opening a resource; a visible Logic Gate grouping header remains the Logic Gate open/context-menu/drop target, suppresses its duplicate Logic Gate leaf, and remains visible when the gate has no nodes.
+P36 - Regrouping and collapsing are presentation-only: they do not mutate project relationships, every accessible node remains available when its branch is visible, and Shift/Ctrl/Command selection order follows the currently rendered visible node rows. A node whose Logic Gate relationship is not visible groups under No logic gate instead of exposing the hidden gate ID.
+P37 - The grouped-row view preserves the existing node and Logic Gate openers, node selection and context menus, critical-step/status/email-origin indicators, root project drops, and Logic Gate-targeted node/email drops.
 
 ## Scenarios
 
@@ -236,3 +241,23 @@ Expected:
 - The personal attachment records the active account email and the shared conversion records both shared-inbox ID and account email.
 - Reopening either message uses the same thread viewer contract as My Triage, Shared Triage, and nodes, including recipients, attachments, Reply/Reply All, drafts, and invitation responses.
 - Shared attachment reads and actions retain shared-inbox authorization and do not silently fall back to a personal grant.
+
+### Scenario P-S11: Universal Grouped Project Relationships
+
+Business logic covered:
+- P33
+- P34
+- P35
+- P36
+- P37
+
+Given:
+- A project has related Logic Gates, including an empty Logic Gate, assigned nodes with different statuses and origins, and a standalone node.
+- The viewer can access those relationships.
+
+Expected:
+- Logic Gates and nodes render in an indented row tree rather than Logic Gate cards.
+- The default Logic Gate grouping shows each visible Logic Gate once as a group/resource row, retains the empty Logic Gate, and places the standalone node under No logic gate.
+- Reordering or changing grouping levels changes only the nesting and row order; removing every level produces a flat relationship list.
+- Collapsing a group hides only its descendants and updates Shift-selection order to the remaining visible node rows.
+- Double-click, context-menu, root-drop, and Logic Gate-drop behavior remains available on the corresponding rows.
