@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-12
 
 # Recycle Bin Tests
 
@@ -80,7 +80,7 @@ Expected:
 - User A can restore the item.
 - The object and captured relationships or placements return.
 - The restored recycle-bin row is removed.
-- Restore events are published for the restored targets.
+- Canonical rows and read versions are updated for the restored targets, and only independently required durable domain facts are appended; no generic workspace browser event is published.
 
 ### Scenario RB-S3: Permanent Delete Is Admin-Scoped
 

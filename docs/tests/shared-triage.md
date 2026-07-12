@@ -65,16 +65,16 @@ ST51 - The hidden archive queue may contain no more than 140 pending emails acro
 ST52 - If accepting the current visible page would exceed 140 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
 ST53 - Background archive work must be accepted by the backend in one request per advanced page; provider mutations run from a backend archive job worker behind the backend provider gate instead of occupying multiple browser request lanes.
 ST54 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
-ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step, must be coalesced across archive confirmations, and must not clear or duplicate an in-flight folder metadata request.
+ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step, must be coalesced across committed local archive/unarchive responses and canonical archive-job reads, and must not clear or duplicate an in-flight folder metadata request.
 ST56 - Folder metadata reconciliation must not fetch the next message page or block the prefetched page from being shown.
 ST57 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
 ST58 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until a canonical refresh provides more messages.
-ST59 - Backend or provider events caused by Shared Triage archive work must be identifiable as archive confirmations instead of generic mailbox updates.
-ST60 - Archive confirmations for the frozen previous Shared Triage page must not trigger a full message-list reload or blank the currently visible prefetched page.
-ST61 - Star and unstar actions in Shared Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
-ST62 - Backend or provider confirmations caused by local Shared Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
+ST59 - Shared Triage archive progress and completion are identified by durable archive job and job-item status returned from canonical archive-job reads, not by backend/provider browser events or generic mailbox updates.
+ST60 - Reconciling durable archive-job status for the frozen previous Shared Triage page must not trigger a full message-list reload or blank the currently visible prefetched page.
+ST61 - Star and unstar actions in Shared Triage must optimistically update the visible message state and Starred count before the committed HTTP response returns.
+ST62 - The committed HTTP response for a local Shared Triage star or unstar action reconciles the affected row, caches, and counts without triggering a full message-list reload or blanking the active Inbox or Starred tab; provider or other-user changes appear on the next canonical load.
 ST63 - Shared Triage mailbox activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
-ST64 - If an accepted background archive mutation fails or never confirms, the source email must not be deleted and may remain or reappear in the shared inbox after refresh/reconciliation.
+ST64 - If an accepted background archive job item reaches failed state or remains incomplete, the source email must not be deleted and may remain or reappear on the next canonical shared-inbox load.
 ST65 - Selecting another shared-inbox email, focusing the email body/detail pane, or returning focus from the detail pane to the list must not reload, blank, or replace the visible message list.
 ST66 - The normal full-list replacement path for a Shared Triage mailbox is initial page/list load, browser refresh, or an explicit list identity change such as mailbox, search, unread filter, account, company, or selected Shared Triage mailbox.
 ST67 - No communications WebSocket message fetches or inserts mail. A canonical page/list load returns newly created messages that match the active filters.
@@ -101,7 +101,7 @@ ST87 - Unread Shared Triage email rows keep their outer unread outline/highlight
 ST88 - Sent email read receipts from Shared Triage use Nylas open tracking on outbound shared mailbox sends by sending `tracking_options.opens = true` through the company-owned shared grant.
 ST89 - Shared mailbox `message.opened` receipts are stored in the company email connection/shared mailbox receipt scope, not in the viewer's personal user receipt scope.
 ST90 - Shared mailbox receipt webhooks update durable/cache receipt state for the correct company connection; browsers read that authorized state through canonical Shared Triage APIs, not realtime publication.
-ST91 - A shared `message.opened` receipt with a message ID must reconcile only the affected visible or selected sent message and must not trigger a full Shared Triage message-list reload, top-up, or prefetch.
+ST91 - A later canonical shared Sent list/detail read enriches only the affected message with its stored `message.opened` receipt summary. The webhook does not trigger a browser message-list reload, top-up, prefetch, or communications publication.
 ST92 - Sent shared mailbox messages without a stored receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
 ST93 - Multiple Shared Triage mailbox work surfaces that point at the same company email connection share receipt state for the same provider message, with read-time authorization on each linked shared inbox.
 ST94 - Nylas shared receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by company-owned shared mailbox sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
@@ -240,7 +240,7 @@ Expected:
 - Protected shared inbox folders cannot be renamed or deleted.
 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and linked company email connection everywhere.
 - Removing a mailbox-capable shared inbox from Shared Triage removes the work surface but keeps the company email connection available for reuse.
-- Successful changes publish workspace refresh events.
+- The committed HTTP response patches the initiating browser's affected Shared Triage tree and mailbox state locally. Other clients reconcile on their next canonical tree load or navigation; no workspace refresh event is emitted.
 
 ### Scenario ST-S3: Shared Mailbox Read And Send
 
@@ -439,7 +439,7 @@ Given:
 Expected:
 - The visible page contains no more than 12 messages.
 - The next page is prefetched after the visible page loads.
-- Created, updated, and deleted message events reconcile the affected message live without replacing the whole shared-inbox list.
+- Created, updated, and deleted provider state appears on the next canonical shared-inbox list load; no message event mutates the visible list live.
 - Newly received mail appears on the next canonical page/list load.
 - Local committed commands patch affected visible rows; external updates appear on the next canonical load.
 - The next explicit page/list load reconciles provider state; no communications realtime event exists.
@@ -453,14 +453,14 @@ Expected:
 - Retryable provider failures remain recorded with attempt count, last error, and next retry time.
 - Successful and final-failed Shared Triage archive job items expose durable state through canonical job reconciliation without communications WebSocket events.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
-- Shared Triage archive confirmation events from the app backend or provider webhook reconcile pending archive bookkeeping without blanking, fully reloading, or removing rows from the currently visible prefetched page.
+- Canonical archive-job reads reconcile pending Shared Triage archive bookkeeping from durable job-item state without blanking, fully reloading, or removing rows from the currently visible prefetched page.
 - Accepted background Shared Triage archive IDs are not treated as already archived in the frontend list cache; the current page remains stable while earlier page jobs drain in the backend.
-- Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
+- Starring or unstarring a message updates the row and Starred count locally, and the committed HTTP response reconciles that concrete state without blanking or fully reloading the active Inbox or Starred tab; external changes appear on the next canonical load.
 - Unread rows keep their unread outline, while the top-left dot is visible only on the selected email row.
 - Opening or returning to a Shared Triage mailbox does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
-- If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
+- If the backend accepts the archive page but a durable job item later reaches failed state or remains incomplete, the source email is not deleted and can remain or reappear on the next canonical load.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
-- If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.
+- If there is no next page, clicking the advance action enqueues the visible page and leaves the list empty until a later canonical load finds more inbox messages.
 
 ### Scenario ST-S10: Shared Email Conversion To Logic Gate
 
@@ -487,7 +487,7 @@ Expected:
 - Company Explorer folder rows are not email conversion targets and must not create Explorer node rows, folder items, or `company_explorer_items` rows.
 - The visible Shared Triage email list handles the local conversion from the committed result by keeping converted rows visible and patching row/detail/cache Logic Gate icon state without full-list replacement, communications cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated workspace/mail GET bursts.
 - The backend sets converted shared source emails to unstarred through the shared mailbox grant, returns successfully updated IDs in `unstarred_message_ids`, and the Shared Triage Starred count/list reconcile locally without loading replacement Starred rows.
-- A converted email dragged from Shared Triage Starred visually de-stars immediately and matching scoped or unscoped star/unstar confirmations are treated as local reconciliation, not as a reason to clear caches, refill from prefetched pages, or reload the active Shared Triage message list.
+- A converted email dragged from Shared Triage Starred visually de-stars immediately from the committed conversion/unstar response. Later provider or other-user changes reconcile on the next canonical load, without clearing caches, refilling from prefetched pages, or reloading the active Shared Triage message list.
 - Company Explorer drops show a temporary green success banner over the Company Explorer section after the conversion succeeds.
 
 ### Scenario ST-S11: Shared Sent Read Receipts

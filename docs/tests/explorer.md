@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Explorer Tests
 
@@ -29,9 +29,9 @@ E18 - Moving an Explorer item changes its parent and position without duplicatin
 E19 - Deleting an Explorer edge removes that placement without deleting the underlying target resource.
 E20 - Protected or system Explorer folders cannot be renamed or deleted.
 E21 - Explorer target deletion removes the underlying target only through the explicit target deletion path, not by deleting a placement edge.
-E22 - Explorer placement, update, and removal events publish the affected parent entity ID.
-E23 - The frontend refreshes loaded branch identities after Explorer events instead of reloading unrelated branches.
-E24 - When refresh context is incomplete, parent entity ID fallback is used to decide which loaded branch should refresh.
+E22 - Explorer placement, update, and removal mutations preserve the affected parent entity ID in independently required durable domain facts and committed responses; they do not publish a Company Explorer or workspace browser event.
+E23 - Company Explorer patches concrete mounted state from the initiating command response or a narrowly scoped same-browser local mutation event; other changes reconcile when the relevant canonical branch is opened or explicitly refreshed.
+E24 - Company Explorer does not use event context or parent-entity fallback to drive background branch refreshes. Canonical branch identity and parent data are resolved by the explicit branch read.
 E25 - Every company has one default root folder named Unfiled.
 E26 - Unfiled has exactly two default child folders, in this order: Projects, Logic Gates.
 E27 - Bare projects and Logic Gates created outside Company Explorer route to Unfiled/Projects and Unfiled/Logic Gates respectively.
@@ -145,7 +145,7 @@ Expected:
 - Any attempt to place a node into Company Explorer is rejected.
 - Communications/email conversion targeting a Company Explorer folder is rejected and must not create a node, folder item, Explorer V2 row, or `company_explorer_items` row.
 
-### Scenario E-S3: Explorer Refresh Events
+### Scenario E-S3: Explorer Local Reconciliation And Canonical Branch Reads
 
 Business logic covered:
 - E22
@@ -155,14 +155,14 @@ Business logic covered:
 
 Given:
 - A user has several Explorer branches loaded.
-- A folder, project, or Logic Gate placement, update, or removal event arrives for one parent entity.
-- A node update or node relationship event also arrives.
+- The user commits a folder, project, Logic Gate, or title mutation from a mounted local surface.
+- Another browser may change an Explorer resource while this browser remains open.
 
 Expected:
-- Explorer events include the affected parent entity ID.
-- Only loaded branches related to the affected parent refresh.
-- Parent entity ID fallback is used when the event does not include richer branch context.
-- Node and node relationship events do not cause Company Explorer branch refresh work.
+- The committed response or concrete same-browser local title event patches only the initiating browser's mounted state.
+- Durable domain facts may retain the affected parent entity ID for independently required consumers, but no Company Explorer or workspace browser event is published.
+- Another browser's changes can remain stale until navigation, branch reopen, or explicit refresh performs the canonical branch read.
+- Node, relationship, and Explorer domain events do not cause background Company Explorer branch refresh work.
 
 ### Scenario E-S4: Default Unfiled Placement
 
