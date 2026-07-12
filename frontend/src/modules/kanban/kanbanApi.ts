@@ -1,13 +1,15 @@
 import { requestJSON } from "../api/requestJSON.js";
-import { clearResourceMissing, markResourceMissing, TerminalResourceNotFoundError, throwIfResourceMarkedMissing } from "../api/missingResources.js";
-import { isHTTPNotFoundError } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
+import {
+  invalidateKanbanBoardContentsCache,
+  invalidateKanbanBoardContentsForCompany,
+} from "./KanbanBoardContentStore.js";
 import { logicGateIDFromKanbanBoardID, logicGateKanbanBoardID } from "./shared.js";
-import type { KanbanBoard, KanbanCard, KanbanColumn, LogicGateArenaView } from "./shared.js";
+import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared.js";
 
 type CacheEntry<T> = {
   value: T;
@@ -15,10 +17,8 @@ type CacheEntry<T> = {
 };
 
 const KANBAN_BOARD_LIST_TTL_MS = 2 * 60_000;
-const LOGIC_GATE_ARENA_VIEW_TTL_MS = 5 * 60_000;
 
 const boardListCache = new Map<string, CacheEntry<KanbanBoard[]>>();
-const logicGateArenaViewCache = new Map<string, CacheEntry<LogicGateArenaView>>();
 
 function markKanbanWorkspaceSnapshotStale(apiBase: string, companyID: string, boardID: string): void {
   const cleanBoardID = boardID.trim();
@@ -56,27 +56,6 @@ export async function listKanbanBoards(apiBase: string, companyID: string, limit
   const boards = payload.boards ?? [];
   boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
   return boards;
-}
-
-export async function getLogicGateArenaView(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateArenaView> {
-  const params = query({ company_id: companyID });
-  const cacheKey = `${apiBase}:company_id=${encodeURIComponent(companyID)}&logic_gate_id=${encodeURIComponent(logicGateID)}`;
-  const resourceKey = { apiBase, companyID, resourceType: "logic_gate" as const, resourceID: logicGateID };
-  throwIfResourceMarkedMissing(resourceKey);
-  const cached = readCache(logicGateArenaViewCache.get(cacheKey) ?? null, LOGIC_GATE_ARENA_VIEW_TTL_MS, cloneLogicGateArenaView);
-  if (cached) return cached;
-  const view = await requestJSON<LogicGateArenaView>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/work?${params}`)
-    .catch((cause) => {
-      if (isHTTPNotFoundError(cause)) {
-        markResourceMissing(resourceKey);
-        logicGateArenaViewCache.delete(cacheKey);
-        throw new TerminalResourceNotFoundError("logic_gate", logicGateID);
-      }
-      throw cause;
-    });
-  clearResourceMissing(resourceKey);
-  logicGateArenaViewCache.set(cacheKey, { value: cloneLogicGateArenaView(view), fetchedAt: Date.now() });
-  return view;
 }
 
 export async function createKanbanBoard(apiBase: string, companyID: string, title: string, boardID = "", position?: number): Promise<KanbanBoard> {
@@ -460,13 +439,11 @@ export function invalidateKanbanBoardListCache(apiBase: string, companyID: strin
 
 export function invalidateLogicGateArenaViewCache(apiBase: string, companyID: string, logicGateID = ""): void {
   const cleanLogicGateID = logicGateID.trim();
-  const prefix = `${apiBase}:company_id=${encodeURIComponent(companyID)}&logic_gate_id=`;
-  for (const key of Array.from(logicGateArenaViewCache.keys())) {
-    if (!key.startsWith(prefix)) continue;
-    if (!cleanLogicGateID || key === `${prefix}${encodeURIComponent(cleanLogicGateID)}`) {
-      logicGateArenaViewCache.delete(key);
-    }
+  if (cleanLogicGateID) {
+    invalidateKanbanBoardContentsCache(apiBase, companyID, logicGateKanbanBoardID(cleanLogicGateID));
+    return;
   }
+  invalidateKanbanBoardContentsForCompany(apiBase, companyID);
 }
 
 function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (value: T) => T): T | null {
@@ -476,15 +453,4 @@ function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (val
 
 function cloneBoards(boards: KanbanBoard[]): KanbanBoard[] {
   return boards.map((board) => ({ ...board }));
-}
-
-function cloneLogicGateArenaView(view: LogicGateArenaView): LogicGateArenaView {
-  return {
-    logic_gate: { ...view.logic_gate },
-    board: { ...view.board },
-    columns: view.columns.map((column) => ({ ...column })),
-    cards: view.cards.map((card) => ({ ...card })),
-    cards_limit: view.cards_limit,
-    projection_sequence: view.projection_sequence,
-  };
 }

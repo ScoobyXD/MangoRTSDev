@@ -89,6 +89,7 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 			return
 		}
 		view.EffectiveAccessFlags = flags
+		view.Work.Permissions = flags
 		response := logicGateViewResponseWithWork(view)
 		response.EditorSequence = editorSequence
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)

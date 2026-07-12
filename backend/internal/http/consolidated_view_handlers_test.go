@@ -380,8 +380,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		t.Fatalf("default logic gate view included work payload: %s", viewBody)
 	}
 	viewWithWork, _ := getLogicGateViewV2ForTestWithQuery(t, handler, companyID, logicGate.LogicGateID, viewer, "include_work=1", http.StatusOK)
-	if viewWithWork.NodeCount != 1 || len(viewWithWork.Work.Nodes) != 1 || viewWithWork.Work.Nodes[0].NodeID != assignedNode.NodeID {
-		t.Fatalf("logic gate work nodes = %+v, want assigned node through explicit include_work", viewWithWork.Work.Nodes)
+	if viewWithWork.NodeCount != 1 || len(viewWithWork.Work.Cards) != 1 || viewWithWork.Work.Cards[0].NodeID != assignedNode.NodeID {
+		t.Fatalf("logic gate work cards = %+v, want assigned node through explicit include_work", viewWithWork.Work.Cards)
 	}
 
 	getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)

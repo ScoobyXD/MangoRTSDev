@@ -24,7 +24,7 @@ import {
 } from "../modules/notifications/notificationsApi";
 import { ensureMangoRealtimeConnection, subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
-import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceRealtime";
+import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceUserRealtime, workspaceRealtimeScope, workspaceScopeRequiresKanbanBoardRefetch, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceRealtime";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { localTriageConversionWasApplied, rememberLocalTriageConversionIDs } from "./appLiveFreshnessBridgeEcho";
 
@@ -234,9 +234,10 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
         if (scope.boardID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: scope.boardID });
           invalidateKanbanBoardContentsCache(apiBase, companyID, scope.boardID);
-          dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
+          if (workspaceScopeRequiresKanbanBoardRefetch(scope)) {
+            dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
+          }
         }
-        if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
         break;
       case "kanban_board_list":
         invalidateKanbanBoardListCache(apiBase, companyID);
@@ -246,9 +247,10 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
         if (scope.boardID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: scope.boardID });
           invalidateKanbanBoardContentsCache(apiBase, companyID, scope.boardID);
-          dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
+          if (workspaceScopeRequiresKanbanBoardRefetch(scope)) {
+            dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
+          }
         }
-        if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
         if (scope.nodeID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
           invalidateNodeRelationshipGraphSnapshot(apiBase, companyID);

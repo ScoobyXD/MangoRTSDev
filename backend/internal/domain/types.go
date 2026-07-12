@@ -850,40 +850,43 @@ type ProjectView struct {
 	EffectiveAccessFlags
 }
 
-type LogicGateArenaView struct {
-	LogicGate          LogicGate      `json:"logic_gate"`
-	Board              KanbanBoard    `json:"board"`
-	Columns            []KanbanColumn `json:"columns"`
-	Cards              []KanbanCard   `json:"cards"`
-	CardsLimit         int            `json:"cards_limit"`
-	ProjectionSequence int64          `json:"projection_sequence,omitempty"`
+// LogicGateWorkHeader is the Kanban-specific Logic Gate metadata needed by the
+// Arena. RequestOwnerUserID is derived from the Generated user assignment; the
+// full GVIC collection belongs to the Logic Gate details APIs.
+type LogicGateWorkHeader struct {
+	LogicGateID        string `json:"logic_gate_id"`
+	Header             string `json:"header"`
+	DefaultAccess      string `json:"default_access"`
+	RequestOwnerUserID string `json:"request_owner_user_id,omitempty"`
+}
+
+// LogicGateWorkCard is the non-redundant card row returned by the Logic Gate
+// Arena. Company, board, and Logic Gate IDs are supplied once instead of being
+// repeated on every card.
+type LogicGateWorkCard struct {
+	CardID                     string    `json:"card_id"`
+	ColumnID                   string    `json:"column_id"`
+	NodeID                     string    `json:"node_id"`
+	NodeTitle                  string    `json:"node_title"`
+	RequestedByUserID          string    `json:"requested_by_user_id,omitempty"`
+	PlacedByUserID             string    `json:"placed_by_user_id,omitempty"`
+	IsIssue                    bool      `json:"is_issue"`
+	Position                   int       `json:"position"`
+	DueDate                    *string   `json:"due_date,omitempty"`
+	Priority                   *int      `json:"priority,omitempty"`
+	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
+	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
+	CreatedTimestamp           time.Time `json:"created_timestamp"`
+	Accounts                   []Account `json:"accounts,omitempty"`
 }
 
 type LogicGateWorkView struct {
-	CompanyID          string                    `json:"company_id"`
-	LogicGateID        string                    `json:"logic_gate_id"`
-	LogicGate          LogicGate                 `json:"logic_gate"`
-	Statuses           []LogicGateWorkStatus     `json:"statuses"`
-	Assignments        []LogicGateWorkAssignment `json:"assignments"`
-	Nodes              []Node                    `json:"nodes"`
-	Board              KanbanBoard               `json:"board"`
-	Columns            []KanbanColumn            `json:"columns"`
-	Cards              []KanbanCard              `json:"cards"`
-	CardsLimit         int                       `json:"cards_limit"`
-	ProjectionSequence int64                     `json:"projection_sequence,omitempty"`
-}
-
-type LogicGateWorkStatus struct {
-	StatusKey   string                    `json:"status_key"`
-	Title       string                    `json:"title"`
-	Position    int                       `json:"position"`
-	Assignments []LogicGateWorkAssignment `json:"assignments"`
-}
-
-type LogicGateWorkAssignment struct {
-	Assignment NodeLogicGateAssignment `json:"assignment"`
-	Node       Node                    `json:"node"`
-	Card       KanbanCard              `json:"card"`
+	LogicGate          LogicGateWorkHeader  `json:"logic_gate"`
+	Permissions        EffectiveAccessFlags `json:"permissions"`
+	Board              KanbanBoard          `json:"board"`
+	Columns            []KanbanColumn       `json:"columns"`
+	Cards              []LogicGateWorkCard  `json:"cards"`
+	ProjectionSequence int64                `json:"projection_sequence"`
 }
 
 type CompanyExplorerFolder struct {

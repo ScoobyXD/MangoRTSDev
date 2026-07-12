@@ -571,6 +571,8 @@ type UserPinReorderInput struct {
 
 type LogicGateWorkRepository interface {
 	GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error)
+	LogicGateWorkAccessFlags(companyID, userID, logicGateID string) (domain.EffectiveAccessFlags, error)
+	CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error)
 }
 
 type WorkItemReadRepository interface {

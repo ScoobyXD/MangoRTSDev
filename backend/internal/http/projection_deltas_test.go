@@ -147,15 +147,24 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionEdit,
+			AccessLevel: store.EntityPermissionView,
 		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions gate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions node: %v", err)
 	}
@@ -185,7 +194,7 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 		t.Fatalf("viewer envelope = %+v, want one sequenced Kanban delta", envelope)
 	}
 	if got := envelope.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID || got.Row.BoardID != boardID || got.Row.Priority == nil || *got.Row.Priority != priority {
-		t.Fatalf("viewer delta = %+v, want upsert row for visible Kanban card", got)
+		t.Fatalf("viewer delta = %+v, want gate-view-authorized upsert despite no node access", got)
 	}
 	assertNoProjectionPayloadForTest(t, otherCh)
 
@@ -327,14 +336,14 @@ func TestKanbanProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t 
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionEdit,
+			AccessLevel: store.EntityPermissionView,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
@@ -360,15 +369,15 @@ func TestKanbanProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t 
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
 	}
 
-	server.publishKanbanPermissionProjectionDeltasAsync(companyID, store.EntityTypeNode, node.NodeID)
+	server.publishKanbanPermissionProjectionDeltasAsync(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID)
 	revoked := readProjectionEnvelopeForTest(t, viewerCh)
 	if len(revoked.Deltas) != 1 {
 		t.Fatalf("revoked envelope = %+v, want one delete delta", revoked)

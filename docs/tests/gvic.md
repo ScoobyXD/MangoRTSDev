@@ -1,4 +1,4 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 # GVIC Tests
 
@@ -58,6 +58,10 @@ GVIC47 - Apply-to-descendants overwrites existing descendant special GVIC rules 
 GVIC48 - Conflicting direct GVIC bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
 GVIC49 - Group GVIC assignments remain group pointers and must not be expanded into one source row per user.
 GVIC50 - GVIC audit/explainability must identify whether a user's role came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership.
+GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic Gate Generated user and does not serialize the full GVIC assignment collection.
+GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
+GVIC53 - Realtime or committed GVIC header reconciliation must patch or revalidate the same cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
+GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_view`, `can_edit`, or `can_admin`.
 
 ## Scenarios
 
@@ -252,3 +256,22 @@ Expected:
 - Later descendant GVIC edits win over earlier ancestor applies until a newer ancestor apply is recorded.
 - Group GVIC assignments remain group pointers and are not expanded into one source row per user.
 - GVIC explanations identify whether a role came from a direct rule, create/transfer inheritance, descendant apply, or group membership.
+
+### Scenario GVIC-S8: Minimal Logic Gate Work Request Owner
+
+Business logic covered:
+- GVIC51
+- GVIC52
+- GVIC53
+- GVIC54
+
+Given:
+- A Logic Gate has one Generated user and an Arena work snapshot is cached.
+- The Generated assignment changes while an older work request is still in flight.
+
+Expected:
+- The work header contains the current Generated user's ID as `request_owner_user_id`.
+- The payload contains no full GVIC assignment collection.
+- The assignment/policy change invalidates the gate work version and reconciles the shared cached snapshot.
+- The stale response cannot overwrite the newer request owner.
+- Request-owner metadata does not grant any resource permission flag.

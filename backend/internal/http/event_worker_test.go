@@ -86,8 +86,8 @@ func TestEventWorkerKanbanDeltaRoutesByBoardAndFiltersPerUser(t *testing.T) {
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionView},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
@@ -156,8 +156,8 @@ func TestEventWorkerKanbanDeltaRoutesByBoardAndFiltersPerUser(t *testing.T) {
 	if got := visibleDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
 		t.Fatalf("visible worker delta = %+v, want upsert", visibleDelta.Deltas)
 	}
-	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID {
-		t.Fatalf("blocked worker delta = %+v, want delete without row", blockedDelta.Deltas)
+	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
+		t.Fatalf("gate viewer worker delta = %+v, want snapshot-parity upsert despite no node access", blockedDelta.Deltas)
 	}
 }
 

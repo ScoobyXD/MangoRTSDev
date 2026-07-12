@@ -593,17 +593,12 @@ func (s *Server) authorizedKanbanProjectionDeltaForUser(delta store.ProjectionDe
 	default:
 		return store.ProjectionDelta{}, false
 	}
-	logicGateAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
+	logicGateAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
 	if err != nil {
 		log.Printf("failed to check kanban projection logic gate access company_id=%s user_id=%s logic_gate_id=%s: %v", delta.CompanyID, userID, logicGateID, err)
 		return store.ProjectionDelta{}, false
 	}
-	nodeAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
-	if err != nil {
-		log.Printf("failed to check kanban projection node access company_id=%s user_id=%s node_id=%s: %v", delta.CompanyID, userID, nodeID, err)
-		return store.ProjectionDelta{}, false
-	}
-	if !logicGateAllowed || !nodeAllowed {
+	if !logicGateAllowed {
 		return store.ProjectionDelta{
 			CompanyID:          delta.CompanyID,
 			Projection:         store.ProjectionNameKanbanBoard,

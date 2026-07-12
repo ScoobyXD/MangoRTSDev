@@ -168,19 +168,6 @@ export type KanbanCard = {
   updated_timestamp: string;
 };
 
-export type LogicGateArenaGVICAssignment = {
-  company_id?: string;
-  logic_gate_id?: string;
-  role: string;
-  principal_type?: string;
-  principal_id?: string;
-  principal_name?: string;
-  user_id?: string;
-  user_display_name?: string;
-  user_email?: string;
-  created_timestamp?: string;
-};
-
 export type KanbanCardNodeMetadata = {
   node_id: string;
   due_date?: string | null;
@@ -189,20 +176,41 @@ export type KanbanCardNodeMetadata = {
 };
 
 export type LogicGateArenaLogicGate = {
-  company_id: string;
   logic_gate_id: string;
   header: string;
-  gvic_assignments?: LogicGateArenaGVICAssignment[];
+  default_access: string;
+  request_owner_user_id?: string | null;
+};
+
+export type LogicGateArenaPermissions = {
+  can_view: boolean;
+  can_edit: boolean;
+  can_admin: boolean;
+};
+
+export type LogicGateArenaCard = {
+  card_id: string;
+  column_id: string;
+  node_id: string;
+  requested_by_user_id?: string;
+  placed_by_user_id?: string;
+  node_title: string;
+  is_issue?: boolean;
+  position: number;
+  due_date?: string | null;
+  priority?: number | null;
+  created_from_email?: boolean;
+  accounts?: Account[];
+  projection_updated_timestamp?: string;
   created_timestamp: string;
 };
 
 export type LogicGateArenaView = {
   logic_gate: LogicGateArenaLogicGate;
+  permissions: LogicGateArenaPermissions;
   board: KanbanBoard;
   columns: KanbanColumn[];
-  cards: KanbanCard[];
-  nodes?: KanbanCardNodeMetadata[];
-  cards_limit: number;
+  cards: LogicGateArenaCard[];
   projection_sequence?: number;
 };
 

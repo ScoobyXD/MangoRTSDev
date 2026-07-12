@@ -706,6 +706,12 @@ func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName, projectio
 	defer r.mu.Unlock()
 	key := companyID + ":" + projectionName + ":" + projectionScope
 	r.projectionSequences[key]++
+	if projectionName == ProjectionNameKanbanBoard {
+		boardID := strings.TrimSpace(strings.TrimPrefix(projectionScope, "board:"))
+		if logicGateID := LogicGateIDFromKanbanBoardID(boardID); logicGateID != "" {
+			r.bumpLogicGateWorkReadVersionLocked(companyID, logicGateID)
+		}
+	}
 	return r.projectionSequences[key], nil
 }
 

@@ -159,7 +159,7 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 		ProjectionCount:     len(projections),
 		GVICAssignmentCount: len(details.LogicGate.GVICAssignments),
 		RelationshipsCount:  len(details.Relationships),
-		AssignmentCount:     len(work.Assignments),
-		NodeCount:           len(work.Nodes),
+		AssignmentCount:     len(work.Cards),
+		NodeCount:           len(work.Cards),
 	}, nil
 }

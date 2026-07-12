@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 # REST API & WebSocket Tests
 
@@ -34,6 +34,14 @@ RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid acro
 RW24 - Attachment upload control, metadata, linking, and content reads are HTTP operations; WebSocket messages may notify that attachment metadata changed, but WebSocket payloads must not carry file bytes, base64 blobs, presigned URLs, or S3 object contents.
 RW25 - Calendar invitation responses use authenticated `POST /v1/communications/calendar-invites/respond` HTTP requests. The request supplies the company/mailbox scope plus `message_id` and `status` (`yes`, `maybe`, or `no`); the backend resolves the iCalendar UID and exactly one provider event under the authorized personal/shared mailbox scope instead of accepting client-supplied grant, calendar, or event identifiers. Shared inbox responses require edit access, WebSocket messages never send the RSVP, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
 RW26 - Normal browser upload uses Mango HTTP JSON endpoints for policy, intent creation/state, multipart signing, completion, and abort, then raw HTTPS PUT directly to private S3 through the presigned URL. Mango API requests and WebSocket payloads never carry the browser file body. Intent creation carries active company context only in the membership-validated `X-Mango-Company-ID` Mango header, never in intent JSON or an S3 request; the S3 request also never carries Mango Authorization/cookies.
+RW27 - `GET /v2/logic-gates/{logic_gate_id}/work` is the primary Kanban-specific Arena read and returns only `logic_gate`, actor `permissions`, `board`, `columns`, minimal `cards`, and `projection_sequence`. The legacy `GET /v1/logic-gate-arena` route may delegate to the same representation but is not the primary path.
+RW28 - The Logic Gate work response omits top-level repeated IDs, statuses, assignments, nodes, cards limits, and the full GVIC collection; contract tests must assert both required fields and absent redundant fields.
+RW29 - A conditional Logic Gate work request performs owning-gate authorization first, then reads one `logic_gate_work_versions` primary-key row; it must not search multiple `domain_events` payload shapes to calculate an ETag.
+RW30 - Logic Gate work ETags include actor identity/permission flags and a response-contract salt in addition to the work version, so permission and code-only representation changes cannot reuse an unsafe `304`.
+RW31 - Arena HTTP reads accept an `AbortSignal`; selecting another Logic Gate cancels the obsolete request, and an aborted request does not report an application error or commit response state.
+RW32 - A valid consecutive Kanban projection WebSocket delta patches the cached/rendered card and sequence. A gap or invalid delta schedules one targeted `/work` revalidation rather than broad or duplicate workspace refetches.
+RW33 - When one committed backend event maps to assignment and Kanban scopes for the same Logic Gate board, freshness handling coalesces it so one logical change cannot start duplicate board revalidations.
+RW34 - `304 Not Modified` reuses the current complete snapshot without clearing board state or creating duplicate render churn.
 
 ## Scenarios
 
@@ -267,3 +275,28 @@ Expected:
 - Each provider request is rate-gated and the action is not sent through WebSocket.
 - Expired or revoked grants, insufficient calendar scope, and provider failures return a recoverable reconnect/provider response and never report a successful RSVP or force Mango logout.
 - Environment OAuth scopes must include Google/Microsoft calendar write access before integrated provider verification. Scope changes are not retroactive: existing grants must be reauthorized/reconsented after the configured scopes change. This route is invitation RSVP, not a full calendar workspace.
+
+### Scenario RW-S12: Conditional Logic Gate Work And Projection Delta
+
+Business logic covered:
+- RW27
+- RW28
+- RW29
+- RW30
+- RW31
+- RW32
+- RW33
+- RW34
+
+Given:
+- An authorized Arena client has a complete Logic Gate work snapshot and ETag.
+- The client starts a conditional read, changes Logic Gates, and later receives a consecutive card delta plus a sequence gap.
+
+Expected:
+- The backend checks access before deciding whether to return `304`.
+- ETag calculation uses the dedicated primary-key version row and actor/contract fingerprint, not domain-event searches.
+- The obsolete HTTP request is aborted without committing stale state.
+- The consecutive delta patches the minimal cached card and sequence once.
+- Duplicate semantic scopes do not start a second revalidation.
+- The sequence gap starts one targeted work read.
+- A `304` keeps the complete snapshot unchanged, and a `200` body contains no redundant collections.

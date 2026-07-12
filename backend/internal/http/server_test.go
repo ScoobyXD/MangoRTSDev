@@ -1075,11 +1075,9 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 		} `json:"board"`
 		Columns []struct{ ColumnID string } `json:"columns"`
 		Cards   []struct {
-			CardID      string  `json:"card_id"`
-			LogicGateID *string `json:"logic_gate_id"`
-			IsIssue     bool    `json:"is_issue"`
+			CardID  string `json:"card_id"`
+			IsIssue bool   `json:"is_issue"`
 		} `json:"cards"`
-		CardsLimit int `json:"cards_limit"`
 	}
 	if err := json.NewDecoder(arenaRec.Body).Decode(&arenaPayload); err != nil {
 		t.Fatalf("decode logic gate arena: %v", err)
@@ -1087,7 +1085,7 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	if arenaPayload.LogicGate.LogicGateID != logicGate.LogicGateID || arenaPayload.Board.BoardID != boardID || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("arena identity = %+v, want selected logic gate and attached board", arenaPayload)
 	}
-	if len(arenaPayload.Columns) != len(columns) || len(arenaPayload.Cards) != 1 || arenaPayload.Cards[0].CardID != createdCard.CardID || arenaPayload.Cards[0].LogicGateID == nil || *arenaPayload.Cards[0].LogicGateID != logicGate.LogicGateID || !arenaPayload.Cards[0].IsIssue || arenaPayload.CardsLimit != store.KanbanMaxCardsLimit {
+	if len(arenaPayload.Columns) != len(columns) || len(arenaPayload.Cards) != 1 || arenaPayload.Cards[0].CardID != createdCard.CardID || !arenaPayload.Cards[0].IsIssue {
 		t.Fatalf("arena contents = %+v, want bounded composed board view", arenaPayload)
 	}
 

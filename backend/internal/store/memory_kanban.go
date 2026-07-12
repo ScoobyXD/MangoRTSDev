@@ -149,6 +149,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 		PlacedByUserID:             strings.TrimSpace(card.PlacedByUserID),
 		DisplayTitle:               card.NodeTitle,
 		Status:                     &status,
+		CreatedFromEmail:           card.CreatedFromEmail,
 		DueDate:                    cloneStringPointer(card.DueDate),
 		Priority:                   cloneIntPointer(card.Priority),
 		Accounts:                   cloneAccountSnapshots(card.Accounts),

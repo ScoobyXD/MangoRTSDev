@@ -75,6 +75,7 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	}
 	r.domainEvents[domainEventMemoryKey(item.CompanyID, item.EventID)] = item
 	r.updateWorkspaceReadVersionsLocked(item)
+	r.updateLogicGateWorkReadVersionsLocked(item)
 	return cloneDomainEvent(item), nil
 }
 
@@ -286,6 +287,65 @@ func (r *MemoryRepo) updateWorkspaceReadVersionsLocked(event domain.DomainEvent)
 				r.workspaceReadVersions[key] = event.Sequence
 			}
 		}
+	}
+}
+
+func (r *MemoryRepo) bumpLogicGateWorkReadVersionLocked(companyID, logicGateID string) {
+	companyID = strings.TrimSpace(companyID)
+	logicGateID = strings.TrimSpace(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return
+	}
+	if r.workspaceReadVersions == nil {
+		r.workspaceReadVersions = map[string]int64{}
+	}
+	versionKey := logicGateWorkReadVersionMemoryKey(companyID, logicGateID)
+	r.workspaceReadVersions[versionKey]++
+}
+
+func (r *MemoryRepo) updateLogicGateWorkReadVersionsLocked(event domain.DomainEvent) {
+	if !isWorkspaceStreamDomainEvent(event) || isWorkspaceDerivedProjectionRequestEventType(event.Type) {
+		return
+	}
+	logicGateIDs := map[string]bool{}
+	addLogicGateID := func(logicGateID string) {
+		logicGateID = strings.TrimSpace(logicGateID)
+		if logicGateID != "" {
+			logicGateIDs[logicGateID] = true
+		}
+	}
+	addLogicGateID(workspaceEventPayloadString(event.Payload, "logic_gate_id"))
+	addLogicGateID(LogicGateIDFromKanbanBoardID(workspaceEventPayloadString(event.Payload, "board_id")))
+
+	nodeID := workspaceEventPayloadString(event.Payload, "node_id")
+	if nodeID != "" {
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == event.CompanyID && assignment.NodeID == nodeID {
+				addLogicGateID(assignment.LogicGateID)
+			}
+		}
+	}
+
+	eventType := strings.TrimSpace(event.Type)
+	bumpAll := stringInList(eventType, CompanyExplorerFolderWorkspaceEventTypes)
+	if stringInList(eventType, CompanyExplorerFolderItemWorkspaceEventTypes) {
+		targetType := workspaceEventPayloadString(event.Payload, "target_type")
+		if targetType == "" || targetType == EntityTypeLogicGate {
+			bumpAll = true
+		}
+	}
+	if (stringInList(eventType, LogicGateListWorkspaceEventTypes) || stringInList(eventType, NodeListWorkspaceEventTypes)) && len(logicGateIDs) == 0 {
+		bumpAll = true
+	}
+	if bumpAll {
+		for _, logicGate := range r.logicGates {
+			if logicGate.CompanyID == event.CompanyID {
+				addLogicGateID(logicGate.LogicGateID)
+			}
+		}
+	}
+	for logicGateID := range logicGateIDs {
+		r.bumpLogicGateWorkReadVersionLocked(event.CompanyID, logicGateID)
 	}
 }
 

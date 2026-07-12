@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"os"
 	"strings"
@@ -55,21 +56,170 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLogicGateWork: %v", err)
 	}
-	if len(work.Assignments) != 2 {
-		t.Fatalf("assignments len = %d, want 2", len(work.Assignments))
-	}
-	if work.Assignments[0].Assignment.NodeID != firstNode.NodeID || work.Assignments[0].Assignment.StatusKey != LogicGateWorkStatusPending {
-		t.Fatalf("first assignment = %+v, want pending first node", work.Assignments[0].Assignment)
-	}
-	if work.Assignments[1].Assignment.NodeID != secondNode.NodeID || work.Assignments[1].Assignment.StatusKey != LogicGateWorkStatusInProgress {
-		t.Fatalf("second assignment = %+v, want in_progress second node", work.Assignments[1].Assignment)
-	}
-	if len(work.Cards) != 2 || work.Cards[1].ColumnID != LogicGateWorkStatusInProgress {
+	if len(work.Cards) != 2 ||
+		work.Cards[0].NodeID != firstNode.NodeID ||
+		work.Cards[0].ColumnID != LogicGateWorkStatusPending ||
+		work.Cards[1].NodeID != secondNode.NodeID ||
+		work.Cards[1].ColumnID != LogicGateWorkStatusInProgress {
 		t.Fatalf("synthesized cards = %+v, want canonical in_progress card", work.Cards)
 	}
 	if work.Cards[0].Priority == nil || *work.Cards[0].Priority != 2 || work.Cards[1].Priority == nil || *work.Cards[1].Priority != 4 {
 		t.Fatalf("synthesized card priorities = %+v, want node priorities 2 and 4", work.Cards)
 	}
+}
+
+func TestLogicGateWorkJSONContractIsKanbanSpecificAndNonRedundant(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555404"
+	repo.EnsureCompany(companyID, "Logic Gate Work Contract Co")
+	owner := mustCreateGVICMembershipUser(t, repo, "logic-gate-contract-owner", companyID)
+	logicGate, err := repo.CreateLogicGate(companyID, "Contract Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: owner.UserID}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Contract card")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusRequested,
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	work, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateWork: %v", err)
+	}
+	payload, err := json.Marshal(work)
+	if err != nil {
+		t.Fatalf("Marshal LogicGateWorkView: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &top); err != nil {
+		t.Fatalf("Unmarshal LogicGateWorkView: %v", err)
+	}
+	for _, required := range []string{"logic_gate", "permissions", "board", "columns", "cards", "projection_sequence"} {
+		if _, ok := top[required]; !ok {
+			t.Fatalf("work JSON missing %q: %s", required, payload)
+		}
+	}
+	if len(top) != 6 {
+		t.Fatalf("work JSON top-level keys = %v, want exactly six Kanban keys", top)
+	}
+	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "nodes", "cards_limit"} {
+		if _, ok := top[forbidden]; ok {
+			t.Fatalf("work JSON retained redundant %q: %s", forbidden, payload)
+		}
+	}
+	var header map[string]json.RawMessage
+	if err := json.Unmarshal(top["logic_gate"], &header); err != nil {
+		t.Fatalf("Unmarshal logic_gate: %v", err)
+	}
+	var requestOwnerUserID string
+	if err := json.Unmarshal(header["request_owner_user_id"], &requestOwnerUserID); err != nil {
+		t.Fatalf("Unmarshal request_owner_user_id: %v", err)
+	}
+	if len(header) != 4 || requestOwnerUserID != owner.UserID {
+		t.Fatalf("logic_gate header = %s, want id/header/default/request owner only", top["logic_gate"])
+	}
+	var cards []map[string]json.RawMessage
+	if err := json.Unmarshal(top["cards"], &cards); err != nil || len(cards) != 1 {
+		t.Fatalf("cards = %s err=%v, want one card", top["cards"], err)
+	}
+	for _, forbidden := range []string{"company_id", "board_id", "logic_gate_id", "description_snapshot", "updated_timestamp"} {
+		if _, ok := cards[0][forbidden]; ok {
+			t.Fatalf("minimal card retained %q: %s", forbidden, top["cards"])
+		}
+	}
+}
+
+func TestMemoryLogicGateWorkVersionInvalidatesEveryResponseDependency(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555405"
+	repo.EnsureCompany(companyID, "Logic Gate Work Version Co")
+	logicGate, err := repo.CreateLogicGate(companyID, "Version Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Version Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		Priority:    testPriority(2),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	boardID := LogicGateKanbanBoardID(logicGate.LogicGateID)
+	assertBump := func(name string, mutate func() error) {
+		t.Helper()
+		before, err := repo.CurrentLogicGateWorkVersion(companyID, logicGate.LogicGateID)
+		if err != nil {
+			t.Fatalf("%s version before: %v", name, err)
+		}
+		if err := mutate(); err != nil {
+			t.Fatalf("%s mutate: %v", name, err)
+		}
+		after, err := repo.CurrentLogicGateWorkVersion(companyID, logicGate.LogicGateID)
+		if err != nil {
+			t.Fatalf("%s version after: %v", name, err)
+		}
+		if after <= before {
+			t.Fatalf("%s version = %d after %d, want independent increment", name, after, before)
+		}
+	}
+	appendEvent := func(eventType string, payload map[string]any) func() error {
+		return func() error {
+			_, err := repo.AppendDomainEvent(DomainEventInput{
+				CompanyID:  companyID,
+				StreamType: workspaceDomainStreamType,
+				StreamID:   companyID,
+				Type:       eventType,
+				Payload:    payload,
+			})
+			return err
+		}
+	}
+	for _, item := range []struct {
+		name      string
+		eventType string
+		payload   map[string]any
+	}{
+		{name: "gate header", eventType: "logic_gate_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
+		{name: "gate permission", eventType: "logic_gate_permissions_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
+		{name: "gate GVIC/request owner", eventType: "logic_gate_gvic_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
+		{name: "inherited permission policy", eventType: "company_explorer_folder_permissions_updated", payload: map[string]any{}},
+		{name: "board", eventType: "kanban_board_updated", payload: map[string]any{"board_id": boardID}},
+		{name: "column/status", eventType: "kanban_column_updated", payload: map[string]any{"board_id": boardID}},
+		{name: "card and email origin", eventType: "kanban_card_upserted", payload: map[string]any{"board_id": boardID}},
+		{name: "node", eventType: "node_updated", payload: map[string]any{"node_id": node.NodeID}},
+		{name: "assignment", eventType: WorkItemLogicGateAssignmentMovedEventType, payload: map[string]any{"logic_gate_id": logicGate.LogicGateID, "node_id": node.NodeID, "board_id": boardID}},
+	} {
+		assertBump(item.name, appendEvent(item.eventType, item.payload))
+	}
+	assertBump("projection sequence", func() error {
+		_, err := repo.NextProjectionSequence(companyID, ProjectionNameKanbanBoard, "board:"+boardID)
+		return err
+	})
 }
 
 func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
@@ -229,15 +379,26 @@ func TestMemoryLogicGateAssignmentsTrackPlacedByUser(t *testing.T) {
 
 func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	postgresSource := readPhase4SourceForTest(t, "postgres_logic_gate_work.go")
-	normalizedPostgres := strings.ToLower(postgresSource)
-	if !strings.Contains(normalizedPostgres, "from kanban_board_projection projection") {
-		t.Fatalf("postgres logic gate work read does not select from kanban_board_projection")
+	getWorkEnd := strings.Index(postgresSource, "func (r *PostgresRepo) LogicGateWorkAccessFlags")
+	if getWorkEnd < 0 {
+		t.Fatalf("postgres logic gate access function boundary not found")
 	}
-	if !strings.Contains(normalizedPostgres, "join node_logic_gate_assignments assignment") {
-		t.Fatalf("postgres logic gate work read does not join assignment metadata narrowly")
+	normalizedPostgres := strings.ToLower(postgresSource[:getWorkEnd])
+	if !strings.Contains(normalizedPostgres, "join kanban_board_projection projection") {
+		t.Fatalf("postgres logic gate work read does not select from kanban_board_projection")
 	}
 	if !strings.Contains(normalizedPostgres, "projection.priority") {
 		t.Fatalf("postgres logic gate work read does not select projection priority")
+	}
+	for _, required := range []string{
+		"company_projection_sequences",
+		"communications_email_nodes",
+		"resource_gvic_assignments",
+		"projection.status_rank",
+	} {
+		if !strings.Contains(normalizedPostgres, required) {
+			t.Fatalf("postgres logic gate work read missing consolidated source %q", required)
+		}
 	}
 	for _, forbidden := range []string{
 		"from kanban_boards",
@@ -247,6 +408,8 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 		"join kanban_boards",
 		"join kanban_columns",
 		"join kanban_cards",
+		"join node_logic_gate_assignments",
+		"left join lateral",
 		"listaccessibleentityids",
 		"mangorts_user_can_access_resource",
 	} {
@@ -316,6 +479,44 @@ func TestPostgresKanbanProjectionCardListSelectsCardMetadata(t *testing.T) {
 	} {
 		if strings.Contains(outerSelect, removed) {
 			t.Fatalf("postgres kanban projection card list outer select still contains removed %s", removed)
+		}
+	}
+}
+
+func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
+	for _, path := range []string{
+		"../../db/migrations/20260711_logic_gate_work_fast_path.sql",
+		"../../db/schema.sql",
+	} {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		normalized := strings.ToLower(string(source))
+		for _, required := range []string{
+			"status_rank smallint generated always as",
+			"company_id, logic_gate_id, status_rank, position",
+			"assignment_created_timestamp, assignment_id",
+			"create table if not exists logic_gate_work_versions",
+			"primary key (company_id, logic_gate_id)",
+			"logic_gate_work_versions_board_key unique (company_id, board_id)",
+			"trg_logic_gate_work_version_gate",
+			"trg_logic_gate_work_version_permissions",
+			"trg_logic_gate_work_version_permission_applications",
+			"trg_logic_gate_work_version_gvic",
+			"trg_logic_gate_work_version_explorer_items",
+			"trg_logic_gate_work_version_explorer_folder_update",
+			"trg_logic_gate_work_version_memberships",
+			"trg_logic_gate_work_version_group_members",
+			"trg_logic_gate_work_version_assignments",
+			"trg_logic_gate_work_version_projection",
+			"trg_logic_gate_work_version_nodes",
+			"trg_logic_gate_work_version_email_origin",
+			"trg_logic_gate_work_version_projection_sequence",
+		} {
+			if !strings.Contains(normalized, required) {
+				t.Fatalf("%s missing Logic Gate fast-path contract %q", path, required)
+			}
 		}
 	}
 }

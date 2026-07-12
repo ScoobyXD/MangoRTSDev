@@ -43,6 +43,7 @@ function row(overrides: Partial<KanbanBoardProjectionRow> = {}): KanbanBoardProj
     position: 2000,
     due_date: "2026-06-03",
     priority: 2,
+    created_from_email: true,
     created_timestamp: "2026-06-01T00:00:00.000Z",
     updated_timestamp: "2026-06-02T00:00:00.000Z",
     projection_updated_timestamp: "2026-06-02T00:00:00.000Z",
@@ -69,6 +70,7 @@ test("converts Kanban projection rows into card metadata", () => {
   assert.equal(converted?.node_title, "Alpha updated");
   assert.equal(converted?.due_date, "2026-06-03");
   assert.equal(converted?.priority, 2);
+  assert.equal(converted?.created_from_email, true);
 });
 
 test("applies Kanban upsert and delete projection deltas locally", () => {
@@ -144,7 +146,7 @@ test("patch deltas update known card fields without refetch", () => {
       deltas: [{
         operation: "patch",
         row_key: { company_id: "company-1", board_id: "board-1", card_id: "card-1" },
-        patch: { priority: 1, due_date: null, projection_updated_timestamp: "2026-06-02T00:00:03.000Z" },
+        patch: { priority: 1, due_date: null, created_from_email: true, projection_updated_timestamp: "2026-06-02T00:00:03.000Z" },
       }],
     }),
     companyID: "company-1",
@@ -156,6 +158,7 @@ test("patch deltas update known card fields without refetch", () => {
   assert.equal(result.fallback, false);
   assert.equal(result.cards[0]?.priority, 1);
   assert.equal(result.cards[0]?.due_date, null);
+  assert.equal(result.cards[0]?.created_from_email, true);
 });
 
 test("requests targeted fallback for projection sequence gaps and unknown delta operations", () => {

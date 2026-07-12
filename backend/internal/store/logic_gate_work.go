@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	logicGateWorkReadVersionScope = "logic-gate-work"
+
 	LogicGateWorkStatusRequested  = "requested"
 	LogicGateWorkStatusBacklog    = "backlog"
 	LogicGateWorkStatusPending    = "pending"
@@ -15,6 +17,14 @@ const (
 	LogicGateWorkStatusReview     = "review"
 	LogicGateWorkStatusDone       = "done"
 )
+
+func logicGateWorkReadVersionMemoryKey(companyID, logicGateID string) string {
+	return workspaceReadVersionMemoryKey(
+		strings.TrimSpace(companyID),
+		logicGateWorkReadVersionScope,
+		WorkspaceReadVersionResourceKey("logic_gate_id", strings.TrimSpace(logicGateID)),
+	)
+}
 
 type logicGateWorkStatusSpec struct {
 	Key      string
@@ -102,7 +112,12 @@ func requestedByUserIDForLogicGateStatus(status, requestedByUserID, fallbackUser
 	return strings.TrimSpace(fallbackUserID)
 }
 
-func sortLogicGateWorkAssignments(items []domain.LogicGateWorkAssignment) {
+type logicGateWorkAssignment struct {
+	Assignment domain.NodeLogicGateAssignment
+	Node       domain.Node
+}
+
+func sortLogicGateWorkAssignments(items []logicGateWorkAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		leftRank := logicGateWorkStatusRank(items[i].Assignment.StatusKey)
 		rightRank := logicGateWorkStatusRank(items[j].Assignment.StatusKey)
@@ -119,48 +134,37 @@ func sortLogicGateWorkAssignments(items []domain.LogicGateWorkAssignment) {
 	})
 }
 
-func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []domain.LogicGateWorkAssignment) domain.LogicGateWorkView {
+func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateWorkAssignment, projectionSequence int64) domain.LogicGateWorkView {
 	sortLogicGateWorkAssignments(assignments)
 	board := synthesizeLogicGateWorkBoard(logicGate)
 	columns := synthesizeLogicGateWorkColumns(logicGate.CompanyID, board.BoardID, logicGate.CreatedTimestamp)
-	statuses := make([]domain.LogicGateWorkStatus, 0, len(logicGateWorkStatusSpecs))
-	statusIndexes := map[string]int{}
-	for _, spec := range logicGateWorkStatusSpecs {
-		statusIndexes[spec.Key] = len(statuses)
-		statuses = append(statuses, domain.LogicGateWorkStatus{
-			StatusKey:   spec.Key,
-			Title:       spec.Title,
-			Position:    spec.Position,
-			Assignments: []domain.LogicGateWorkAssignment{},
-		})
-	}
-
-	normalizedAssignments := make([]domain.LogicGateWorkAssignment, 0, len(assignments))
-	nodes := make([]domain.Node, 0, len(assignments))
-	cards := make([]domain.KanbanCard, 0, len(assignments))
+	cards := make([]domain.LogicGateWorkCard, 0, len(assignments))
 	for _, item := range assignments {
-		statusKey := logicGateWorkStatusKeyOrDefault(item.Assignment.StatusKey, LogicGateWorkStatusPending)
-		item.Assignment.StatusKey = statusKey
-		item.Node = logicGateWorkNodeWithAssignment(item.Node, item.Assignment)
-		item.Card = synthesizeLogicGateWorkCard(board.BoardID, item.Assignment, item.Node)
-		normalizedAssignments = append(normalizedAssignments, item)
-		nodes = append(nodes, item.Node)
-		cards = append(cards, item.Card)
-		statuses[statusIndexes[statusKey]].Assignments = append(statuses[statusIndexes[statusKey]].Assignments, item)
+		cards = append(cards, synthesizeLogicGateWorkCard(item.Assignment, item.Node))
 	}
 
 	return domain.LogicGateWorkView{
-		CompanyID:   logicGate.CompanyID,
-		LogicGateID: logicGate.LogicGateID,
-		LogicGate:   logicGate,
-		Statuses:    statuses,
-		Assignments: normalizedAssignments,
-		Nodes:       nodes,
-		Board:       board,
-		Columns:     columns,
-		Cards:       cards,
-		CardsLimit:  KanbanMaxCardsLimit,
+		LogicGate: domain.LogicGateWorkHeader{
+			LogicGateID:        logicGate.LogicGateID,
+			Header:             logicGate.Header,
+			DefaultAccess:      defaultResourceAccessOrEdit(logicGate.DefaultAccess),
+			RequestOwnerUserID: logicGateWorkRequestOwnerUserID(logicGate.GVICAssignments),
+		},
+		Board:              board,
+		Columns:            columns,
+		Cards:              cards,
+		ProjectionSequence: projectionSequence,
 	}
+}
+
+func logicGateWorkRequestOwnerUserID(assignments []domain.LogicGateGVICAssignment) string {
+	for _, assignment := range assignments {
+		principalType, principalID := logicGateGVICAssignmentPrincipal(assignment)
+		if assignment.Role == domain.GVICRoleGenerated && principalType == EntityPermissionSubjectUser {
+			return strings.TrimSpace(principalID)
+		}
+	}
+	return ""
 }
 
 func logicGateWorkCardEmailOriginKey(boardID, cardID, nodeID string) string {
@@ -173,35 +177,10 @@ func markLogicGateWorkEmailOriginCards(work *domain.LogicGateWorkView, emailOrig
 	}
 	for index := range work.Cards {
 		card := &work.Cards[index]
-		if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
+		if emailOriginKeys[logicGateWorkCardEmailOriginKey(work.Board.BoardID, card.CardID, card.NodeID)] {
 			card.CreatedFromEmail = true
 		}
 	}
-	for index := range work.Assignments {
-		card := &work.Assignments[index].Card
-		if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
-			card.CreatedFromEmail = true
-		}
-	}
-	for statusIndex := range work.Statuses {
-		for assignmentIndex := range work.Statuses[statusIndex].Assignments {
-			card := &work.Statuses[statusIndex].Assignments[assignmentIndex].Card
-			if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
-				card.CreatedFromEmail = true
-			}
-		}
-	}
-}
-
-func logicGateWorkNodeWithAssignment(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {
-	statusKey := logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending)
-	status := LogicGateWorkStatusTitle(statusKey)
-	if assignment.IsIssue {
-		status = "Issue"
-	}
-	node.Status = &status
-	node.LogicGateIDs = cleanStringList(append(node.LogicGateIDs, assignment.LogicGateID))
-	return node
 }
 
 func synthesizeLogicGateWorkBoard(logicGate domain.LogicGate) domain.KanbanBoard {
@@ -236,29 +215,25 @@ func synthesizeLogicGateWorkColumns(companyID, boardID string, created time.Time
 	return columns
 }
 
-func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGateAssignment, node domain.Node) domain.KanbanCard {
+func synthesizeLogicGateWorkCard(assignment domain.NodeLogicGateAssignment, node domain.Node) domain.LogicGateWorkCard {
 	cardID := strings.TrimSpace(assignment.CompatibilityCardID)
 	if cardID == "" {
 		cardID = assignment.AssignmentID
 	}
-	logicGateID := assignment.LogicGateID
-	return domain.KanbanCard{
-		CompanyID:         assignment.CompanyID,
-		BoardID:           boardID,
-		CardID:            cardID,
-		ColumnID:          logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
-		NodeID:            assignment.NodeID,
-		LogicGateID:       &logicGateID,
-		RequestedByUserID: strings.TrimSpace(assignment.RequestedByUserID),
-		PlacedByUserID:    strings.TrimSpace(assignment.PlacedByUserID),
-		NodeTitle:         node.Title,
-		IsIssue:           assignment.IsIssue,
-		Position:          assignment.Position,
-		DueDate:           cloneStringPointer(node.DueDate),
-		Priority:          cloneIntPointer(node.Priority),
-		CreatedFromEmail:  false,
-		CreatedTimestamp:  assignment.CreatedTimestamp,
-		UpdatedTimestamp:  assignment.UpdatedTimestamp,
+	return domain.LogicGateWorkCard{
+		CardID:                     cardID,
+		ColumnID:                   logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
+		NodeID:                     assignment.NodeID,
+		RequestedByUserID:          strings.TrimSpace(assignment.RequestedByUserID),
+		PlacedByUserID:             strings.TrimSpace(assignment.PlacedByUserID),
+		NodeTitle:                  node.Title,
+		IsIssue:                    assignment.IsIssue,
+		Position:                   assignment.Position,
+		DueDate:                    cloneStringPointer(node.DueDate),
+		Priority:                   cloneIntPointer(node.Priority),
+		ProjectionUpdatedTimestamp: assignment.UpdatedTimestamp,
+		CreatedTimestamp:           assignment.CreatedTimestamp,
+		Accounts:                   cloneAccountSnapshots(node.Accounts),
 	}
 }
 
@@ -269,5 +244,32 @@ func LogicGateWorkCompatibilityCard(boardID string, assignment domain.NodeLogicG
 	if boardID == "" {
 		boardID = strings.TrimSpace(assignment.CompatibilityBoardID)
 	}
-	return synthesizeLogicGateWorkCard(boardID, assignment, node)
+	card := synthesizeLogicGateWorkCard(assignment, node)
+	return LogicGateWorkCardToKanbanCard(assignment.CompanyID, boardID, assignment.LogicGateID, card)
+}
+
+// LogicGateWorkCardToKanbanCard restores compatibility-only coordinates for
+// the generic Kanban endpoints without bloating the Arena response.
+func LogicGateWorkCardToKanbanCard(companyID, boardID, logicGateID string, card domain.LogicGateWorkCard) domain.KanbanCard {
+	logicGateID = strings.TrimSpace(logicGateID)
+	return domain.KanbanCard{
+		CompanyID:                  strings.TrimSpace(companyID),
+		BoardID:                    strings.TrimSpace(boardID),
+		CardID:                     card.CardID,
+		ColumnID:                   card.ColumnID,
+		NodeID:                     card.NodeID,
+		LogicGateID:                stringPointer(logicGateID),
+		RequestedByUserID:          card.RequestedByUserID,
+		PlacedByUserID:             card.PlacedByUserID,
+		NodeTitle:                  card.NodeTitle,
+		IsIssue:                    card.IsIssue,
+		Position:                   card.Position,
+		DueDate:                    cloneStringPointer(card.DueDate),
+		Priority:                   cloneIntPointer(card.Priority),
+		CreatedFromEmail:           card.CreatedFromEmail,
+		ProjectionUpdatedTimestamp: card.ProjectionUpdatedTimestamp,
+		CreatedTimestamp:           card.CreatedTimestamp,
+		UpdatedTimestamp:           card.ProjectionUpdatedTimestamp,
+		Accounts:                   cloneAccountSnapshots(card.Accounts),
+	}
 }

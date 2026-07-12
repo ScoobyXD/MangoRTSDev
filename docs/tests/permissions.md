@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 # Permissions Tests
 
@@ -64,6 +64,12 @@ P52 - Conflicting direct bindings and ancestor apply records resolve by a monoto
 P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; resource admin is not required, view-only is not enough, and GVIC assignments must not authorize the delete.
 P55 - If a user is denied permission-settings visibility, the permissions dialog remains dismissible with the X control and must not attempt to autosave a panel that never loaded editable permission data.
+P56 - Logic Gate work reads return actor-specific `can_view`, `can_edit`, and `can_admin` flags while preserving the existing default, direct-user, group, ancestor-application, and manager/admin authorization semantics.
+P57 - Logic Gate work authorization is evaluated before conditional ETag handling; losing view access cannot produce a cached `304` or preserve readable board data.
+P58 - Direct Logic Gate permission/default changes, gate policy revisions, inherited Explorer permission applications, Logic Gate Explorer placement changes, and ancestor folder moves/default changes invalidate the affected Logic Gate work version.
+P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags conservatively invalidate all Logic Gate work versions in that company.
+P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
+P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set any of the work response permission flags.
 
 ## Scenarios
 
@@ -246,3 +252,25 @@ Expected:
 - The X control closes the permissions dialog.
 - Closing does not issue a permission save request.
 - The user can return to the underlying resource or previous UI state.
+
+### Scenario P-S7: Logic Gate Work Permission-Safe ETag
+
+Business logic covered:
+- P56
+- P57
+- P58
+- P59
+- P60
+- P61
+
+Given:
+- Two users have different effective permission levels on the same Logic Gate.
+- A direct rule, an inherited Explorer rule, and group membership are changed while one user holds an older work ETag.
+
+Expected:
+- Each response reports permission flags for its authenticated actor.
+- Access is recalculated before `If-None-Match` can return `304`.
+- Direct and inherited policy changes bump the affected gate, while actor membership/hierarchy changes conservatively bump company gate versions.
+- Actor permission identity/flags prevent cross-user validator reuse.
+- Removing view access returns denial and does not expose cached card data.
+- GVIC assignment alone does not set view, edit, or admin permission.
