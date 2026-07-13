@@ -117,10 +117,11 @@ function openHomePinContextMenu(
   setMenu({ x: event.clientX, y: event.clientY, ...target, id });
 }
 
-function HomePinContextMenu({ menu, onClose, onDelete }: {
+function HomePinContextMenu({ menu, onClose, onDelete, resolveLabel }: {
   menu: HomePinContextMenuState | null;
   onClose: () => void;
   onDelete?: (target: HomePinContextMenuState, position?: ConfirmActionMenuPosition) => void;
+  resolveLabel?: (target: HomePinContextMenuState) => string;
 }) {
   if (!menu) return null;
   const openRoute = menu.kind === "logic_gate"
@@ -144,7 +145,7 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
         type="button"
         style={sharedInboxContextMenuButtonStyle}
         onClick={() => {
-          requestAppSidebarPin({ kind: menu.kind, id: menu.id, name: menu.label });
+          requestAppSidebarPin({ kind: menu.kind, id: menu.id, name: resolveLabel?.(menu) || menu.label });
           onClose();
         }}
       >
@@ -1649,6 +1650,7 @@ export function LogicGateRail({
     <HomePinContextMenu
       menu={pinContextMenu}
       onClose={() => setPinContextMenu(null)}
+      resolveLabel={(target) => logicGateTitle(logicGateByID.get(target.id)) || target.label}
       onDelete={(target, position) => {
         if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id, position);
       }}
@@ -1990,6 +1992,7 @@ export function NodeInboxRail({
     <HomePinContextMenu
       menu={pinContextMenu}
       onClose={() => setPinContextMenu(null)}
+      resolveLabel={(target) => target.kind === "node" ? nodeTitle(nodeByID.get(target.id)) || target.label : target.kind === "logic_gate" ? logicGateTitle(logicGateByID.get(target.id)) || target.label : target.label}
       onDelete={(target, position) => {
         if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id, position);
       }}
@@ -3199,6 +3202,8 @@ function logicGateInboxNodeNotificationButtonStyle(role: string): React.CSSPrope
 type InboxNotificationMenuState = {
   x: number;
   y: number;
+  targetKind: "node" | "logic_gate";
+  targetID: string;
   title: string;
   loading: boolean;
   error: string;
@@ -3346,6 +3351,8 @@ export function GVICRoleInboxMatrix({
     const nextMenu: InboxNotificationMenuState = {
       x: event.clientX,
       y: event.clientY,
+      targetKind: "logic_gate",
+      targetID: group.logicGateID,
       title: `${group.label} updates`,
       loading: true,
       error: "",
@@ -3377,6 +3384,8 @@ export function GVICRoleInboxMatrix({
     const nextMenu: InboxNotificationMenuState = {
       x: event.clientX,
       y: event.clientY,
+      targetKind: "node",
+      targetID: nodeID,
       title: `${node ? nodeTitle(node) : "Node"} updates`,
       loading: true,
       error: "",
@@ -3421,8 +3430,9 @@ export function GVICRoleInboxMatrix({
       onOpenNode(node, informationID || undefined);
       return;
     }
-    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID, informationID || undefined);
-  }, [nodeByID, onOpenLogicGate, onOpenNode]);
+    const logicGateLabel = logicGateID ? logicGateTitle(logicGateByID.get(logicGateID)) : "";
+    if (logicGateID) onOpenLogicGate(logicGateID, logicGateLabel || notification.title || logicGateID, nodeID, informationID || undefined);
+  }, [logicGateByID, nodeByID, onOpenLogicGate, onOpenNode]);
   const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
@@ -3432,6 +3442,14 @@ export function GVICRoleInboxMatrix({
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear updates" } : current);
     });
   }, []);
+  const currentNotificationMenu = useMemo(() => {
+    if (!notificationMenu) return null;
+    const currentLabel = notificationMenu.targetKind === "node"
+      ? nodeTitle(nodeByID.get(notificationMenu.targetID))
+      : logicGateTitle(logicGateByID.get(notificationMenu.targetID));
+    const title = currentLabel ? `${currentLabel} updates` : notificationMenu.title;
+    return title === notificationMenu.title ? notificationMenu : { ...notificationMenu, title };
+  }, [logicGateByID, nodeByID, notificationMenu]);
   const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3612,7 +3630,7 @@ export function GVICRoleInboxMatrix({
         </div>
       </div>
     </section>
-    <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} resolveLabel={(target) => target.kind === "node" ? nodeTitle(nodeByID.get(target.id)) || target.label : target.kind === "logic_gate" ? logicGateTitle(logicGateByID.get(target.id)) || target.label : target.label} />
     {cellContextMenu && (
       <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
         <button
@@ -3639,7 +3657,7 @@ export function GVICRoleInboxMatrix({
         </button>
       </FrameRightClickMenu>
     )}
-    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} onClear={clearGroupNotifications} />
+    <InboxNotificationMenu menu={currentNotificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} onClear={clearGroupNotifications} />
   </>
   );
 }

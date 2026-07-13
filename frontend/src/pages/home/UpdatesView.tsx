@@ -33,6 +33,12 @@ import { getUniversalStatusGroupValue } from "../../modules/grouping/universalSt
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import {
+  resolveCurrentUpdateLogicGateGroupValue,
+  resolveCurrentUpdateLogicGateLabel,
+  resolveUpdateLogicGateID,
+  type UpdateLogicGateDetails,
+} from "./updatesCurrentEntityLabels";
 
 type UpdatesEditorContentComponent = React.FC<{
   accent: string;
@@ -61,6 +67,7 @@ type UpdatesViewProps = {
   onOpenLogicGate: (logicGateID: string, label: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 };
 
@@ -170,6 +177,7 @@ export function UpdatesView({
   onOpenLogicGate,
   onOpenProject,
   resolveNodeDetails,
+  resolveLogicGateDetails,
   resolveUserLabel,
 }: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
@@ -194,6 +202,9 @@ export function UpdatesView({
   const [reloadToken, setReloadToken] = useState(0);
   const updatesListRef = useRef<HTMLDivElement | null>(null);
   const notificationRefreshTimerRef = useRef<number | null>(null);
+  const canonicalLoadGenerationRef = useRef(0);
+  const canonicalLoadInFlightRef = useRef(false);
+  const notificationReloadQueuedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -292,7 +303,11 @@ export function UpdatesView({
   }, [branchByRootID, branchLoadingIDs, companyID, filter]);
 
   useEffect(() => {
+    const loadGeneration = canonicalLoadGenerationRef.current + 1;
+    canonicalLoadGenerationRef.current = loadGeneration;
     if (!companyID.trim()) {
+      canonicalLoadInFlightRef.current = false;
+      notificationReloadQueuedRef.current = false;
       setRootGroups([]);
       setBranchByRootID({});
       setExpandedGroupIDs(new Set());
@@ -300,6 +315,7 @@ export function UpdatesView({
     }
     let cancelled = false;
     setLoadingRoots(true);
+    canonicalLoadInFlightRef.current = true;
     setError("");
     setBranchByRootID({});
     setBranchLoadingIDs(new Set());
@@ -341,8 +357,21 @@ export function UpdatesView({
           setLoadingRoots(false);
           setBranchLoadingIDs(new Set());
         }
-    });
-    return () => { cancelled = true; };
+        if (!cancelled && canonicalLoadGenerationRef.current === loadGeneration) {
+          canonicalLoadInFlightRef.current = false;
+          if (notificationReloadQueuedRef.current) {
+            notificationReloadQueuedRef.current = false;
+            setReloadToken((value) => value + 1);
+          }
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (canonicalLoadGenerationRef.current === loadGeneration) {
+        canonicalLoadInFlightRef.current = false;
+        notificationReloadQueuedRef.current = false;
+      }
+    };
   }, [companyID, filter, liveRefreshToken, reloadToken]);
 
   useEffect(() => {
@@ -358,6 +387,10 @@ export function UpdatesView({
       if (notificationRefreshTimerRef.current !== null) window.clearTimeout(notificationRefreshTimerRef.current);
       notificationRefreshTimerRef.current = window.setTimeout(() => {
         notificationRefreshTimerRef.current = null;
+        if (canonicalLoadInFlightRef.current) {
+          notificationReloadQueuedRef.current = true;
+          return;
+        }
         setReloadToken((value) => value + 1);
       }, 80);
     };
@@ -374,8 +407,8 @@ export function UpdatesView({
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
   const displayGroups = useMemo(
-    () => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, resolveNodeDetails),
-    [resolveNodeDetails, selectedSetting.groupings, updateRows],
+    () => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, resolveNodeDetails, resolveLogicGateDetails),
+    [resolveLogicGateDetails, resolveNodeDetails, selectedSetting.groupings, updateRows],
   );
   const visibleUpdateRows = useMemo(
     () => flattenDisplayRows(displayGroups, expandedGroupIDs),
@@ -627,9 +660,14 @@ export function UpdatesView({
     const resourceID = group.resource_id?.trim() ?? "";
     if (!resourceID) return;
     if (group.resource_type === "node") openNodePanelByResource(resourceID, group.label);
-    if (group.resource_type === "logic_gate") onOpenLogicGate(resourceID, group.label);
+    if (group.resource_type === "logic_gate") {
+      onOpenLogicGate(resourceID, resolveCurrentUpdateLogicGateLabel({
+        currentDetails: resolveLogicGateDetails?.(resourceID),
+        groupedLabel: group.label,
+      }));
+    }
     if (group.resource_type === "project") onOpenProject(resourceID, group.label);
-  }, [onOpenLogicGate, onOpenProject, openNodePanelByResource]);
+  }, [onOpenLogicGate, onOpenProject, openNodePanelByResource, resolveLogicGateDetails]);
 
   const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
 
@@ -678,6 +716,7 @@ export function UpdatesView({
               onOpenGroupResource={openGroupResource}
               onOpenContextMenu={openUpdateContextMenu}
               resolveNodeDetails={resolveNodeDetails}
+              resolveLogicGateDetails={resolveLogicGateDetails}
               resolveUserLabel={resolveUserLabel}
             />
           )}
@@ -687,6 +726,7 @@ export function UpdatesView({
         <UpdatesNodePanel
           panel={activeNodePanel}
           resolveNodeDetails={resolveNodeDetails}
+          resolveLogicGateDetails={resolveLogicGateDetails}
           resolveUserLabel={resolveUserLabel}
           onClose={() => setActiveNodePanel(null)}
         />
@@ -721,6 +761,7 @@ function UpdateGroupList({
   onOpenGroupResource,
   onOpenContextMenu,
   resolveNodeDetails,
+  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   groups: UpdateDisplayGroup[];
@@ -737,6 +778,7 @@ function UpdateGroupList({
   onOpenGroupResource: (group: UpdateDisplayGroup) => void;
   onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   return (
@@ -786,6 +828,7 @@ function UpdateGroupList({
                 onOpenGroupResource={onOpenGroupResource}
                 onOpenContextMenu={onOpenContextMenu}
                 resolveNodeDetails={resolveNodeDetails}
+                resolveLogicGateDetails={resolveLogicGateDetails}
                 resolveUserLabel={resolveUserLabel}
               />
             )}
@@ -802,6 +845,7 @@ function UpdateGroupList({
                 onHoverNotification={onHoverNotification}
                 onOpenContextMenu={onOpenContextMenu}
                 resolveNodeDetails={resolveNodeDetails}
+                resolveLogicGateDetails={resolveLogicGateDetails}
                 resolveUserLabel={resolveUserLabel}
               />
             )}
@@ -866,6 +910,7 @@ function UpdateRows({
   onHoverNotification,
   onOpenContextMenu,
   resolveNodeDetails,
+  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   rows: UpdateFeedRow[];
@@ -879,6 +924,7 @@ function UpdateRows({
   onHoverNotification: (notificationKey: string) => void;
   onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   return (
@@ -927,7 +973,12 @@ function UpdateRows({
             </span>
             <span style={updateRowTextStyle}>
               <span style={updateRowTitleStyle}>
-                <UpdateCanonicalRowCopy row={row} resolveNodeDetails={resolveNodeDetails} resolveUserLabel={resolveUserLabel} />
+                <UpdateCanonicalRowCopy
+                  row={row}
+                  resolveNodeDetails={resolveNodeDetails}
+                  resolveLogicGateDetails={resolveLogicGateDetails}
+                  resolveUserLabel={resolveUserLabel}
+                />
               </span>
               {rowBody && <span style={updateRowBodyStyle}>{rowBody}</span>}
             </span>
@@ -1031,19 +1082,23 @@ function updateRowTone(item: NotificationItem): "urgent" | "mention" | "new" | "
 function UpdateCanonicalRowCopy({
   row,
   resolveNodeDetails,
+  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   row: UpdateFeedRow;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   const item = row.item;
   const tone = updateRowTone(item);
   const nodeID = updateRowNodeID(row);
   const nodeDetails = nodeID ? resolveNodeDetails?.(nodeID) ?? null : null;
+  const logicGateID = resolveUpdateLogicGateID(row);
+  const logicGateDetails = logicGateID ? resolveLogicGateDetails?.(logicGateID) ?? null : null;
   const actor = updateActorLabel(item, resolveUserLabel);
   const nodeLabel = updateRowNodeLabel(row, nodeDetails);
-  const logicGateLabel = updateRowLogicGateLabel(row);
+  const logicGateLabel = updateRowLogicGateLabel(row, logicGateDetails);
   const statusLabel = updateRowStatusLabel(row, nodeDetails);
   const chatMention = updateRowIsChatMention(row);
   const priorityValue = nodeDetails ? updatePriorityValue(nodeDetails.priority) : null;
@@ -1178,11 +1233,13 @@ function UpdateStatusToken({ status }: { status: string }) {
 function UpdatesNodePanel({
   panel,
   resolveNodeDetails,
+  resolveLogicGateDetails,
   resolveUserLabel,
   onClose,
 }: {
   panel: UpdatesNodePanelState;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
   onClose: () => void;
 }) {
@@ -1195,7 +1252,12 @@ function UpdatesNodePanel({
         <div style={updatesNodePanelNotificationStyle}>
           <span style={updateRowIconStyle(updateRowTone(panel.row.item))}>{updateRowIcon(panel.row.item)}</span>
           <span style={updatesNodePanelNotificationTextStyle}>
-            <UpdateCanonicalRowCopy row={panel.row} resolveNodeDetails={resolveNodeDetails} resolveUserLabel={resolveUserLabel} />
+            <UpdateCanonicalRowCopy
+              row={panel.row}
+              resolveNodeDetails={resolveNodeDetails}
+              resolveLogicGateDetails={resolveLogicGateDetails}
+              resolveUserLabel={resolveUserLabel}
+            />
             {body && <span style={updatesNodePanelNotificationBodyStyle}>{body}</span>}
           </span>
           <span style={updatesNodePanelNotificationTimeStyle}>{formatNotificationTimestamp(panel.row.item.created_timestamp)}</span>
@@ -1278,10 +1340,12 @@ function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | nu
     || "Node";
 }
 
-function updateRowLogicGateLabel(row: UpdateFeedRow): string {
-  return row.logicGate?.label.trim()
-    || (row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "")
-    || "Logic Gate";
+function updateRowLogicGateLabel(row: UpdateFeedRow, details?: UpdateLogicGateDetails | null): string {
+  return resolveCurrentUpdateLogicGateLabel({
+    currentDetails: details,
+    groupedLabel: row.logicGate?.label,
+    historicalEntityLabel: row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "",
+  });
 }
 
 function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: string) => string): string {
@@ -1411,6 +1475,7 @@ function buildUpdateDisplayGroups(
   rows: UpdateFeedRow[],
   groupings: UpdateGroupingSetting[],
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined,
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined,
 ): UpdateDisplayGroup[] {
   const displayGroupings: UpdateDisplayGroupingSetting[] = normalizeUpdateGroupingStack(groupings);
   if (displayGroupings.length === 0) {
@@ -1431,7 +1496,7 @@ function buildUpdateDisplayGroups(
   const groups = buildUniversalNestedGroups(rows, displayGroupings, {
     rootID: "updates",
     rowKey: (row) => row.rowKey,
-    getValues: (row, field) => getUpdateGroupValues(row, field, resolveNodeDetails),
+    getValues: (row, field) => getUpdateGroupValues(row, field, resolveNodeDetails, resolveLogicGateDetails),
     sortRows: sortUpdateRows,
   });
   return groups.map(convertUniversalUpdateGroup);
@@ -1458,9 +1523,20 @@ function getUpdateGroupValues(
   row: UpdateFeedRow,
   field: UpdateDisplayGroupingField,
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined,
+  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined,
 ): UniversalGroupValue[] {
   if (field === "project") return [updateResourceGroupValue("project", row.project, "No project")];
-  if (field === "logic_gate") return [updateResourceGroupValue("logic_gate", row.logicGate, "No logic gate")];
+  if (field === "logic_gate") {
+    const logicGateID = resolveUpdateLogicGateID(row);
+    if (!logicGateID) return [updateResourceGroupValue("logic_gate", undefined, "No logic gate")];
+    const groupValue = resolveCurrentUpdateLogicGateGroupValue({
+      row,
+      currentDetails: resolveLogicGateDetails?.(logicGateID),
+      historicalEntityLabel: row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "",
+    });
+    if (!groupValue) return [updateResourceGroupValue("logic_gate", undefined, "No logic gate")];
+    return [{ key: `logic_gate:${groupValue.id}`, label: groupValue.label, sortValue: groupValue.sortValue }];
+  }
   if (field === "type") return [updateTypeGroupValue(row.item)];
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
   if (field === "status") {

@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 # Pin Tests
 
@@ -36,6 +36,7 @@ PIN25 - Successful pinned email conversion updates Home from the committed respo
 PIN26 - Successful pinned or Explorer email conversion must keep converted source email rows visible and must not trigger row removal, post-removal fill, message-length prefetch, or stale prefetched-page top-up for those rows.
 PIN27 - Successful pinned email conversion must set source emails to unstarred through the source mailbox scope, return `unstarred_message_ids`, and reconcile Home locally without blanking, refilling, or repeatedly reloading My Triage or Shared Triage.
 PIN28 - Pinned-node and pinned-Logic-Gate email conversions persist mailbox provenance in the resulting attached-email projection: personal mail stores `account_email`, and Shared Triage mail stores both `shared_inbox_id` and `account_email` for later scoped reads and mutations.
+PIN29 - After a successful same-window Node or Logic Gate rename, the visible matching sidebar pin name converges from the concrete committed-title event. This is a local label patch only: project pins are unaffected, no pin HTTP write occurs, and the durable pin-name snapshot/listing rules remain unchanged.
 
 ## Scenarios
 
@@ -49,16 +50,18 @@ Business logic covered:
 - PIN5
 - PIN6
 - PIN7
+- PIN29
 
 Given:
 - A user has company access.
-- The user can view a node, a logic gate, and a project.
+- The user can view a node, a logic gate, and a project, pins them, and then successfully renames the Node and Logic Gate in the same window.
 
 Expected:
 - The user can pin each supported resource type.
 - Each created pin stores company ID, user ID, resource type, resource ID, name, position, and created timestamp.
 - Pinning the same resource again does not create a duplicate pin.
 - Loading the sidebar pin section reads those pins from the pin table.
+- The visible Node and Logic Gate pin names update immediately without changing order/recency or writing the pin row; the project pin and durable snapshot remain unchanged.
 
 ### Scenario PIN-S2: Permission Changes After Pinning
 

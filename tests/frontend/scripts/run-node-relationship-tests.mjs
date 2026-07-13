@@ -35,6 +35,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinDrops.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/preloadDashboardPlan.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/timelineState.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/committedTitleCacheInvalidation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/map/mapMode.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),

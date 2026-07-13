@@ -176,6 +176,36 @@ export function applyCompanyExplorerEntityTitleUpdate(
   };
 }
 
+export function applyCompanyExplorerSnapshotTitleUpdate(
+  snapshot: CompanyExplorerSnapshotPayload,
+  update: CompanyExplorerEntityTitleUpdate,
+): CompanyExplorerSnapshotPayload {
+  const resourceID = update.resourceID.trim();
+  const title = update.title.trim();
+  if (!resourceID || !title) return snapshot;
+  const nodes = update.entityType === "node" && snapshot.nodes
+    ? snapshot.nodes.map((node) => node.node_id === resourceID ? { ...node, name: title } : node)
+    : snapshot.nodes;
+  const logicGates = update.entityType === "logic_gate" && snapshot.logic_gates
+    ? snapshot.logic_gates.map((logicGate) => logicGate.logic_gate_id === resourceID
+      ? { ...logicGate, header: title }
+      : logicGate)
+    : snapshot.logic_gates;
+  const rows = snapshot.rows?.map((row) => (
+    row.entity_type === update.entityType
+    && (row.resource_id || row.entity_id) === resourceID
+      ? { ...row, name: title }
+      : row
+  ));
+  if (nodes === snapshot.nodes && logicGates === snapshot.logic_gates && rows === snapshot.rows) return snapshot;
+  return {
+    ...snapshot,
+    nodes,
+    logic_gates: logicGates,
+    rows,
+  };
+}
+
 export function applyCompanyExplorerSearchTitleUpdate(
   results: CompanyExplorerSearchResult[],
   update: CompanyExplorerEntityTitleUpdate,

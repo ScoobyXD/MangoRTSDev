@@ -22,6 +22,12 @@ type realtimeSubscriptionRegistry struct {
 	scopeConnections map[realtimeScopeKey]map[string]*realtimeConnection
 }
 
+type realtimePublishResult struct {
+	attempted int
+	delivered int
+	failed    int
+}
+
 func newRealtimeSubscriptionRegistry() *realtimeSubscriptionRegistry {
 	return &realtimeSubscriptionRegistry{
 		connections:      map[string]*realtimeConnection{},
@@ -174,20 +180,48 @@ func (r *realtimeSubscriptionRegistry) hasSubscribers(companyID, scope string) b
 	return r.scopeSubscriptionCount(companyID, scope) > 0
 }
 
-func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) int {
-	connections := r.connectionsForScope(companyID, scope)
-	published := 0
-	for _, conn := range connections {
-		if conn.sendText(payload) == nil {
-			published++
+func (r *realtimeSubscriptionRegistry) hasScopeTypeSubscribers(companyID, scopeType string) bool {
+	companyID = strings.TrimSpace(companyID)
+	scopeType = strings.TrimSpace(scopeType)
+	if r == nil || companyID == "" || scopeType == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for key, bucket := range r.scopeConnections {
+		if key.companyID == companyID && len(bucket) > 0 && realtimeScopeType(key.scope) == scopeType {
+			return true
 		}
 	}
-	return published
+	return false
+}
+
+func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) realtimePublishResult {
+	connections := r.connectionsForScope(companyID, scope)
+	result := realtimePublishResult{attempted: len(connections)}
+	for _, conn := range connections {
+		if err := conn.sendText(payload); err != nil {
+			result.failed++
+			r.removeConnection(conn.id)
+			conn.close()
+			continue
+		}
+		result.delivered++
+	}
+	return result
 }
 
 func (r *realtimeSubscriptionRegistry) publishToConnection(connectionID, companyID, scope string, payload []byte) bool {
 	conn := r.connectionForSubscription(connectionID, companyID, scope)
-	return conn != nil && conn.sendText(payload) == nil
+	if conn == nil {
+		return false
+	}
+	if err := conn.sendText(payload); err != nil {
+		r.removeConnection(conn.id)
+		conn.close()
+		return false
+	}
+	return true
 }
 
 func (r *realtimeSubscriptionRegistry) connectionForSubscription(connectionID, companyID, scope string) *realtimeConnection {

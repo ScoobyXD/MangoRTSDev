@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # REST API & WebSocket Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`backend/internal/http/calendar_invite_handlers_test.go` covers invitation parsing and RSVP handler behavior; `backend/internal/http/nylas_client_test.go` covers provider event lookup/response shapes; broader REST/WebSocket rule IDs are not fully mapped yet)
+- Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, authorization, routing, dead/stalled connections, and the Kanban lookup guard for RW23 and RW37-RW40. Frontend behavior tests exercise the shared socket, notification coordinator, coalescer, local-title-event helpers, and RW15 publication-time communications/Kanban/graph cache convergence, with source guards for mounted consumers and rename entry points under RW10-RW12, RW15, RW20, and RW39; they are not a full mounted React request-cardinality or dirty-contentEditable/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
 
 ## Business Logic
 
@@ -22,12 +22,12 @@ RW11 - Exactly three product scope families exist: `notifications:user:{user_id}
 RW12 - WebSocket reconnects or subscription failures must not be reported as successful durable saves.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
-RW15 - Logic gate header renames are committed through `PUT /v1/logic-gates/{logic_gate_id}` and reconcile the initiating browser's active Arena title, app target, and visible local labels from the committed response/local command-result propagation. Another user revalidates on activation/navigation; there is no `logic_gate_updated` browser stream.
+RW15 - Successful Node and Logic Gate renames publish one concrete same-window committed-title event after the HTTP command succeeds. Every supported Editor, Kanban, Node Map, Logic Gate Map, Home/My Work, and Company Explorer rename entry point patches matching mounted Editor, Kanban/Arena, map, Explorer, Home, My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin, AppTimeline, and Project Management labels as applicable. For Logic Gates only, Updates also resolves saved Logic Gate grouping headers and sort values from the current title; stored notification title/body prose remains historical. The wired async title-bearing setters capture the shared registry version before awaiting and overlay only newer same-window commits before storing their result. The app-lifetime publication coordinator synchronously patches or invalidates affected title-bearing communications, project-relationship, Kanban, entity-record, workspace-snapshot, and graph caches, and cache generations prevent pre-commit requests from repopulating an old title. Denormalized persisted sidebar-pin responses overlay all latest commits. A later canonical request remains authoritative rather than being permanently masked. Passive convergence preserves dock recency, pin persistence, dirty editor text, and every active title `contentEditable` draft/caret; another user revalidates on activation/navigation because there is no broad title browser stream.
 RW16 - Explicit editor saved versions are created through HTTP save-version routes after pending projection writes are flushed; the information tables store those saved versions, not every live typing update.
 RW17 - Restoring an editor saved version is an HTTP restore route that overwrites the current editor projection after user confirmation; it does not publish a document or generic projection realtime message.
 RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
 RW19 - WebSocket reconnects after backend replacement/deploy must use randomized delay, exponential backoff, and bounded or very slow retry behavior; clients must not all reconnect immediately.
-RW20 - WebSocket reconnect recovery is limited to active notification summary, mounted Node chat, and mounted board canonical reads. It never refetches the whole app.
+RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, and mounted board canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Updates adds its canonical feed read only while open. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
@@ -44,6 +44,10 @@ RW33 - One committed card-visible change publishes only to each affected mounted
 RW34 - `304 Not Modified` reuses the current complete snapshot without clearing board state or creating duplicate render churn.
 RW35 - A conditional `GET /v2/nodes/{node_id}/view` performs effective Node authorization first, then reads one dedicated shared node-view version and one actor-specific version. Its ETag includes company, node, actor, effective permission flags, response-contract salt, and both versions; a match returns `304` before `GetNodeView`, serialization, body hashing, object reads, or seen-state writes and never depends on `event_rows`.
 RW36 - Attachment content conditionals remain HTTP-authorized: one repository read selects attachment, requested-or-original variant, and active links; specialized resource checks authorize those links; and a strong validator match returns private `304` before the single object-storage read.
+RW37 - The realtime handshake rejects unauthenticated clients and token-bearing URL query authentication, signed tickets work across Server instances that share the environment signing contract, unauthorized retained scopes are denied and not stored, and closing a connection removes its subscriptions.
+RW38 - Backend WebSocket writes use a bounded deadline. A send failure removes and closes the dead connection so later mutations cannot block on it; healthy subscribers continue receiving messages, and delivery-failure metrics are distinct from no-subscriber metrics.
+RW39 - Notification create, delete, and clear operations publish only to the matching authenticated user's notification scope. First acceptance/reconnect reconcile canonical state. A local delete/clear marker records HTTP and socket observers separately. HTTP-first keeps the local optimistic source, while socket-first uses a canonical non-local source so open Updates reloads even if the HTTP response is lost; the matching second observer emits nothing, and after both claim the marker is removed so a distinct later clear is not suppressed. Duplicate socket frames remain suppressed while a lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
+RW40 - Ordinary `node_updated` processing does not query Kanban projection rows when there are no relevant local board subscribers; a mounted local board preserves exact affected-board lookup and delivery.
 
 ## Scenarios
 
@@ -139,10 +143,10 @@ Given:
 
 Expected:
 - The backend publishes only to the matching notification, Node chat, or board scope.
-- Reconnect uses that scope's canonical HTTP read when needed.
+- First acceptance and reconnect use only that scope's coalesced canonical HTTP read; Updates fetches its feed only while open.
 - Ordinary workspace, Explorer, graph, My Work, Project Management, mail, permission, and document mutations emit no product socket message.
 
-### Scenario RW-S5: Logic Gate Rename Reconciles Arena And Explorer Titles
+### Scenario RW-S5: Same-Window Node And Logic Gate Titles Converge
 
 Business logic covered:
 - RW1
@@ -152,18 +156,17 @@ Business logic covered:
 - RW15
 
 Given:
-- A logic gate is open in Logic Gate Arena.
-- The same logic gate is visible in Company Explorer.
-- The same browser has the relevant mounted surfaces.
+- The same Node or Logic Gate is visible in concurrently mounted Editor, Kanban/Arena, Node Map, Logic Gate Map, Company Explorer, Home, My Work, Updates, AppLayout dock/popup/sidebar pins, AppTimeline, and Project Management caches as applicable.
+- Each supported rename entry point successfully commits once; one editor document is dirty/in flight and one Editor or map title `contentEditable` has a live draft and caret.
 
 Expected:
-- Renaming the logic gate from the arena title sends `PUT /v1/logic-gates/{logic_gate_id}` with the new `header`.
-- After the PUT succeeds, the arena title keeps the committed header and does not fall back to the stale arena selection label.
-- Local committed-response propagation updates the visible labels in the initiating browser.
+- Each successful HTTP rename publishes one concrete committed-title event after commit.
+- All matching same-window labels converge immediately, including Updates current Node/Logic Gate row, selected-panel, and open-action labels, dock and popup-parent labels, visible Node/Logic Gate sidebar pins, current/history timeline labels, and Project Management `display_title`/workspace labels. Logic Gate titles also update Updates saved Logic Gate grouping headers and sort values; notification title/body prose stays historical, and passive updates do not bump dock recency or write pin rows.
+- Dirty, debounced, queued, or in-flight editor text remains unchanged, and an actively edited title defers the incoming label without changing its DOM draft or caret.
+- Failed renames publish no event.
 - No workspace WebSocket event is published.
 - Another user sees the new title after opening or revalidating the surface.
-- The app-level arena target and any collapsed Logic Gate Arena dock tab for that logic gate keep the committed label so later route changes do not reapply the old title.
-- A full browser refresh is not required to see the committed logic gate header in either surface.
+- A full browser refresh is not required.
 
 ### Scenario RW-S6: Terminal Auth Failure Stops Realtime And Refetch Storms
 
@@ -219,7 +222,7 @@ Expected:
 - Reconnect attempts use exponential backoff after repeated failures.
 - Reconnect behavior is capped or becomes very slow instead of retrying aggressively forever.
 - A reconnect does not refetch the whole app by default.
-- After reconnect, the client requests only the scoped data that may be stale for active subscriptions.
+- First acceptance and reconnect each request only the canonical data for active subscriptions; a closed Updates view requests no feed.
 
 ### Scenario RW-S9: Realtime Tickets Work Across Backend Workers
 
@@ -291,13 +294,13 @@ Business logic covered:
 
 Given:
 - An authorized Arena client has a complete Logic Gate work snapshot and ETag.
-- The client starts a conditional read, changes Logic Gates, and later receives a `kanban.changed` hint.
+- The client starts a conditional read, changes Logic Gates, receives first subscription acceptance, and later receives a `kanban.changed` hint and reconnect acceptance.
 
 Expected:
 - The backend checks access before deciding whether to return `304`.
 - ETag calculation uses the dedicated primary-key version row and actor/contract fingerprint, not domain-event searches.
 - The obsolete HTTP request is aborted without committing stale state.
-- The compact hint coalesces one targeted work read.
+- First acceptance, the compact hint, and reconnect each coalesce through the same targeted work loader.
 - Duplicate hints do not start a second concurrent revalidation.
 - No projection-delta sequence or replay path exists.
 - A `304` keeps the complete snapshot unchanged, and a `200` body contains no redundant collections.
@@ -317,3 +320,48 @@ Expected:
 - The node-view match reads dedicated shared/user version rows and returns `304` without building the consolidated response or writing seen state.
 - The attachment match uses the minimal attachment/link/variant read and returns `304` before S3/object storage.
 - Neither route uses `event_rows` as canonical version state or exposes object-storage keys.
+
+### Scenario RW-S14: Retained Transport Authentication, Authorization, And Routing
+
+Business logic covered:
+- RW11
+- RW23
+- RW37
+- RW39
+
+Given:
+- Clients attempt unauthenticated and token-query WebSocket handshakes.
+- One Server instance signs a ticket and another Server instance accepts the upgrade.
+- An authenticated client requests an unauthorized retained scope, later subscribes to an authorized scope, and then closes.
+- Notification create, delete, and clear commands commit.
+
+Expected:
+- Unauthenticated and token-query handshakes are rejected.
+- The signed ticket works across Server instances under the shared signing contract.
+- The unauthorized scope is denied and never stored.
+- Closing removes all retained subscriptions.
+- Notification create, delete, and clear publish only to the matching user scope.
+
+### Scenario RW-S15: Acceptance Reconciliation, Dead Connections, And Board Lookup Guard
+
+Business logic covered:
+- RW20
+- RW38
+- RW39
+- RW40
+
+Given:
+- Notification, mounted Node chat, and mounted board subscriptions receive first acceptance, later reconnect acceptance, and compact hints while a canonical read is slow; a second local same-scope handler also joins after the shared scope is already accepted.
+- One WebSocket writer is slow or dead while another subscriber is healthy.
+- A local notification delete/clear result is followed by its matching socket echo.
+- In the opposite ordering, the server commits and the socket echo arrives before a lost/rejected HTTP response for an Updates-local Seen mutation.
+- Ordinary `node_updated` publication runs both without and with a relevant local board subscriber.
+
+Expected:
+- Each active retained surface performs one single-flight canonical reconciliation on first acceptance and reconnect, with at most one queued final read and no overlap/restart; Updates fetches only while open.
+- A late handler joining an already accepted shared scope receives immediate local acceptance; accepted state clears on disconnect, rejection, or last unsubscribe.
+- The dead write reaches its bounded deadline, the connection is closed and evicted, and the healthy subscriber still receives delivery.
+- Delivery failures and no-subscriber publishes increment distinct metrics.
+- HTTP-first plus its matching echo causes at most one summary request and, subject to the local optimistic source filter, at most one open-feed request.
+- Socket-first plus a lost/rejected HTTP response performs exactly one summary reconciliation and one mounted Updates feed reconciliation; the later HTTP failure emits no second update.
+- No-subscriber `node_updated` performs no Kanban projection lookup; a mounted board preserves correct lookup and board-scoped delivery.

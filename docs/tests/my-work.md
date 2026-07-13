@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # My Work Rules
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: core read path, projection sync, and permission filtering have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: core read path, projection sync, and permission filtering have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. `tests/frontend/pages/home/myWorkMatrixLoader.test.ts` covers matching Node and Logic Gate title patches, existing-cache convergence, version-gated pre-commit in-flight reconciliation, post-commit canonical authority, and a projection/drop result that merges only newer title commits. Rule ID mapping is partial.
 
 ## Definitions
 
@@ -75,6 +75,7 @@ MW48 - The active My Work saved-view row is visibly highlighted.
 MW49 - Right-clicking a My Work saved-view row exposes Edit, Rename, and Delete commands. Renames persist to the saved-view name and drag reorder persists through saved-view `position`.
 MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
 MW51 - My Work Status grouping consumes the shared universal status contract also used by Updates and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify/Verification/Verified normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and Complete/Completed/Closed/Archived normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and the distinct No status group remain before Done.
+MW52 - My Work records the concrete same-window committed-title event with a company/entity key and monotonic title-commit version: a matching Node rename updates current work-row titles, and a matching Logic Gate rename updates path/group labels. Existing cache entries are patched immediately. A matrix request applies only title commits newer than the version captured when that request began, so a pre-commit in-flight result cannot restore an old label while a request begun after the commit remains authoritative canonical truth. Node-drop projection responses capture the shared title version before the request and merge only newer local Node or Logic Gate title commits while still applying assignment, priority, and other non-title fields, including for newly introduced rows. This does not create a My Work WebSocket subscription or trigger a canonical reload; other companies and unrelated resources remain unchanged.
 
 ## Projection Maintenance
 
@@ -202,3 +203,24 @@ Expected:
 - No GVIC/My Work realtime event or `event_rows` record is emitted.
 - The next open, navigation, or explicit refresh reads the current projection.
 - Unauthorized readers do not receive hidden nodes or hidden path contexts from the canonical API.
+
+### Scenario MW-S5: Same-Window Committed Titles Patch Mounted Rows
+
+Business logic covered:
+- MW52
+
+Given:
+- My Work is already mounted with matrix cells containing a Node row and a Logic Gate path label.
+- The same Node or Logic Gate is renamed successfully from another surface in the same browser window.
+- My Work may be unmounted with a fresh 30-second matrix cache entry, or a pre-rename matrix request may resolve after the title event.
+- An unrelated-resource or other-company committed-title event may also arrive.
+
+Expected:
+- The matching Node work-row title changes immediately from the local committed-title event.
+- The matching Logic Gate path/group label changes immediately wherever that context is present in the mounted matrix cells.
+- A cache hit, remount, or late response from a request begun before the rename retains the committed current label instead of restoring stale row data.
+- A canonical request begun after the title commit may replace the local label with its later canonical result; the local override is not a permanent display-row mask.
+- A node-drop projection response applies role, priority, and other non-title fields while merging Node or Logic Gate title commits newer than the version captured before that drop request; newly introduced rows are covered, and a later response begun after the commit remains authoritative.
+- Existing matrix identity and unrelated grouping fields remain unchanged.
+- Unrelated-resource and other-company labels remain unchanged.
+- No My Work WebSocket subscription is created and no canonical My Work request is issued for this label-only convergence.

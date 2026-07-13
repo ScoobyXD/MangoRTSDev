@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { kanbanRealtimeCanonicalRefreshDelayMs, KANBAN_REALTIME_REFRESH_DEBOUNCE_MS } from "./kanbanRealtimeRefresh";
+import { applyCommittedNodeTitleToKanbanAccountAssignment, kanbanRealtimeCanonicalRefreshDelayMs, KANBAN_REALTIME_REFRESH_DEBOUNCE_MS, reconcileCommittedKanbanBoardTitles, reconcileCommittedKanbanCardTitles, reconcileCommittedKanbanLogicGateLabel } from "./kanbanRealtimeRefresh";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
@@ -15,7 +15,9 @@ import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
+import { commitEntityTitleMutation, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import {
   assignNodeToLogicGateStatus,
@@ -533,6 +535,25 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     cardsRef.current = resolved;
     setCards(resolved);
   }, []);
+
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID) return;
+    const title = update.title.trim();
+    if (!title) return;
+    if (update.entityType === "node") {
+      applyCards((current) => current.map((card) => card.node_id === update.resourceID ? { ...card, node_title: title } : card));
+      setNodeEditorOverlay((current) => current?.nodeID === update.resourceID ? { ...current, nodeTitle: title } : current);
+      setAccountAssignmentModal((current) => applyCommittedNodeTitleToKanbanAccountAssignment(current, update.resourceID, title));
+      return;
+    }
+    const nextBoards = boardsRef.current.map((board) => {
+      const logicGateID = board.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(board.board_id);
+      return logicGateID === update.resourceID ? { ...board, title } : board;
+    });
+    boardsRef.current = nextBoards;
+    setBoards(nextBoards);
+    if (logicGateIDFromKanbanBoardID(activeBoardIDRef.current) === update.resourceID) setActiveLogicGateLabel(title);
+  }), [applyCards, companyID]);
 
   const beginLocalBoardMutation = useCallback((mutationBoardID = activeBoardIDRef.current, logicGateID = "") => {
     const cleanBoardID = mutationBoardID.trim();
@@ -1221,6 +1242,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const loadLogicGateArenaView = useCallback((logicGateID: string, expectedBoardID: string) => {
     if (!logicGateID || !expectedBoardID) return;
     const mutationSeqAtStart = localBoardMutationSeqRef.current;
+    const requestStartTitleVersion = readCommittedEntityTitleVersion();
     if ((pendingBoardMutationsRef.current.get(expectedBoardID) ?? 0) > 0) return;
     setError("");
     void arenaBoardLoadCoordinatorRef.current?.load({
@@ -1230,7 +1252,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       apply: (contents) => {
         if (activeBoardIDRef.current !== expectedBoardID) return;
         if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
-        const logicGateLabel = humanLabelOrFallback(contents.logicGate?.header, "Logic Gate");
+        const logicGateLabel = humanLabelOrFallback(foldCommittedEntityTitlesSince(
+          contents.logicGate?.header ?? "",
+          companyID,
+          requestStartTitleVersion,
+          (current, update) => reconcileCommittedKanbanLogicGateLabel(current, logicGateID, update),
+        ), "Logic Gate");
         if (contents.board) {
           const board = { ...contents.board, logic_gate_id: contents.board.logic_gate_id ?? logicGateID, title: logicGateLabel };
           upsertBoardInList(board);
@@ -1238,7 +1265,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setActiveLogicGateLabel(logicGateLabel);
         setActiveLogicGateRequestOwnerUserID(cleanKanbanText(contents.logicGate?.request_owner_user_id));
         const nextColumns = sortColumns(contents.columns);
-        const nextCards = contents.cards;
+        const nextCards = foldCommittedEntityTitlesSince(
+          contents.cards,
+          companyID,
+          requestStartTitleVersion,
+          reconcileCommittedKanbanCardTitles,
+        );
         applyColumns(nextColumns);
         applyCards(nextCards);
         setBoardSnapshotLoadedID(expectedBoardID);
@@ -1334,7 +1366,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
     try {
-      const nextBoards = await listKanbanBoards(apiBase, companyID, 200);
+      const requestStartTitleVersion = readCommittedEntityTitleVersion();
+      const loadedBoards = await listKanbanBoards(apiBase, companyID, 200);
+      const nextBoards = foldCommittedEntityTitlesSince(
+        loadedBoards,
+        companyID,
+        requestStartTitleVersion,
+        reconcileCommittedKanbanBoardTitles,
+      );
       const sortedBoards = sortKanbanBoards(nextBoards);
       boardsRef.current = sortedBoards;
       setBoards(sortedBoards);
@@ -1408,9 +1447,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setBoards(optimisticBoards);
     setError("");
     try {
-      const saved = activeBoard
-        ? await updateKanbanBoard(apiBase, companyID, boardID, cleanTitle)
-        : await createKanbanBoard(apiBase, companyID, cleanTitle, boardID);
+      const saved = await commitEntityTitleMutation(
+        () => activeBoard
+          ? updateKanbanBoard(apiBase, companyID, boardID, cleanTitle)
+          : createKanbanBoard(apiBase, companyID, cleanTitle, boardID),
+        (result) => {
+          const logicGateID = result.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(result.board_id);
+          return logicGateID ? { companyID, entityType: "logic_gate", resourceID: logicGateID, title: getKanbanBoardDisplayTitle(result) } : null;
+        },
+      );
       upsertBoardInList(saved);
       window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
       setEditingBoardTitle(false);
@@ -1447,13 +1492,19 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       return;
     }
     try {
+      const requestStartTitleVersion = readCommittedEntityTitleVersion();
       // The UI renders a bounded first window. Headless agents should page by
       // column through the cards API instead of loading company-scale boards.
       const { columns: nextColumns, cards: nextCards } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500, abortController.signal);
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
       applyColumns(sortColumns(nextColumns));
-      applyCards(nextCards);
+      applyCards(foldCommittedEntityTitlesSince(
+        nextCards,
+        companyID,
+        requestStartTitleVersion,
+        reconcileCommittedKanbanCardTitles,
+      ));
       setBoardSnapshotLoadedID(requestedBoardID);
     } catch (cause) {
       if (boardRefreshRequestRef.current !== requestID) return;
@@ -1542,8 +1593,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const streamBoardID = activeBoardID.trim();
     const streamLogicGateID = logicGateIDFromKanbanBoardID(streamBoardID);
     if (!companyID || !streamBoardID || !streamLogicGateID || boardSnapshotLoadedID !== streamBoardID) return undefined;
-    let acceptedOnce = false;
     let refreshTimer: number | null = null;
+    const canonicalRefresh = createCoalescedCanonicalRefresh(async () => {
+      invalidateArenaViewForBoard(streamBoardID, streamLogicGateID);
+      invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+      await refreshBoard(streamBoardID);
+    });
     const flushCanonicalRefresh = () => {
       const retryDelay = kanbanRealtimeCanonicalRefreshDelayMs(
         Date.now(),
@@ -1558,9 +1613,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         return;
       }
       refreshTimer = null;
-      invalidateArenaViewForBoard(streamBoardID, streamLogicGateID);
-      invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-      void refreshBoard(streamBoardID);
+      canonicalRefresh.request();
     };
     const scheduleCanonicalRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
@@ -1568,8 +1621,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `board:${streamBoardID}`, {
       onAccepted() {
-        if (acceptedOnce) scheduleCanonicalRefresh();
-        acceptedOnce = true;
+        scheduleCanonicalRefresh();
       },
       onKanbanChanged(message) {
         if (message.company_id !== companyID || message.board_id !== streamBoardID) return;
@@ -1579,6 +1631,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return () => {
       unsubscribe();
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      canonicalRefresh.dispose();
     };
   }, [activeBoardID, apiBase, boardSnapshotLoadedID, companyID, invalidateArenaViewForBoard, refreshBoard]);
   const syncCardTitlesFromNodeGraph = useCallback(() => {
@@ -1913,10 +1966,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     renameNodeCommitInFlightRef.current = true;
     setError("");
     try {
-      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
-        method: "PUT",
-        json: { company_id: companyID, name: cleanTitle },
-      });
+      const updated = await commitEntityTitleMutation(
+        () => requestJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
+          method: "PUT",
+          json: { company_id: companyID, name: cleanTitle },
+        }),
+        (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: getNodeTitle(result) || cleanTitle }),
+      );
       const updatedTitle = getNodeTitle(updated) || cleanTitle;
       invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);

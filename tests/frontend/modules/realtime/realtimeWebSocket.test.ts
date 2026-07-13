@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { TerminalAuthFailureError } from "../../../../frontend/src/modules/api/requestJSON.js";
+import { createCoalescedCanonicalRefresh } from "../../../../frontend/src/modules/realtime/coalescedCanonicalRefresh.js";
 import {
   computeRealtimeReconnectDelayMs,
   isSupportedRealtimeScope,
@@ -139,16 +140,72 @@ test("one client shares a socket and dispatches compact messages to exact scopes
       reconnectDelayMs: 60_000,
     });
     let notifications = 0;
+    let notificationAcceptances = 0;
     let chat = 0;
+    let chatAcceptances = 0;
     let board = 0;
-    const unsubNotifications = client.subscribe("notifications:user:user-1", { onNotificationCreated: () => { notifications += 1; } });
-    const unsubChat = client.subscribe("chat:node:node-1", { onChatMessageCreated: () => { chat += 1; } });
-    const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onKanbanChanged: () => { board += 1; } });
+    let boardAcceptances = 0;
+    const unsubNotifications = client.subscribe("notifications:user:user-1", { onAccepted: () => { notificationAcceptances += 1; }, onNotificationCreated: () => { notifications += 1; } });
+    const unsubChat = client.subscribe("chat:node:node-1", { onAccepted: () => { chatAcceptances += 1; }, onChatMessageCreated: () => { chat += 1; } });
+    const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onKanbanChanged: () => { board += 1; } });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 
     assert.equal(sockets.length, 1);
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
     assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "notifications:user:user-1"]);
+
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
+    assert.equal(notificationAcceptances, 1);
+    assert.equal(chatAcceptances, 1);
+    assert.equal(boardAcceptances, 1);
+    let lateChatAcceptances = 0;
+    let lateBoardAcceptances = 0;
+    const wireSubscribeCount = sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length;
+    const unsubLateChat = client.subscribe("chat:node:node-1", {
+      onAccepted: () => { lateChatAcceptances += 1; },
+    });
+    const unsubLateBoard = client.subscribe("board:logic-gate:gate-1", {
+      onAccepted: () => { lateBoardAcceptances += 1; },
+    });
+    assert.equal(lateChatAcceptances, 1, "a second mounted editor immediately reconciles an already accepted node scope");
+    assert.equal(lateBoardAcceptances, 1, "a second mounted Kanban immediately reconciles an already accepted board scope");
+    assert.equal(sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length, wireSubscribeCount, "late local handlers do not duplicate the wire subscription");
+
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.rejected", scope: "chat:node:node-1", error: "forbidden" }) });
+    let acceptanceAfterRejection = 0;
+    const unsubRejectedChat = client.subscribe("chat:node:node-1", {
+      onAccepted: () => { acceptanceAfterRejection += 1; },
+    });
+    assert.equal(acceptanceAfterRejection, 0, "rejection clears local acceptance for later handlers");
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
+    assert.equal(chatAcceptances, 2);
+    assert.equal(lateChatAcceptances, 2);
+    assert.equal(acceptanceAfterRejection, 1);
+
+    const transientScope = "board:logic-gate:transient";
+    let transientAcceptances = 0;
+    const transientSubscribeCount = sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length;
+    const unsubTransient = client.subscribe(transientScope, {
+      onAccepted: () => { transientAcceptances += 1; },
+    });
+    assert.equal(sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length, transientSubscribeCount + 1);
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: transientScope }) });
+    assert.equal(transientAcceptances, 1);
+    unsubTransient();
+    let freshTransientAcceptances = 0;
+    const resubscribeCount = sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length;
+    const unsubFreshTransient = client.subscribe(transientScope, {
+      onAccepted: () => { freshTransientAcceptances += 1; },
+    });
+    assert.equal(freshTransientAcceptances, 0, "last unsubscribe clears local acceptance for a fresh handler");
+    assert.equal(
+      sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length,
+      resubscribeCount + 1,
+      "a fresh handler after the last unsubscribe sends a new wire subscription",
+    );
+    unsubFreshTransient();
 
     sockets[0].onmessage?.({ data: JSON.stringify({
       type: "notification.created",
@@ -163,6 +220,38 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(notifications, 1);
     assert.equal(chat, 1);
     assert.equal(board, 1);
+
+    sockets[0].close();
+    let downtimeChatAcceptances = 0;
+    let downtimeBoardAcceptances = 0;
+    const unsubDowntimeChat = client.subscribe("chat:node:node-1", {
+      onAccepted: () => { downtimeChatAcceptances += 1; },
+    });
+    const unsubDowntimeBoard = client.subscribe("board:logic-gate:gate-1", {
+      onAccepted: () => { downtimeBoardAcceptances += 1; },
+    });
+    assert.equal(downtimeChatAcceptances, 0, "a closed socket must not leak stale node-scope acceptance");
+    assert.equal(downtimeBoardAcceptances, 0, "a closed socket must not leak stale board-scope acceptance");
+    client.ensureOpen();
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    assert.equal(sockets.length, 2);
+    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "notifications:user:user-1"]);
+    sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
+    sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
+    sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
+    assert.equal(notificationAcceptances, 2);
+    assert.equal(chatAcceptances, 3);
+    assert.equal(boardAcceptances, 2);
+    assert.equal(lateChatAcceptances, 3);
+    assert.equal(lateBoardAcceptances, 2);
+    assert.equal(acceptanceAfterRejection, 2);
+    assert.equal(downtimeChatAcceptances, 1);
+    assert.equal(downtimeBoardAcceptances, 1);
+    unsubLateChat();
+    unsubLateBoard();
+    unsubDowntimeChat();
+    unsubDowntimeBoard();
+    unsubRejectedChat();
     unsubNotifications();
     unsubChat();
     unsubBoard();
@@ -186,6 +275,51 @@ test("terminal authentication failure does not reconnect", async () => {
   assert.equal(ticketRequests, 1);
   unsubscribe();
   client.close();
+});
+
+test("canonical refresh coalescing allows one in flight and one final queued refresh", async () => {
+  const resolvers: Array<() => void> = [];
+  let calls = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const refresh = createCoalescedCanonicalRefresh(() => {
+    calls += 1;
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    return new Promise<void>((resolve) => {
+      resolvers.push(() => {
+        inFlight -= 1;
+        resolve();
+      });
+    });
+  });
+
+  refresh.request();
+  refresh.request();
+  refresh.request();
+  assert.equal(calls, 1, "bursts during an active refresh do not start parallel requests");
+  assert.equal(maxInFlight, 1);
+  resolvers.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 2, "the burst produces one final canonical refresh");
+  assert.equal(maxInFlight, 1);
+  resolvers.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 2);
+
+  let disposedCalls = 0;
+  let resolveDisposed: (() => void) | undefined;
+  const disposedRefresh = createCoalescedCanonicalRefresh(() => {
+    disposedCalls += 1;
+    return new Promise<void>((resolve) => { resolveDisposed = resolve; });
+  });
+  disposedRefresh.request();
+  disposedRefresh.request();
+  disposedRefresh.dispose();
+  resolveDisposed?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(disposedCalls, 1, "dispose drops a queued final refresh");
+  refresh.dispose();
 });
 
 test("frontend source inventory contains only the three retained scope families", () => {
@@ -215,6 +349,13 @@ test("frontend source inventory contains only the three retained scope families"
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorCollaboration.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorProjectionDeltas.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/kanban/kanbanProjectionDeltas.ts")), false);
+
+  const editorSource = readFileSync(resolve(sourceRoot, "modules/editor/EditorContent.tsx"), "utf8");
+  const kanbanSource = readFileSync(resolve(sourceRoot, "modules/kanban/KanbanContent.tsx"), "utf8");
+  for (const [surface, source] of [["Node chat", editorSource], ["Kanban", kanbanSource]] as const) {
+    assert.match(source, /onAccepted\(\)\s*{\s*scheduleCanonicalRefresh\(\);\s*}/, `${surface} must reconcile the load-to-subscribe race on first acceptance and reconnect`);
+    assert.doesNotMatch(source, /acceptedOnce/, `${surface} must not skip first acceptance`);
+  }
 
   const subscriptionSources = sourceFiles
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))

@@ -19,6 +19,21 @@ type CacheEntry<T> = {
 const KANBAN_BOARD_LIST_TTL_MS = 2 * 60_000;
 
 const boardListCache = new Map<string, CacheEntry<KanbanBoard[]>>();
+const boardListGenerationByScope = new Map<string, number>();
+
+function boardListScopeKey(apiBase: string, companyID: string): string {
+  return `${apiBase}\u0000${companyID.trim()}`;
+}
+
+function readBoardListGeneration(apiBase: string, companyID: string): number {
+  return boardListGenerationByScope.get(boardListScopeKey(apiBase, companyID)) ?? 0;
+}
+
+function bumpBoardListGeneration(apiBase: string, companyID: string): void {
+  const scopeKey = boardListScopeKey(apiBase, companyID);
+  boardListGenerationByScope.set(scopeKey, (boardListGenerationByScope.get(scopeKey) ?? 0) + 1);
+}
+
 
 function markKanbanWorkspaceSnapshotStale(apiBase: string, companyID: string, boardID: string): void {
   const cleanBoardID = boardID.trim();
@@ -52,9 +67,10 @@ export async function listKanbanBoards(apiBase: string, companyID: string, limit
   const cacheKey = `${apiBase}:${params}`;
   const cached = readCache(boardListCache.get(cacheKey) ?? null, KANBAN_BOARD_LIST_TTL_MS, cloneBoards);
   if (cached) return cached;
+  const generation = readBoardListGeneration(apiBase, companyID);
   const payload = await requestJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
   const boards = payload.boards ?? [];
-  boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
+  if (readBoardListGeneration(apiBase, companyID) === generation) boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
   return boards;
 }
 
@@ -431,6 +447,7 @@ export async function deleteKanbanCard(apiBase: string, companyID: string, board
 }
 
 export function invalidateKanbanBoardListCache(apiBase: string, companyID: string): void {
+  bumpBoardListGeneration(apiBase, companyID);
   const prefix = `${apiBase}:company_id=${encodeURIComponent(companyID)}`;
   for (const key of Array.from(boardListCache.keys())) {
     if (key.startsWith(prefix)) boardListCache.delete(key);

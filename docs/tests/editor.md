@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Unified Editor Tests
 
@@ -69,6 +69,8 @@ ED44 - Node document typing and Logic Gate document typing use durable HTTP auto
 ED45 - Durable Node chat create/delete publishes compact committed hints only to `chat:node:{node_id}` while that Node chat is mounted. Project chat has no retained realtime subscription, and Node chat publication never uses a generic editor/document or workspace scope.
 ED46 - Attachment-backed image hydration has exactly one owner for each rich-editor DOM/document update across `EditorContent`, `NodeTextBlockEditor`, and `UnifiedRichEditorSurface`. That owner returns cleanup, replaces prior cleanup before DOM replacement or context change, observes near-viewport frames relative to the actual editor scrollport, uses the shared bounded display-load queue/Blob singleflight, retries failed frames with bounded backoff, and revokes every consumer-owned object URL on replacement or unmount.
 ED47 - Node and Logic Gate saved-version history is progressive Save Settings data. The editor must not request history during initial document open; activating Save Settings loads it for the current target while manual Save, confirmed restore, sorting, and status behavior remain unchanged.
+ED48 - Mounted Node chat performs one single-flight canonical durable-chat refresh on first `subscription.accepted` and every reconnect acceptance, with at most one queued final refresh for later hints/acceptance and no overlap or invalidation of the active read. A second local Editor joining an already accepted Node-chat scope receives immediate local acceptance. No Project-chat, generic editor, replay, or event-history scope is added.
+ED49 - A successful same-window Node or Logic Gate rename patches the mounted editor label through the concrete committed-title event without replacing dirty, debounced, queued, or in-flight document text. If the Editor title `contentEditable` is active, the incoming label is deferred until editing ends and cannot replace its DOM draft or move its caret.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1115,3 +1117,23 @@ Expected:
 - Compatible consumers share Blob work but create and revoke their own object URLs.
 - Replacing external HTML, switching attachment/auth context, or unmounting runs the previous hydration cleanup before new work can mutate the DOM.
 - Opening the document does not load saved versions. Activating Save Settings loads the current target's history without changing manual save or restore behavior.
+
+### Scenario ED-S10: Retained Chat Reconciliation And Safe Title Convergence
+
+Business logic covered:
+- ED44
+- ED45
+- ED48
+- ED49
+
+Given:
+- A Node editor has loaded durable chat and then receives its first accepted chat subscription or reconnects while a canonical chat read is slow; a second Editor may join the already accepted scope.
+- Node or Logic Gate document text may be dirty, debounced, queued, or saving.
+- A successful rename commits from any supported same-window rename entry point.
+- The mounted Editor title `contentEditable` may have a live draft and caret.
+
+Expected:
+- First subscription acceptance, reconnect acceptance, immediate acceptance of a late local handler, and chat create/delete hints run one canonical durable-chat read at a time with at most one queued final read.
+- Project chat and generic editor/document scopes remain absent, with no replay log or recovery worker.
+- The committed-title event updates the mounted editor label immediately unless that title is actively edited, in which case it applies after editing ends.
+- Existing title DOM draft/caret, dirty or in-flight document text, and save state remain untouched while editing is active.

@@ -12,7 +12,9 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-expl
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
+import { subscribeCommittedEntityTitleUpdates } from "../modules/company-explorer/companyExplorerLocalEntityUpdates";
 import { requestAppSidebarPin, type SidebarPin } from "./sidebarPins";
+import { resolveCurrentAppSidebarPin } from "./appCommittedTitleState";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
@@ -302,6 +304,39 @@ export function AppSidebar({
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID.trim()) return;
+    const title = update.title.trim();
+    if (!title) return;
+    if (update.entityType === "logic_gate") {
+      setExplorerTriagePriorityMenu((current) => {
+        if (!current || current.target.logicGateID.trim() !== update.resourceID || current.target.label === title) return current;
+        return { ...current, target: { ...current.target, label: title } };
+      });
+    }
+    const expectedPinKind = update.entityType === "node" ? "node" : "logic_gate";
+    setPinContextMenu((current) => {
+      if (!current || current.pin.kind !== expectedPinKind || current.pin.id.trim() !== update.resourceID || current.pin.name === title) return current;
+      return { ...current, pin: { ...current.pin, name: title } };
+    });
+    setPinTriagePriorityMenu((current) => {
+      const pin = current?.action.pin;
+      if (!current || !pin || pin.kind !== expectedPinKind || pin.id.trim() !== update.resourceID || pin.name === title) return current;
+      return { ...current, action: { ...current.action, pin: { ...pin, name: title } } };
+    });
+  }), [companyID]);
+  useEffect(() => {
+    setPinContextMenu((current) => {
+      if (!current) return current;
+      const pin = resolveCurrentAppSidebarPin(pins, current.pin);
+      return pin === current.pin ? current : { ...current, pin };
+    });
+    setPinTriagePriorityMenu((current) => {
+      if (!current) return current;
+      const pin = resolveCurrentAppSidebarPin(pins, current.action.pin);
+      return pin === current.action.pin ? current : { ...current, action: { ...current.action, pin } };
+    });
+  }, [pins]);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
     () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],

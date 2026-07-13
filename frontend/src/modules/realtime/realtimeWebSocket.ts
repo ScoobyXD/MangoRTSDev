@@ -285,6 +285,7 @@ export class MangoRealtimeClient {
   private readonly WebSocketCtor: typeof WebSocket;
   private readonly reconnectDelayMs: number;
   private readonly subscriptions = new Map<string, Set<RealtimeSubscription>>();
+  private readonly acceptedScopes = new Set<string>();
   private socket: WebSocket | null = null;
   private opening = false;
   private manualClose = false;
@@ -312,12 +313,16 @@ export class MangoRealtimeClient {
     bucket.add(subscription);
     this.subscriptions.set(cleanScope, bucket);
     this.ensureOpen();
+    if (this.acceptedScopes.has(cleanScope)) {
+      subscription.onAccepted?.({ type: "subscription.accepted", scope: cleanScope });
+    }
     if (firstForScope && this.socket?.readyState === WebSocket.OPEN) this.sendSubscribe(cleanScope);
     return () => {
       const current = this.subscriptions.get(cleanScope);
       current?.delete(subscription);
       if (current && current.size > 0) return;
       this.subscriptions.delete(cleanScope);
+      this.acceptedScopes.delete(cleanScope);
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
       this.closeIfIdle();
     };
@@ -328,6 +333,7 @@ export class MangoRealtimeClient {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
+    this.acceptedScopes.clear();
     const attemptID = this.openAttemptID + 1;
     this.openAttemptID = attemptID;
     void this.getTicket()
@@ -355,6 +361,7 @@ export class MangoRealtimeClient {
           if (this.socket !== socket) return;
           this.socket = null;
           this.opening = false;
+          this.acceptedScopes.clear();
           this.subscriptionsSentForSocket = false;
           if (!this.manualClose && this.subscriptions.size > 0) this.scheduleReconnect();
         };
@@ -379,6 +386,7 @@ export class MangoRealtimeClient {
     this.socket?.close();
     this.socket = null;
     this.opening = false;
+    this.acceptedScopes.clear();
     this.subscriptionsSentForSocket = false;
   }
 
@@ -405,6 +413,7 @@ export class MangoRealtimeClient {
     this.socket?.close();
     this.socket = null;
     this.opening = false;
+    this.acceptedScopes.clear();
     this.subscriptionsSentForSocket = false;
     this.reconnectAttempts = 0;
   }
@@ -443,6 +452,11 @@ export class MangoRealtimeClient {
     }
     const bucket = message.scope ? this.subscriptions.get(message.scope) : undefined;
     if (!bucket || bucket.size === 0) return;
+    if (message.type === "subscription.accepted") {
+      this.acceptedScopes.add(message.scope);
+    } else if (message.type === "subscription.rejected") {
+      this.acceptedScopes.delete(message.scope);
+    }
     for (const sub of bucket) {
       switch (message.type) {
         case "subscription.accepted":

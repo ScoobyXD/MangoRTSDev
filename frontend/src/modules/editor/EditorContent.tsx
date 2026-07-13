@@ -97,7 +97,8 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
-import { publishCompanyExplorerEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
@@ -628,6 +629,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [relationshipTabAnchorCenterPx, setRelationshipTabAnchorCenterPx] = useState<number | null>(null);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
+  const editingTitleActiveRef = useRef(false);
+  const committedTitleEditBufferRef = useRef(createCommittedTitleEditBuffer());
   const editorDocumentRef = useRef<HTMLDivElement | null>(null);
   const attachmentHydrationCleanupRef = useRef<(() => void) | null>(null);
   const editorHeaderRef = useRef<HTMLDivElement | null>(null);
@@ -1141,7 +1144,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const nextTitle = nodeID ? preserveNodeTitle(label || readNodeLabelFromGraph(nodeID), previousTitle, nodeID) : "";
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
-    setLinkedNodeTitle(nextTitle);
+    if (!isSameEntity || !editingTitleActiveRef.current) setLinkedNodeTitle(nextTitle);
     if (nodeID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
@@ -1160,7 +1163,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
-    setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
+    if (!isSameEntity || !editingTitleActiveRef.current) {
+      setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
+    }
     if (logicGateID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
@@ -1191,40 +1196,62 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setError("");
     try {
       if (linkedEntityKind === "logic_gate") {
-        const updated = await requestJSON<LogicGateRecord>(`/v1/logic-gates/${linkedNodeID}`, {
-          method: "PUT",
-          body: JSON.stringify({ company_id: companyID, header: value }),
-        });
+        const updated = await commitEntityTitleMutation(
+          () => requestJSON<LogicGateRecord>(`/v1/logic-gates/${linkedNodeID}`, {
+            method: "PUT",
+            body: JSON.stringify({ company_id: companyID, header: value }),
+          }),
+          (result) => ({ companyID, entityType: "logic_gate", resourceID: result.logic_gate_id, title: result.header }),
+        );
         setLinkedNodeTitle(updated.header);
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
         invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
-        publishCompanyExplorerEntityTitleUpdate({
-          companyID,
-          entityType: "logic_gate",
-          resourceID: updated.logic_gate_id,
-          title: updated.header,
-        });
       } else {
-        const updated = await requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
-          method: "PUT",
-          body: JSON.stringify({ company_id: companyID, name: value }),
-        });
+        const updated = await commitEntityTitleMutation(
+          () => requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
+            method: "PUT",
+            body: JSON.stringify({ company_id: companyID, name: value }),
+          }),
+          (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: getNodeTitle(result) }),
+        );
         setLinkedNodeTitle(getNodeTitle(updated));
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
-        publishCompanyExplorerEntityTitleUpdate({
-          companyID,
-          entityType: "node",
-          resourceID: updated.node_id,
-          title: getNodeTitle(updated),
-        });
       }
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, requestJSON]);
+
+  const applyCommittedEditorTitle = useCallback((update: { entityType: "node" | "logic_gate"; resourceID: string; title: string }) => {
+    const title = update.title.trim();
+    if (!title) return;
+    setLinkedNodeTitle(title);
+    if (update.entityType === "logic_gate") onLogicGateTitleChange?.({ logicGateID: update.resourceID, label: title });
+  }, [onLogicGateTitleChange]);
+
+  const updateIsEditingTitle = useCallback((nextEditing: boolean) => {
+    const wasEditing = editingTitleActiveRef.current;
+    editingTitleActiveRef.current = nextEditing;
+    setIsEditingTitle(nextEditing);
+    if (nextEditing) {
+      if ((linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && linkedNodeID) {
+        committedTitleEditBufferRef.current.begin(linkedEntityKind, linkedNodeID);
+      }
+      return;
+    }
+    if (!wasEditing || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate") || !linkedNodeID) return;
+    const deferred = committedTitleEditBufferRef.current.finish(linkedEntityKind, linkedNodeID);
+    if (deferred) applyCommittedEditorTitle(deferred);
+  }, [applyCommittedEditorTitle, linkedEntityKind, linkedNodeID]);
+
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID || update.entityType !== linkedEntityKind || update.resourceID !== linkedNodeID || !update.title.trim()) return;
+    const immediate = committedTitleEditBufferRef.current.receive(update);
+    if (immediate) applyCommittedEditorTitle(immediate);
+  }), [applyCommittedEditorTitle, companyID, linkedEntityKind, linkedNodeID]);
 
   const createRelatedNode = useCallback(async (kind: EditorRelatedNodeCreationKind) => {
     if (!linkedEntityCanEdit) return;
@@ -1784,6 +1811,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   useEffect(() => {
     setIsEditingTitle(false);
+    editingTitleActiveRef.current = false;
+    committedTitleEditBufferRef.current.reset();
     editingTitleDraftRef.current = "";
     logicGateGVICApplyToAssignedNodesRequestRef.current += 1;
     setLogicGateGVICApplyToAssignedNodesBusy(false);
@@ -1791,11 +1820,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   useEffect(() => {
     if (linkedEntityCanEdit) return;
-    setIsEditingTitle(false);
+    updateIsEditingTitle(false);
     pendingEditorFontSizeRef.current = null;
     editorDocumentRef.current?.blur();
     window.getSelection()?.removeAllRanges();
-  }, [linkedEntityCanEdit, linkedNodeID]);
+  }, [linkedEntityCanEdit, linkedNodeID, updateIsEditingTitle]);
 
   useEffect(() => {
     const element = editorHeaderRef.current;
@@ -1889,19 +1918,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const nodeID = linkedEntityKind === "node" ? linkedNodeID.trim() : "";
     const snapshotScope = nodeID ? editorSnapshotScope("node", nodeID) : "";
     if (!companyID || !nodeID || editorSnapshotLoadedScope !== snapshotScope) return undefined;
-    let acceptedOnce = false;
     let refreshTimer: number | null = null;
+    const canonicalRefresh = createCoalescedCanonicalRefresh(refreshEditorSnapshot);
     const scheduleCanonicalRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
-        void refreshEditorSnapshot();
+        canonicalRefresh.request();
       }, 80);
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `chat:node:${nodeID}`, {
       onAccepted() {
-        if (acceptedOnce) scheduleCanonicalRefresh();
-        acceptedOnce = true;
+        scheduleCanonicalRefresh();
       },
       onChatMessageCreated(message) {
         if (message.company_id !== companyID || message.node_id !== nodeID) return;
@@ -1917,6 +1945,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return () => {
       unsubscribe();
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      canonicalRefresh.dispose();
     };
   }, [apiBase, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot]);
   const currentEditorVersionSignature = useCallback(() => {
@@ -2179,6 +2208,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedEntityCanAdmin(canAdminResourceAccess(node));
       const rawNextTitle = getNodeTitle(node);
       setLinkedNodeTitle((current) => {
+        if (editingTitleActiveRef.current) return current;
         const nextTitle = preserveNodeTitle(rawNextTitle, current, linkedNodeID);
         if (current === nextTitle) return current;
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
@@ -2204,6 +2234,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedEntityCanAdmin(canAdminResourceAccess(logicGate));
       const nextTitle = getLogicGateTitle(logicGate);
       setLinkedNodeTitle((current) => {
+        if (editingTitleActiveRef.current) return current;
         if (current === nextTitle) return current;
         invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
         return nextTitle;
@@ -2270,6 +2301,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeLogicGateIDs([]);
     setNodeAccounts([]);
     setLinkedEntityAccessDeniedMessage("");
+    const linkedDetailsTitleVersionAtStart = readCommittedEntityTitleVersion();
     (async () => {
       try {
         setError("");
@@ -2282,7 +2314,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           if (!isCurrentLinkedLoad()) return;
           setLinkedEntityCanEdit(canEditResourceAccess(details));
           setLinkedEntityCanAdmin(canAdminResourceAccess(details));
-          setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
+          const loadedLogicGateTitle = foldCommittedEntityTitlesSince(
+            getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }),
+            companyID,
+            linkedDetailsTitleVersionAtStart,
+            (current, update) => update.entityType === "logic_gate" && update.resourceID === linkedNodeID ? update.title : current,
+          );
+          setLinkedNodeTitle((current) => editingTitleActiveRef.current ? current : loadedLogicGateTitle);
           setNodeStatus("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
@@ -2331,7 +2369,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         const snapshotScope = editorSnapshotScope("node", linkedNodeID);
         setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
-        setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(details.node), current, linkedNodeID));
+        const loadedNodeTitle = foldCommittedEntityTitlesSince(
+          getNodeTitle(details.node),
+          companyID,
+          linkedDetailsTitleVersionAtStart,
+          (current, update) => update.entityType === "node" && update.resourceID === linkedNodeID ? update.title : current,
+        );
+        setLinkedNodeTitle((current) => editingTitleActiveRef.current
+          ? current
+          : preserveNodeTitle(loadedNodeTitle, current, linkedNodeID));
         setNodeStatus(details.node.status ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
@@ -2615,7 +2661,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             titleTextColor={editorPrimaryText}
             panelBackground={panelBackground}
             ruleColor={ruleColor}
-            onSetIsEditingTitle={setIsEditingTitle}
+            onSetIsEditingTitle={updateIsEditingTitle}
             onUpdateTitle={updateNodeTitle}
             onCommitNodeStatus={commitNodeStatus}
             onSetNodePriorityDraft={setNodePriorityDraft}

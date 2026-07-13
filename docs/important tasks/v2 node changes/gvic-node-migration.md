@@ -201,7 +201,7 @@ begin tx
   diff current vs next
   delete removed effective rows
   insert added effective rows
-  append projection/event rows for changed users/resources
+  append only independently required durable domain facts and return exact changed-row data
 commit
 ```
 
@@ -551,7 +551,7 @@ Phase 1 is the functional migration. The app should run on the new model by the 
 3. Add migration data transforms for RACI to GVIC, node assignee to node GVIC, node title to name, status color removal, and verify to review.
 4. Update backend domain/store/API/events/projections to write and read the new GVIC/node contracts.
 5. Update frontend API/types/UI/routes to use the new GVIC/node contracts.
-6. Update Company Explorer, Home, My Work, kanban, editor, project management, shared triage, notifications, and realtime invalidation to work from the new contracts.
+6. Update Company Explorer, Home, My Work, Kanban, editor, project management, shared triage, notifications, concrete same-browser reconciliation, and affected mounted-board hints to work from the new contracts.
 7. Run backend and frontend tests.
 8. Run manual smoke tests for node editor, logic gate work board, GVIC assignment picker, group assignment, group membership change, shared triage, project views, and My Work/GVIC views.
 

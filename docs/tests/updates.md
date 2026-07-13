@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. Frontend selection tests cover row selection and individual Seen successor/reload decisions. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74 current Node-or-Logic-Gate resolution plus Home/Updates source wiring for actions and panels, with saved grouping-label/sort coverage for Logic Gates. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -30,8 +30,8 @@ U19 - Groups sort by project, logic gate, node, then fallback update groups, wit
 U20 - Notifications sort newest first, then by title or ID to keep ordering stable.
 U21 - Updates visibility filters out notifications whose project, logic gate, or node is not viewable by the current user.
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
-U23 - One app-lifetime notification coordinator owns `notifications:user:{user_id}`. A created, deleted, or cleared hint coalesces one canonical summary reconciliation and immediately updates the urgent `!`, normal `@`, and regular unread badges.
-U24 - Updates registers with the notification coordinator only while open. An external notification hint coalesces one canonical feed reconciliation while open and causes no feed request while closed; local Seen keeps its existing optimistic no-reload behavior.
+U23 - One app-lifetime notification coordinator owns `notifications:user:{user_id}`. Every first or reconnect `subscription.accepted` performs one coalesced canonical notification-summary reconciliation; a later local handler joining an already accepted shared scope receives immediate acceptance, and created/deleted/cleared hints use the same coalescer to update urgent `!`, normal `@`, and regular unread badges.
+U24 - Updates registers with the notification coordinator only while open. First subscription acceptance, reconnect acceptance, and external notification hints run one canonical feed load at a time with at most one queued final load; they never overlap or restart a slow load and cause no feed request while closed. HTTP-first local Seen keeps its existing optimistic no-reload behavior.
 U25 - Updates saved grouping views persist Project, Logic Gate, and Status grouping fields through the saved-views API.
 U26 - The update trigger canon is limited to the rules in U27 through U49; adding a new update trigger requires updating this file.
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
@@ -80,6 +80,8 @@ U69 - The Home sidebar Updates tab shows separate live unread badges for urgent 
 U70 - Attachment-related update rows may reference attachment IDs, email IDs, node IDs, and preview metadata, but Updates payloads must not carry file bytes, data URLs, base64 blobs, or S3 object contents.
 U71 - Seeing an individual update activates the next remaining visible row below it and opens that row's node preview when it references a node, so the user can continue down the list with repeated Seen actions. If no row remains below, Updates clears the active row and node preview instead of jumping upward.
 U72 - Updates Status grouping consumes the shared universal status contract also used by My Work and Project Logic Gates / Nodes. A real status carried by a status-bearing notification is authoritative for that event row; arbitrary comment/mention prose and backend placeholders such as `a new status` or `a new state` are never status values. When no real event status exists, Updates falls back to the currently resolved node status, then the distinct No status group. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify aliases normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and completed/closed/archived aliases normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and No status remain before Done.
+U73 - A pending local notification delete/clear marker tracks whether HTTP and socket observers have claimed it. HTTP-first success emits once with its local optimistic source and a matching socket echo emits nothing; after both observers claim, the marker is removed so a distinct later clear is not suppressed. Socket-first commit emits once with a canonical non-local source so mounted Updates fetches even if the HTTP response is lost/rejected; duplicate socket frames remain suppressed while that lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
+U74 - A successful same-window Node or Logic Gate rename creates no notification under U45 and never rewrites the historical `NotificationItem.title` or `body_preview`. Mounted Updates resolves the current Node or Logic Gate label from Home's locally converged entity cache for the row's current-entity label, selected-panel entity label, and open action. For Logic Gate rows only, the current title also supplies saved Logic Gate grouping headers and alphabetical sort values.
 
 ## Update Row Copy And Visual Language
 
@@ -221,10 +223,12 @@ Business logic covered:
 - U12
 - U23
 - U24
+- U73
 
 Given:
 - A user has unread notifications across several surfaces and roles.
 - Another user has separate notifications in the same company.
+- The notification socket may first accept, reconnect, or echo a local delete/clear command; in one case the server commit/socket hint arrives before a lost or rejected HTTP response for Updates-local Seen.
 
 Expected:
 - List, summary, read, unread, and delete operations affect only the current user's company-scoped notifications.
@@ -233,7 +237,11 @@ Expected:
 - Deleting one notification removes only that notification.
 - Clearing notifications can be scoped and publishes a cleared event.
 - Summary counts update after read/delete operations.
-- The one notification coordinator coalesces one summary refresh and, only while Updates is open, one canonical feed refresh; it does not fabricate feed rows.
+- First subscription acceptance and reconnect acceptance each coalesce one canonical summary refresh; a late handler on an accepted shared scope receives its own immediate acceptance.
+- Only while Updates is open, first acceptance, reconnect acceptance, and hints run one feed request at a time with at most one queued final request; a closed Updates view performs no feed request.
+- HTTP-first local delete/clear plus its matching socket echo emits at most one summary update and, subject to optimistic source filtering, at most one open-feed update.
+- Socket-first plus a lost/rejected HTTP response emits exactly one summary update and one mounted Updates feed update; HTTP failure with no socket emits neither.
+- The coordinator does not fabricate feed rows, and local Seen preserves its no-reload behavior.
 
 ### Scenario U-S4: Saved Grouping Views
 
@@ -392,3 +400,23 @@ Expected:
 - The Updates payload may reference the node, email, provider message, and Mango attachment IDs needed for navigation/rendering.
 - The Updates payload does not include raw attachment bytes, data URLs, base64 strings, or S3 object contents.
 - Opening the referenced attachment content requires the normal Mango attachment/content API permission check.
+
+### Scenario U-S9: Current Node Or Logic Gate Labels Converge Without Rewriting History
+
+Business logic covered:
+- U19
+- U25
+- U45
+- U50
+- U74
+
+Given:
+- Updates is mounted with a historical notification row for a Node or Logic Gate; for the Logic Gate case, a saved view is grouped by Logic Gate.
+- The same user successfully renames that Node or Logic Gate elsewhere in the same browser window.
+
+Expected:
+- The rename creates no new notification.
+- The row's stored notification title and body preview remain the historical text recorded when the notification was created.
+- The mounted row's current-entity label, selected preview panel entity label, and open-Node or open-Logic-Gate action immediately use the current committed title.
+- For the Logic Gate case, the saved Logic Gate grouping header and alphabetical grouping order use the current committed title and sort value.
+- No feed reload, cross-user title socket, or generalized fan-out plane is required for this same-window convergence.

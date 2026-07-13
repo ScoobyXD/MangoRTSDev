@@ -1,34 +1,34 @@
 # Making Logic Gates Faster
 
-Last updated: 2026-07-11
+Last updated: 2026-07-13
 
 ## Problem
 
 Opening the Logic Gate Arena could do more work than one logical board load requires:
 
-- forced Logic Gate props and live selection could start separate `/work` requests;
+- forced Logic Gate props and the current Arena selection could start separate `/work` requests;
 - stale requests could finish after the user selected a different Logic Gate;
 - cached board contents were not the single cache-first authority;
 - ETags searched four `domain_events` shapes instead of reading one indexed version row;
-- the cold Postgres path performed separate gate, access, GVIC, card, email-origin, and projection-sequence reads;
+- the cold Postgres path performed separate gate, access, GVIC, card, and email-origin reads;
 - the response repeated the same work through statuses, assignments, nodes, and cards.
 
-The target architecture makes a logical Arena selection one cancelable, single-flight load, makes realtime deltas the normal reconciliation path, and makes the database read and wire contract Kanban-specific.
+The target architecture makes a logical Arena selection one cancelable, single-flight load, routes retained board wake-ups through one coalesced canonical revalidation, and makes the database read and wire contract Kanban-specific.
 
 ## Architecture
 
 ### One frontend board loader
 
-All Logic Gate Arena loads use the shared board-content store. Forced props and live selection converge on the same guarded loader and cache key. The loader:
+All Logic Gate Arena loads use the shared board-content store. Forced props and the current React selection converge on the same guarded loader and cache key. The loader:
 
 1. synchronously renders a complete cached snapshot when one exists;
 2. shares an in-flight request for the same company/board;
 3. aborts an obsolete request when the selected Logic Gate changes;
 4. rejects a late response whose selection generation is no longer current;
 5. applies a successful full snapshot once; and
-6. reconciles exact card changes and projection sequence through realtime deltas.
+6. coalesces first subscription acceptance, reconnect acceptance, and compact `kanban.changed` hints through one conditional canonical `/work` revalidation.
 
-Cache invalidation retains the last complete snapshot as stale data. It does not discard an in-flight request and start a duplicate request. A realtime delta updates the rendered state, cached snapshot, and projection sequence together. Sequence gaps, malformed deltas, and permission uncertainty request one targeted revalidation.
+Cache invalidation retains the last complete snapshot as stale data. It does not discard an in-flight request and start a duplicate request. Retained board messages carry no card delta, projection sequence, or replay cursor: the guarded loader refreshes the canonical snapshot and reuses it on `304 Not Modified`.
 
 ### Dedicated work version
 
@@ -44,7 +44,7 @@ The cold path is shaped as:
 2. one primary-key work-version lookup; and
 3. one consolidated work query.
 
-The consolidated query returns the Logic Gate header/resolved default access/request owner, board projection sequence, and minimal card rows. Email origin is calculated in the card read. It does not run a second email query or a per-row lateral lookup for redundant assignment memberships.
+The consolidated query returns the Logic Gate header/resolved default access/request owner and minimal card rows. Email origin is calculated in the card read. It does not run a second email query or a per-row lateral lookup for redundant assignment memberships.
 
 `kanban_board_projection.status_rank` stores the canonical sort rank as a generated column. The hot index orders by company, Logic Gate, status rank, manual position, assignment creation time, and assignment ID, so the database does not recompute the status sort for each read.
 
@@ -95,8 +95,7 @@ Canonical ranks are:
       "projection_updated_timestamp": "2026-07-11T12:00:00Z",
       "created_timestamp": "2026-07-11T11:00:00Z"
     }
-  ],
-  "projection_sequence": 42
+  ]
 }
 ```
 
@@ -136,20 +135,20 @@ It:
 
 The migration was prepared and source-verified locally only. It was not applied to a local, dev, or production database, and no live database credentials were used.
 
-Deployment must use the normal human-controlled migration path. Apply the migration before deploying code that selects `status_rank` or `logic_gate_work_versions`. The operator should account for the projection-table column/index build lock and duration, verify the seeded row count against `logic_gates`, then deploy the application and observe `/work` latency, request count, ETag/304 rate, and realtime fallback rate.
+Deployment must use the normal human-controlled migration path. Apply the migration before deploying code that selects `status_rank` or `logic_gate_work_versions`. The operator should account for the projection-table column/index build lock and duration, verify the seeded row count against `logic_gates`, then deploy the application and observe `/work` latency, request count, ETag/304 rate, and mounted-board revalidation rate.
 
 ## Verification Contract
 
 Focused coverage must prove:
 
-- forced/live loader convergence and same-key single-flight deduplication;
+- forced/current-selection loader convergence and same-key single-flight deduplication;
 - cancellation for A-to-B and stale-response rejection for A-to-B-to-A;
-- cache-first rendering followed by realtime reconciliation;
+- cache-first rendering followed by first-acceptance, reconnect, and compact-hint canonical reconciliation;
 - no duplicate render/state churn for one logical load;
-- exact projection-delta handling, including `created_from_email`;
+- canonical minimal-card refresh handling, including `created_from_email`, without delta, sequence, or replay state;
 - one primary-key version lookup instead of four event searches;
 - invalidation for every row in the matrix;
-- exact authorization, ordering, request-owner, account, assignment, email-origin, and projection-sequence semantics;
+- exact authorization, ordering, request-owner, account, assignment, and email-origin semantics;
 - migration/canonical-schema parity and generated status rank; and
 - serialization of the minimal response plus explicit absence of redundant collections.
 
@@ -160,9 +159,9 @@ Required verification includes focused Go tests, focused frontend tests, fronten
 Without relying on a live database benchmark, the implementation proves these reductions by construction:
 
 - four JSON/domain-event ETag searches become one primary-key lookup;
-- repeated forced/live requests become one same-key in-flight request;
+- repeated forced/current-selection requests become one same-key in-flight request;
 - obsolete cross-gate reads are canceled and cannot commit stale state;
-- the normal realtime path patches a snapshot instead of reloading the full board;
+- retained board wake-ups share one guarded conditional canonical revalidation;
 - the cold work body is produced by one consolidated query after access/version reads;
 - the second email-origin query and per-row redundant assignment-membership lookup are removed;
 - status ordering uses an indexed stored rank; and

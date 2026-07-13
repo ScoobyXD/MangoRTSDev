@@ -21,12 +21,13 @@ import (
 )
 
 const (
-	webSocketGUID                = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	maxRealtimeMessageBytes      = 1 << 20
-	webSocketOpcodeText     byte = 0x1
-	webSocketOpcodeClose    byte = 0x8
-	webSocketOpcodePing     byte = 0x9
-	webSocketOpcodePong     byte = 0xA
+	webSocketGUID                      = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxRealtimeMessageBytes            = 1 << 20
+	realtimeWebSocketWriteTimeout      = 2 * time.Second
+	webSocketOpcodeText           byte = 0x1
+	webSocketOpcodeClose          byte = 0x8
+	webSocketOpcodePing           byte = 0x9
+	webSocketOpcodePong           byte = 0xA
 )
 
 const (
@@ -54,6 +55,7 @@ type realtimeConnection struct {
 	conn      net.Conn
 	reader    *bufio.Reader
 	writeMu   sync.Mutex
+	closeOnce sync.Once
 }
 
 type realtimeClientMessage struct {
@@ -131,7 +133,7 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		s.realtimeRegistry.removeConnection(realtimeConn.id)
 		s.recordRealtimeActiveConnections()
 		s.recordRealtimeActiveSubscriptions()
-		_ = conn.Close()
+		realtimeConn.close()
 		log.Printf("realtime_connection_closed company_id=%s user_id=%s connection_id=%s", companyID, realtimeConn.userID, realtimeConn.id)
 	}()
 
@@ -409,8 +411,18 @@ func (c *realtimeConnection) sendText(payload []byte) error {
 }
 
 func (c *realtimeConnection) writeFrame(opcode byte, payload []byte) error {
+	if c == nil || c.conn == nil {
+		return net.ErrClosed
+	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	if err := c.conn.SetWriteDeadline(time.Now().Add(realtimeWebSocketWriteTimeout)); err != nil {
+		c.close()
+		return err
+	}
+	defer func() {
+		_ = c.conn.SetWriteDeadline(time.Time{})
+	}()
 	header := []byte{0x80 | (opcode & 0x0F)}
 	length := len(payload)
 	switch {
@@ -425,13 +437,26 @@ func (c *realtimeConnection) writeFrame(opcode byte, payload []byte) error {
 		header = append(header, size[:]...)
 	}
 	if _, err := c.conn.Write(header); err != nil {
+		c.close()
 		return err
 	}
 	if length == 0 {
 		return nil
 	}
 	_, err := c.conn.Write(payload)
+	if err != nil {
+		c.close()
+	}
 	return err
+}
+
+func (c *realtimeConnection) close() {
+	if c == nil || c.conn == nil {
+		return
+	}
+	c.closeOnce.Do(func() {
+		_ = c.conn.Close()
+	})
 }
 
 type webSocketFrame struct {

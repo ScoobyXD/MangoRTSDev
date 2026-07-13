@@ -55,6 +55,17 @@ import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
 import { removeNodeRelationshipGraphNode } from "../modules/node-map/NodeRelationshipGraph";
+import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/company-explorer/companyExplorerLocalEntityUpdates";
+import { invalidateCachesForCommittedEntityTitle } from "./committedTitleCacheInvalidation";
+import {
+  isCommittedTitleUpdateForCompany,
+  reconcileAppDockTabTitles,
+  reconcileAppLogicGateTargetTitle,
+  reconcileAppNodePopupTitle,
+  reconcileAppSidebarPinTitles,
+  reconcileAppTimelineTitles,
+} from "./appCommittedTitleState";
+import { recordMyWorkCommittedTitle } from "../pages/home/myWorkMatrixLoader";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -618,7 +629,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     let cancelled = false;
     fetchSidebarPins(apiBase, cleanCompanyID)
       .then((pins) => {
-        if (!cancelled) setSidebarPins(pins);
+        if (!cancelled) setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -649,6 +660,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (taskbarData.scope !== taskbarScope) return;
     saveAppTimelineState(taskbarData.scope, taskbarData.timelineState);
   }, [taskbarData.scope, taskbarData.timelineState, taskbarScope]);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    invalidateCachesForCommittedEntityTitle(apiBase, update);
+    if (!isCommittedTitleUpdateForCompany(update, activeCompanyID)) return;
+    recordMyWorkCommittedTitle(update);
+    setDockTabs((current) => reconcileAppDockTabTitles(current, update));
+    setTimelineState((current) => reconcileAppTimelineTitles(current, update));
+    setSidebarPins((current) => reconcileAppSidebarPinTitles(current, update));
+    setExplorerNodePopup((current) => reconcileAppNodePopupTitle(current, update));
+    setLogicGateArenaTarget((current) => reconcileAppLogicGateTargetTitle(current, update));
+  }), [activeCompanyID, apiBase, setDockTabs, setTimelineState]);
   useEffect(() => {
     const rollCurrentTimeline = () => setTimelineState((current) => rollTimelineStateToDate(current));
     rollCurrentTimeline();
@@ -1178,7 +1199,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       for (const pin of cleanPins) {
         try {
           const saved = await createSidebarPin(apiBase, cleanCompanyID, pin);
-          setSidebarPins((previous) => upsertSidebarPin(previous, saved));
+          setSidebarPins((previous) => foldLatestCommittedEntityTitles(upsertSidebarPin(previous, saved), cleanCompanyID, reconcileAppSidebarPinTitles));
         } catch (error) {
           console.error("Failed to save sidebar pin", error);
         }
@@ -1194,22 +1215,24 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (!cleanCompanyID || !pinID) return;
     void deleteSidebarPin(apiBase, cleanCompanyID, pinID).catch((error) => {
       console.error("Failed to remove sidebar pin", error);
-      setSidebarPins(previousPins);
+      setSidebarPins(foldLatestCommittedEntityTitles(previousPins, cleanCompanyID, reconcileAppSidebarPinTitles));
     });
   }, [activeCompanyID, apiBase]);
 
   const reorderSidebarPin = useCallback((moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => {
     const cleanCompanyID = activeCompanyID.trim();
     const nextPins = moveSidebarPin(sidebarPinsRef.current, moving, target, placement);
-    setSidebarPins(nextPins);
+    setSidebarPins(foldLatestCommittedEntityTitles(nextPins, cleanCompanyID, reconcileAppSidebarPinTitles));
     if (!cleanCompanyID) return;
     const pinIDs = nextPins.map((pin) => pin.pinID.trim()).filter(Boolean);
     if (pinIDs.length !== nextPins.length) return;
     void reorderSidebarPins(apiBase, cleanCompanyID, pinIDs)
-      .then((pins) => setSidebarPins(pins))
+      .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
       .catch((error) => {
         console.error("Failed to reorder sidebar pins", error);
-        void fetchSidebarPins(apiBase, cleanCompanyID).then(setSidebarPins).catch(() => {});
+        void fetchSidebarPins(apiBase, cleanCompanyID)
+          .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
+          .catch(() => {});
       });
   }, [activeCompanyID, apiBase]);
 

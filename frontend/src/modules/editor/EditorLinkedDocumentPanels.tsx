@@ -4,6 +4,7 @@ import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
+import { createOneShotBlurSuppression } from "../company-explorer/companyExplorerLocalEntityUpdates";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gate-map/shared";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
@@ -61,7 +62,7 @@ type EditorLinkedDocumentPanelsProps = {
   titleTextColor: string;
   panelBackground: string;
   ruleColor: string;
-  onSetIsEditingTitle: React.Dispatch<React.SetStateAction<boolean>>;
+  onSetIsEditingTitle: (editing: boolean) => void;
   onUpdateTitle: (nextTitle: string) => Promise<void>;
   onCommitNodeStatus: (statusKey: string, statusLabel: string, statusColor: string) => void;
   onSetNodePriorityDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -325,6 +326,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onAddGVICPrincipal,
   onRemoveGVICPrincipal,
 }) => {
+  const titleBlurSuppressionRef = useRef(createOneShotBlurSuppression());
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [hoveredStatusValue, setHoveredStatusValue] = useState<NodeStatusValue | "">("");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
@@ -513,6 +515,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
               }}
               onBlur={() => {
+                if (!titleBlurSuppressionRef.current.shouldHandleBlur()) return;
                 if (!canEdit || !isEditingTitle) return;
                 const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                 void onUpdateTitle(latestTitle);
@@ -525,6 +528,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 }
                 if (event.key === "Enter") {
                   event.preventDefault();
+                  titleBlurSuppressionRef.current.suppress();
                   const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                   void onUpdateTitle(latestTitle);
                   onSetIsEditingTitle(false);
@@ -532,6 +536,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 }
                 if (event.key === "Escape") {
                   event.preventDefault();
+                  titleBlurSuppressionRef.current.suppress();
                   if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
                   onSetIsEditingTitle(false);
                   event.currentTarget.blur();

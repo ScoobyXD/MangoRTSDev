@@ -9,6 +9,7 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
+import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes";
 import {
@@ -63,6 +64,7 @@ import {
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
+import { applyCommittedLogicGateTitleToRecords, applyCommittedLogicGateTitleToSearchResults, resolveCommittedLastAssignedLogicGateLabel } from "./editorCommittedTitleState";
 
 import {
   AttachedEmailOrganizerPane,
@@ -421,6 +423,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
   const [projectAssignStatus, setProjectAssignStatus] = useState("");
   const formattingControllerAvailable = canEdit && blocks.some((block) => block.id === focusedTextBlockID);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID || update.entityType !== "logic_gate") return;
+    const resourceID = update.resourceID.trim();
+    const title = update.title.trim();
+    if (!resourceID || !title) return;
+    setAssignedLogicGateRecords((current) => applyCommittedLogicGateTitleToRecords(current, resourceID, title));
+    setLogicGateSearchResults((current) => applyCommittedLogicGateTitleToSearchResults(current, resourceID, title));
+    setLastAssignedLogicGateLabel((current) => resolveCommittedLastAssignedLogicGateLabel(lastAssignedLogicGateID, current, resourceID, title));
+    setProjectLogicGateOptions((current) => applyCommittedLogicGateTitleToRecords(current, resourceID, title));
+  }), [companyID, lastAssignedLogicGateID]);
+
   useEffect(() => {
     onFormattingControllerAvailabilityChange?.(formattingControllerAvailable);
   }, [formattingControllerAvailable, onFormattingControllerAvailabilityChange]);
@@ -859,6 +872,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     let cancelled = false;
     setProjectLogicGateOptions([]);
     setProjectLogicGatesLoading(true);
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     void (async () => {
       const view = await fetchProjectView(companyID, projectID);
       if (cancelled) return;
@@ -875,7 +889,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         }
       }));
       if (!cancelled) {
-        setProjectLogicGateOptions(sortLogicGateOptions(records.filter((record): record is LogicGateRecord => Boolean(record))));
+        setProjectLogicGateOptions(foldCommittedEntityTitlesSince(
+          sortLogicGateOptions(records.filter((record): record is LogicGateRecord => Boolean(record))),
+          companyID,
+          titleVersionAtStart,
+          (current, update) => update.entityType === "logic_gate"
+            ? applyCommittedLogicGateTitleToRecords(current, update.resourceID, update.title)
+            : current,
+        ));
       }
     })()
       .catch((cause) => {
@@ -1007,6 +1028,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return;
     }
     let cancelled = false;
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     void Promise.all(ids.map(async (logicGateID) => {
       try {
         const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
@@ -1015,7 +1037,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         return null;
       }
     })).then((records) => {
-      if (!cancelled) setAssignedLogicGateRecords(records.filter((record): record is LogicGateRecord => Boolean(record)));
+      if (!cancelled) setAssignedLogicGateRecords(foldCommittedEntityTitlesSince(
+        records.filter((record): record is LogicGateRecord => Boolean(record)),
+        companyID,
+        titleVersionAtStart,
+        (current, update) => update.entityType === "logic_gate"
+          ? applyCommittedLogicGateTitleToRecords(current, update.resourceID, update.title)
+          : current,
+      ));
     });
     return () => { cancelled = true; };
   }, [apiBase, assignedLogicGateIDs, companyID]);
@@ -1031,9 +1060,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     let cancelled = false;
     setLogicGateSearchLoading(true);
     const timer = window.setTimeout(() => {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       void fetchCompanyExplorerSearchResults(apiBase, companyID, query, 24, ["folder", "logic_gate"])
         .then((payload) => {
-          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchResults(payload.results ?? []);
+          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchResults(foldCommittedEntityTitlesSince(
+            payload.results ?? [],
+            companyID,
+            titleVersionAtStart,
+            (current, update) => update.entityType === "logic_gate"
+              ? applyCommittedLogicGateTitleToSearchResults(current, update.resourceID, update.title)
+              : current,
+          ));
         })
         .catch((cause) => {
           if (!cancelled && logicGateSearchRequestRef.current === requestID) onError(cause instanceof Error ? cause.message : "failed_to_search_logic_gates");

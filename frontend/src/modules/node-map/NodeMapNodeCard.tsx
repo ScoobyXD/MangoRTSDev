@@ -8,6 +8,7 @@ import {
 } from "./NodeMapControls";
 import { isLegalRelationshipSidePair } from "./relationshipProjection";
 import { buildNodeTitleCommentSegments, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
+import { createOneShotBlurSuppression } from "../company-explorer/companyExplorerLocalEntityUpdates";
 
 type NodeMapNodeCardProps = {
   node: NodeRecord;
@@ -43,7 +44,7 @@ type NodeMapNodeCardProps = {
   onSetSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   onSetDragState: React.Dispatch<React.SetStateAction<NodeMapDragState | null>>;
   onSetRelationshipDraft: React.Dispatch<React.SetStateAction<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>>;
-  onSetEditingNodeTitleNodeID: React.Dispatch<React.SetStateAction<string | null>>;
+  onSetEditingNodeTitleNodeID: (nodeID: string | null) => void;
   onSetInlineCommentDraft: React.Dispatch<React.SetStateAction<NodeInlineCommentDraft | null>>;
   onSetError: React.Dispatch<React.SetStateAction<string>>;
   onCreateInlineCommentThread: (draft: NodeInlineCommentDraft) => void;
@@ -116,6 +117,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   const nodeTitle = getNodeTitle(node);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const titleElementRef = useRef<HTMLDivElement | null>(null);
+  const titleBlurSuppressionRef = useRef(createOneShotBlurSuppression());
   const nodeInlineCommentDraft = inlineCommentDraft?.nodeID === node.node_id ? inlineCommentDraft : null;
   const titleSegments = useMemo(() => buildNodeTitleCommentSegments(nodeTitle, inlineCommentThreads), [inlineCommentThreads, nodeTitle]);
 
@@ -319,19 +321,24 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
               editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
             }}
             onBlur={() => {
+              if (!titleBlurSuppressionRef.current.shouldHandleBlur()) return;
               void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
               onSetEditingNodeTitleNodeID(null);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
+                titleBlurSuppressionRef.current.suppress();
                 void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
                 onSetEditingNodeTitleNodeID(null);
+                event.currentTarget.blur();
               }
               if (event.key === "Escape") {
                 event.preventDefault();
+                titleBlurSuppressionRef.current.suppress();
                 if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
                 onSetEditingNodeTitleNodeID(null);
+                event.currentTarget.blur();
               }
             }}
             /*

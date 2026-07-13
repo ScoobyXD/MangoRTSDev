@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type React from "react";
 import { getNodeTitle, type NodeDirection, type NodePosition, type NodeRecord } from "./shared";
 import {
@@ -6,6 +7,7 @@ import {
   resolveNodeMapPointerSelection,
 } from "../node-map/NodeMapControls";
 import { canStartRelationshipFromSide, isLegalRelationshipSidePair } from "./relationshipProjection";
+import { createOneShotBlurSuppression } from "../company-explorer/companyExplorerLocalEntityUpdates";
 
 const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
   { direction: "left", style: { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" } },
@@ -48,7 +50,7 @@ type LogicGateMapNodeCardProps = {
   onSetSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   onSetDragState: React.Dispatch<React.SetStateAction<NodeMapDragState | null>>;
   onSetRelationshipDraft: React.Dispatch<React.SetStateAction<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>>;
-  onSetEditingNodeTitleNodeID: React.Dispatch<React.SetStateAction<string | null>>;
+  onSetEditingNodeTitleNodeID: (nodeID: string | null) => void;
   onSetError: React.Dispatch<React.SetStateAction<string>>;
   onCreateLinkedNode: (sourceNodeID: string, direction: NodeDirection) => Promise<void>;
   onCommitRelationshipBetweenNodes: (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => Promise<void>;
@@ -109,6 +111,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const isSelected = selectedNodeIDs.has(node.node_id);
   const isPrimary = node.node_id === selectedNodeID;
   const isEditingTitle = editingNodeTitleNodeID === node.node_id;
+  const titleBlurSuppressionRef = useRef(createOneShotBlurSuppression());
   const gateFill = isSelected ? nodeCardSelectedBackground : nodeCardBackground;
   const gateStroke = isSelected ? selectionColor : nodeCardBorder;
   const gateShadow = isSelected
@@ -246,19 +249,24 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
             }}
             onBlur={() => {
+              if (!titleBlurSuppressionRef.current.shouldHandleBlur()) return;
               void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
               onSetEditingNodeTitleNodeID(null);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
+                titleBlurSuppressionRef.current.suppress();
                 void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
                 onSetEditingNodeTitleNodeID(null);
+                event.currentTarget.blur();
               }
               if (event.key === "Escape") {
                 event.preventDefault();
+                titleBlurSuppressionRef.current.suppress();
                 if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
                 onSetEditingNodeTitleNodeID(null);
+                event.currentTarget.blur();
               }
             }}
             /*

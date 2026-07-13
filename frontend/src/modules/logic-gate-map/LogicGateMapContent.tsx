@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, canAdminResourceAccess, canEditResourceAccess, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -24,6 +24,8 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
+import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, preserveEditingEntityTitleInSnapshot, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { reconcileCommittedLogicGateTitleInSnapshot } from "../map/committedTitleSnapshotReconciliation";
 
 type LogicGateWorkspaceEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -65,6 +67,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
   const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const allNodesRef = useRef<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -126,6 +129,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);
   const editingNodeTitleDraftRef = useRef("");
   const editingNodeTitleElementRef = useRef<HTMLDivElement | null>(null);
+  const editingNodeTitleNodeIDRef = useRef<string | null>(null);
+  const committedTitleEditBufferRef = useRef(createCommittedTitleEditBuffer());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const isDarkTheme = theme === "dark";
@@ -224,6 +229,50 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     });
   };
 
+  const applyCommittedLogicGateTitle = useCallback((update: { resourceID: string; title: string }) => {
+    const title = update.title.trim();
+    if (!title) return;
+    const patchTitle = (items: NodeRecord[]) => items.map((item) => item.node_id === update.resourceID
+      ? { ...item, header: title, title }
+      : item);
+    setAllNodes((current) => {
+      const next = patchTitle(current);
+      allNodesRef.current = next;
+      return next;
+    });
+    setNodes(patchTitle);
+    setDetails((current) => current?.node.node_id === update.resourceID
+      ? {
+        ...current,
+        node: { ...current.node, header: title, title },
+        logic_gate: { ...current.logic_gate, header: title },
+      }
+      : current);
+  }, []);
+
+  const updateEditingLogicGateTitleNodeID = useCallback((nextNodeID: string | null) => {
+    const previousNodeID = editingNodeTitleNodeIDRef.current;
+    if (nextNodeID && previousNodeID && nextNodeID !== previousNodeID) {
+      const deferred = committedTitleEditBufferRef.current.finish("logic_gate", previousNodeID);
+      if (deferred) applyCommittedLogicGateTitle(deferred);
+    }
+    editingNodeTitleNodeIDRef.current = nextNodeID;
+    setEditingNodeTitleNodeID(nextNodeID);
+    if (nextNodeID) {
+      committedTitleEditBufferRef.current.begin("logic_gate", nextNodeID);
+      return;
+    }
+    if (!previousNodeID) return;
+    const deferred = committedTitleEditBufferRef.current.finish("logic_gate", previousNodeID);
+    if (deferred) applyCommittedLogicGateTitle(deferred);
+  }, [applyCommittedLogicGateTitle]);
+
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID || update.entityType !== "logic_gate" || !update.title.trim()) return;
+    const immediate = committedTitleEditBufferRef.current.receive(update);
+    if (immediate) applyCommittedLogicGateTitle(immediate);
+  }), [applyCommittedLogicGateTitle, companyID]);
+
   useEffect(() => {
     selectedNodeIDRef.current = selectedNodeID;
   }, [selectedNodeID]);
@@ -246,14 +295,23 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderIDRef.current,
   ) => {
+    const reconciledSnapshotNodes = preserveEditingEntityTitleInSnapshot(
+      snapshotNodes,
+      allNodesRef.current,
+      editingNodeTitleNodeIDRef.current,
+      (incoming, current) => getNodeTitle(incoming) === getNodeTitle(current)
+        ? incoming
+        : { ...incoming, header: getNodeTitle(current), title: getNodeTitle(current) },
+    );
     const scoped = filterLogicGateGraphToFolderScope({
-      nodes: snapshotNodes,
+      nodes: reconciledSnapshotNodes,
       relationships: snapshotRelationships,
       folders: snapshotFolders,
       folderItems: snapshotFolderItems,
       folderID,
     });
-    setAllNodes(snapshotNodes);
+    allNodesRef.current = reconciledSnapshotNodes;
+    setAllNodes(reconciledSnapshotNodes);
     setFolders(snapshotFolders);
     setFolderItems(snapshotFolderItems);
     setNodes(scoped.nodes);
@@ -327,12 +385,18 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setLoading(true);
     setError("");
     try {
+      const requestStartTitleVersion = readCommittedEntityTitleVersion();
       const scope = { folderID: activeFolderIDRef.current };
       if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope)) {
         await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
       }
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
-      const snapshotNodes = snapshot.nodes ?? [];
+      const snapshotNodes = foldCommittedEntityTitlesSince(
+        snapshot.nodes ?? [],
+        companyID,
+        requestStartTitleVersion,
+        reconcileCommittedLogicGateTitleInSnapshot,
+      );
       const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
       applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
 
@@ -893,10 +957,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     if (!value) return;
     setError("");
     try {
-      const updatedRecord = await requestJSON<LogicGateRecord>(`/v1/logic-gates/${nodeID}`, {
-        method: "PUT",
-        body: JSON.stringify({ company_id: companyID, header: value }),
-      });
+      const updatedRecord = await commitEntityTitleMutation(
+        () => requestJSON<LogicGateRecord>(`/v1/logic-gates/${nodeID}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, header: value }),
+        }),
+        (result) => ({ companyID, entityType: "logic_gate", resourceID: result.logic_gate_id, title: result.header }),
+      );
       const updated = toLogicGateCanvasRecord(updatedRecord);
       // Latency rule: update in-memory graph cache directly so we avoid a snapshot re-fetch.
       upsertLogicGateRelationshipGraphNode(apiBase, companyID, updated);
@@ -1353,7 +1420,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
-  }, [editingNodeTitleNodeID, nodeByID]);
+  }, [editingNodeTitleNodeID]);
 
   const viewportHandlers = useLogicGateMapViewportHandlers({
     viewportRef,
@@ -1459,7 +1526,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
               onSetSelectedNodeIDs={setSelectedNodeIDs}
               onSetDragState={setDragState}
               onSetRelationshipDraft={setRelationshipDraft}
-              onSetEditingNodeTitleNodeID={setEditingNodeTitleNodeID}
+              onSetEditingNodeTitleNodeID={updateEditingLogicGateTitleNodeID}
               onSetError={setError}
               onCreateLinkedNode={createLinkedNode}
               onCommitRelationshipBetweenNodes={commitRelationshipBetweenNodes}
@@ -1565,7 +1632,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
               return;
             }
             editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new logic gate";
-            setEditingNodeTitleNodeID(nodeID);
+            updateEditingLogicGateTitleNodeID(nodeID);
             setNodeContextMenu(null);
           }}
           onOpenPermissions={(nodeID) => {
