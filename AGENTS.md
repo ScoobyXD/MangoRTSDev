@@ -21,17 +21,31 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 - Full test runner: `scripts/run_all_tests.mjs`.
 - Cloud-integrated local backend helper: `scripts/start_local_cognito_backend.ps1`.
 
-## Worktree task completion and local merge
+## App worktree task creation, completion, and integration
 
-For one coherent feature or fix, the agent task that implements the work owns it through the local merge into `main`. Do not declare the task done while its intended changes remain only in a worker worktree. Use a separate integration task only when the user explicitly requests one, when several completed workers must be merged sequentially, or when the original task is unavailable.
+### Default: create the worker, then stop without integration
 
-1. Implement the requested change and run proportionate focused verification in the worker worktree.
-2. Review the worker diff, exclude unrelated changes, and commit every intended worker change.
-3. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`.
-4. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
-5. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
-6. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
-7. Keep the merge local: do not push the branch or `main` unless the user explicitly asks for a push.
+When Jonat asks a project/Local task in the Codex desktop app to create, spawn, or start a new worktree for one job, use this lifecycle by default:
+
+1. Create one separate, user-visible Codex app task in a new Codex-managed Git worktree. Inject the user's complete requested task, relevant context, safety boundaries, and this no-integration policy into the worker prompt.
+2. The original task is only the launcher. After confirming that the worker task was created, it must stop. It must not duplicate the work, remain an orchestrator, poll the worker, apply the worker's patches, or integrate the result unless Jonat explicitly asked for continuing coordination.
+3. The worker owns implementation, proportionate verification, diff review, and documentation updates in its own worktree. For a change task, commit every intended change locally on the worker branch unless Jonat explicitly says not to commit. For a read-only task, make no commit.
+4. When finished, the worker reports what changed, why, verification results, worktree path, branch, commit SHA when applicable, and final status, then stops in the worktree.
+5. Do not merge or otherwise integrate the worker into local `main`. Do not hand the task off to Local, apply its patch from another task, push any branch, or open a pull request unless Jonat explicitly requests that separate action after reviewing the completed worker.
+6. "Do not push" is not permission to merge locally. Commit, merge, handoff, push, and pull-request creation are separate actions; integration into `main` always requires an explicit user request.
+
+This launcher/worker behavior should be driven from Jonat's natural-language request. Do not require him to configure branches, paths, helper scripts, or task settings manually when app task/worktree controls are available. Use hidden subagents only for bounded subtasks inside the worker; do not substitute a hidden subagent for the requested user-visible worktree task.
+
+### Explicit integration only
+
+Only when Jonat explicitly asks to merge or integrate a completed worker into local `main`:
+
+1. Review the worker diff, exclude unrelated changes, and ensure every intended worker change is committed.
+2. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`.
+3. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
+4. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
+5. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
+6. Do not push the worker branch or `main` unless Jonat explicitly asks for a push.
 
 ## Local development commands
 
