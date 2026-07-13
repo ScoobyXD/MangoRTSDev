@@ -30,7 +30,7 @@ async function flushAsyncWork() {
   });
 }
 
-test("NodeTextBlockEditor restores its attachment hydrator after StrictMode replay", async () => {
+test("NodeTextBlockEditor restores its attachment hydrator after StrictMode replay", { timeout: 5_000 }, async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -281,11 +281,16 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const pendingContainer = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(pendingContainer);
     let pendingFetchSignal: AbortSignal | null = null;
+    let resolvePendingFetchAbort!: () => void;
+    const pendingFetchAbort = new Promise<void>((resolve) => {
+      resolvePendingFetchAbort = resolve;
+    });
     fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       fetchedURLs.push(String(input));
       pendingFetchSignal = init?.signal ?? null;
       return new Promise<Response>((_resolve, reject) => {
         pendingFetchSignal?.addEventListener("abort", () => {
+          resolvePendingFetchAbort();
           reject(new DOMException("The operation was aborted.", "AbortError"));
         }, { once: true });
       });
@@ -304,7 +309,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       pendingRoot.unmount();
     });
     pendingMountedRoot = null;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await pendingFetchAbort;
     await flushAsyncWork();
     assert.equal(pendingFetchSignal?.aborted, true);
     assert.equal(activeObservers, 0);

@@ -2034,6 +2034,13 @@ type communicationsInlineImageReference struct {
 	ContentID    string
 }
 
+func communicationsAttachmentID(item NylasAttachment) string {
+	if attachmentID := strings.TrimSpace(item.AttachmentID); attachmentID != "" {
+		return attachmentID
+	}
+	return strings.TrimSpace(item.ID)
+}
+
 func prepareCommunicationsInlineImageAttachments(body string, items []NylasAttachment) (string, []NylasAttachment) {
 	references := make([]communicationsInlineImageReference, 0)
 	seenAttachmentIDs := make(map[string]struct{})
@@ -2071,10 +2078,7 @@ func prepareCommunicationsInlineImageAttachments(body string, items []NylasAttac
 	prepared := append([]NylasAttachment(nil), items...)
 	itemIndexByAttachmentID := make(map[string]int, len(prepared))
 	for index, item := range prepared {
-		attachmentID := strings.TrimSpace(item.AttachmentID)
-		if attachmentID == "" {
-			attachmentID = strings.TrimSpace(item.ID)
-		}
+		attachmentID := communicationsAttachmentID(item)
 		if attachmentID != "" {
 			itemIndexByAttachmentID[attachmentID] = index
 		}
@@ -2104,20 +2108,12 @@ func communicationsInlineImageContentID(attachmentID string) string {
 
 func communicationsSendHasAttachmentReference(items []NylasAttachment) bool {
 	for _, item := range items {
-		attachmentID := strings.TrimSpace(item.AttachmentID)
-		if attachmentID == "" {
-			attachmentID = strings.TrimSpace(item.ID)
-		}
+		attachmentID := communicationsAttachmentID(item)
 		if validAttachmentUUIDText(attachmentID) && strings.TrimSpace(item.Content) == "" {
 			return true
 		}
 	}
 	return false
-}
-
-type communicationsAttachmentAccessResult struct {
-	allowed bool
-	err     error
 }
 
 func validCommunicationsSendAttachmentContent(content store.AttachmentContentRead, companyID, attachmentID string) bool {
@@ -2148,15 +2144,12 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 	cleaned := make([]NylasAttachment, 0, len(items))
 	outbound := make([]NylasOutboundAttachment, 0, len(items))
 	contentByAttachmentID := make(map[string]store.AttachmentContentRead, len(items))
-	accessByResource := make(map[string]communicationsAttachmentAccessResult)
+	accessByResource := make(map[string]bool)
 	var totalDeclaredBytes int64
 	storage := s.attachmentStorage
 
 	for _, item := range items {
-		attachmentID := strings.TrimSpace(item.AttachmentID)
-		if attachmentID == "" {
-			attachmentID = strings.TrimSpace(item.ID)
-		}
+		attachmentID := communicationsAttachmentID(item)
 		if strings.TrimSpace(item.Filename) == "" && attachmentID == "" {
 			continue
 		}
@@ -2202,22 +2195,10 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 		}
 		totalDeclaredBytes += content.ByteSize
 
-		contentType := strings.TrimSpace(item.ContentType)
-		if contentType == "" {
-			contentType = strings.TrimSpace(content.MimeType)
-		}
-		if contentType == "" {
-			contentType = strings.TrimSpace(content.OriginalMimeType)
-		}
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
+		contentType := firstNonBlank(item.ContentType, content.MimeType, content.OriginalMimeType, "application/octet-stream")
 		filename := strings.TrimSpace(item.Filename)
-		if filename == "" {
-			filename = "attachment"
-		}
-		if filename == "attachment" && strings.TrimSpace(content.OriginalFilename) != "" {
-			filename = content.OriginalFilename
+		if filename == "" || filename == "attachment" {
+			filename = firstNonBlank(content.OriginalFilename, "attachment")
 		}
 
 		metadata := NylasAttachment{
@@ -2234,14 +2215,10 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 
 		storageKey := strings.TrimSpace(content.StorageKey)
 		outbound = append(outbound, NylasOutboundAttachment{
-			ID:                 metadata.ID,
-			AttachmentID:       metadata.AttachmentID,
-			Filename:           metadata.Filename,
-			ContentType:        metadata.ContentType,
-			ContentID:          metadata.ContentID,
-			ContentDisposition: metadata.ContentDisposition,
-			IsInline:           metadata.IsInline,
-			Size:               metadata.Size,
+			Filename:    metadata.Filename,
+			ContentType: metadata.ContentType,
+			ContentID:   metadata.ContentID,
+			Size:        metadata.Size,
 			Open: func(ctx context.Context) (NylasOutboundAttachmentContent, error) {
 				output, err := storage.GetObject(ctx, AttachmentGetObjectInput{Key: storageKey})
 				if err != nil {
@@ -2257,21 +2234,22 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 	return cleaned, outbound, true
 }
 
-func (s *Server) canSendAttachmentThroughResourceLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment, accessByResource map[string]communicationsAttachmentAccessResult) bool {
+func (s *Server) canSendAttachmentThroughResourceLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment, accessByResource map[string]bool) bool {
 	for _, link := range links {
 		resourceType := store.NormalizeAttachmentResourceType(link.ResourceType)
 		resourceID := strings.TrimSpace(link.ResourceID)
 		accessKey := resourceType + "\x00" + resourceID
-		access, exists := accessByResource[accessKey]
+		allowed, exists := accessByResource[accessKey]
 		if !exists {
-			access.allowed, access.err = s.canViewAttachmentResource(r, companyID, resourceType, resourceID)
-			accessByResource[accessKey] = access
+			var err error
+			allowed, err = s.canViewAttachmentResource(r, companyID, resourceType, resourceID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
+				return false
+			}
+			accessByResource[accessKey] = allowed
 		}
-		if access.err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
-			return false
-		}
-		if access.allowed {
+		if allowed {
 			return true
 		}
 	}

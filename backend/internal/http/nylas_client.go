@@ -352,15 +352,11 @@ type NylasAttachment struct {
 // an exact-size, one-shot opener so stored objects can flow directly into the
 // provider request without raw bytes or readers escaping into response JSON.
 type NylasOutboundAttachment struct {
-	ID                 string
-	AttachmentID       string
-	Filename           string
-	ContentType        string
-	ContentID          string
-	ContentDisposition string
-	IsInline           bool
-	Size               int64
-	Open               NylasOutboundAttachmentOpener
+	Filename    string
+	ContentType string
+	ContentID   string
+	Size        int64
+	Open        NylasOutboundAttachmentOpener
 }
 
 type NylasOutboundAttachmentOpener func(context.Context) (NylasOutboundAttachmentContent, error)
@@ -545,7 +541,6 @@ func (c *NylasRESTClient) SendMessage(ctx context.Context, grantID string, reque
 	if len(request.OutboundAttachments) > 0 {
 		return c.sendMessageMultipart(ctx, grantID, request)
 	}
-	request.OutboundAttachments = nil
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
@@ -629,7 +624,6 @@ func buildNylasMultipartPlan(request NylasSendMessageRequest) (nylasMultipartPla
 	}
 	messageRequest := request
 	messageRequest.Attachments = nil
-	messageRequest.OutboundAttachments = nil
 	messageRaw, err := json.Marshal(messageRequest)
 	if err != nil {
 		return nylasMultipartPlan{}, err
@@ -715,9 +709,7 @@ func newNylasMultipartStream(ctx context.Context, plan nylasMultipartPlan) *nyla
 		} else {
 			_ = writer.Close()
 		}
-		stream.mu.Lock()
 		stream.encodeErr = err
-		stream.mu.Unlock()
 		close(stream.done)
 	}()
 	go func() {
@@ -747,8 +739,6 @@ func (s *nylasMultipartStream) Close() error {
 
 func (s *nylasMultipartStream) Err() error {
 	<-s.done
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.encodeErr
 }
 

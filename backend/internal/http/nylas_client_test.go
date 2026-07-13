@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -245,7 +244,6 @@ func TestNylasRESTClientSendMessageWithAttachmentsUsesMultipart(t *testing.T) {
 		Attachments: []NylasAttachment{{
 			Filename:    "note.txt",
 			ContentType: "text/plain",
-			Content:     "aGVsbG8=",
 			Size:        5,
 		}},
 		OutboundAttachments: []NylasOutboundAttachment{{
@@ -318,7 +316,6 @@ func TestNylasRESTClientUsesInlineContentIDAsMultipartFieldName(t *testing.T) {
 		Attachments: []NylasAttachment{{
 			Filename:    "screenshot.png",
 			ContentType: "image/png",
-			Content:     "cG5nLWJ5dGVz",
 			ContentID:   contentID,
 			IsInline:    true,
 			Size:        9,
@@ -327,7 +324,6 @@ func TestNylasRESTClientUsesInlineContentIDAsMultipartFieldName(t *testing.T) {
 			Filename:    "screenshot.png",
 			ContentType: "image/png",
 			ContentID:   contentID,
-			IsInline:    true,
 			Size:        9,
 			Open: func(context.Context) (NylasOutboundAttachmentContent, error) {
 				return NylasOutboundAttachmentContent{
@@ -457,7 +453,7 @@ func TestNylasRESTClientMultipartPreservesOrderAndSingleActiveSource(t *testing.
 		},
 		OutboundAttachments: []NylasOutboundAttachment{
 			{Filename: "first.txt", ContentType: "text/plain", Size: 11, Open: firstOpen},
-			{Filename: "second.png", ContentType: "image/png", ContentID: "inline-cid", IsInline: true, Size: 12, Open: secondOpen},
+			{Filename: "second.png", ContentType: "image/png", ContentID: "inline-cid", Size: 12, Open: secondOpen},
 		},
 	})
 	if err != nil {
@@ -606,7 +602,7 @@ func TestNylasRESTClientMultipartStreamsBeforeAttachmentCompletes(t *testing.T) 
 }
 
 func TestNylasRESTClientMultipartSupportsZeroSizeAttachment(t *testing.T) {
-	source := newNylasTrackedReadCloser(io.NopCloser(bytes.NewReader(nil)))
+	source := newNylasTrackedReadCloser(io.NopCloser(strings.NewReader("")))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength <= 0 || len(r.TransferEncoding) != 0 {
 			t.Errorf("request framing = length %d transfer %v", r.ContentLength, r.TransferEncoding)

@@ -488,7 +488,6 @@ func TestCommunicationsSendValidatesBeforeAttachmentWork(t *testing.T) {
 		{name: "invalid id is not an attachment reference", attachments: []map[string]any{{"attachment_id": "not-a-valid-reference", "filename": "invalid.txt"}}},
 		{name: "raw bytes are not an attachment reference", attachments: []map[string]any{{"attachment_id": "11111111-1111-1111-1111-111111111111", "filename": "raw.txt", "content": "QUJD"}}},
 	} {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newCommunicationsSendTestFixture(t)
 			fixture.server.attachmentStorage = nil
@@ -604,7 +603,6 @@ func TestCommunicationsSendRejectsInvalidOrOversizedMetadataBeforeStorage(t *tes
 		{name: "overflow sized metadata", sizes: []int64{1, int64(1<<63 - 1)}},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newCommunicationsSendTestFixture(t)
 			attachments := make([]map[string]any, 0, len(test.sizes))
