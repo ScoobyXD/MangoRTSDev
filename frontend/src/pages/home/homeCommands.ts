@@ -287,6 +287,7 @@ export async function sendHomeMailComposeCommand(args: {
   companyID?: string;
   sharedInboxID?: string;
   connectedAccountEmail?: string;
+  currentUserID?: string;
   sendEmail?: HomeSendEmail;
 }): Promise<HomeSendMailCommandResult> {
   const to = parseEmailAddressList(args.compose.to);
@@ -327,6 +328,11 @@ export async function sendHomeMailComposeCommand(args: {
     input.shared_inbox_id = cleanSharedInboxID;
   }
   const cleanConnectedAccountEmail = args.connectedAccountEmail?.trim().toLowerCase() ?? "";
+  const cleanCurrentUserID = args.currentUserID?.trim() ?? "";
+  if (cleanCurrentUserID) {
+    input.local_user_id = cleanCurrentUserID;
+    if (cleanConnectedAccountEmail) input.local_account_email = cleanConnectedAccountEmail;
+  }
   const sentToConnectedAccount = !!cleanConnectedAccountEmail && [...to, ...cc, ...bcc].some((address) => (
     address.email.trim().toLowerCase() === cleanConnectedAccountEmail
   ));

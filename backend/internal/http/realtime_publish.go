@@ -33,6 +33,36 @@ func (s *Server) publishRealtimeMessage(companyID, scope string, message any) in
 	return published
 }
 
+func (s *Server) publishRealtimeMessageToUsers(companyID, scope string, userIDs []string, message any) int {
+	companyID = strings.TrimSpace(companyID)
+	scope = strings.TrimSpace(scope)
+	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
+		return 0
+	}
+	allowedUserIDs := map[string]struct{}{}
+	for _, userID := range userIDs {
+		if userID = strings.TrimSpace(userID); userID != "" {
+			allowedUserIDs[userID] = struct{}{}
+		}
+	}
+	if len(allowedUserIDs) == 0 || !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return 0
+	}
+	payload, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
+		return 0
+	}
+	published := s.realtimeRegistry.publishToUsers(companyID, scope, payload, allowedUserIDs)
+	if published == 0 {
+		s.recordOperationalMetric("realtime.publish_skipped_no_authorized_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return 0
+	}
+	s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(published), 0)
+	return published
+}
+
 func nodeChatProjectionDetails(items []domain.NodeProjection, messageID string) (string, bool) {
 	messageID = strings.TrimSpace(messageID)
 	for _, item := range items {

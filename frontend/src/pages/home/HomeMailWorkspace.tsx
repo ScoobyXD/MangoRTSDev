@@ -2,8 +2,8 @@ import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, formatAddressList, formatMessageDate, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
-import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
+import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
+import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators } from "./HomeParts";
 import {
   accountEmailStyle,
   accountRowStyle,
@@ -168,8 +168,8 @@ function MessageAttachmentCount({ message }: { message: EmailMessage }) {
 }
 
 function MessageThreadCount({ message }: { message: EmailMessage }) {
-  const count = message.thread_message_count ?? 0;
-  if (count <= 1) return null;
+  if (!emailMessageHasMultipleThreadMessages(message)) return null;
+  const count = emailThreadMessageCount(message);
   return <span style={messageReadStatusStyle} title={`${count} messages in this thread`}>{count} msgs</span>;
 }
 
@@ -605,6 +605,8 @@ export function HomeMailWorkspace({
                   data-home-mail-message-id={message.id}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={active}
+                  aria-label={emailMessageRowAriaLabel(message, rowAddressLabel)}
                   style={isArchivableListView
                     ? triageMessageRowStyle(active, message.unread, draggable, hovered, false)
                     : messageRowStyle(active, message.unread, hovered, false)}
@@ -619,7 +621,7 @@ export function HomeMailWorkspace({
                   onClick={(event) => onSelectMessage(message, event)}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return;
-                    if (event.key !== "Enter" && event.key !== " ") return;
+                    if (!isMailRowActivationKey(event.key)) return;
                     event.preventDefault();
                     onSelectMessage(message, event);
                   }}
@@ -630,7 +632,7 @@ export function HomeMailWorkspace({
                 >
                   {isArchivableListView ? (
                     <>
-                      <MessagePlacementIcon message={message} active={active} />
+                      <MessageLeadingIndicators message={message} active={active} />
                       <span style={triageMessageContentStyle}>
                         <strong style={triageSenderStyle}>{rowAddressLabel}</strong>
                         <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>

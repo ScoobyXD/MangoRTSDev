@@ -14,11 +14,17 @@ import {
   condenseEmailThreadMessages,
   emailAttachmentIsReferencedInline,
   emailAttachmentIsInlineContent,
+  emailMessageHasMultipleThreadMessages,
+  emailMessageRowAriaLabel,
+  emailMailboxMessageKey,
+  emailMailboxScopeKey,
+  emailThreadMessageCount,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
   getHomeViewLabel,
   inboxLogicGateLabel,
+  isMailRowActivationKey,
   isWorkspacePanelHomeViewID,
   logicGateTitle,
   messageDocument,
@@ -27,6 +33,7 @@ import {
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxCountsFromFolders,
   mailboxForHomeView,
+  missingEmailThreadMessageIDs,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
   rewriteEmailDocumentCIDSources,
@@ -36,9 +43,10 @@ import {
   setNodeDragData,
   sharedInboxCanLoadMail,
   sortEmailConversationMessagesNewestFirst,
+  unreadEmailThreadMessagesForSelection,
   visibleEmailAttachmentsForBody,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
-import { messageSelectDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
+import { messageUnreadDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
 import { GVIC_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
@@ -191,19 +199,70 @@ test("email cid image sources are rewritten to resolved sources", () => {
 });
 
 
-test("message select dot only appears for the selected email while unread rows keep their outline", () => {
-  const unreadInactiveDot = messageSelectDotStyle(false, true);
-  assert.equal(unreadInactiveDot.visibility, "hidden");
-  assert.equal(unreadInactiveDot.background, "transparent");
-  assert.equal(unreadInactiveDot.boxShadow, "none");
+test("unread dot and frame stay distinct from the full-card selected surface", () => {
+  const unreadDot = messageUnreadDotStyle(true);
+  assert.equal(unreadDot.visibility, "visible");
+  assert.notEqual(unreadDot.background, "transparent");
+  assert.notEqual(unreadDot.boxShadow, "none");
 
-  const activeDot = messageSelectDotStyle(true, false);
-  assert.equal(activeDot.visibility, "visible");
-  assert.notEqual(activeDot.background, "transparent");
+  const readDot = messageUnreadDotStyle(false);
+  assert.equal(readDot.visibility, "hidden");
+  assert.equal(readDot.background, "transparent");
+  assert.equal(readDot.boxShadow, "none");
 
   const unreadRow = triageMessageRowStyle(false, true, true);
-  assert.equal(unreadRow.border, "1px solid transparent");
+  assert.equal(unreadRow.border, "2px solid transparent");
   assert.match(String(unreadRow.background), /border-box/);
+  assert.match(String(unreadRow.background), /#38bdf8/);
+
+  const selectedReadRow = triageMessageRowStyle(true, false, true);
+  assert.equal(selectedReadRow.border, "1px solid transparent");
+  assert.match(String(selectedReadRow.background), /rgba\(25, 168, 255, 0\.12\)/);
+  assert.notEqual(selectedReadRow.background, unreadRow.background);
+
+  const selectedUnreadRow = triageMessageRowStyle(true, true, true);
+  assert.equal(selectedUnreadRow.border, "2px solid transparent");
+  assert.match(String(selectedUnreadRow.background), /rgba\(25, 168, 255, 0\.12\)/);
+  assert.match(String(selectedUnreadRow.background), /#38bdf8/);
+});
+
+test("mail row thread indicators and accessible activation use explicit message counts", () => {
+  assert.equal(emailThreadMessageCount({}), 0);
+  assert.equal(emailThreadMessageCount({ thread_message_count: Number.NaN }), 0);
+  assert.equal(emailThreadMessageCount({ thread_message_count: 2.9 }), 2);
+  assert.equal(emailMessageHasMultipleThreadMessages({ thread_message_count: 1 }), false);
+  assert.equal(emailMessageHasMultipleThreadMessages({ thread_message_count: 2 }), true);
+
+  assert.equal(
+    emailMessageRowAriaLabel({ subject: "Quarterly plan", unread: true, thread_message_count: 3 }, "Alex Example"),
+    "Unread email, Alex Example, Quarterly plan, 3 message thread",
+  );
+  assert.equal(
+    emailMessageRowAriaLabel({ subject: "", unread: false, thread_message_count: 1 }, ""),
+    "Read email, Unknown sender, (no subject)",
+  );
+
+  assert.equal(isMailRowActivationKey("Enter"), true);
+  assert.equal(isMailRowActivationKey(" "), true);
+  assert.equal(isMailRowActivationKey("Spacebar"), false);
+  assert.equal(isMailRowActivationKey("Escape"), false);
+});
+
+test("local read mutation keys isolate identical provider ids by user and mailbox scope", () => {
+  const personalA = emailMailboxScopeKey("company-1", "user-a", "A@Example.com", "");
+  const personalB = emailMailboxScopeKey("company-1", "user-b", "a@example.com", "");
+  const personalOtherAccount = emailMailboxScopeKey("company-1", "user-a", "other@example.com", "");
+  const sharedA = emailMailboxScopeKey("company-1", "user-a", "shared@example.com", "shared-a");
+  const sharedB = emailMailboxScopeKey("company-1", "user-a", "shared@example.com", "shared-b");
+
+  assert.equal(
+    emailMailboxMessageKey(personalA, "provider-message-1"),
+    emailMailboxMessageKey(emailMailboxScopeKey(" company-1 ", " user-a ", "a@example.com", ""), " provider-message-1 "),
+  );
+  assert.notEqual(emailMailboxMessageKey(personalA, "provider-message-1"), emailMailboxMessageKey(personalB, "provider-message-1"));
+  assert.notEqual(emailMailboxMessageKey(personalA, "provider-message-1"), emailMailboxMessageKey(personalOtherAccount, "provider-message-1"));
+  assert.notEqual(emailMailboxMessageKey(personalA, "provider-message-1"), emailMailboxMessageKey(sharedA, "provider-message-1"));
+  assert.notEqual(emailMailboxMessageKey(sharedA, "provider-message-1"), emailMailboxMessageKey(sharedB, "provider-message-1"));
 });
 
 test("triage email list condenses messages from the same Nylas thread into one visible row", () => {
@@ -230,6 +289,76 @@ test("triage email list condenses messages from the same Nylas thread into one v
   assert.equal(afterReply[0].thread_message_count, 3);
   assert.equal(afterReply[0].unread, true);
   assert.equal(afterReply[0].starred, true);
+
+  const partiallyLoadedAuthoritativeThread = condenseEmailThreadMessages([
+    emailMessage("latest-only", "thread-authoritative", 500, { thread_message_count: 4 }),
+  ]);
+  assert.equal(partiallyLoadedAuthoritativeThread[0]?.thread_message_count, 4);
+  assert.equal(emailMessageHasMultipleThreadMessages(partiallyLoadedAuthoritativeThread[0] ?? {}), true);
+});
+
+test("selecting an aggregated unread thread targets every loaded unread member and leaves unrelated threads alone", () => {
+  const rawMessages = [
+    emailMessage("latest-read", "thread-1", 300, { unread: false }),
+    emailMessage("older-unread", "thread-1", 200, { unread: true }),
+    emailMessage("oldest-unread", "thread-1", 100, { unread: true }),
+    emailMessage("other-unread", "thread-2", 250, { unread: true }),
+  ];
+  const selectedCard = condenseEmailThreadMessages(rawMessages)[0];
+  assert.equal(selectedCard?.id, "latest-read");
+  assert.equal(selectedCard?.unread, true);
+  assert.deepEqual(
+    unreadEmailThreadMessagesForSelection(rawMessages, selectedCard ?? emailMessage("", "", 0)).map((message) => message.id),
+    ["older-unread", "oldest-unread"],
+  );
+});
+
+test("external inbound, user sent reply, and next inbound stay one thread without absorbing forwards", () => {
+  const condensed = condenseEmailThreadMessages([
+    emailMessage("external-latest", "provider-thread-1", 300, { unread: true, from: [{ email: "external@example.test" }] }),
+    emailMessage("user-sent", "provider-thread-1", 200, { folders: ["sent"], from: [{ email: "me@example.test" }] }),
+    emailMessage("external-original", "provider-thread-1", 100, { from: [{ email: "external@example.test" }] }),
+    emailMessage("forwarded-one-off", "", 250, { subject: "Fwd: unrelated" }),
+    emailMessage("different-thread", "provider-thread-2", 150),
+  ]);
+
+  assert.deepEqual(condensed.map((message) => message.id), [
+    "external-latest",
+    "forwarded-one-off",
+    "different-thread",
+  ]);
+  assert.equal(condensed[0]?.thread_message_count, 3);
+  assert.equal(condensed[0]?.thread_unread_count, 1);
+  assert.equal(condensed[1]?.thread_message_count, 1);
+  assert.equal(condensed[2]?.thread_message_count, 1);
+});
+
+test("authoritative thread hydration plans exact missing sent and received messages without subject-based merging", () => {
+  const loadedExternalConversation = [
+    emailMessage("external-latest", "provider-thread-1", 300),
+    emailMessage("external-original", "provider-thread-1", 100),
+    emailMessage("forwarded-unrelated", "", 250, { subject: "Fwd: Subject" }),
+  ];
+  assert.deepEqual(
+    missingEmailThreadMessageIDs(
+      ["external-original", "user-sent", "external-latest"],
+      "external-latest",
+      loadedExternalConversation,
+    ),
+    ["user-sent"],
+  );
+  assert.deepEqual(
+    missingEmailThreadMessageIDs(
+      ["user-original", "external-reply", "user-second", "external-latest", "external-reply"],
+      "external-latest",
+      [emailMessage("external-latest", "provider-thread-2", 400), emailMessage("user-original", "provider-thread-2", 100)],
+    ),
+    ["external-reply", "user-second"],
+  );
+  assert.deepEqual(
+    missingEmailThreadMessageIDs([], "one-off", [emailMessage("forwarded-unrelated", "", 250)]),
+    [],
+  );
 });
 
 test("conversation messages are newest first with a deterministic id tie-breaker", () => {

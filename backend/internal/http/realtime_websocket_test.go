@@ -53,11 +53,13 @@ func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	}
 }
 
-func TestRealtimeWebSocketOnlyAllowsNotificationChatAndBoardScopes(t *testing.T) {
+func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardScopes(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222222"
+	repo.EnsureCompany(companyID, "Realtime scope test")
 	token := "realtime-scopes-token"
 	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-scopes", domain.RoleCompanyUser)
+	otherUser := mustRealtimeAuthUser(t, repo, companyID, "realtime-scopes-other", domain.RoleCompanyUser)
 	node, err := repo.CreateNode(companyID, "Chat node")
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +68,31 @@ func TestRealtimeWebSocketOnlyAllowsNotificationChatAndBoardScopes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID: companyID, Provider: "google", AccountEmail: "support@example.com",
+		GrantID: "realtime-support-grant", Status: "connected", ConnectedByUserID: user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sharedInbox, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID: companyID, Provider: "google", AccountEmail: "private@example.com",
+		GrantID: "realtime-private-grant", Status: "connected", ConnectedByUserID: user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenInbox, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Private", "private@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, input := range []store.EntityPermissionUpdateInput{
 		{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
 		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: sharedInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: hiddenInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true},
 	} {
 		if _, err := repo.SetEntityPermissions(input); err != nil {
 			t.Fatal(err)
@@ -79,7 +103,13 @@ func TestRealtimeWebSocketOnlyAllowsNotificationChatAndBoardScopes(t *testing.T)
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	allowed := []string{realtimeNotificationScope(user.UserID), realtimeChatScope(node.NodeID), realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID))}
+	allowed := []string{
+		realtimeNotificationScope(user.UserID),
+		realtimePersonalMailboxScope(user.UserID),
+		realtimeSharedMailboxScope(sharedInbox.FolderID),
+		realtimeChatScope(node.NodeID),
+		realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID)),
+	}
 	for _, scope := range allowed {
 		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 		message := client.readJSON(t)
@@ -87,17 +117,26 @@ func TestRealtimeWebSocketOnlyAllowsNotificationChatAndBoardScopes(t *testing.T)
 			t.Fatalf("scope %s response = %+v", scope, message)
 		}
 	}
-	forbidden := []string{
-		"workspace:user:" + user.UserID, "company_explorer:user:" + user.UserID,
-		"node_graph:user:" + user.UserID, "logic_gate_graph:user:" + user.UserID,
-		"gvic_matrix:user:" + user.UserID, "project_management:user:" + user.UserID,
-		"communications:user:" + user.UserID, "editor:node:" + node.NodeID,
+	forbidden := []struct {
+		scope string
+		error string
+	}{
+		{scope: realtimePersonalMailboxScope(otherUser.UserID), error: "access_denied"},
+		{scope: realtimeSharedMailboxScope(hiddenInbox.FolderID), error: "access_denied"},
+		{scope: "workspace:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "company_explorer:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "node_graph:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "logic_gate_graph:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "gvic_matrix:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "project_management:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "communications:user:" + user.UserID, error: "unsupported_scope"},
+		{scope: "editor:node:" + node.NodeID, error: "unsupported_scope"},
 	}
-	for _, scope := range forbidden {
-		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	for _, test := range forbidden {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": test.scope})
 		message := client.readJSON(t)
-		if message["type"] != realtimeMessageSubscriptionRejected || message["error"] != "unsupported_scope" {
-			t.Fatalf("forbidden scope %s response = %+v", scope, message)
+		if message["type"] != realtimeMessageSubscriptionRejected || message["error"] != test.error {
+			t.Fatalf("forbidden scope %s response = %+v, want error %s", test.scope, message, test.error)
 		}
 	}
 }

@@ -185,6 +185,26 @@ func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload 
 	return published
 }
 
+func (r *realtimeSubscriptionRegistry) publishToUsers(companyID, scope string, payload []byte, allowedUserIDs map[string]struct{}) int {
+	if len(allowedUserIDs) == 0 {
+		return 0
+	}
+	connections := r.connectionsForScope(companyID, scope)
+	published := 0
+	for _, conn := range connections {
+		if conn == nil {
+			continue
+		}
+		if _, allowed := allowedUserIDs[strings.TrimSpace(conn.userID)]; !allowed {
+			continue
+		}
+		if conn.sendText(payload) == nil {
+			published++
+		}
+	}
+	return published
+}
+
 func (r *realtimeSubscriptionRegistry) publishToConnection(connectionID, companyID, scope string, payload []byte) bool {
 	conn := r.connectionForSubscription(connectionID, companyID, scope)
 	return conn != nil && conn.sendText(payload) == nil

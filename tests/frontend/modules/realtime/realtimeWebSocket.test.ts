@@ -9,14 +9,18 @@ import {
   isSupportedRealtimeScope,
   MangoRealtimeClient,
   parseRealtimeMessage,
+  realtimePersonalMailboxScope,
+  realtimeSharedMailboxScope,
   realtimeWebSocketURL,
   type RealtimeChatMessageCreatedMessage,
   type RealtimeChatMessageDeletedMessage,
   type RealtimeKanbanChangedMessage,
+  type RealtimeMailboxFolderChangedMessage,
+  type RealtimeMailboxMessageChangedMessage,
   type RealtimeNotificationCreatedMessage,
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
-test("parses the three retained product message families", () => {
+test("parses retained product and scoped mailbox message families", () => {
   const notification = parseRealtimeMessage(JSON.stringify({
     type: "notification.created",
     company_id: "company-1",
@@ -64,6 +68,27 @@ test("parses the three retained product message families", () => {
   })) as RealtimeKanbanChangedMessage;
   assert.equal(board.board_id, "logic-gate:gate-1");
   assert.equal(board.change_type, "card.moved");
+
+  const mailboxMessage = parseRealtimeMessage(JSON.stringify({
+    type: "mailbox.message.changed",
+    company_id: "company-1",
+    scope: "mailbox:personal:user:user-1",
+    trigger: "message.created",
+    message_id: "message-2",
+    thread_id: "thread-1",
+    occurred_at: "2026-07-13T12:00:00Z",
+  })) as RealtimeMailboxMessageChangedMessage;
+  assert.equal(mailboxMessage.message_id, "message-2");
+  assert.equal(mailboxMessage.thread_id, "thread-1");
+
+  const mailboxFolder = parseRealtimeMessage(JSON.stringify({
+    type: "mailbox.folder.changed",
+    company_id: "company-1",
+    scope: "mailbox:shared:shared-1",
+    trigger: "folder.updated",
+    shared_inbox_id: "shared-1",
+  })) as RealtimeMailboxFolderChangedMessage;
+  assert.equal(mailboxFolder.shared_inbox_id, "shared-1");
 });
 
 test("rejects deleted broad protocol messages", () => {
@@ -72,10 +97,14 @@ test("rejects deleted broad protocol messages", () => {
   }
 });
 
-test("allows only notification, node-chat, and board scope families", () => {
+test("allows only narrow notification, mailbox, node-chat, and board scope families", () => {
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
+  assert.equal(isSupportedRealtimeScope("mailbox:personal:user:user-1"), true);
+  assert.equal(isSupportedRealtimeScope("mailbox:shared:shared-1"), true);
+  assert.equal(realtimePersonalMailboxScope(" user-1 "), "mailbox:personal:user:user-1");
+  assert.equal(realtimeSharedMailboxScope(" shared-1 "), "mailbox:shared:shared-1");
   assert.equal(isSupportedRealtimeScope("workspace:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("communications:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("editor:node:node-1"), false);
@@ -141,14 +170,16 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     let notifications = 0;
     let chat = 0;
     let board = 0;
+    let mailbox = 0;
     const unsubNotifications = client.subscribe("notifications:user:user-1", { onNotificationCreated: () => { notifications += 1; } });
     const unsubChat = client.subscribe("chat:node:node-1", { onChatMessageCreated: () => { chat += 1; } });
     const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onKanbanChanged: () => { board += 1; } });
+    const unsubMailbox = client.subscribe("mailbox:personal:user:user-1", { onMailboxMessageChanged: () => { mailbox += 1; } });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 
     assert.equal(sockets.length, 1);
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
-    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "notifications:user:user-1"]);
+    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:user:user-1", "notifications:user:user-1"]);
 
     sockets[0].onmessage?.({ data: JSON.stringify({
       type: "notification.created",
@@ -158,14 +189,17 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "kanban.changed", company_id: "company-1", scope: "board:logic-gate:gate-1", board_id: "logic-gate:gate-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:user:user-1", trigger: "message.created", message_id: "mail-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:other", node_id: "other", block_id: "block-1", message_id: "m-2" }) });
 
     assert.equal(notifications, 1);
     assert.equal(chat, 1);
     assert.equal(board, 1);
+    assert.equal(mailbox, 1);
     unsubNotifications();
     unsubChat();
     unsubBoard();
+    unsubMailbox();
     client.close();
   } finally {
     globalThis.WebSocket = originalWebSocket;
@@ -188,7 +222,7 @@ test("terminal authentication failure does not reconnect", async () => {
   client.close();
 });
 
-test("frontend source inventory contains only the three retained scope families", () => {
+test("frontend source inventory contains only retained narrow scope families", () => {
   const sourceRoot = resolve(process.cwd(), "frontend/src");
   const sourceFiles = listSourceFiles(sourceRoot);
   const combined = sourceFiles.map((file) => readFileSync(file, "utf8")).join("\n");
@@ -220,11 +254,12 @@ test("frontend source inventory contains only the three retained scope families"
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-  assert.equal(subscriptionSources.length, 3);
+  assert.equal(subscriptionSources.length, 4);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppLiveFreshnessBridge.tsx",
     "modules/editor/EditorContent.tsx",
     "modules/kanban/KanbanContent.tsx",
+    "pages/home/HomePage.tsx",
   ]);
 });
 

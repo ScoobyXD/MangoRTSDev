@@ -263,7 +263,12 @@ export async function apiFetchJSON<T>(path: string, init?: RequestInit): Promise
     if (response.status === 401 && !PUBLIC_AUTH_PATHS.has(path)) {
       markTerminalAuthFailure("api_401");
     }
-    throw new Error(apiErrorMessage(response, text));
+    const payload = parseErrorPayload(text);
+    throw Object.assign(new Error(apiErrorMessage(response, text)), {
+      name: "APIRequestError",
+      status: response.status,
+      code: stringValue(payload?.error),
+    });
   }
   return response.json() as Promise<T>;
 }

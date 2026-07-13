@@ -7,6 +7,7 @@ import {
   invalidateMangoResourceAttachmentsCache,
   linkMangoResourceAttachment,
   listMangoResourceAttachments,
+  mangoEmailDraftResourceID,
   mangoEmailSignatureResourceID,
   unlinkMangoResourceAttachment,
   type AttachmentRequestJSON,
@@ -138,6 +139,19 @@ test("signature attachment resource IDs require a complete personal mailbox scop
   assert.equal(mangoEmailSignatureResourceID({ userID: "user-1" }), "");
   assert.equal(mangoEmailSignatureResourceID({ accountEmail: "person@example.test" }), "");
   assert.equal(mangoEmailSignatureResourceID({ sharedInboxID: " shared-1 " }), "shared:shared-1");
+});
+
+test("draft attachment resource IDs separate personal accounts and shared inboxes", () => {
+  assert.equal(mangoEmailDraftResourceID({
+    draftID: " draft:1 ",
+    userID: " user-1 ",
+    accountEmail: " Person@Example.Test ",
+  }), "personal:user-1:person%40example.test:draft%3A1");
+  assert.equal(mangoEmailDraftResourceID({ draftID: "draft:1", userID: "user-1" }), "");
+  assert.equal(mangoEmailDraftResourceID({
+    draftID: "draft:1",
+    sharedInboxID: " shared-1 ",
+  }), "shared:shared-1:draft%3A1");
 });
 
 test("filters node text-block files without changing the source list", () => {
