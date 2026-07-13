@@ -155,6 +155,33 @@ export function emailThreadKey(message: Pick<EmailMessage, "id" | "thread_id">):
   return `message:${message.id.trim()}`;
 }
 
+export function emailThreadMessageCount(message: Pick<EmailMessage, "thread_message_count">): number {
+  const count = message.thread_message_count ?? 0;
+  if (!Number.isFinite(count)) return 0;
+  return Math.max(0, Math.floor(count));
+}
+
+export function emailMessageHasMultipleThreadMessages(message: Pick<EmailMessage, "thread_message_count">): boolean {
+  return emailThreadMessageCount(message) > 1;
+}
+
+export function emailMessageRowAriaLabel(
+  message: Pick<EmailMessage, "subject" | "unread" | "thread_message_count">,
+  addressLabel: string,
+): string {
+  const threadMessageCount = emailThreadMessageCount(message);
+  return [
+    message.unread ? "Unread email" : "Read email",
+    addressLabel.trim() || "Unknown sender",
+    message.subject.trim() || "(no subject)",
+    threadMessageCount > 1 ? `${threadMessageCount} message thread` : "",
+  ].filter(Boolean).join(", ");
+}
+
+export function isMailRowActivationKey(key: string): boolean {
+  return key === "Enter" || key === " ";
+}
+
 export function sortEmailConversationMessagesNewestFirst(messages: EmailMessage[]): EmailMessage[] {
   return [...messages].sort((a, b) => {
     const aDate = Number.isFinite(a.date ?? 0) ? (a.date ?? 0) : 0;
@@ -184,15 +211,53 @@ export function condenseEmailThreadMessages(messages: EmailMessage[]): EmailMess
     const representative = group[0];
     if (!representative) continue;
     const unreadCount = group.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
+    const authoritativeMessageCount = group.reduce((count, message) => (
+      Math.max(count, emailThreadMessageCount(message))
+    ), 0);
     condensed.push({
       ...representative,
       unread: unreadCount > 0,
       starred: group.some((message) => message.starred),
-      thread_message_count: group.length,
+      thread_message_count: Math.max(group.length, authoritativeMessageCount),
       thread_unread_count: unreadCount,
     });
   }
   return condensed;
+}
+
+export function unreadEmailThreadMessagesForSelection(
+  messages: EmailMessage[],
+  selected: EmailMessage,
+): EmailMessage[] {
+  if (!selected.id.trim() || !selected.unread) return [];
+  const threadID = selected.thread_id?.trim() ?? "";
+  const matches = messages.filter((message) => (
+    message.unread
+    && (threadID
+      ? (message.thread_id?.trim() ?? "") === threadID
+      : message.id === selected.id)
+  ));
+  return matches.length > 0 ? matches : [selected];
+}
+
+export function missingEmailThreadMessageIDs(
+  authoritativeMessageIDs: string[],
+  selectedMessageID: string,
+  loadedMessages: EmailMessage[],
+): string[] {
+  const loadedIDs = new Set([
+    selectedMessageID,
+    ...loadedMessages.map((message) => message.id),
+  ].map((id) => id.trim()).filter(Boolean));
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  for (const rawID of authoritativeMessageIDs) {
+    const messageID = rawID.trim();
+    if (!messageID || loadedIDs.has(messageID) || seen.has(messageID)) continue;
+    seen.add(messageID);
+    missing.push(messageID);
+  }
+  return missing;
 }
 
 export function getHomeGridTemplateColumns(widths: HomeColumnWidths): string {
@@ -979,6 +1044,25 @@ export function canDragTriageMessageFromMailbox(mailbox: EmailMailbox): boolean 
 
 export function messageListFilterKey(companyID: string, viewID: HomeViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
   return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
+}
+
+export function emailMailboxScopeKey(
+  companyID: string,
+  userID: string,
+  accountEmail: string,
+  sharedInboxID: string,
+): string {
+  const cleanSharedInboxID = sharedInboxID.trim();
+  return JSON.stringify([
+    companyID.trim(),
+    userID.trim(),
+    cleanSharedInboxID ? "shared" : "personal",
+    cleanSharedInboxID || accountEmail.trim().toLowerCase(),
+  ]);
+}
+
+export function emailMailboxMessageKey(mailboxScopeKey: string, messageID: string): string {
+  return JSON.stringify([mailboxScopeKey, messageID.trim()]);
 }
 
 export function isArchivableHomeViewID(viewID: HomeViewID): boolean {

@@ -31,6 +31,7 @@ const HOME_MAIL_STAR_EDGE_FRAME = "linear-gradient(135deg, #facc15 0%, #fde68a 4
 const HOME_MAIL_STAR_EDGE_SHADOW = "0 0 0 2px rgba(250, 204, 21, 0.28), 0 0 28px rgba(250, 204, 21, 0.46), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const HOME_NODE_ICON_BLUE = "#19a8ff";
 const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
+const HOME_MAIL_SELECTED_SURFACE = `linear-gradient(${HOME_NODE_ICON_BLUE_SOFT}, ${HOME_NODE_ICON_BLUE_SOFT})`;
 const HOME_LOGIC_GATE_GREEN = "#19f07a";
 const HOME_LOGIC_GATE_GREEN_SOFT = "rgba(25, 240, 122, 0.12)";
 const HOME_LOGIC_GATE_GREEN_BORDER = "rgba(25, 240, 122, 0.72)";
@@ -1897,16 +1898,20 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
   const outlined = framed || unread;
   const frameBackground = pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
   const borderColor = pendingStarred || outlined ? "transparent" : HOME_KEY_SOFT_BORDER;
+  const rowSurface = active
+    ? `${HOME_MAIL_SELECTED_SURFACE} padding-box, ${HOME_KEY_ACTIVE_SURFACE} padding-box`
+    : `${HOME_KEY_SURFACE} padding-box`;
   return {
     display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) 108px",
+    gridTemplateColumns: "28px minmax(0, 1fr) 108px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${borderColor}`,
+    boxSizing: "border-box",
+    border: `${unread ? 2 : 1}px solid ${borderColor}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
     background: outlined
-      ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${frameBackground} border-box`
+      ? `${rowSurface}, ${frameBackground} border-box`
       : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
     color: "#111827",
@@ -1927,17 +1932,40 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
   };
 }
 
-export function messageSelectDotStyle(active: boolean, _unread: boolean): React.CSSProperties {
+export const messageLeadingIndicatorsStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 5,
+};
+
+export function messageUnreadDotStyle(unread: boolean): React.CSSProperties {
   return {
     width: 9,
     height: 9,
     marginTop: 4,
+    alignSelf: "flex-start",
+    flexShrink: 0,
     borderRadius: 9,
-    visibility: active ? "visible" : "hidden",
-    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : "transparent",
-    boxShadow: active
+    visibility: unread ? "visible" : "hidden",
+    background: unread ? HOME_KEY_EDGE_FRAME_GRADIENT : "transparent",
+    boxShadow: unread
       ? "0 0 0 4px rgba(92, 238, 255, 0.18), 0 0 13px rgba(183, 124, 255, 0.34), 2px 2px 5px rgba(157, 171, 191, 0.5)"
       : "none",
+  };
+}
+
+export function messageThreadIconStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 22,
+    height: 20,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    color: active ? "#0284c7" : HOME_CYAN,
+    filter: active ? "drop-shadow(0 0 4px rgba(25, 168, 255, 0.34))" : undefined,
   };
 }
 

@@ -337,11 +337,14 @@ export function mangoAttachmentContentPath(companyID: string, attachmentID: stri
   return `/v1/attachments/${encodeURIComponent(attachmentID.trim())}/content?${query.toString()}`;
 }
 
-export function mangoEmailDraftResourceID(input: { draftID: string; userID?: string; sharedInboxID?: string }): string {
+export function mangoEmailDraftResourceID(input: { draftID: string; userID?: string; accountEmail?: string; sharedInboxID?: string }): string {
   const draftID = input.draftID.trim();
   const sharedInboxID = input.sharedInboxID?.trim() ?? "";
   if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}:${encodeURIComponent(draftID)}`;
-  return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(draftID)}`;
+  const userID = input.userID?.trim() ?? "";
+  const accountEmail = input.accountEmail?.trim().toLowerCase() ?? "";
+  if (!userID || !accountEmail || !draftID) return "";
+  return `personal:${encodeURIComponent(userID)}:${encodeURIComponent(accountEmail)}:${encodeURIComponent(draftID)}`;
 }
 
 export function mangoEmailSignatureResourceID(input: { userID?: string; accountEmail?: string; sharedInboxID?: string }): string {

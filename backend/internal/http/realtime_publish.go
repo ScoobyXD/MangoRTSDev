@@ -9,22 +9,46 @@ import (
 	"strings"
 )
 
-func (s *Server) publishRealtimeMessage(companyID, scope string, message any) {
+func (s *Server) publishRealtimeMessage(companyID, scope string, message any) int {
+	return s.publishRealtimeMessageWithAudience(companyID, scope, nil, message)
+}
+
+func (s *Server) publishRealtimeMessageToUsers(companyID, scope string, userIDs []string, message any) int {
+	allowedUserIDs := map[string]struct{}{}
+	for _, userID := range userIDs {
+		if userID = strings.TrimSpace(userID); userID != "" {
+			allowedUserIDs[userID] = struct{}{}
+		}
+	}
+	return s.publishRealtimeMessageWithAudience(companyID, scope, allowedUserIDs, message)
+}
+
+func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
 	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
-		return
+		return 0
+	}
+	restrictedAudience := allowedUserIDs != nil
+	if restrictedAudience && len(allowedUserIDs) == 0 {
+		s.recordOperationalMetric("realtime.publish_skipped_no_authorized_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return 0
 	}
 	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return
+		return 0
 	}
 	payload, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
-		return
+		return 0
 	}
-	result := s.realtimeRegistry.publish(companyID, scope, payload)
+	result := realtimePublishResult{}
+	if restrictedAudience {
+		result = s.realtimeRegistry.publishToUsers(companyID, scope, payload, allowedUserIDs)
+	} else {
+		result = s.realtimeRegistry.publish(companyID, scope, payload)
+	}
 	attempted := result.delivered + result.failed
 	if result.failed > 0 {
 		log.Printf("realtime_delivery_failed company_id=%s scope_type=%s scope=%s attempted=%d failed=%d", companyID, realtimeScopeType(scope), scope, attempted, result.failed)
@@ -33,12 +57,17 @@ func (s *Server) publishRealtimeMessage(companyID, scope string, message any) {
 		s.recordRealtimeActiveSubscriptions()
 	}
 	if attempted == 0 {
-		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return
+		metric := "realtime.publish_skipped_no_subscribers_count"
+		if restrictedAudience {
+			metric = "realtime.publish_skipped_no_authorized_subscribers_count"
+		}
+		s.recordOperationalMetric(metric, realtimeScopeType(scope), 1, 0)
+		return 0
 	}
 	if result.delivered > 0 {
 		s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(result.delivered), 0)
 	}
+	return result.delivered
 }
 
 func nodeChatProjectionDetails(items []domain.NodeProjection, messageID string) (string, bool) {

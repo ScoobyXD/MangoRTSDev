@@ -31,20 +31,22 @@ const (
 )
 
 const (
-	realtimeMessageReady                = "ready"
-	realtimeMessageSubscribe            = "subscribe"
-	realtimeMessageUnsubscribe          = "unsubscribe"
-	realtimeMessageSubscriptionAccepted = "subscription.accepted"
-	realtimeMessageSubscriptionRejected = "subscription.rejected"
-	realtimeMessageNotificationCreated  = "notification.created"
-	realtimeMessageNotificationDeleted  = "notification.deleted"
-	realtimeMessageNotificationsCleared = "notifications.cleared"
-	realtimeMessageChatCreated          = "chat.message.created"
-	realtimeMessageChatDeleted          = "chat.message.deleted"
-	realtimeMessageKanbanChanged        = "kanban.changed"
-	realtimeMessagePing                 = "ping"
-	realtimeMessagePong                 = "pong"
-	realtimeMessageError                = "error"
+	realtimeMessageReady                 = "ready"
+	realtimeMessageSubscribe             = "subscribe"
+	realtimeMessageUnsubscribe           = "unsubscribe"
+	realtimeMessageSubscriptionAccepted  = "subscription.accepted"
+	realtimeMessageSubscriptionRejected  = "subscription.rejected"
+	realtimeMessageNotificationCreated   = "notification.created"
+	realtimeMessageNotificationDeleted   = "notification.deleted"
+	realtimeMessageNotificationsCleared  = "notifications.cleared"
+	realtimeMessageChatCreated           = "chat.message.created"
+	realtimeMessageChatDeleted           = "chat.message.deleted"
+	realtimeMessageKanbanChanged         = "kanban.changed"
+	realtimeMessageMailboxMessageChanged = "mailbox.message.changed"
+	realtimeMessageMailboxFolderChanged  = "mailbox.folder.changed"
+	realtimeMessagePing                  = "ping"
+	realtimeMessagePong                  = "pong"
+	realtimeMessageError                 = "error"
 )
 
 type realtimeConnection struct {
@@ -87,6 +89,17 @@ type realtimeKanbanChangedMessage struct {
 	Scope      string `json:"scope"`
 	BoardID    string `json:"board_id"`
 	ChangeType string `json:"change_type,omitempty"`
+}
+
+type realtimeMailboxChangedMessage struct {
+	Type          string     `json:"type"`
+	CompanyID     string     `json:"company_id"`
+	Scope         string     `json:"scope"`
+	Trigger       string     `json:"trigger"`
+	MessageID     string     `json:"message_id,omitempty"`
+	ThreadID      string     `json:"thread_id,omitempty"`
+	SharedInboxID string     `json:"shared_inbox_id,omitempty"`
+	OccurredAt    *time.Time `json:"occurred_at,omitempty"`
 }
 
 func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +311,15 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if userID := realtimePersonalMailboxUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
+	if sharedInboxID := realtimeSharedMailboxIDFromScope(scope); sharedInboxID != "" {
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
+	}
 	if nodeID := realtimeChatNodeIDFromScope(scope); nodeID != "" {
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	}
@@ -353,6 +375,22 @@ func realtimeNotificationUserIDFromScope(scope string) string {
 	return realtimeResourceIDFromScope(scope, "notifications:user:")
 }
 
+func realtimePersonalMailboxScope(userID string) string {
+	return realtimeResourceScope("mailbox:personal:user:", userID)
+}
+
+func realtimePersonalMailboxUserIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, "mailbox:personal:user:")
+}
+
+func realtimeSharedMailboxScope(sharedInboxID string) string {
+	return realtimeResourceScope("mailbox:shared:", sharedInboxID)
+}
+
+func realtimeSharedMailboxIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, "mailbox:shared:")
+}
+
 func realtimeResourceScope(prefix, resourceID string) string {
 	resourceID = strings.TrimSpace(resourceID)
 	if resourceID == "" {
@@ -373,6 +411,8 @@ func realtimeScopeType(scope string) string {
 	switch {
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
+	case realtimePersonalMailboxUserIDFromScope(scope) != "", realtimeSharedMailboxIDFromScope(scope) != "":
+		return "mailbox"
 	case realtimeChatNodeIDFromScope(scope) != "":
 		return "chat"
 	case realtimeBoardIDFromScope(scope) != "":
@@ -394,7 +434,7 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"notifications", "chat", "board"} {
+	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 }

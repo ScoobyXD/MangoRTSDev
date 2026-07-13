@@ -50,8 +50,8 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
 import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
-import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
@@ -1332,7 +1332,33 @@ export function MessagePlacementIcon({ message, active }: { message: EmailMessag
       </span>
     );
   }
-  return <span style={messageSelectDotStyle(active, message.unread)} title="Not sent to a Logic Gate" />;
+  return null;
+}
+
+function MessageThreadIndicator({ message, active }: { message: EmailMessage; active: boolean }) {
+  if (!emailMessageHasMultipleThreadMessages(message)) return null;
+  const count = emailThreadMessageCount(message);
+  const label = `${count} messages in this thread`;
+  return (
+    <span role="img" aria-label={label} title={label} style={messageThreadIconStyle(active)}>
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ display: "block" }}>
+        <path d="M5.2 3.2h9.4v6.6H5.2z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" opacity="0.58" />
+        <path d="m5.8 4 4.1 2.9L14 4" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" opacity="0.58" />
+        <path d="M2.6 6.3h10.2v7.2H2.6z" fill="#ffffff" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+        <path d="m3.25 7.05 4.45 3.2 4.45-3.2" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+export function MessageLeadingIndicators({ message, active }: { message: EmailMessage; active: boolean }) {
+  return (
+    <span style={messageLeadingIndicatorsStyle}>
+      <span aria-hidden="true" style={messageUnreadDotStyle(message.unread)} />
+      <MessageThreadIndicator message={message} active={active} />
+      <MessagePlacementIcon message={message} active={active} />
+    </span>
+  );
 }
 
 type MyLogicGateGroup = {
@@ -5173,7 +5199,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const cleanCompanyID = companyID.trim();
     const cleanDraftID = compose.draftID.trim() || createHomeMailDraftID();
     const cleanSharedInboxID = compose.sharedInboxID.trim();
-    if (!cleanCompanyID || (!cleanSharedInboxID && !currentUserID.trim())) {
+    const cleanAccountEmail = compose.accountEmail.trim().toLowerCase();
+    if (!cleanCompanyID || (!cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
       setAttachmentError("Email attachment context is unavailable.");
       return;
     }
@@ -5186,6 +5213,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       const resourceID = mangoEmailDraftResourceID({
         draftID: cleanDraftID,
         userID: currentUserID,
+        accountEmail: cleanAccountEmail,
         sharedInboxID: cleanSharedInboxID,
       });
       const results = await Promise.allSettled(selectedFiles.map(async (file) => {
@@ -5347,9 +5375,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     return mangoEmailDraftResourceID({
       draftID: cleanDraftID,
       userID: currentUserID,
+      accountEmail: compose.accountEmail,
       sharedInboxID: cleanSharedInboxID,
     });
-  }, [compose.draftID, compose.sharedInboxID, currentUserID]);
+  }, [compose.accountEmail, compose.draftID, compose.sharedInboxID, currentUserID]);
   const composeEditorImageAttachmentContext = companyID.trim() && composeAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,

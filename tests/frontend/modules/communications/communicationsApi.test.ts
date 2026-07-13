@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   addLogicGateGVICAssignments,
+  addLocalEmailReply,
   archiveEmailMessage,
   archiveEmailMessagesBatch,
   createFolderQuery,
@@ -10,16 +11,22 @@ import {
   convertTriageMessagesToExplorerTarget,
   deleteCommunicationsSharedInbox,
   downloadEmailAttachment,
+  deleteEmailDraft,
   emailMessageMatchesListFilters,
+  fetchCommunicationsStatus,
   getEmailMessage,
   getEmailSignature,
   getEmailThread,
   invalidateCommunicationsCache,
+  invalidateCommunicationsFolderCache,
+  invalidateEmailMessageCache,
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
   listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
+  listEmailDrafts,
+  listEmailFolders,
   listEmailMessages,
   listNodeFolderItems,
   listNodes,
@@ -31,6 +38,7 @@ import {
   removeLogicGateGVICAssignments,
   respondToCalendarInvite,
   saveEmailSignature,
+  saveEmailDraft,
   sendEmail,
   unarchiveEmailMessage,
   updateEmailMessage,
@@ -39,6 +47,12 @@ import {
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
 
 test("communications message query omits empty values and encodes filters", () => {
   assert.equal(
@@ -601,6 +615,56 @@ test("unstar updates return cached inbox messages to primary and remove them fro
   }
 });
 
+test("read and archive overlays never cross personal and shared mailbox cache scopes with colliding provider ids", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  let personalFetches = 0;
+  let sharedFetches = 0;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    if (init?.method === "PUT") {
+      return jsonResponse({ message: message("collision-1", { subject: "Shared", folders: ["INBOX"], unread: true }) });
+    }
+    if (path.includes("/archive")) {
+      return jsonResponse({ message: message("collision-1", { subject: "Shared", folders: ["INBOX"], unread: false }) });
+    }
+    if (path.includes("mailbox=primary") && path.includes("shared_inbox_id=shared-1")) {
+      sharedFetches += 1;
+      return jsonResponse({ messages: [message("collision-1", { subject: "Shared", folders: ["INBOX"], unread: true })] });
+    }
+    if (path.includes("mailbox=primary") && path.includes("company_id=company-1")) {
+      personalFetches += 1;
+      return jsonResponse({ messages: [message("collision-1", { subject: "Personal", folders: ["INBOX"], unread: true })] });
+    }
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    const personalParams = { mailbox: "primary" as const, limit: 25, companyID: "company-1" };
+    const sharedParams = { ...personalParams, sharedInboxID: "shared-1" };
+    await listEmailMessages(personalParams);
+    await listEmailMessages(sharedParams);
+
+    await updateEmailMessage("collision-1", { unread: false }, "shared-1", "company-1");
+    assert.deepEqual(
+      (await listEmailMessages(personalParams)).messages.map((item) => [item.subject, item.unread]),
+      [["Personal", true]],
+    );
+    assert.deepEqual(
+      (await listEmailMessages(sharedParams)).messages.map((item) => [item.subject, item.unread]),
+      [["Shared", false]],
+    );
+
+    await archiveEmailMessage("collision-1", "shared-1", "company-1");
+    assert.deepEqual((await listEmailMessages(personalParams)).messages.map((item) => item.subject), ["Personal"]);
+    assert.deepEqual((await listEmailMessages(sharedParams)).messages.map((item) => item.id), []);
+    assert.equal(personalFetches, 1);
+    assert.equal(sharedFetches, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
 test("archive updates add messages to archive and all overlays even before those tabs are cached", async () => {
   invalidateCommunicationsCache();
   const originalFetch = globalThis.fetch;
@@ -733,6 +797,152 @@ test("sendEmail scopes shared inbox sends through query params", async () => {
   }
 });
 
+test("sendEmail leaves reply-history persistence to the caller", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.includes("/messages/send")) {
+      return jsonResponse({ message: message("sent-reply", { thread_id: "thread-1", body: "Sent reply" }) });
+    }
+    return jsonResponse({ message: message("inbound-1", { thread_id: "thread-1", body: "Inbound body" }) });
+  };
+  try {
+    await getEmailMessage("inbound-1", "company-1", "shared-1");
+    await sendEmail({
+      to: [{ email: "customer@example.test" }],
+      subject: "Re: Hello",
+      body: "Sent reply",
+      reply_to_message_id: "inbound-1",
+      company_id: "company-1",
+      shared_inbox_id: "shared-1",
+    });
+
+    const cachedInbound = await getEmailMessage("inbound-1", "company-1", "shared-1");
+    assert.equal(cachedInbound.local_replies, undefined);
+    assert.deepEqual(calls, [
+      "/v1/communications/messages/inbound-1?company_id=company-1&shared_inbox_id=shared-1",
+      "/v1/communications/messages/send?company_id=company-1&shared_inbox_id=shared-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("durable draft API requires and preserves one exact personal or shared scope", async () => {
+  const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  const draft = {
+    company_id: "company-1",
+    draft_id: "draft-1",
+    scope_type: "personal",
+    personal_user_id: "user-1",
+    personal_account_email: "me@example.test",
+    kind: "compose",
+    to_recipients: "",
+    cc_recipients: "",
+    bcc_recipients: "",
+    subject: "Scoped",
+    body_editor_html: "",
+    created_timestamp: "2026-07-13T12:00:00Z",
+    updated_timestamp: "2026-07-13T12:00:00Z",
+  };
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    calls.push({
+      path,
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+    });
+    if ((init?.method ?? "GET") === "DELETE") return jsonResponse({ status: "deleted" });
+    if (path.includes("/drafts/draft-1") && init?.method === "PUT") {
+      return jsonResponse({ draft: { ...draft, scope_type: "shared", shared_inbox_id: "shared-1" } });
+    }
+    if (path.includes("/drafts/draft-1")) return jsonResponse({ draft });
+    return jsonResponse({ drafts: [draft] });
+  };
+  try {
+    await assert.rejects(() => listEmailDrafts("company-1", {}), /email_draft_scope_required/);
+    await listEmailDrafts("company-1", { accountEmail: " Me@Example.Test " });
+    await listEmailDrafts("company-1", { sharedInboxID: " shared-1 " });
+    await saveEmailDraft({
+      companyID: "company-1",
+      draftID: "draft-1",
+      sharedInboxID: "shared-1",
+      to: "",
+      cc: "",
+      bcc: "",
+      subject: "Scoped",
+      bodyEditorHTML: "",
+    });
+    await deleteEmailDraft("company-1", "draft-1", { sharedInboxID: "shared-1" });
+
+    assert.deepEqual(calls.map((call) => [call.method, call.path]), [
+      ["GET", "/v1/communications/drafts?company_id=company-1&account_email=me%40example.test"],
+      ["GET", "/v1/communications/drafts?company_id=company-1&shared_inbox_id=shared-1"],
+      ["PUT", "/v1/communications/drafts/draft-1"],
+      ["DELETE", "/v1/communications/drafts/draft-1?company_id=company-1&shared_inbox_id=shared-1"],
+    ]);
+    assert.equal(calls[2]?.body?.shared_inbox_id, "shared-1");
+    assert.equal(calls[2]?.body?.company_id, "company-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("locally persisted sent replies are isolated by authenticated mailbox scope", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+    clear: () => { values.clear(); },
+    key: (index: number) => Array.from(values.keys())[index] ?? null,
+    get length() { return values.size; },
+  } as Storage;
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  globalThis.fetch = async () => jsonResponse({
+    message: message("inbound-1", { thread_id: "thread-1", body: "Inbound" }),
+  });
+  const sentReply = message("sent-1", {
+    thread_id: "thread-1",
+    body: "User reply",
+    folders: ["sent"],
+    unread: false,
+  });
+  try {
+    addLocalEmailReply("inbound-1", sentReply, {
+      companyID: "company-1",
+      userID: "user-a",
+      accountEmail: "a@example.test",
+    });
+    invalidateCommunicationsCache();
+    const owner = await getEmailMessage("inbound-1", "company-1", undefined, {
+      userID: "user-a",
+      accountEmail: "a@example.test",
+    });
+    assert.deepEqual(owner.local_replies?.map((reply) => reply.id), ["sent-1"]);
+
+    invalidateCommunicationsCache();
+    const otherUser = await getEmailMessage("inbound-1", "company-1", undefined, {
+      userID: "user-b",
+      accountEmail: "b@example.test",
+    });
+    assert.equal(otherUser.local_replies, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+    if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
 test("email detail fetch ignores preview-only list cache entries", async () => {
   invalidateCommunicationsCache();
   const calls: string[] = [];
@@ -756,6 +966,126 @@ test("email detail fetch ignores preview-only list cache entries", async () => {
       "/v1/communications/messages?limit=25&mailbox=primary",
       "/v1/communications/messages/msg-1",
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("email detail invalidation keeps the replacement request in flight and authoritative", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const staleResponse = deferred<Response>();
+  const freshResponse = deferred<Response>();
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1 ? staleResponse.promise : freshResponse.promise;
+  }) as typeof fetch;
+  try {
+    const staleRead = getEmailMessage("race-message", "company-1");
+    assert.equal(calls, 1);
+
+    invalidateEmailMessageCache("race-message", "company-1");
+    const freshRead = getEmailMessage("race-message", "company-1");
+    assert.equal(calls, 2);
+
+    staleResponse.resolve(jsonResponse({ message: message("race-message", { subject: "Obsolete detail", body: "Old" }) }));
+    assert.equal((await staleRead).subject, "Obsolete detail");
+
+    const coalescedRead = getEmailMessage("race-message", "company-1");
+    assert.equal(calls, 2);
+
+    freshResponse.resolve(jsonResponse({ message: message("race-message", { subject: "Fresh detail", body: "New" }) }));
+    assert.equal((await freshRead).subject, "Fresh detail");
+    assert.equal((await coalescedRead).subject, "Fresh detail");
+    assert.equal((await getEmailMessage("race-message", "company-1")).subject, "Fresh detail");
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("status invalidation prevents an obsolete request from replacing the current session cache", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const staleResponse = deferred<Response>();
+  const freshResponse = deferred<Response>();
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1 ? staleResponse.promise : freshResponse.promise;
+  }) as typeof fetch;
+  try {
+    const staleRead = fetchCommunicationsStatus();
+    invalidateCommunicationsCache({ status: true });
+    const freshRead = fetchCommunicationsStatus();
+
+    freshResponse.resolve(jsonResponse({ configured: true, connected: true, status: "connected" }));
+    assert.equal((await freshRead).connected, true);
+    staleResponse.resolve(jsonResponse({ configured: true, connected: false, status: "disconnected" }));
+    assert.equal((await staleRead).connected, false);
+
+    assert.equal((await fetchCommunicationsStatus()).connected, true);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("folder invalidation keeps the replacement unread counts authoritative", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const staleResponse = deferred<Response>();
+  const freshResponse = deferred<Response>();
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1 ? staleResponse.promise : freshResponse.promise;
+  }) as typeof fetch;
+  try {
+    const staleRead = listEmailFolders({ companyID: "company-1" });
+    invalidateCommunicationsFolderCache();
+    const freshRead = listEmailFolders({ companyID: "company-1" });
+
+    freshResponse.resolve(jsonResponse({ folders: [{ id: "inbox", name: "Inbox", unread_count: 1 }] }));
+    assert.equal((await freshRead)[0]?.unread_count, 1);
+    staleResponse.resolve(jsonResponse({ folders: [{ id: "inbox", name: "Inbox", unread_count: 9 }] }));
+    assert.equal((await staleRead)[0]?.unread_count, 9);
+
+    assert.equal((await listEmailFolders({ companyID: "company-1" }))[0]?.unread_count, 1);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("message-page invalidation prevents an obsolete arrival snapshot from replacing the refresh", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const staleResponse = deferred<Response>();
+  const freshResponse = deferred<Response>();
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1 ? staleResponse.promise : freshResponse.promise;
+  }) as typeof fetch;
+  const params = { mailbox: "primary" as const, limit: 25, companyID: "company-1" };
+  try {
+    const staleRead = listEmailMessages(params);
+    invalidateCommunicationsCache({ messagePages: true });
+    const freshRead = listEmailMessages(params);
+
+    freshResponse.resolve(jsonResponse({ messages: [message("new-arrival", { date: 200 })] }));
+    assert.equal((await freshRead).messages[0]?.id, "new-arrival");
+    staleResponse.resolve(jsonResponse({ messages: [message("older-snapshot", { date: 100 })] }));
+    assert.equal((await staleRead).messages[0]?.id, "older-snapshot");
+
+    assert.equal((await listEmailMessages(params)).messages[0]?.id, "new-arrival");
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

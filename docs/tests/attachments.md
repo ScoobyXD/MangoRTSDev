@@ -40,7 +40,7 @@ ATT6 - Inline editor images must render as high-quality images on first open, no
 ATT7 - Node attachment-button uploads and attachment lists use the same Mango attachment API, private S3 storage, metadata records, and `resource_attachments` links as pasted inline images. The node loads attachment metadata separately from file bytes; image bytes are requested only when a row is visible or near-visible, and original bytes are requested only by an explicit download.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
-ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. Personal and shared email-signature images/logos use the same Mango attachment system through mailbox-scoped `email_signature` resource links.
+ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. `email_draft` and `email_signature` resource links retain the exact immutable personal-account or shared-inbox mailbox scope.
 ATT11 - Incoming provider email attachments may stay provider-referenced while they are only mailbox-list metadata, but must be cached or persisted into Mango S3 when attached to a node, converted into work, repeatedly opened as a durable Mango resource, or otherwise selected for Mango ownership.
 ATT12 - Attached-email projections and communications email JSON may store provider IDs, message/thread metadata, inline/content IDs, and Mango attachment references, but must not store attachment bytes.
 ATT13 - Attachment content access must be authorized through Mango resource permissions; knowing an S3 key or attachment ID is not enough to read bytes.
@@ -74,6 +74,7 @@ ATT40 - Collapsed historical email cards issue no attachment-content reads. Expa
 ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
 ATT42 - Outbound email has a separate aggregate limit of exactly 24,000,000 attachment bytes; it does not change the general direct-browser limit of 1 GiB per file. Recipient and nonempty-content-or-valid-reference checks run first, then every unique Mango attachment is resolved through one original-content metadata/link read and authorized before any S3 body is opened. Declared original sizes are nonnegative and summed without overflow; zero bytes and exactly 24,000,000 bytes are valid, while any larger aggregate fails before S3.
 ATT43 - After outbound preflight succeeds, S3 bodies open lazily inside the admitted provider send and stream directly into a deterministic-length Nylas multipart request. Each returned object length must match the authorized metadata before reading; the stream is bounded to that exact size, detects short, long, and failing readers, and closes on success, failure, provider rejection, or cancellation. Outbound send creates neither base64 attachment copies nor a complete multipart buffer, while incoming Nylas MIME recovery and calendar attachment content remain unchanged.
+ATT44 - Personal `email_draft` attachment reads and account-scoped link/unlink operations are owner-only; new personal draft resource IDs include the exact normalized account as well as user and draft. Legacy user/draft IDs remain owner-only and readable for compatibility but cannot create, link, upload, unlink, or otherwise mutate attachments. Company administrator or manager status is not an override. Shared-draft attachment reads require view access to the exact shared inbox and mutations require edit access. A cross-user/account/shared-inbox identifier cannot expose attachment content or change resource scope.
 
 ## Scenarios
 
@@ -176,6 +177,7 @@ Business logic covered:
 - ATT15
 - ATT42
 - ATT43
+- ATT44
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
@@ -189,6 +191,7 @@ Expected:
 - The backend reads S3 bytes at send time and passes normal files to the provider as ordinary attachments.
 - Each pasted image reference is deduplicated, permission-checked, converted to one inline attachment with a matching alphanumeric CID, and rewritten from the private Mango source to `cid:` in outbound HTML.
 - Personal and Shared Triage use the same conversion while preserving their personal/shared permission and grant scopes.
+- Personal draft metadata and bytes remain owner-only. New links use the exact owner account; legacy three-part owner/draft links remain readable only by that owner for compatibility and are rejected for new links, uploads, or other mutations. A known account association remains valid while reauthentication is required, but wrong-account identifiers and company administrator/manager roles cannot authorize another user's direct resource operations or attachment-content reads. Shared draft attachment reads require view access and mutations require edit access to the exact shared inbox.
 - Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.
 - Normal durable email payloads do not carry raw base64 `content`.
 - Communications draft and signature upserts reject durable inline data URLs/base64 file bytes.

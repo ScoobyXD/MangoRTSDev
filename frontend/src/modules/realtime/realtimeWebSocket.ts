@@ -16,6 +16,8 @@ type RealtimeMessageType =
   | "chat.message.created"
   | "chat.message.deleted"
   | "kanban.changed"
+  | "mailbox.message.changed"
+  | "mailbox.folder.changed"
   | "ping"
   | "pong"
   | "error";
@@ -97,6 +99,28 @@ export type RealtimeKanbanChangedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
+export type RealtimeMailboxMessageChangedMessage = RealtimeBaseMessage & {
+  type: "mailbox.message.changed";
+  company_id: string;
+  scope: string;
+  trigger: string;
+  message_id?: string;
+  thread_id?: string;
+  shared_inbox_id?: string;
+  occurred_at?: string;
+  ts?: string;
+};
+
+export type RealtimeMailboxFolderChangedMessage = RealtimeBaseMessage & {
+  type: "mailbox.folder.changed";
+  company_id: string;
+  scope: string;
+  trigger: string;
+  shared_inbox_id?: string;
+  occurred_at?: string;
+  ts?: string;
+};
+
 export type RealtimeErrorMessage = RealtimeBaseMessage & {
   type: "error";
   error?: string;
@@ -113,6 +137,8 @@ type RealtimeInboundMessage =
   | RealtimeChatMessageCreatedMessage
   | RealtimeChatMessageDeletedMessage
   | RealtimeKanbanChangedMessage
+  | RealtimeMailboxMessageChangedMessage
+  | RealtimeMailboxFolderChangedMessage
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
@@ -125,6 +151,8 @@ type RealtimeSubscriptionHandlers = {
   onChatMessageCreated?: (message: RealtimeChatMessageCreatedMessage) => void;
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
+  onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
+  onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
 };
 
@@ -242,6 +270,34 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       if (!boardID) throw new Error("realtime_board_id_required");
       return { ...scoped, type, board_id: boardID, change_type: stringValue(payload.change_type) || undefined, ts: stringValue(payload.ts) || undefined };
     }
+    case "mailbox.message.changed": {
+      const scoped = scopedMessageBase(payload, type);
+      const trigger = stringValue(payload.trigger);
+      if (!trigger) throw new Error("realtime_mailbox_trigger_required");
+      return {
+        ...scoped,
+        type,
+        trigger,
+        message_id: stringValue(payload.message_id) || undefined,
+        thread_id: stringValue(payload.thread_id) || undefined,
+        shared_inbox_id: stringValue(payload.shared_inbox_id) || undefined,
+        occurred_at: stringValue(payload.occurred_at) || undefined,
+        ts: stringValue(payload.ts) || undefined,
+      };
+    }
+    case "mailbox.folder.changed": {
+      const scoped = scopedMessageBase(payload, type);
+      const trigger = stringValue(payload.trigger);
+      if (!trigger) throw new Error("realtime_mailbox_trigger_required");
+      return {
+        ...scoped,
+        type,
+        trigger,
+        shared_inbox_id: stringValue(payload.shared_inbox_id) || undefined,
+        occurred_at: stringValue(payload.occurred_at) || undefined,
+        ts: stringValue(payload.ts) || undefined,
+      };
+    }
     case "error":
       return { ...base, type, error: stringValue(payload.error) || undefined, message: stringValue(payload.message) || undefined };
     case "ping":
@@ -253,7 +309,17 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:user:[^:]+|mailbox:shared:[^:]+)$/.test(scope.trim());
+}
+
+export function realtimePersonalMailboxScope(userID: string): string {
+  const cleanUserID = userID.trim();
+  return cleanUserID ? `mailbox:personal:user:${cleanUserID}` : "";
+}
+
+export function realtimeSharedMailboxScope(sharedInboxID: string): string {
+  const cleanSharedInboxID = sharedInboxID.trim();
+  return cleanSharedInboxID ? `mailbox:shared:${cleanSharedInboxID}` : "";
 }
 
 export function realtimeWebSocketURL(apiBase: string, companyID: string): string {
@@ -460,6 +526,12 @@ export class MangoRealtimeClient {
           break;
         case "kanban.changed":
           sub.onKanbanChanged?.(message);
+          break;
+        case "mailbox.message.changed":
+          sub.onMailboxMessageChanged?.(message);
+          break;
+        case "mailbox.folder.changed":
+          sub.onMailboxFolderChanged?.(message);
           break;
       }
     }

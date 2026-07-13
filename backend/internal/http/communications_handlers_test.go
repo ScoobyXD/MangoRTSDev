@@ -65,6 +65,23 @@ type fakeNylasUpdateCall struct {
 	Update    NylasMessageUpdate
 }
 
+type failOnceWebhookMembershipRepo struct {
+	store.Repository
+	mu       sync.Mutex
+	failures int
+}
+
+func (r *failOnceWebhookMembershipRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
+	r.mu.Lock()
+	if r.failures > 0 {
+		r.failures--
+		r.mu.Unlock()
+		return nil, errors.New("temporary membership lookup failure")
+	}
+	r.mu.Unlock()
+	return r.Repository.ListUserMemberships(userID)
+}
+
 type blockingCommunicationsNylasClient struct {
 	*fakeNylasClient
 	blockingMu       sync.Mutex
@@ -314,8 +331,11 @@ func seedEmailAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRe
 	return attachmentID
 }
 
-func personalEmailDraftResourceID(userID, draftID string) string {
-	return "personal:" + url.QueryEscape(strings.TrimSpace(userID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+func personalEmailDraftResourceID(userID, accountEmail, draftID string) string {
+	return "personal:" +
+		url.QueryEscape(strings.TrimSpace(userID)) + ":" +
+		url.QueryEscape(normalizeEmailForCompare(accountEmail)) + ":" +
+		url.QueryEscape(strings.TrimSpace(draftID))
 }
 
 func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
@@ -382,6 +402,7 @@ type communicationsSendTestFixture struct {
 	token        string
 	companyID    string
 	userID       string
+	accountEmail string
 }
 
 func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixture {
@@ -429,6 +450,7 @@ func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixtu
 		token:        "Bearer " + testJWT(t, key, "kid", subject, user.Email),
 		companyID:    companyID,
 		userID:       user.UserID,
+		accountEmail: user.Email,
 	}
 }
 
@@ -462,7 +484,7 @@ func assertCommunicationsAttachmentReadShape(t *testing.T, repo *countingCommuni
 func TestCommunicationsSendValidatesBeforeAttachmentWork(t *testing.T) {
 	t.Run("missing recipients", func(t *testing.T) {
 		fixture := newCommunicationsSendTestFixture(t)
-		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-no-recipients"), "note.txt", []byte("hello"))
+		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-no-recipients"), "note.txt", []byte("hello"))
 		rec := fixture.send(t, map[string]any{
 			"subject": "No recipients",
 			"body":    "Body",
@@ -510,7 +532,7 @@ func TestCommunicationsSendValidatesBeforeAttachmentWork(t *testing.T) {
 
 func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-lazy"), "note.txt", []byte("hello"))
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-lazy"), "note.txt", []byte("hello"))
 	s3ReadsAtSendStart := -1
 	fixture.nylas.onSend = func(NylasSendMessageRequest) {
 		s3ReadsAtSendStart = len(fixture.storage.getKeys)
@@ -552,7 +574,7 @@ func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
 
 func TestCommunicationsSendUnauthorizedAttachmentDoesNotOpenStorage(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID("another-user", "draft-private"), "private.txt", []byte("private"))
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID("another-user", fixture.accountEmail, "draft-private"), "private.txt", []byte("private"))
 	rec := fixture.send(t, map[string]any{
 		"to":      []map[string]string{{"email": "friend@example.com"}},
 		"subject": "Unauthorized attachment",
@@ -573,7 +595,7 @@ func TestCommunicationsSendUnauthorizedAttachmentDoesNotOpenStorage(t *testing.T
 
 func TestCommunicationsSendPreservesLazyStorageErrorResponse(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-missing-object"), "missing.txt", []byte("gone"))
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-missing-object"), "missing.txt", []byte("gone"))
 	delete(fixture.storage.objects, attachmentOriginalObjectKey(fixture.companyID, attachmentID))
 	rec := fixture.send(t, map[string]any{
 		"to":      []map[string]string{{"email": "friend@example.com"}},
@@ -607,7 +629,7 @@ func TestCommunicationsSendRejectsInvalidOrOversizedMetadataBeforeStorage(t *tes
 			fixture := newCommunicationsSendTestFixture(t)
 			attachments := make([]map[string]any, 0, len(test.sizes))
 			for index, size := range test.sizes {
-				attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fmt.Sprintf("draft-limit-%d", index)), fmt.Sprintf("file-%d.bin", index), []byte{byte(index + 1)})
+				attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, fmt.Sprintf("draft-limit-%d", index)), fmt.Sprintf("file-%d.bin", index), []byte{byte(index + 1)})
 				fixture.countingRepo.sizeOverrides[attachmentID] = size
 				attachments = append(attachments, map[string]any{
 					"attachment_id": attachmentID,
@@ -637,7 +659,7 @@ func TestCommunicationsSendAcceptsExactAggregateAndDeduplicatesMetadataReads(t *
 		fixture.nylas.skipOutboundAttachmentReads = true
 		attachments := make([]map[string]any, 0, 2)
 		for index := 0; index < 2; index++ {
-			attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fmt.Sprintf("draft-exact-%d", index)), fmt.Sprintf("exact-%d.bin", index), []byte{byte(index + 1)})
+			attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, fmt.Sprintf("draft-exact-%d", index)), fmt.Sprintf("exact-%d.bin", index), []byte{byte(index + 1)})
 			fixture.countingRepo.sizeOverrides[attachmentID] = 12_000_000
 			attachments = append(attachments, map[string]any{"attachment_id": attachmentID, "filename": fmt.Sprintf("exact-%d.bin", index)})
 		}
@@ -662,7 +684,7 @@ func TestCommunicationsSendAcceptsExactAggregateAndDeduplicatesMetadataReads(t *
 	t.Run("duplicate id reuses metadata", func(t *testing.T) {
 		fixture := newCommunicationsSendTestFixture(t)
 		fixture.nylas.skipOutboundAttachmentReads = true
-		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-duplicate"), "duplicate.bin", []byte("x"))
+		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-duplicate"), "duplicate.bin", []byte("x"))
 		rec := fixture.send(t, map[string]any{
 			"to": []map[string]string{{"email": "friend@example.com"}},
 			"attachments": []map[string]any{
@@ -682,7 +704,7 @@ func TestCommunicationsSendAcceptsExactAggregateAndDeduplicatesMetadataReads(t *
 
 func TestCommunicationsSendAcceptsZeroByteAttachmentOnlyMessage(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-empty-file"), "empty.txt", nil)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-empty-file"), "empty.txt", nil)
 	rec := fixture.send(t, map[string]any{
 		"to": []map[string]string{{"email": "friend@example.com"}},
 		"attachments": []map[string]any{{
@@ -784,6 +806,53 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	}
 	if !state.StrictEmail {
 		t.Fatalf("state.StrictEmail = false, want true for personal auth URL")
+	}
+}
+
+func TestCommunicationsThreadReturnsAuthoritativeInboundAndSentMessageIDs(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "thread-history-user"
+	user, err := repo.UpsertAuthUser(subject, "thread-user@example.com", "Thread User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "thread-history-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{thread: NylasThread{
+		ID:         "thread-1",
+		MessageIDs: []string{"external-original", "user-sent", "external-latest"},
+	}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/threads/thread-1", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Thread NylasThread `json:"thread"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(payload.Thread.MessageIDs, ","); got != "external-original,user-sent,external-latest" {
+		t.Fatalf("thread message ids = %q", got)
 	}
 }
 
@@ -1486,7 +1555,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
 	}
-	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
 	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"note.txt","content_type":"text/plain","size":5}]}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
@@ -1499,7 +1568,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "hello" {
 		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want metadata-only attachment and streamed hello", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
-	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
+	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
 	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
 	inlinePayload, err := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -1910,7 +1979,7 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	largeContent := []byte(strings.Repeat("ABC", 280000))
-	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-large"), "large.txt", "text/plain", largeContent)
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-large"), "large.txt", "text/plain", largeContent)
 	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
@@ -2469,6 +2538,33 @@ func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
 	}
 }
 
+func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
+	t.Parallel()
+
+	changes, err := parseNylasWebhookChanges([]byte(`{
+		"deltas": [
+			{"type": " Message.Created.Truncated ", "data": {"object": {"id": "message-1", "grant_id": "grant-1"}}},
+			{"trigger_type": "FOLDER.UPDATED.extra", "data": {"object": {"id": "folder-1", "grant_id": "grant-1"}}},
+			{"event": "thread.replied", "data": {"object": {"id": "thread-1", "grant_id": "grant-1"}}}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("parseNylasWebhookChanges: %v", err)
+	}
+	if len(changes) != 3 {
+		t.Fatalf("changes = %d, want 3", len(changes))
+	}
+	if changes[0].Trigger != "message.created" {
+		t.Fatalf("created trigger = %q, want canonical message.created", changes[0].Trigger)
+	}
+	if changes[1].Trigger != "folder.updated" {
+		t.Fatalf("folder trigger = %q, want canonical folder.updated", changes[1].Trigger)
+	}
+	if changes[2].Trigger != "" {
+		t.Fatalf("unsupported trigger = %q, want empty", changes[2].Trigger)
+	}
+}
+
 func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	t.Parallel()
 
@@ -2497,21 +2593,35 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 	cache.setMessagePage("user-1", "account:other@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "other-message"}}}, now)
 	cache.setMessage("user-1", "account:other@example.com", NylasMessage{ID: "other-message", Subject: "Other cached body"}, now)
+	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.created", MessageID: "message-1"})
+	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created preserved folders; want unread and mailbox counts invalidated")
+	}
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created preserved message page; want list cache invalidated")
+	}
+	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created preserved detail; want changed message detail invalidated")
+	}
+	if _, ok := cache.getMessagePage("user-1", "account:other@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message.created invalidated an unrelated account page")
+	}
+	if _, ok := cache.getMessage("user-1", "account:other@example.com", "other-message", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message.created invalidated an unrelated account detail")
+	}
+
+	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
-	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.updated invalidated folders; want folder cache preserved")
+	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.updated preserved folders; want unread and mailbox counts invalidated")
 	}
 	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("message.updated preserved message page; want list cache invalidated")
 	}
 	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("message.updated preserved detail; want changed message detail invalidated")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:other@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.updated invalidated an unrelated account page")
-	}
-	if _, ok := cache.getMessage("user-1", "account:other@example.com", "other-message", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.updated invalidated an unrelated account detail")
 	}
 
 	cache = newCommunicationsCache()
@@ -3269,6 +3379,44 @@ func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *test
 	}
 }
 
+func TestNylasWebhookDeliveryFailureForgetsReceiptSoProviderRetryCanRecover(t *testing.T) {
+	baseRepo := store.NewMemoryRepo()
+	companyID := "70707070-7070-4070-8070-707070707099"
+	user := mustRealtimeAuthUser(t, baseRepo, companyID, "communications-webhook-retry", domain.RoleCompanyUser)
+	if _, err := baseRepo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "retry-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := &failOnceWebhookMembershipRepo{Repository: baseRepo, failures: 1}
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}})
+	defer server.Close()
+	handler := server.Routes()
+	body := `{"type":"message.created","data":{"object":{"id":"retry-message","thread_id":"retry-thread","grant_id":"retry-grant"}}}`
+
+	send := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+		req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	first := send()
+	if first.Code != http.StatusInternalServerError || !strings.Contains(first.Body.String(), "failed_to_deliver_email_change") {
+		t.Fatalf("first retryable delivery status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := send()
+	if second.Code != http.StatusOK {
+		t.Fatalf("retried delivery status=%d body=%s", second.Code, second.Body.String())
+	}
+}
+
 func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "70707070-7070-4070-8070-707070707001"
@@ -3285,14 +3433,24 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
+	nylas := &fakeNylasClient{}
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: config,
+		NylasClient: nylas,
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
 		}},
 	})
 	defer server.Close()
 	handler := server.Routes()
+	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	mailboxScope := realtimePersonalMailboxScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": mailboxScope})
+	if subscribed := client.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted || subscribed["scope"] != mailboxScope {
+		t.Fatalf("personal mailbox subscription = %+v", subscribed)
+	}
 
 	challengeReq := httptest.NewRequest(http.MethodGet, "/nylas/webhook?challenge=abc123", nil)
 	challengeRec := httptest.NewRecorder()
@@ -3301,13 +3459,38 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 		t.Fatalf("challenge status=%d body=%q", challengeRec.Code, challengeRec.Body.String())
 	}
 
-	body := `{"type":"message.created","data":{"object":{"id":"message-1","grant_id":"grant-1"}}}`
+	cacheScope := "grant:grant-1"
+	query := NylasMessageQuery{Limit: 12, Mailbox: "primary"}
+	now := time.Now().UTC()
+	server.commCache.setFolders(user.UserID, cacheScope, []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	server.commCache.setMessagePage(user.UserID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	server.commCache.setMessage(user.UserID, cacheScope, NylasMessage{ID: "message-1", Subject: "Stale"}, now)
+
+	body := `{"type":"message.created","time":"2026-06-09T20:00:00Z","data":{"object":{"id":"message-1","thread_id":"thread-1","grant_id":"grant-1"}}}`
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := client.readJSON(t)
+	if created["type"] != realtimeMessageMailboxMessageChanged || created["company_id"] != companyID || created["scope"] != mailboxScope ||
+		created["trigger"] != "message.created" || created["message_id"] != "message-1" || created["thread_id"] != "thread-1" ||
+		created["occurred_at"] != "2026-06-09T20:00:00Z" {
+		t.Fatalf("personal mailbox created event = %+v", created)
+	}
+	if _, ok := server.commCache.getFolders(user.UserID, cacheScope, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created webhook preserved folder counts")
+	}
+	if _, ok := server.commCache.getMessagePage(user.UserID, cacheScope, query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created webhook preserved message page")
+	}
+	if _, ok := server.commCache.getMessage(user.UserID, cacheScope, "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.created webhook preserved message detail")
+	}
+	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls != 0 {
+		t.Fatalf("webhook provider calls folders=%d messages=%d details=%d, want event hint without provider polling", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
 	}
 	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	duplicateReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
@@ -3316,6 +3499,7 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("duplicate webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
 	}
+	client.assertNoMessage(t)
 
 	openedBody := `{"type":"message.opened","time":"2026-06-09T21:14:00Z","data":{"object":{"message_id":"message-1","thread_id":"thread-1","grant_id":"grant-1","count":2}}}`
 	openedReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(openedBody))
@@ -3324,6 +3508,11 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	handler.ServeHTTP(openedRec, openedReq)
 	if openedRec.Code != http.StatusOK {
 		t.Fatalf("opened webhook status = %d body=%s", openedRec.Code, openedRec.Body.String())
+	}
+	opened := client.readJSON(t)
+	if opened["type"] != realtimeMessageMailboxMessageChanged || opened["trigger"] != "message.opened" ||
+		opened["message_id"] != "message-1" || opened["thread_id"] != "thread-1" {
+		t.Fatalf("personal mailbox opened event = %+v", opened)
 	}
 	statuses, err := repo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
 		UserID:     user.UserID,
@@ -3422,6 +3611,156 @@ func TestNylasWebhookStoresSharedReadStatusForSharedInbox(t *testing.T) {
 		t.Fatalf("personal read statuses = %+v, want shared webhook not stored in viewer personal scope", personalStatuses)
 	}
 
+}
+
+func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "81818181-8181-4181-8181-818181818181"
+	repo.EnsureCompany(companyID, "Shared mailbox live arrival")
+	visibleToken := "shared-mailbox-visible-token"
+	revokedToken := "shared-mailbox-revoked-token"
+	visible := mustRealtimeAuthUser(t, repo, companyID, "shared-mailbox-visible", domain.RoleCompanyUser)
+	revoked := mustRealtimeAuthUser(t, repo, companyID, "shared-mailbox-revoked", domain.RoleCompanyUser)
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID: companyID, Provider: "google", AccountEmail: "support@example.com",
+		GrantID: "shared-live-grant", Status: "connected", ConnectedByUserID: visible.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setAudience := func(userIDs ...string) {
+		t.Helper()
+		permissions := make([]store.EntityPermissionInput, 0, len(userIDs))
+		for _, userID := range userIDs {
+			permissions = append(permissions, store.EntityPermissionInput{
+				SubjectType: store.EntityPermissionSubjectUser,
+				SubjectID:   userID,
+				AccessLevel: store.EntityPermissionView,
+			})
+		}
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: folder.FolderID,
+			DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: permissions,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setAudience(visible.UserID, revoked.UserID)
+
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	nylas := &fakeNylasClient{}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			visibleToken: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
+			revokedToken: {Subject: revoked.CognitoSubject, Email: revoked.Email, Name: revoked.DisplayName},
+		}},
+	})
+	defer server.Close()
+	handler := server.Routes()
+	scope := realtimeSharedMailboxScope(folder.FolderID)
+	visibleClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, visibleToken)
+	defer visibleClient.close()
+	visibleClient.readJSON(t)
+	visibleClient.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	if subscribed := visibleClient.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted {
+		t.Fatalf("visible shared mailbox subscription = %+v", subscribed)
+	}
+	revokedClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, revokedToken)
+	defer revokedClient.close()
+	revokedClient.readJSON(t)
+	revokedClient.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	if subscribed := revokedClient.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted {
+		t.Fatalf("pre-revocation shared mailbox subscription = %+v", subscribed)
+	}
+
+	// The publisher re-resolves the current effective audience. An already-open
+	// socket must not keep receiving mailbox identifiers after access is revoked.
+	setAudience(visible.UserID)
+	cacheScope := "grant:shared-live-grant"
+	query := NylasMessageQuery{Limit: 12, Mailbox: "primary"}
+	now := time.Now().UTC()
+	for _, userID := range []string{visible.UserID, revoked.UserID} {
+		server.commCache.setFolders(userID, cacheScope, []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+		server.commCache.setMessagePage(userID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "shared-message-live"}}}, now)
+		server.commCache.setMessage(userID, cacheScope, NylasMessage{ID: "shared-message-live", Subject: "Stale"}, now)
+	}
+
+	body := `{"type":"message.created","time":"2026-06-10T15:00:00Z","data":{"object":{"id":"shared-message-live","thread_id":"shared-thread-live","grant_id":"shared-live-grant"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shared created webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := visibleClient.readJSON(t)
+	if created["type"] != realtimeMessageMailboxMessageChanged || created["company_id"] != companyID || created["scope"] != scope ||
+		created["shared_inbox_id"] != folder.FolderID || created["trigger"] != "message.created" ||
+		created["message_id"] != "shared-message-live" || created["thread_id"] != "shared-thread-live" {
+		t.Fatalf("shared mailbox created event = %+v", created)
+	}
+	revokedClient.assertNoMessage(t)
+	if _, ok := server.commCache.getFolders(visible.UserID, cacheScope, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("shared message.created preserved current viewer folder counts")
+	}
+	if _, ok := server.commCache.getMessagePage(visible.UserID, cacheScope, query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("shared message.created preserved current viewer message page")
+	}
+	if _, ok := server.commCache.getMessage(visible.UserID, cacheScope, "shared-message-live", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("shared message.created preserved current viewer message detail")
+	}
+	if _, ok := server.commCache.getFolders(revoked.UserID, cacheScope, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("shared webhook invalidated cache for a user outside the current audience")
+	}
+	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls != 0 {
+		t.Fatalf("shared webhook provider calls folders=%d messages=%d details=%d, want event hint without provider polling", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
+	}
+
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	duplicateReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
+	duplicateRec := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusOK {
+		t.Fatalf("duplicate shared webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+	visibleClient.assertNoMessage(t)
+	revokedClient.assertNoMessage(t)
+
+	server.commCache.setFolders(visible.UserID, cacheScope, []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	server.commCache.setMessagePage(visible.UserID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "shared-message-live"}}}, now)
+	server.commCache.setMessage(visible.UserID, cacheScope, NylasMessage{ID: "shared-message-live", Subject: "Fresh"}, now)
+	folderBody := `{"type":"folder.updated","time":"2026-06-10T15:01:00Z","data":{"object":{"id":"inbox","grant_id":"shared-live-grant"}}}`
+	folderReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(folderBody))
+	folderReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", folderBody))
+	folderRec := httptest.NewRecorder()
+	handler.ServeHTTP(folderRec, folderReq)
+	if folderRec.Code != http.StatusOK {
+		t.Fatalf("shared folder webhook status = %d body=%s", folderRec.Code, folderRec.Body.String())
+	}
+	folderChanged := visibleClient.readJSON(t)
+	if folderChanged["type"] != realtimeMessageMailboxFolderChanged || folderChanged["trigger"] != "folder.updated" ||
+		folderChanged["scope"] != scope || folderChanged["shared_inbox_id"] != folder.FolderID {
+		t.Fatalf("shared mailbox folder event = %+v", folderChanged)
+	}
+	if _, present := folderChanged["message_id"]; present {
+		t.Fatalf("folder event mislabeled provider folder id as message id: %+v", folderChanged)
+	}
+	revokedClient.assertNoMessage(t)
+	if _, ok := server.commCache.getFolders(visible.UserID, cacheScope, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("folder.updated webhook preserved folder cache")
+	}
+	if _, ok := server.commCache.getMessagePage(visible.UserID, cacheScope, query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("folder.updated webhook invalidated message page")
+	}
+	if _, ok := server.commCache.getMessage(visible.UserID, cacheScope, "shared-message-live", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("folder.updated webhook invalidated message detail")
+	}
 }
 
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {

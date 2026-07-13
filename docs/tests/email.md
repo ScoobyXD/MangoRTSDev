@@ -24,11 +24,11 @@ Required regression scenario:
 - Confirm the count and projection remain, the standalone attached-email organizer renders its list/folders and retained thread, no replacement text box is created, and a view-only user can open it without receiving edit controls.
 
 EMAIL1 - Mango email drafts are Mango application records, not Nylas provider drafts and not browser-only state.
-EMAIL2 - Browser `localStorage` may be used only as a migration/fallback mirror for drafts and signatures; the database is the source of truth when the backend is reachable.
+EMAIL2 - Browser `localStorage` may be used only as a company/user-keyed fallback mirror for drafts and signatures. Every view filters it to the exact active personal account or shared inbox; after a successful database read, only rows explicitly marked pending sync may migrate, and stale/unmarked local rows cannot resurrect deleted or revoked drafts.
 EMAIL3 - Personal draft and signature rows are scoped to the actor's personal `user_email_connections` tuple of `user_id` plus `account_email`.
 EMAIL4 - Shared draft and signature rows are scoped to `shared_inbox_id`; `shared_inboxes` remains the Mango permission/resource wrapper and points to `company_email_connections` for provider grant plumbing.
 EMAIL5 - A draft or signature row must be either personal or shared, never both and never neither.
-EMAIL6 - Personal drafts are visible/editable only to the owning user inside the company; shared drafts/signatures require Shared Triage view/edit access for the selected shared inbox.
+EMAIL6 - Personal draft list/get/create/update/delete and draft-attachment access are owner-only in the exact personal account scope; company manager status does not bypass ownership. Shared draft list/get/attachment reads require view access to the exact inbox, while create/update/delete and attachment mutation require edit access.
 EMAIL7 - Draft IDs remain client-stable text IDs so reply/forward resume behavior and existing `email_draft` attachment resource IDs do not break; new personal reply/forward IDs include the connected personal mailbox scope to avoid cross-account collisions.
 EMAIL8 - Reply drafts are unique per company, mailbox scope, and source message ID; reopening Reply resumes the existing draft and preserves the original message context.
 EMAIL9 - Forward drafts are unique per company, mailbox scope, and source message ID; reopening Forward resumes the existing draft.
@@ -44,7 +44,7 @@ EMAIL18 - Nylas is the mailbox read/send provider boundary; Mango owns draft/sig
 EMAIL19 - SES remains for auth/invitation/system email and must not be confused with user mailbox draft/send behavior.
 EMAIL20 - Provider reauthorization problems must be recoverable mailbox errors, not Mango logout/session failures.
 EMAIL21 - A thread action targets the exact message card on which Reply, Reply All, or Forward was chosen; its provider message ID, recipients, original context, and stable draft identity must not be substituted with the latest thread message.
-EMAIL22 - Conversation details are newest first with a deterministic message-ID tie-breaker. New inbound or locally sent messages appear expanded at the top and collapse previously expanded cards while preserving the single grouped mailbox row.
+EMAIL22 - Conversation details are newest first with a deterministic message-ID tie-breaker. Authoritative provider thread `message_ids` define membership; any sent/received member absent from the bounded preview page is fetched by exact ID. New inbound or locally sent messages appear expanded at the top and collapse previously expanded cards while preserving the single grouped mailbox row.
 EMAIL23 - A thread detail pane owns the only vertical scrollbar. A selected single-message reader uses all remaining detail-pane height as its flexible minimum, so a short body never leaves a shallow fixed-height reader box; every expanded message document grows to its complete rendered content, including content sized from the document root, without clipping or exposing a per-message body scrollbar. Collapsed cards remain header summaries until expanded.
 EMAIL24 - Reply body editors have a nontrivial minimum/default height, support vertical resizing, and automatically persist a clamped per-user mailbox-scope height preference.
 EMAIL25 - Selecting a mailbox row while compose/reply is open quietly saves eligible draft content, exits compose, and shows the selected message on the first click without reloading the list.
@@ -67,6 +67,12 @@ EMAIL40 - Received body text and HTML render before inline CID downloads finish.
 EMAIL41 - Normal detail reads use mailbox-scoped frontend/backend caches and same-key in-flight coalescing without `refresh=true`. Raw MIME is not part of an ordinary body-only detail critical path; calendar RSVP and concrete unresolved inline-content recovery remain authenticated raw-MIME uses.
 EMAIL42 - Missing recipients and empty subject/body without a valid attachment reference are rejected before attachment authorization, repository expansion, S3, or Nylas send work. Attachment-only email remains valid. Every referenced Mango attachment then completes tenant-scoped original metadata and active-link authorization preflight; nonnegative sizes are summed without overflow and an aggregate above exactly 24,000,000 bytes is rejected before any object opens.
 EMAIL43 - Provider-ready outbound attachments are metadata plus exact size and a lazy opener, separate from inbound `NylasAttachment.Content`. Once the Nylas gate admits the send, S3 bytes stream exactly once into a deterministic-Content-Length multipart request with preserved order, filenames, content types, CID/inline semantics, and exact bytes. Length mismatch, short/long/error readers, cancellation, and provider failure close every opened body; no outbound base64 round trip or complete multipart buffer is allowed.
+EMAIL44 - Signed provider `message.created` webhooks publish narrow exact-mailbox invalidation hints after server cache invalidation and existing webhook deduplication. The active matching My/Shared Triage Inbox performs one coalesced canonical refresh; a bounded local-conversion suppression defers that pending refresh until expiry instead of dropping it. Off-view hints only invalidate cache, reconnect acceptance reconciles an open Inbox once, event payloads never insert rows, and no mail polling loop is added. Transient audience/delivery lookup failure forgets the dedupe receipt and returns a retryable server error.
+EMAIL45 - Thread reconstruction supports external-initiated, Mango-user-initiated, alternating inbound/outbound replies, and forwards without guessing. Provider thread IDs or exact supported reply metadata may establish membership; subject similarity never does, cross-mailbox IDs cannot merge, duplicates collapse by message ID, and unresolved one-offs remain single conversations.
+EMAIL46 - An unread card always has the unread dot and thicker frame. Pointer or keyboard open optimistically clears unread UI and decrements/recomputes the visible count before the scoped provider command completes; success survives selection/realtime refresh, while failure rolls back accurately and surfaces the established error. Pending-read timers, overlays, and responses are keyed by authenticated mailbox plus provider message ID and may mutate only the captured list/filter and selection generation, so identical provider IDs or stale completions cannot cross users, personal accounts, shared inboxes, searches, or selections. Selection uses the separate full-card Mango selection surface and accessible pressed state.
+EMAIL47 - Draft scope columns are immutable across upsert conflicts, soft deletion, and known-ID reuse. List/get/delete store predicates include exact scope, shared account email is canonicalized from the inbox, and cross-user/account/inbox IDs cannot be read, taken over, reassigned, updated, or deleted.
+EMAIL48 - An email-card thread icon appears on the left only when the sanitized canonical/loaded message count is greater than one; thread-ID presence alone is not proof of a multi-message conversation.
+EMAIL49 - Locally persisted sent-reply fallback data is keyed by company, authenticated user, personal account/shared inbox, source message, and thread. When a provider send response omits thread ID, exact reply-target metadata supplies it before the enriched reply is persisted under the thread key; no local reply cache crosses users or mailboxes.
 
 ## Scenarios
 
@@ -287,3 +293,32 @@ Expected:
 - The selected body becomes readable without waiting for raw MIME, historical message details, or CID downloads.
 - Thread preview metadata is bounded, collapsed messages fetch no body or attachment bytes, and expanding one older card hydrates only that card.
 - Rapidly selecting another thread removes the prior cards immediately and stale completions do not reinsert them.
+
+### Scenario EMAIL-S11: Live Conversation, Read State, Thread Indicator, And Draft IDOR
+
+Business logic covered:
+- EMAIL2
+- EMAIL3
+- EMAIL4
+- EMAIL5
+- EMAIL6
+- EMAIL21
+- EMAIL22
+- EMAIL44
+- EMAIL45
+- EMAIL46
+- EMAIL47
+- EMAIL48
+- EMAIL49
+
+Given:
+- An external sender sends the first message, the Mango user replies, and the external sender replies again while the personal or exact shared inbox is open or while another view is active.
+- The bounded preview page omits the Mango sent reply, or the initial send response omits thread ID while its exact reply target has one.
+- Another user/account/shared inbox knows a durable draft ID and attempts list, get, update, delete, or attachment access.
+
+Expected:
+- A signed, deduplicated create webhook emits one authorized exact-mailbox hint. The matching active list refreshes canonically once, shows the arrival once in date order, and updates unread metadata; an off-view mailbox performs no request until canonical open.
+- Conversation detail contains all provider-listed sent and received members, including the intervening Mango reply, without duplicate IDs, subject-based merging, cross-scope history, or loss of valid one-offs/forwards.
+- The unread dot/frame and visible count clear immediately on pointer/Enter/Space open and stay cleared after success; a failed provider write rolls back and reports the error. The selected full-card surface remains distinct.
+- The row shows a thread icon only for the proven multi-message conversation.
+- Every draft operation and attachment authorization uses one immutable exact scope. Personal owner and shared view/edit distinctions hold; cross-scope known IDs cannot expose content or mutate scope, spoofed shared account data is ignored, and stale browser mirrors cannot reappear as another scope's drafts.

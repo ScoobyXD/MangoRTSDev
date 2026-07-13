@@ -675,7 +675,14 @@ test("signature hydration, empty remote rows, and attachment scope preserve the 
   assert.match(homeMailWorkspace, /emailSignatureAccountEmail: string/);
   assert.match(homeMailWorkspace, /emailSignatureAccountEmail=\{emailSignatureAccountEmail\}/);
   assert.match(homeParts, /accountEmail: emailSignatureAccountEmail/);
-  assert.doesNotMatch(homeParts, /accountEmail: compose\.accountEmail/);
+  assert.match(homeParts, /const composeAttachmentResourceID[\s\S]*accountEmail: compose\.accountEmail/);
+  const signatureAttachmentScope = sourceSliceBetween(
+    homeParts,
+    "const signatureAttachmentResourceID",
+    "[compose.sharedInboxID, currentUserID, emailSignatureAccountEmail]",
+    "signature attachment resource scope",
+  );
+  assert.doesNotMatch(signatureAttachmentScope, /accountEmail: compose\.accountEmail/);
   assert.match(homeMailDrafts, /const homeMailSignatureLocalRevisions = new Map<string, number>\(\)/);
   assert.match(signatureLoader, /const localRevisionAtLoadStart = readHomeMailSignatureLocalRevision\(scopeKey\)/);
   assert.match(signatureLoader, /readHomeMailSignatureLocalRevision\(scopeKey\) !== localRevisionAtLoadStart/);

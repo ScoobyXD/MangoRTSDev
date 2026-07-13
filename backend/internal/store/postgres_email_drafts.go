@@ -11,19 +11,30 @@ func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDr
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return nil, err
 	}
-	companyID := strings.TrimSpace(input.CompanyID)
-	actorUserID := cleanUUIDText(input.ActorUserID)
-	if companyID == "" || actorUserID == "" {
-		return nil, ErrInvalid
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	if err != nil {
+		return nil, err
 	}
 
-	rows, err := r.db.Query(`
+	var rows *sql.Rows
+	if scope.scopeType == "shared" {
+		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSelectColumns()+`
 from communications_email_drafts
 where company_id = $1::uuid
-  and deleted_timestamp is null
-  and (personal_user_id = $2::uuid or shared_inbox_id is not null)
-order by updated_timestamp desc, draft_id asc`, companyID, actorUserID)
+	and deleted_timestamp is null
+	and shared_inbox_id = $2::uuid
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID)
+	} else {
+		rows, err = r.db.Query(`
+select `+communicationsEmailDraftSelectColumns()+`
+from communications_email_drafts
+where company_id = $1::uuid
+	and deleted_timestamp is null
+	and personal_user_id = $2::uuid
+	and personal_account_email = $3
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -40,21 +51,35 @@ order by updated_timestamp desc, draft_id asc`, companyID, actorUserID)
 	return drafts, rows.Err()
 }
 
-func (r *PostgresRepo) GetCommunicationsEmailDraft(companyID, draftID string) (domain.CommunicationsEmailDraft, error) {
+func (r *PostgresRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
-	companyID = strings.TrimSpace(companyID)
-	draftID = strings.TrimSpace(draftID)
-	if companyID == "" || draftID == "" {
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	draftID := strings.TrimSpace(input.DraftID)
+	if draftID == "" {
 		return domain.CommunicationsEmailDraft{}, ErrInvalid
+	}
+	if scope.scopeType == "shared" {
+		return scanCommunicationsEmailDraft(r.db.QueryRow(`
+select `+communicationsEmailDraftSelectColumns()+`
+from communications_email_drafts
+where company_id = $1::uuid
+	and draft_id = $2
+	and shared_inbox_id = $3::uuid
+	and deleted_timestamp is null`, scope.companyID, draftID, scope.sharedInboxID))
 	}
 	return scanCommunicationsEmailDraft(r.db.QueryRow(`
 select `+communicationsEmailDraftSelectColumns()+`
 from communications_email_drafts
 where company_id = $1::uuid
-  and draft_id = $2
-  and deleted_timestamp is null`, companyID, draftID))
+	and draft_id = $2
+	and personal_user_id = $3::uuid
+	and personal_account_email = $4
+	and deleted_timestamp is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail))
 }
 
 func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
@@ -65,7 +90,7 @@ func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailD
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
-	return scanCommunicationsEmailDraft(r.db.QueryRow(`
+	saved, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
 insert into communications_email_drafts (
   company_id,
   draft_id,
@@ -110,10 +135,7 @@ insert into communications_email_drafts (
   null
 )
 on conflict (company_id, draft_id) do update set
-  personal_user_id = excluded.personal_user_id,
-  personal_account_email = excluded.personal_account_email,
-  shared_inbox_id = excluded.shared_inbox_id,
-  updated_by_user_id = excluded.updated_by_user_id,
+	updated_by_user_id = excluded.updated_by_user_id,
   kind = excluded.kind,
   source_message_id = excluded.source_message_id,
   account_email = excluded.account_email,
@@ -123,9 +145,12 @@ on conflict (company_id, draft_id) do update set
   subject = excluded.subject,
   body_editor_html = excluded.body_editor_html,
   reply_to_message = excluded.reply_to_message,
-  scheduled_send_timestamp = excluded.scheduled_send_timestamp,
-  updated_timestamp = now(),
-  deleted_timestamp = null
+	scheduled_send_timestamp = excluded.scheduled_send_timestamp,
+	updated_timestamp = now(),
+	deleted_timestamp = null
+where communications_email_drafts.personal_user_id is not distinct from excluded.personal_user_id
+	and communications_email_drafts.personal_account_email is not distinct from excluded.personal_account_email
+	and communications_email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id
 returning `+communicationsEmailDraftSelectColumns(),
 		draft.CompanyID,
 		draft.DraftID,
@@ -145,26 +170,36 @@ returning `+communicationsEmailDraftSelectColumns(),
 		draft.ReplyToMessageJSON,
 		draft.ScheduledSendTimestamp,
 	))
+	if errors.Is(err, ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
+	}
+	return saved, err
 }
 
 func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return err
 	}
-	companyID := strings.TrimSpace(input.CompanyID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	if err != nil {
+		return err
+	}
 	draftID := strings.TrimSpace(input.DraftID)
 	updatedByUserID := cleanUUIDText(input.UpdatedByUserID)
-	if companyID == "" || draftID == "" {
+	if draftID == "" {
 		return ErrInvalid
 	}
 	result, err := r.db.Exec(`
 update communications_email_drafts
 set deleted_timestamp = now(),
-    updated_timestamp = now(),
-    updated_by_user_id = nullif($3, '')::uuid
+	updated_timestamp = now(),
+	updated_by_user_id = nullif($3, '')::uuid
 where company_id = $1::uuid
-  and draft_id = $2
-  and deleted_timestamp is null`, companyID, draftID, updatedByUserID)
+	and draft_id = $2
+	and personal_user_id is not distinct from nullif($4, '')::uuid
+	and personal_account_email is not distinct from nullif($5, '')
+	and shared_inbox_id is not distinct from nullif($6, '')::uuid
+	and deleted_timestamp is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID)
 	if err != nil {
 		return err
 	}
@@ -182,7 +217,7 @@ func (r *PostgresRepo) GetCommunicationsEmailSignature(input CommunicationsEmail
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}

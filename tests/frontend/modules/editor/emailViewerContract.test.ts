@@ -62,9 +62,86 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
   assert.match(homePage, /preserveCurrentThread[\s\S]{0,300}: \[visiblePrimaryMessage\]/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
-  assert.doesNotMatch(homePage, /getEmailThread/);
+  assert.match(homePage, /await getEmailMessage\(selectedMessageID[\s\S]{0,2200}await getEmailThread\(threadID/);
+  assert.match(homePage, /authoritativeMessageIDs = cleanIDList\(thread\.message_ids \?\? \[\]\)/);
+  assert.match(homePage, /const missingMessageIDs = missingEmailThreadMessageIDs\(/);
+  assert.match(homePage, /for \(let index = 0; index < missingMessageIDs\.length; index \+= 4\)/);
+  assert.match(homePage, /EMAIL_THREAD_PREVIEW_MAX_PAGES = 8/);
+  assert.match(homePage, /Some messages in this email thread could not be loaded/);
   assert.doesNotMatch(homePage, /Promise\.all\(detailIDs/);
   assert.match(homeParts, /onLoadMessageBody/);
+});
+
+test("personal and shared mail rows expose unread, selected, thread, and keyboard semantics", () => {
+  const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
+  const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+
+  assert.match(homeWorkspace, /aria-pressed=\{active\}/);
+  assert.match(homeWorkspace, /aria-label=\{emailMessageRowAriaLabel\(message, rowAddressLabel\)\}/);
+  assert.match(homeWorkspace, /if \(!isMailRowActivationKey\(event\.key\)\) return;[\s\S]{0,140}onSelectMessage\(message, event\)/);
+  assert.match(homeWorkspace, /<MessageLeadingIndicators message=\{message\} active=\{active\} \/>/);
+  assert.match(homeParts, /emailMessageHasMultipleThreadMessages\(message\)/);
+  assert.match(homeParts, /role="img" aria-label=\{label\} title=\{label\}/);
+  assert.match(homeParts, /messageUnreadDotStyle\(message\.unread\)/);
+  assert.doesNotMatch(homeParts, /messageSelectDotStyle/);
+});
+
+test("mailbox live refresh, read-on-open rollback, and draft scope stay wired through shared Home paths", () => {
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
+  const drafts = source("frontend/src/pages/home/homeMailDrafts.ts");
+
+  assert.ok(homePage.includes("realtimePersonalMailboxScope(currentUserID)"));
+  assert.ok(homePage.includes("realtimeSharedMailboxScope(sharedInbox.folder_id)"));
+  assert.ok(homePage.includes("onMailboxMessageChanged: onMailboxChanged"));
+  assert.ok(homePage.includes("onMailboxFolderChanged: onMailboxChanged"));
+  assert.ok(homePage.includes("onAccepted: () =>"));
+  assert.ok(homePage.includes("if (!acceptedOnce)"));
+  assert.ok(homePage.includes("const mailboxRealtimeScopesKey = useMemo"));
+  assert.ok(homePage.includes("invalidateCommunicationsCache({ folders: true, messagePages: true })"));
+  assert.ok(homePage.includes("scheduleMessageListRefresh(120, { refresh: true, bumpMailboxRealtimeRevision: true })"));
+  assert.ok(homePage.includes("pendingOptions.refresh = pendingOptions.refresh || options?.refresh === true"));
+  assert.ok(homePage.includes("pendingOptions.bumpMailboxRealtimeRevision = pendingOptions.bumpMailboxRealtimeRevision || options?.bumpMailboxRealtimeRevision === true"));
+  assert.ok(homePage.includes("const hasCanonicalArrivalRefresh = pendingOptions.refresh || pendingOptions.bumpMailboxRealtimeRevision"));
+  assert.ok(homePage.includes("messageListRefreshTimerRef.current = window.setTimeout(runScheduledRefresh, retryDelayMs)"));
+  assert.match(homePage, /if \(localTriageConversionMailNetworkIsSuppressed\(requestKey\)\) \{\s*scheduleMessageListRefresh\(0, \{ refresh: options\.refresh \}\);\s*return;/);
+  assert.ok(homePage.includes("setMailboxRealtimeRevision((revision) => revision + 1)"));
+
+  assert.ok(homePage.includes("locallyReadMessageKeysRef.current.add(messageKey)"));
+  assert.ok(homePage.includes("unreadEmailThreadMessagesForSelection(messagesRef.current, message)"));
+  const markReadStart = homePage.indexOf("const markMessageReadFromListSelection");
+  const markReadEnd = homePage.indexOf("const selectMessageRow", markReadStart);
+  assert.ok(markReadStart >= 0 && markReadEnd > markReadStart);
+  const markReadSource = homePage.slice(markReadStart, markReadEnd);
+  assert.match(markReadSource, /const requestViewID = activeViewIDRef\.current/);
+  assert.match(markReadSource, /requestMailbox === "drafts"/);
+  assert.match(markReadSource, /const requestFilterKey = messageListFilterKey/);
+  assert.match(markReadSource, /const requestEmailMailboxScopeKey = activeEmailMailboxScopeKeyRef\.current/);
+  assert.match(markReadSource, /const requestUserID = currentUserID/);
+  assert.match(markReadSource, /if \(currentUserIDRef\.current !== requestUserID\)/);
+  assert.match(markReadSource, /const requestSelectionGeneration = messageSelectionGenerationRef\.current/);
+  assert.match(markReadSource, /requestStillOwnsVisibleList/);
+  assert.match(markReadSource, /selectedThreadStillActive/);
+  assert.match(markReadSource, /if \(!requestStillOwnsVisibleList\(\)\) return;/);
+  assert.match(markReadSource, /: current\)\);/);
+  assert.doesNotMatch(markReadSource, /mailboxRef\.current !== "primary"\) return;/);
+  assert.ok(homePage.includes("applyLocalReadOverlays(messages: EmailMessage[], locallyReadMessageKeys: Set<string>, mailboxScopeKey: string)"));
+  assert.ok(homePage.includes("markReadMutationTokenByMessageKeyRef.current.get(messageKey) !== mutationToken"));
+  assert.ok(homePage.includes("selectedMessageRef.current = visiblePrimaryMessage"));
+  assert.ok(homePage.includes("activeViewIDRef.current = viewID"));
+  assert.match(homePage, /useLayoutEffect\(\(\) => \{\s*messagesRef\.current = messages;/);
+  assert.ok(homePage.includes("const rollback = { ...messageToMark, unread: true }"));
+  assert.ok(homePage.includes('setError(formatError(markError, "Failed to mark message read"))'));
+
+  assert.ok(homePage.includes("const activeMailDrafts = useMemo"));
+  assert.ok(homePage.includes("const activeMailDraftScopeAuthorized"));
+  assert.ok(homePage.includes("draft.userID === currentUserID"));
+  assert.ok(homePage.includes("homeMailDraftMatchesScope("));
+  assert.ok(homePage.includes("activeSharedInboxFolderID,"));
+  assert.ok(homePage.includes("activeMailAccountEmail,"));
+  assert.ok(homePage.includes("draftCount={activeMailDrafts.length}"));
+  assert.ok(drafts.includes("draft.pendingRemoteSync === true"));
+  assert.ok(drafts.includes("otherScopeDrafts"));
+  assert.ok(drafts.includes("draft.accountEmail.trim().toLowerCase()"));
 });
 
 test("node list context menus unlink attachments and remove attached emails", () => {

@@ -122,7 +122,7 @@ type CommunicationsRepository interface {
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
-	GetCommunicationsEmailDraft(companyID, draftID string) (domain.CommunicationsEmailDraft, error)
+	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
@@ -2232,8 +2232,18 @@ type CompanyEmailConnectionInput struct {
 }
 
 type CommunicationsEmailDraftListInput struct {
-	CompanyID   string
-	ActorUserID string
+	CompanyID            string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+}
+
+type CommunicationsEmailDraftGetInput struct {
+	CompanyID            string
+	DraftID              string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
 }
 
 type CommunicationsEmailDraftInput struct {
@@ -2257,9 +2267,12 @@ type CommunicationsEmailDraftInput struct {
 }
 
 type CommunicationsEmailDraftDeleteInput struct {
-	CompanyID       string
-	DraftID         string
-	UpdatedByUserID string
+	CompanyID            string
+	DraftID              string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+	UpdatedByUserID      string
 }
 
 type CommunicationsEmailSignatureScopeInput struct {
