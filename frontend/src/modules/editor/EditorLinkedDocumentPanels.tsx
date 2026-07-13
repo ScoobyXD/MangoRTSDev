@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useAppOverlayPortalTarget } from "../../app/AppModalPortal";
+import { useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
@@ -349,55 +349,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     onSetIsEditingTitle(false);
   }, [canEdit, onSetIsEditingTitle]);
 
-  useEffect(() => {
-    if (!statusMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (statusMenuRef.current?.contains(event.target as Node)) return;
-      setStatusMenuOpen(false);
-      setHoveredStatusValue("");
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        setStatusMenuOpen(false);
-        setHoveredStatusValue("");
-        window.requestAnimationFrame(() => statusMenuRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [statusMenuOpen]);
-
-  useEffect(() => {
-    if (!priorityMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (priorityMenuRef.current?.contains(event.target as Node)) return;
-      setPriorityMenuOpen(false);
-      setHoveredPriorityValue("");
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        setPriorityMenuOpen(false);
-        setHoveredPriorityValue("");
-        window.requestAnimationFrame(() => priorityMenuRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [priorityMenuOpen]);
+  useAppFloatingMenuDismissal(statusMenuOpen, statusMenuRef, () => {
+    setStatusMenuOpen(false);
+    setHoveredStatusValue("");
+  });
+  useAppFloatingMenuDismissal(priorityMenuOpen, priorityMenuRef, () => {
+    setPriorityMenuOpen(false);
+    setHoveredPriorityValue("");
+  });
 
   const beginTitleEditAtEnd = () => {
     if (!canEdit) return;

@@ -4739,8 +4739,8 @@ function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDr
   onCancel: () => void;
 }) {
   return (
-    <AppModalPortal onRequestClose={() => { if (!busy) onCancel(); }}>
-    <div style={{ ...homeDialogBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={homeDialogBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -4782,8 +4782,8 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, canConnect, onCo
   onCancel: () => void;
 }) {
   return (
-    <AppModalPortal onRequestClose={() => { if (!busy) onCancel(); }}>
-    <div style={{ ...homeDialogBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={homeDialogBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -4809,7 +4809,7 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, canConnect, onCo
 const homeDialogBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 80,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 20,

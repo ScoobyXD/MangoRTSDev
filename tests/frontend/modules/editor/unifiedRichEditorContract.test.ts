@@ -171,6 +171,7 @@ test("the numeric font-size input commits on Enter and cancels cleanly on Escape
 test("toolbar cancellation and passive format reads preserve keyboard focus", () => {
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const modalPortal = readFileSync(resolve(process.cwd(), "frontend/src/app/AppModalPortal.tsx"), "utf8");
   const readFormatState = sourceSliceBetween(
     editorSurfaceHandlers,
     "readFormatState: () => {",
@@ -178,13 +179,12 @@ test("toolbar cancellation and passive format reads preserve keyboard focus", ()
     "shared read-format-state command",
   );
 
-  assert.match(editorTabBar, /const outlineTriggerRef = useRef<HTMLButtonElement \| null>\(null\)/);
-  assert.match(editorTabBar, /const highlightTriggerRef = useRef<HTMLButtonElement \| null>\(null\)/);
-  assert.match(editorTabBar, /setOutlineMenuOpen\(false\);\s*window\.requestAnimationFrame\(\(\) => outlineTriggerRef\.current\?\.focus/);
-  assert.match(editorTabBar, /setHighlightMenuOpen\(false\);\s*window\.requestAnimationFrame\(\(\) => highlightTriggerRef\.current\?\.focus/);
-  assert.match(editorTabBar, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*setOutlineMenuOpen\(false\)/);
-  assert.match(editorTabBar, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*setHighlightMenuOpen\(false\)/);
-  assert.match(editorTabBar, /document\.addEventListener\("keydown", closeOnEscape, true\)/);
+  assert.match(editorTabBar, /useAppFloatingMenuDismissal\(outlineMenuOpen, outlineMenuRef, \(\) => setOutlineMenuOpen\(false\)\)/);
+  assert.match(editorTabBar, /useAppFloatingMenuDismissal\(highlightMenuOpen, highlightMenuRef, \(\) => setHighlightMenuOpen\(false\)\)/);
+  assert.match(modalPortal, /const trigger = containerRef\.current\?\.querySelector<HTMLButtonElement>\("button\[aria-haspopup\]"\)/);
+  assert.match(modalPortal, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*event\.stopImmediatePropagation\(\);\s*onCloseRef\.current\(\)/);
+  assert.match(modalPortal, /targetDocument\.addEventListener\("keydown", closeOnEscape, true\)/);
+  assert.match(modalPortal, /requestAnimationFrame\(restoreFocus\)/);
   assert.match(readFormatState, /const editor = restoreFormattingRange\(\)/);
   assert.doesNotMatch(readFormatState, /restoreFormattingSelection|\.focus\(/);
 });
@@ -545,7 +545,7 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(formattingHook, /insertList: \(kind\) => \{\s*const editor = restoreFormattingSelection\(\)/);
   assert.match(formattingHook, /pendingEditorFontSizeRef\.current[\s\S]*fontSize: pendingEditorFontSizeRef\.current/);
   assert.match(fontSizeCommand, /if \(!range \|\| range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize/);
-  assert.match(editorSurfaceHandlers, /function editorSelectedTextRuns\(root: HTMLElement, _range: Range\)/);
+  assert.match(editorSurfaceHandlers, /function editorSelectedTextRuns\(root: HTMLElement, range: Range\)[\s\S]*getEditorRangeOffsets\(root, range\)/);
   assert.match(editorSurfaceHandlers, /const spans = wrapEditorSelectedTextRuns\([\s\S]*span\.style\.fontSize/);
   assert.match(editorSurfaceHandlers, /function normalizeEditorFontSizeSpans\(root: HTMLElement, spans: readonly HTMLSpanElement\[\]\)/);
   assert.match(fontSizeCommand, /normalizeEditorFontSizeSpans\(root, spans\)/);
@@ -610,8 +610,10 @@ test("collapsed-caret font size and highlight are retained as pending typing sty
   assert.match(beforeInput, /pendingFontSize !== null \|\| pendingHighlightColor !== undefined/);
   assert.match(beforeInput, /if \(pendingStyle && pendingFontSize !== null\) pendingStyle\.fontSize = pendingFontSize/);
   assert.match(beforeInput, /if \(pendingStyle && pendingHighlightColor !== undefined\) pendingStyle\.highlightColor = pendingHighlightColor/);
+  assert.match(editorSurfaceHandlers, /const clearPendingTypingStyle = useCallback\(\(\) => \{\s*pendingEditorFontSizeRef\.current = null;\s*pendingEditorHighlightColorRef\.current = undefined/);
   assert.match(beforeInput, /const selectionFormat = readEditorSelectionFormatState\(root\)/);
-  assert.match(beforeInput, /if \(selectionFormat\) \{\s*scriptedTypingStyle\.inlineFormat = \{\s*bold: selectionFormat\.bold,\s*underline: selectionFormat\.underline,\s*italic: selectionFormat\.italic/);
+  assert.ok(beforeInput.indexOf("const selectionFormat = readEditorSelectionFormatState(root)") < beforeInput.indexOf("const activeTableCell"));
+  assert.match(beforeInput, /if \(includeInlineFormat && selectionFormat\) \{\s*scriptedTypingStyle\.inlineFormat = \{\s*bold: selectionFormat\.bold,\s*underline: selectionFormat\.underline,\s*italic: selectionFormat\.italic/);
   assert.ok(beforeInput.indexOf("startEditorListFromBlankLine") < beforeInput.indexOf("pendingNativeStyledInsertionRef.current = { text"));
   assert.match(editorSurfaceHandlers, /onInput\(event\) \{[\s\S]*pendingNativeStyledInsertionRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, pendingStyledInsertion\.text, pendingStyledInsertion\.style\)/);
   assert.match(editorSurfaceHandlers, /function wrapEditorSelectedTextRunsWithInlineFormat[\s\S]*editorTextNodeHasInlineFormatDefinition\(root, run\.node, command\)/);
@@ -624,6 +626,7 @@ test("collapsed-caret font size and highlight are retained as pending typing sty
   assert.match(editorSurfaceHandlers, /onKeyUp\(event\) \{\s*rememberEditorSelectionRange\(event\.currentTarget\);\s*refreshMentionDraft\(event\.currentTarget\)/);
   assert.match(editorSurfaceHandlers, /const alreadyStyled = editorSelectedTextRuns\(root, range\)\.every\(\(run\) => readEditorTextNodeEffectiveFontSize\(root, run\.node\) === nextFontSize\);\s*if \(!alreadyStyled\)/);
   assert.match(editorSurfaceHandlers, /readSelectionHighlightColor\(root, run\.node\.parentElement \?\? root\) === color\);\s*if \(!alreadyStyled\)/);
+  assert.match(editorSurfaceHandlers, /restoreEditorSelectionRange\(root\);\s*root\.focus\(\{ preventScroll: true \}\);\s*clearPendingTypingStyle\(\);/);
 });
 
 test("italic, alignment, and table insertion route through the shared toolbar and controller", () => {
@@ -686,6 +689,8 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /secondaryActions\.map\(\(action\) =>/);
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{action\.id\}/);
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action="save-version"/);
+  assert.match(editorTabBar, /const toggleHeaderMenu = \(menu: "outline" \| "highlight" \| "overflow"\)[\s\S]*setOutlineMenuOpen\(menu === "outline" && opening\)[\s\S]*setHighlightMenuOpen\(menu === "highlight" && opening\)[\s\S]*setOverflowMenuOpen\(menu === "overflow" && opening\)/);
+  assert.match(editorTabBar, /toggleHeaderMenu\("highlight"\)[\s\S]*toggleHeaderMenu\("outline"\)[\s\S]*toggleHeaderMenu\("overflow"\)/);
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
   assert.match(editorContent, /onCreateRelatedNode=/);
   assert.match(editorContent, /onSaveCurrentVersion=/);
@@ -712,27 +717,33 @@ test("blocking editor and node overlays use the app modal layer above feature st
     "frontend/src/pages/home/HomePage.tsx",
     "frontend/src/pages/home/HomeParts.tsx",
   ];
-  assert.match(modalPortal, /export const APP_MODAL_LAYER_Z_INDEX = 10100/);
+  assert.match(modalPortal, /const APP_MODAL_LAYER_Z_INDEX = 10100/);
   assert.match(modalPortal, /data-mango-modal-layer="true"/);
   assert.match(modalPortal, /createPortal\([\s\S]*targetDocument\.body/);
   assert.match(modalPortal, /export function useAppOverlayPortalTarget/);
   assert.match(modalPortal, /data-mango-modal-focus-trap=\{trapFocus \? "true" : "false"\}/);
   assert.match(modalPortal, /const trappingLayers = layers\.filter[\s\S]*const activeLayers = trappingLayers\.length > 0 \? trappingLayers : layers/);
+  assert.match(modalPortal, /export function appOverlayCanHandleEscape[\s\S]*const activeLayer = activeAppModalLayer\(ownerDocument\)[\s\S]*element\?\.closest<HTMLElement>\(APP_MODAL_LAYER_SELECTOR\) === activeLayer/);
+  assert.match(modalPortal, /activeElement\.closest<HTMLElement>\('\[role="menu"\]'\)[\s\S]*:scope > button\[aria-haspopup\]/);
+  assert.match(modalPortal, /const fallbackLayer = activeAppModalLayer\(targetDocument, layer\)[\s\S]*appModalFocusableElements\(fallbackLayer\)/);
+  assert.match(modalPortal, /element\.matches\(":disabled"\) \|\| element\.tabIndex < 0 \|\| element\.getClientRects\(\)\.length === 0[\s\S]*current\.hasAttribute\("inert"\)/);
   assert.match(modalPortal, /zIndex: trapFocus \? APP_MODAL_LAYER_Z_INDEX : APP_MODAL_LAYER_Z_INDEX - 10/);
   assert.match(modalPortal, /targetDocument\.addEventListener\("keydown", onKeyDown\)/);
   assert.match(modalPortal, /targetDocument\.addEventListener\("focusin", onFocusIn, true\)/);
-  assert.match(modalPortal, /previousFocus\?\.isConnected[\s\S]*previousFocus\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(modalPortal, /previousFocus\?\.isConnected[\s\S]*previousFocus\.focus\(\{ preventScroll: true \}\)[\s\S]*targetDocument\.activeElement === previousFocus/);
   for (const path of consumerPaths) {
     const source = readFileSync(resolve(process.cwd(), path), "utf8");
     assert.match(source, /AppModalPortal/, path + " must escape feature-local stacking contexts");
   }
   assert.match(editorSurfaceHandlers, /React\.createElement\(AppModalPortal, \{ onRequestClose: \(\) => setActiveImagePreview\(null\) \}, imagePreviewModal\)/);
   assert.match(frameRightClickMenu, /const portalTarget = useAppOverlayPortalTarget\(\)[\s\S]*portalTarget \? createPortal/);
+  assert.match(frameRightClickMenu, /if \(!appOverlayCanHandleEscape\(menuRef\.current\)\) return/);
   assert.match(linkedDocumentPanels, /const floatingPortalTarget = useAppOverlayPortalTarget\(\)[\s\S]*createPortal\([\s\S]*floatingPortalTarget/);
   const kanbanOverlay = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanOverlays.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   assert.match(kanbanOverlay, /useAppViewportAnchorRect\(boardRootRef\)/);
   assert.match(projectSummary, /useAppViewportAnchorRect\(containerRef\)/);
+  assert.match(projectSummary, /<AppModalPortal onRequestClose=\{saving \? undefined : onClose\}>[\s\S]*disabled=\{saving\}[\s\S]*Save Assignments/);
   assert.match(kanbanOverlay, /data-mango-editor-overlay-backdrop=\{fullscreen \? "modal" : "modeless"\}/);
   assert.match(kanbanOverlay, /trapFocus=\{fullscreen\}/);
 });

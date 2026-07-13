@@ -148,7 +148,7 @@ export function KanbanAccountAssignmentModal({
 
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
-    <div style={{ ...modalBackdropStyle, zIndex: 1 }} onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <div style={modalBackdropStyle} onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div role="dialog" aria-modal="true" aria-label={`Accounts for ${title}`} style={modalPanelStyle}>
         <div style={{ fontSize: 12, fontWeight: 760, color: "#111111", overflowWrap: "anywhere" }}>
           Accounts for {title}
@@ -359,7 +359,7 @@ const modalBackdropStyle: React.CSSProperties = {
   background: "rgba(241, 245, 249, 0.66)",
   backdropFilter: "blur(14px) saturate(1.18)",
   WebkitBackdropFilter: "blur(14px) saturate(1.18)",
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
 };

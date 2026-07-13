@@ -1373,10 +1373,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
       ) : null}
       {projectRenameTarget ? (
-        <AppModalPortal onRequestClose={() => { if (!projectRenameSaving) setProjectRenameTarget(null); }}>
+        <AppModalPortal onRequestClose={projectRenameSaving ? undefined : () => setProjectRenameTarget(null)}>
         <div
           role="presentation"
-          style={{ ...projectDeleteBackdropStyle, zIndex: 1 }}
+          style={projectDeleteBackdropStyle}
           onPointerDown={() => {
             if (!projectRenameSaving) setProjectRenameTarget(null);
           }}
@@ -2674,7 +2674,7 @@ const projectContextMenuButtonStyle: React.CSSProperties = {
 const projectDeleteBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 18,

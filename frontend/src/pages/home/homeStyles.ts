@@ -1335,7 +1335,7 @@ export const messageContextMenuStyle: React.CSSProperties = {
 export const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 130,
+  zIndex: 1,
   display: "block",
   background: "rgba(241, 245, 249, 0.66)",
   backdropFilter: "blur(14px) saturate(1.18)",

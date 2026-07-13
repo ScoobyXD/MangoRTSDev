@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useAppOverlayPortalTarget } from "./AppModalPortal";
+import { appOverlayCanHandleEscape, useAppOverlayPortalTarget } from "./AppModalPortal";
 
 export type FrameRightClickMenuClampInput = {
   x: number;
@@ -98,6 +98,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
       if (event.key !== "Escape") return;
       const confirmMenuActive = document.querySelector("[data-mango-confirm-action-menu='true']");
       if (!isConfirmActionMenu && confirmMenuActive) return;
+      if (!appOverlayCanHandleEscape(menuRef.current)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       onClose();

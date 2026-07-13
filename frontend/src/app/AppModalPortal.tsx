@@ -1,7 +1,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
 
-export const APP_MODAL_LAYER_Z_INDEX = 10100;
+const APP_MODAL_LAYER_Z_INDEX = 10100;
 
 export type AppViewportAnchorRect = {
   left: number;
@@ -69,6 +69,28 @@ const MODAL_FOCUSABLE_SELECTOR = [
   "[contenteditable=\"true\"]",
   "[tabindex]:not([tabindex=\"-1\"])",
 ].join(",");
+const APP_MODAL_LAYER_SELECTOR = '[data-mango-modal-layer="true"]';
+
+function activeAppModalLayer(targetDocument: Document, excludedLayer?: HTMLElement): HTMLElement | null {
+  const layers = Array.from(targetDocument.querySelectorAll<HTMLElement>(APP_MODAL_LAYER_SELECTOR))
+    .filter((layer) => layer !== excludedLayer);
+  const trappingLayers = layers.filter((layer) => layer.dataset.mangoModalFocusTrap === "true");
+  const activeLayers = trappingLayers.length > 0 ? trappingLayers : layers;
+  return activeLayers[activeLayers.length - 1] ?? null;
+}
+
+/** Prevent background floating surfaces from consuming Escape ahead of the active modal. */
+export function appOverlayCanHandleEscape(
+  element: Element | null,
+  targetDocument?: Document | null,
+): boolean {
+  const ownerDocument = targetDocument
+    ?? element?.ownerDocument
+    ?? (typeof document === "undefined" ? null : document);
+  if (!ownerDocument) return false;
+  const activeLayer = activeAppModalLayer(ownerDocument);
+  return !activeLayer || element?.closest<HTMLElement>(APP_MODAL_LAYER_SELECTOR) === activeLayer;
+}
 
 const AppOverlayPortalTargetContext = React.createContext<HTMLElement | null>(null);
 
@@ -78,14 +100,69 @@ export function useAppOverlayPortalTarget(ownerDocument?: Document | null): HTML
   return modalLayer ?? targetDocument?.body ?? null;
 }
 
+/** Shared outside-pointer/Escape behavior for floating menus, including trigger focus restoration. */
+export function useAppFloatingMenuDismissal(
+  open: boolean,
+  containerRef: React.RefObject<HTMLElement | null>,
+  onClose: () => void,
+): void {
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const targetDocument = containerRef.current?.ownerDocument
+      ?? (typeof document === "undefined" ? null : document);
+    if (!targetDocument) return undefined;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) onCloseRef.current();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (!appOverlayCanHandleEscape(containerRef.current, targetDocument)) return;
+      const trigger = containerRef.current?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onCloseRef.current();
+      const restoreFocus = () => trigger?.focus({ preventScroll: true });
+      const view = targetDocument.defaultView;
+      if (view) view.requestAnimationFrame(restoreFocus);
+      else restoreFocus();
+    };
+
+    targetDocument.addEventListener("pointerdown", closeOnPointerDown, true);
+    targetDocument.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      targetDocument.removeEventListener("pointerdown", closeOnPointerDown, true);
+      targetDocument.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [containerRef, open]);
+}
+
 function elementIsVisibleForModalFocus(element: HTMLElement): boolean {
+  if (element.matches(":disabled") || element.tabIndex < 0 || element.getClientRects().length === 0) return false;
   for (let current: HTMLElement | null = element; current; current = current.parentElement) {
-    if (current.hidden || current.getAttribute("aria-hidden") === "true") return false;
+    if (current.hidden || current.hasAttribute("inert") || current.getAttribute("aria-hidden") === "true") return false;
     const view: Window | null = current.ownerDocument.defaultView;
     const style = view?.getComputedStyle(current);
     if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return false;
   }
   return true;
+}
+
+function appModalFocusableElements(layer: HTMLElement): HTMLElement[] {
+  return Array.from(layer.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR))
+    .filter(elementIsVisibleForModalFocus);
+}
+
+function appModalRestoreFocusTarget(targetDocument: Document): HTMLElement | null {
+  const view = targetDocument.defaultView;
+  const activeElement = targetDocument.activeElement;
+  if (!view || !(activeElement instanceof view.HTMLElement)) return null;
+  const menu = activeElement.closest<HTMLElement>('[role="menu"]');
+  return menu?.parentElement?.querySelector<HTMLButtonElement>(':scope > button[aria-haspopup]') ?? activeElement;
 }
 
 type AppModalPortalProps = {
@@ -103,48 +180,38 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
   onRequestClose,
 }) => {
   const targetDocument = ownerDocument ?? (typeof document === "undefined" ? null : document);
-  const layerRef = React.useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const trappingSessionRef = React.useRef(false);
   if (trapFocus && !trappingSessionRef.current && targetDocument) {
-    restoreFocusRef.current = targetDocument.activeElement as HTMLElement | null;
+    restoreFocusRef.current = appModalRestoreFocusTarget(targetDocument);
   }
   trappingSessionRef.current = trapFocus;
   const [layerElement, setLayerElement] = React.useState<HTMLDivElement | null>(null);
   const onRequestCloseRef = React.useRef(onRequestClose);
   onRequestCloseRef.current = onRequestClose;
-  const closeOnEscape = Boolean(onRequestClose);
   const setLayerNode = React.useCallback((element: HTMLDivElement | null) => {
-    layerRef.current = element;
     setLayerElement(element);
   }, []);
 
   React.useEffect(() => {
-    const layer = layerRef.current;
-    if (!layer || !targetDocument || (!trapFocus && !closeOnEscape)) return undefined;
+    const layer = layerElement;
+    if (!layer || !targetDocument) return undefined;
     const previousFocus = trapFocus ? restoreFocusRef.current : null;
-    const isTopLayer = () => {
-      const layers = Array.from(targetDocument.querySelectorAll<HTMLElement>("[data-mango-modal-layer=\"true\"]"));
-      const trappingLayers = layers.filter((candidate) => candidate.dataset.mangoModalFocusTrap === "true");
-      const activeLayers = trappingLayers.length > 0 ? trappingLayers : layers;
-      return activeLayers[activeLayers.length - 1] === layer;
-    };
-    const focusableElements = () => Array.from(layer.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR))
-      .filter(elementIsVisibleForModalFocus);
-    const focusFirst = () => (focusableElements()[0] ?? layer).focus({ preventScroll: true });
+    const isTopLayer = () => activeAppModalLayer(targetDocument) === layer;
+    const focusFirst = () => (appModalFocusableElements(layer)[0] ?? layer).focus({ preventScroll: true });
     const focusLayerIfNeeded = () => {
       if (trapFocus && !layer.contains(targetDocument.activeElement)) focusFirst();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isTopLayer()) return;
-      if (event.key === "Escape" && onRequestCloseRef.current && !event.defaultPrevented) {
+      if (event.key === "Escape" && !event.defaultPrevented && (trapFocus || onRequestCloseRef.current)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        onRequestCloseRef.current();
+        onRequestCloseRef.current?.();
         return;
       }
       if (!trapFocus || event.key !== "Tab") return;
-      const focusable = focusableElements();
+      const focusable = appModalFocusableElements(layer);
       if (focusable.length === 0) {
         event.preventDefault();
         focusFirst();
@@ -170,9 +237,15 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
       if (frameID !== undefined) view?.cancelAnimationFrame(frameID);
       targetDocument.removeEventListener("keydown", onKeyDown);
       if (trapFocus) targetDocument.removeEventListener("focusin", onFocusIn, true);
-      if (trapFocus && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      if (!trapFocus) return;
+      if (previousFocus?.isConnected && elementIsVisibleForModalFocus(previousFocus)) {
+        previousFocus.focus({ preventScroll: true });
+        if (targetDocument.activeElement === previousFocus) return;
+      }
+      const fallbackLayer = activeAppModalLayer(targetDocument, layer);
+      (fallbackLayer ? appModalFocusableElements(fallbackLayer)[0] ?? fallbackLayer : null)?.focus({ preventScroll: true });
     };
-  }, [closeOnEscape, targetDocument, trapFocus]);
+  }, [layerElement, targetDocument, trapFocus]);
 
   if (!targetDocument?.body) return null;
   return createPortal(

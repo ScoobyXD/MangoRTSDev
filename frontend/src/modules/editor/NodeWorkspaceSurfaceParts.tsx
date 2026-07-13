@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AppModalPortal } from "../../app/AppModalPortal.js";
+import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
@@ -106,7 +106,6 @@ import {
   type TextBlockSelectionAnchor,
   type TextBlockSelectionDraft,
   userAccentForName,
-  useCloseFloatingMenu,
 } from "./NodeWorkspaceSurfaceShared";
 type TimelineCellProps = {
   accent: string;
@@ -158,7 +157,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
-  useCloseFloatingMenu(open, rootRef, close);
+  useAppFloatingMenuDismissal(open, rootRef, close);
   const menuItemStyle: React.CSSProperties = {
     width: "100%",
     minHeight: 30,
@@ -2456,12 +2455,6 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
   const src = useAttachmentObjectURL(attachment, apiBase, companyID, "original");
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
       if (!isCopyShortcut(event)) return;
       const copied = copyImageAttachmentToClipboard(attachment);
       if (!copied && typeof document !== "undefined") document.execCommand("copy");
@@ -2479,7 +2472,7 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("copy", onCopy, true);
     };
-  }, [attachment, onClose]);
+  }, [attachment]);
 
   return (
     <AppModalPortal onRequestClose={onClose}>
@@ -2549,7 +2542,7 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
     setOpen(false);
     setEmailMenu(null);
   }, []);
-  useCloseFloatingMenu(open || Boolean(emailMenu), rootRef, close);
+  useAppFloatingMenuDismissal(open || Boolean(emailMenu), rootRef, close);
   return (
     <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
       <button
@@ -2858,8 +2851,6 @@ const AttachmentPreviewModal: React.FC<{
   const [textContent, setTextContent] = useState("");
   const [textTruncated, setTextTruncated] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
   const objectURLRef = useRef("");
   const filename = splitAttachmentFilename(attachment.original_filename).filename;
   const presentationKind = classifyAttachmentPresentation({ filename, mimeType: attachment.mime_type });
@@ -2868,32 +2859,6 @@ const AttachmentPreviewModal: React.FC<{
     URL.revokeObjectURL(objectURLRef.current);
     objectURLRef.current = "";
   }, []);
-
-  useEffect(() => {
-    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = dialogRef.current ? Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), audio[controls], video[controls], iframe, [tabindex]:not([tabindex="-1"])')).filter((element) => element.getClientRects().length > 0) : [];
-      if (focusable.length === 0) return;
-      const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const nextIndex = event.shiftKey
-        ? activeIndex <= 0 ? focusable.length - 1 : activeIndex - 1
-        : activeIndex < 0 || activeIndex === focusable.length - 1 ? 0 : activeIndex + 1;
-      event.preventDefault();
-      focusable[nextIndex]?.focus();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
 
   useEffect(() => {
     revokeObjectURL();
@@ -2968,7 +2933,6 @@ const AttachmentPreviewModal: React.FC<{
     }
   };
 
-  if (typeof document === "undefined") return null;
   return (
     <AppModalPortal onRequestClose={onClose}>
     <div
@@ -2977,7 +2941,6 @@ const AttachmentPreviewModal: React.FC<{
       style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.52)", padding: 18 }}
     >
       <div
-        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`attachment-preview-title-${attachment.attachment_id}`}
@@ -2986,7 +2949,7 @@ const AttachmentPreviewModal: React.FC<{
         <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr) 32px", alignItems: "center", gap: 9, borderBottom: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, padding: "7px 8px 7px 11px", background: EDITOR_NEU_SURFACE }}>
           <AttachmentTypeVisual kind={presentationKind} />
           <div id={`attachment-preview-title-${attachment.attachment_id}`} title={filename} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 900 }}>{filename}</div>
-          <button ref={closeButtonRef} type="button" title="Close preview" aria-label="Close preview" onClick={onClose} style={{ width: 30, height: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}>X</button>
+          <button type="button" title="Close preview" aria-label="Close preview" onClick={onClose} style={{ width: 30, height: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}>X</button>
         </div>
         <div style={{ minWidth: 0, minHeight: 0, display: "grid", placeItems: status === "ready" ? undefined : "center", overflow: "auto", background: "#ffffff", padding: previewKind === "text" || previewKind === "unavailable" ? 18 : 0 }}>
           {status === "loading" && <div role="status" style={{ fontSize: 12, fontWeight: 850, color: "rgba(71,85,105,0.82)" }}>Loading preview...</div>}
@@ -3117,7 +3080,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
     setOpen(false);
     setAttachmentMenu(null);
   }, []);
-  useCloseFloatingMenu(open || Boolean(attachmentMenu), rootRef, close);
+  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close);
   useEffect(() => {
     if (activeUploadCount > 0) setOpen(true);
   }, [activeUploadCount]);
@@ -3884,8 +3847,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   }, [normalizedLayout.emailFolderByID, orderedEmails]);
   const closeFolderMenu = useCallback(() => setFolderMenu(null), []);
   const closeEmailMenu = useCallback(() => setEmailMenu(null), []);
-  useCloseFloatingMenu(Boolean(folderMenu), folderMenuRef, closeFolderMenu);
-  useCloseFloatingMenu(Boolean(emailMenu), emailMenuRef, closeEmailMenu);
+  useAppFloatingMenuDismissal(Boolean(folderMenu), folderMenuRef, closeFolderMenu);
+  useAppFloatingMenuDismissal(Boolean(emailMenu), emailMenuRef, closeEmailMenu);
 
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));

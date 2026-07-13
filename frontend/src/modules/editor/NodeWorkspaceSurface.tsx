@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { AppModalPortal } from "../../app/AppModalPortal.js";
+import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
@@ -721,27 +721,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [canEdit]);
 
 
-  useEffect(() => {
-    if (!logicGateAssignerOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (logicGateAssignerRef.current?.contains(event.target as Node)) return;
-      setLogicGateAssignerOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      setLogicGateAssignerOpen(false);
-      window.requestAnimationFrame(() => logicGateAssignerRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    window.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      window.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [logicGateAssignerOpen]);
+  useAppFloatingMenuDismissal(logicGateAssignerOpen, logicGateAssignerRef, () => setLogicGateAssignerOpen(false));
 
   useEffect(() => {
     if (logicGateAssignerOpen) return;
@@ -775,27 +755,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => window.removeEventListener("resize", updateDropdownLeft);
   }, [projectAssignerMenuWidth, projectAssignerOpen, width]);
 
-  useEffect(() => {
-    if (!projectAssignerOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (projectAssignerRef.current?.contains(event.target as Node)) return;
-      setProjectAssignerOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      setProjectAssignerOpen(false);
-      window.requestAnimationFrame(() => projectAssignerRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    window.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      window.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [projectAssignerOpen]);
+  useAppFloatingMenuDismissal(projectAssignerOpen, projectAssignerRef, () => setProjectAssignerOpen(false));
 
   useEffect(() => {
     if (!companyID || !nodeID) {
@@ -3064,4 +3024,3 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     </div>
   );
 };
-

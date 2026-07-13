@@ -97,7 +97,6 @@ function notificationTypeCount(summary: NotificationSummary, type: string): numb
 }
 const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
-const NODE_EDITOR_POPUP_Z_INDEX = 130;
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
@@ -1865,7 +1864,7 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
   const label = folderName.trim() || "this inbox";
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
-    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -1919,7 +1918,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
   const isSharedInbox = mode === "shared_inbox";
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
-    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -2000,7 +1999,7 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCan
 }): React.ReactElement {
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
-    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -2068,16 +2067,6 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   }, [popupRect]);
 
   useEffect(() => setNodeEditorFullscreenChromeActiveFlag(popupFullscreen), [popupFullscreen]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   useEffect(() => {
     const onResize = () => setPopupRect((current) => (popupFullscreen ? fullscreenNodeEditorPopupRect() : clampNodeEditorPopupRect(current)));
@@ -2886,7 +2875,7 @@ const appSidebarVersionStyle: React.CSSProperties = {
 const sharedInboxEmailModalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 190,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   background: "rgba(0,0,0,0.28)",
@@ -2969,7 +2958,7 @@ const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
 const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: NODE_EDITOR_POPUP_Z_INDEX,
+  zIndex: 1,
   display: "block",
   background: "rgba(15, 23, 42, 0.18)",
   padding: 0,
@@ -3033,4 +3022,3 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   padding: 0,
   cursor: "pointer",
 };
-

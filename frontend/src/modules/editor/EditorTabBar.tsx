@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal";
 import { EDITOR_OVERFLOW_HEADER_TAB_IDS, EDITOR_PRIMARY_HEADER_TAB_IDS, EDITOR_TAB_ITEMS, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import { EDITOR_HIGHLIGHT_COLOR_ITEMS, normalizeEditorHighlightColor, type EditorHighlightColor } from "./richTextEditing";
@@ -102,7 +103,7 @@ function colorWithAlpha(color: string, alpha: number): string {
 
   return `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
 }
-export type EditorHeaderOverflowAction = {
+type EditorHeaderOverflowAction = {
   id: string;
   label: string;
   onSelect: () => void;
@@ -199,16 +200,14 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
-  const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "create" | "overflow" | null>(null);
+  const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "overflow" | null>(null);
   const [hoveredFormatControl, setHoveredFormatControl] = useState<EditorFormatControlID | null>(null);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const [customHighlightColor, setCustomHighlightColor] = useState<EditorHighlightColor>(highlightColor ?? EDITOR_HIGHLIGHT_COLOR_ITEMS[0].color);
   const cancelFontSizeCommitRef = useRef(false);
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
-  const outlineTriggerRef = useRef<HTMLButtonElement | null>(null);
   const highlightMenuRef = useRef<HTMLDivElement | null>(null);
-  const highlightTriggerRef = useRef<HTMLButtonElement | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement | null>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement | null>(null);
   const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
@@ -237,6 +236,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     if (formatControlsDisabled) setHighlightMenuOpen(false);
   }, [formatControlsDisabled]);
 
+  useAppFloatingMenuDismissal(outlineMenuOpen, outlineMenuRef, () => setOutlineMenuOpen(false));
+  useAppFloatingMenuDismissal(highlightMenuOpen, highlightMenuRef, () => setHighlightMenuOpen(false));
+  useAppFloatingMenuDismissal(overflowMenuOpen, overflowMenuRef, () => setOverflowMenuOpen(false));
+
   const commitFontSizeDraft = () => {
     const parsed = Number.parseInt(fontSizeDraft, 10);
     if (!Number.isFinite(parsed)) {
@@ -247,69 +250,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     setFontSizeDraft(String(nextFontSize));
     onSetSelectionFontSize(nextFontSize);
   };
-
-  useEffect(() => {
-    if (!outlineMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (outlineMenuRef.current?.contains(event.target as Node)) return;
-      setOutlineMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOutlineMenuOpen(false);
-      window.requestAnimationFrame(() => outlineTriggerRef.current?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [outlineMenuOpen]);
-
-  useEffect(() => {
-    if (!highlightMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (highlightMenuRef.current?.contains(event.target as Node)) return;
-      setHighlightMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setHighlightMenuOpen(false);
-      window.requestAnimationFrame(() => highlightTriggerRef.current?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [highlightMenuOpen]);
-
-  useEffect(() => {
-    if (!overflowMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (overflowMenuRef.current?.contains(event.target as Node)) return;
-      setOverflowMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOverflowMenuOpen(false);
-      window.requestAnimationFrame(() => overflowTriggerRef.current?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [overflowMenuOpen]);
 
   useEffect(() => {
     if (!onRelationshipTabAnchorChange) return;
@@ -382,11 +322,24 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     onMouseEnter: () => setHoveredFormatControl(id),
     onMouseLeave: () => setHoveredFormatControl((current) => (current === id ? null : current)),
   });
-  const inlineFormatButtonStyle = (id: EditorFormatControlID, active: boolean, withRightBorder = true): React.CSSProperties => ({
-    ...formatControlStyle(id, { active, withRightBorder }),
-    height: 24,
-    textDecoration: active && !withRightBorder ? "underline" : undefined,
-  });
+  const inlineFormatButtonStyle = (id: EditorFormatControlID, active: boolean): React.CSSProperties => (
+    formatControlStyle(id, { active })
+  );
+  const preserveEditorSelection: React.PointerEventHandler<HTMLElement> = (event) => event.preventDefault();
+  const toggleHeaderMenu = (menu: "outline" | "highlight" | "overflow") => {
+    const opening = menu === "outline" ? !outlineMenuOpen : menu === "highlight" ? !highlightMenuOpen : !overflowMenuOpen;
+    setOutlineMenuOpen(menu === "outline" && opening);
+    setHighlightMenuOpen(menu === "highlight" && opening);
+    setOverflowMenuOpen(menu === "overflow" && opening);
+    if (menu === "overflow" && opening) {
+      window.requestAnimationFrame(() => overflowMenuRef.current?.querySelector<HTMLButtonElement>('[data-mango-editor-header-overflow-menu] button:not(:disabled)')?.focus({ preventScroll: true }));
+    }
+  };
+  const runOverflowAction = (action: () => void) => {
+    setOverflowMenuOpen(false);
+    overflowTriggerRef.current?.focus({ preventScroll: true });
+    action();
+  };
 
   return (
     <div
@@ -396,7 +349,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       data-mango-editor-header-primary={primaryTabs.map((tab) => tab.id).join(" ")}
       data-mango-unified-editor-toolbar="true"
       data-mango-unified-editor-toolbar-tabs={visibleTabs.map((tab) => tab.id).join(" ")}
-      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, paddingRight: "var(--mango-node-shell-action-clearance, 0px)", overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
+      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
     >
       {primaryTabs.map((tab) => {
         const selected = activeTab === tab.id;
@@ -420,7 +373,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="decrease-font"
                 {...formatControlHoverHandlers("decrease-font")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -479,7 +432,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="increase-font"
                 {...formatControlHoverHandlers("increase-font")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -497,7 +450,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="bold"
                 {...formatControlHoverHandlers("bold")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -515,7 +468,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="underline"
                 {...formatControlHoverHandlers("underline")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -533,7 +486,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="italic"
                 {...formatControlHoverHandlers("italic")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -544,7 +497,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 <span style={{ fontStyle: "italic" }}>I</span>
               </button>
               <button
-                ref={highlightTriggerRef}
                 type="button"
                 aria-label="Text highlight"
                 title="Text highlight"
@@ -554,10 +506,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="highlight"
                 {...formatControlHoverHandlers("highlight")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (!formatControlsDisabled) setHighlightMenuOpen((open) => !open);
+                  if (!formatControlsDisabled) toggleHeaderMenu("highlight");
                 }}
                 style={{
                   ...formatControlStyle("highlight", { active: Boolean(highlightColor), width: 40 }),
@@ -602,7 +554,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                           aria-label={`${item.label} highlight`}
                           aria-checked={colorSelected}
                           title={item.label}
-                          onPointerDown={(event) => event.preventDefault()}
+                          onPointerDown={preserveEditorSelection}
                           onClick={() => {
                             onSetSelectionHighlightColor(item.color);
                             setCustomHighlightColor(item.color);
@@ -642,7 +594,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                       role="menuitem"
                       aria-label="No highlight"
                       title="No highlight"
-                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerDown={preserveEditorSelection}
                       onClick={() => {
                         onSetSelectionHighlightColor(null);
                         setHighlightMenuOpen(false);
@@ -668,7 +620,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     disabled={formatControlsDisabled}
                     data-mango-editor-format-control={controlID}
                     {...formatControlHoverHandlers(controlID)}
-                    onPointerDown={(event) => event.preventDefault()}
+                    onPointerDown={preserveEditorSelection}
                     onClick={(event) => {
                       event.stopPropagation();
                       if (!formatControlsDisabled) onSetTextAlignment(alignment);
@@ -687,7 +639,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   disabled={formatControlsDisabled}
                   data-mango-editor-format-control="table"
                   {...formatControlHoverHandlers("table")}
-                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerDown={preserveEditorSelection}
                   onClick={(event) => {
                     event.stopPropagation();
                     if (!formatControlsDisabled) onInsertTable();
@@ -711,7 +663,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               style={{ position: "relative", flex: "0 0 auto" }}
             >
               <button
-                ref={outlineTriggerRef}
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={outlineMenuOpen}
@@ -720,7 +671,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 onClick={() => {
                   if (disabled) return;
                   onOutlineStyleFocus();
-                  setOutlineMenuOpen((open) => !open);
+                  toggleHeaderMenu("outline");
                 }}
                 style={{ ...tabStyle, display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 7 }}
               >
@@ -823,7 +774,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         return (
           <button
             key={tab.id}
-            ref={tab.id === "relationships" ? relationshipTabRef : undefined}
             type="button"
             onMouseEnter={() => setHoveredTabID(tab.id)}
             onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
@@ -852,13 +802,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
             data-mango-editor-header-overflow-trigger="true"
             onMouseEnter={() => setHoveredTabID("overflow")}
             onMouseLeave={() => setHoveredTabID((current) => (current === "overflow" ? null : current))}
-            onClick={() => setOverflowMenuOpen((open) => {
-              const nextOpen = !open;
-              if (nextOpen) {
-                window.requestAnimationFrame(() => overflowMenuRef.current?.querySelector<HTMLButtonElement>('[data-mango-editor-header-overflow-menu] button:not(:disabled)')?.focus({ preventScroll: true }));
-              }
-              return nextOpen;
-            })}
+            onClick={() => toggleHeaderMenu("overflow")}
             style={{
               minWidth: 58,
               height: 24,
@@ -932,9 +876,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     data-mango-editor-header-overflow-action={tab.id}
                     onClick={() => {
                       if (disabled) return;
-                      setOverflowMenuOpen(false);
-                      onSelectTab(tab.id);
-                      window.requestAnimationFrame(() => overflowTriggerRef.current?.focus({ preventScroll: true }));
+                      runOverflowAction(() => onSelectTab(tab.id));
                     }}
                     style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: selected ? colorWithAlpha(outlineMenuAccent, 0.14) : "transparent", color: surfaceText, cursor: disabled ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: selected ? 800 : 700 }}
                   >
@@ -951,9 +893,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   data-mango-editor-header-overflow-action={action.id}
                   onClick={() => {
                     if (action.disabled) return;
-                    setOverflowMenuOpen(false);
-                    action.onSelect();
-                    window.requestAnimationFrame(() => overflowTriggerRef.current?.focus({ preventScroll: true }));
+                    runOverflowAction(action.onSelect);
                   }}
                   style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: "transparent", color: action.disabled ? colorWithAlpha(surfaceText, 0.46) : surfaceText, cursor: action.disabled ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: 700 }}
                 >
@@ -966,11 +906,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   role="menuitem"
                   disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
                   data-mango-editor-header-overflow-action="save-version"
-                  onClick={() => {
-                    setOverflowMenuOpen(false);
-                    onSaveCurrentVersion();
-                    window.requestAnimationFrame(() => overflowTriggerRef.current?.focus({ preventScroll: true }));
-                  }}
+                  onClick={() => runOverflowAction(onSaveCurrentVersion)}
                   style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: "transparent", color: saveCurrentVersionDisabled || saveCurrentVersionBusy ? colorWithAlpha(surfaceText, 0.46) : accent, cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: 750 }}
                 >
                   {saveCurrentVersionBusy ? "Saving version" : "Save version"}
@@ -988,11 +924,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   key={kind}
                   type="button"
                   role="menuitem"
-                  onClick={() => {
-                    setOverflowMenuOpen(false);
-                    onCreateRelatedNode(kind as EditorRelatedNodeCreationKind);
-                    window.requestAnimationFrame(() => overflowTriggerRef.current?.focus({ preventScroll: true }));
-                  }}
+                  onClick={() => runOverflowAction(() => onCreateRelatedNode(kind as EditorRelatedNodeCreationKind))}
                   style={{
                     width: "100%",
                     minHeight: 28,

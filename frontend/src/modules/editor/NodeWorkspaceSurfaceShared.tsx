@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import type { EmailAddress, EmailMessage } from "../communications/communicationsApi";
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
 import {
@@ -201,32 +201,6 @@ export function parseDraggedEmail(dataTransfer: DataTransfer): ReturnType<typeof
   }
 }
 
-export function useCloseFloatingMenu(open: boolean, ref: React.RefObject<HTMLElement>, onClose: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (event: MouseEvent) => {
-      if (ref.current?.contains(event.target as Node)) return;
-      onClose();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const trigger = ref.current?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      onClose();
-      window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
-    };
-    const timer = window.setTimeout(() => window.addEventListener("mousedown", onMouseDown, true), 0);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("mousedown", onMouseDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [open, onClose, ref]);
-}
-
 export function formatFileSize(size: number): string {
   if (!Number.isFinite(size) || size <= 0) return "0 KB";
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
@@ -402,4 +376,3 @@ export const PaperclipIcon: React.FC<{ color: string }> = ({ color }) => (
     <path d="m7.1 9.7 4.5-4.5a2.2 2.2 0 1 1 3.1 3.1l-6 6a3.8 3.8 0 0 1-5.4-5.4l6-6a3 3 0 0 1 4.2 0" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-

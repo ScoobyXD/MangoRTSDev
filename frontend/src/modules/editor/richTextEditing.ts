@@ -24,7 +24,7 @@ export const EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE = "data-mango-editor-table-col
 export const EDITOR_TABLE_WIDTH_ATTRIBUTE = "data-mango-editor-table-width";
 export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
 export const EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-table-text-align";
-export const EDITOR_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-text-align";
+const EDITOR_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-text-align";
 export const EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE = "data-mango-editor-table-align-controls";
 export const EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE = "data-mango-editor-table-align-action";
 export const EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE = "data-mango-editor-table-align-icon";
@@ -38,10 +38,10 @@ export const EDITOR_HIGHLIGHT_CLEAR_VALUE = "none";
 
 export type EditorListKind = "bullet" | "checklist";
 export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
-export type EditorTableTextAlign = "left" | "center" | "right";
+export type EditorTextAlignment = "left" | "center" | "right";
 export type EditorHighlightColor = `#${string}`;
 export type EditorHighlightColorItem = { id: string; label: string; color: EditorHighlightColor };
-export function splitEditorSelectedTextRunOffsets(text: string, startOffset: number, endOffset: number): Array<{ startOffset: number; endOffset: number }> {
+function splitEditorSelectedTextRunOffsets(text: string, startOffset: number, endOffset: number): Array<{ startOffset: number; endOffset: number }> {
   const runs: Array<{ startOffset: number; endOffset: number }> = [];
   let runStart = Math.max(0, startOffset);
   const safeEnd = Math.min(text.length, endOffset);
@@ -305,23 +305,23 @@ function applySafeHighlight(source: HTMLElement, target: HTMLElement) {
   if (highlight.explicit) setEditorElementHighlight(target, highlight.color);
 }
 
-export function readEditorTableTextAlignValue(value: string | null | undefined): EditorTableTextAlign | null {
+function readEditorAlignmentValue(value: string | null | undefined): EditorTextAlignment | null {
   const normalized = value?.trim().toLowerCase();
   if (normalized === "left" || normalized === "center" || normalized === "right") return normalized;
   return null;
 }
 
-export function readEditorTableTextAlign(table: HTMLElement): EditorTableTextAlign | null {
-  return readEditorTableTextAlignValue(table.getAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE))
-    ?? readEditorTableTextAlignValue(table.style.textAlign);
+export function readEditorTableTextAlign(table: HTMLElement): EditorTextAlignment | null {
+  return readEditorAlignmentValue(table.getAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE))
+    ?? readEditorAlignmentValue(table.style.textAlign);
 }
 
-export function readEditorTextAlign(element: HTMLElement): EditorTableTextAlign | null {
-  return readEditorTableTextAlignValue(element.getAttribute(EDITOR_TEXT_ALIGN_ATTRIBUTE))
-    ?? readEditorTableTextAlignValue(element.style.textAlign);
+export function readEditorTextAlign(element: HTMLElement): EditorTextAlignment | null {
+  return readEditorAlignmentValue(element.getAttribute(EDITOR_TEXT_ALIGN_ATTRIBUTE))
+    ?? readEditorAlignmentValue(element.style.textAlign);
 }
 
-function applyEditorTextAlign(element: HTMLElement, align: EditorTableTextAlign) {
+function applyEditorTextAlign(element: HTMLElement, align: EditorTextAlignment) {
   element.setAttribute(EDITOR_TEXT_ALIGN_ATTRIBUTE, align);
   element.style.textAlign = align;
 }
@@ -424,7 +424,7 @@ export function applyEditorTableLayout(table: HTMLTableElement, widthPercent = 1
   return { widthPercent: safeWidth, offsetPercent: safeOffset };
 }
 
-export function applyEditorTableTextAlign(table: HTMLTableElement, align: EditorTableTextAlign | null) {
+export function applyEditorTableTextAlign(table: HTMLTableElement, align: EditorTextAlignment | null) {
   if (align) {
     table.setAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE, align);
     table.style.textAlign = align;
@@ -442,7 +442,7 @@ export function applyEditorTableTextAlign(table: HTMLTableElement, align: Editor
   });
 }
 
-function appendEditorTableAlignmentIcon(button: HTMLButtonElement, align: EditorTableTextAlign) {
+function appendEditorTableAlignmentIcon(button: HTMLButtonElement, align: EditorTextAlignment) {
   const icon = button.ownerDocument.createElement("span");
   icon.setAttribute(EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE, align);
   icon.setAttribute("aria-hidden", "true");
@@ -470,7 +470,7 @@ export function ensureEditorTableAlignmentControls(cell: HTMLTableCellElement, r
   controls.setAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE, "true");
   controls.setAttribute("contenteditable", "false");
   controls.setAttribute("aria-label", "Table alignment");
-  (["left", "center", "right"] as EditorTableTextAlign[]).forEach((align) => {
+  (["left", "center", "right"] as EditorTextAlignment[]).forEach((align) => {
     const button = cell.ownerDocument.createElement("button");
     button.type = "button";
     button.setAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE, align);
@@ -772,15 +772,13 @@ function appendSanitizedIndentedBlock(element: HTMLElement, target: Node, ownerD
   target.appendChild(ownerDocument.createTextNode("\n"));
 }
 
-function appendSanitizedAlignedBlock(element: HTMLElement, target: Node, ownerDocument: Document, align: EditorTableTextAlign, indent = "") {
+function appendSanitizedAlignedBlock(element: HTMLElement, target: Node, ownerDocument: Document, align: EditorTextAlignment, indent = "") {
   const block = ownerDocument.createElement("div");
   applyEditorTextAlign(block, align);
   if (indent) block.style.marginLeft = indent;
   appendSanitizedChildren(element, block, ownerDocument);
   target.appendChild(block);
 }
-
-
 function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
   if (source.nodeType === Node.TEXT_NODE) {
     target.appendChild(ownerDocument.createTextNode(normalizeEditorArrowLigatureText(source.textContent ?? "")));

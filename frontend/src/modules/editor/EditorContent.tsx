@@ -2590,7 +2590,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
             onInsertTable={linkedEntityCanEdit ? () => currentFormattingController()?.insertTable() : undefined}
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
-            saveCurrentVersionDisabled={!linkedEntityCanEdit || saveVersionRestoring}
+            saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}

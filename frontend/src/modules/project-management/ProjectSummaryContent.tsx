@@ -2926,8 +2926,8 @@ function ProjectAssignmentsDialog({
   };
 
   return (
-    <AppModalPortal onRequestClose={onClose}>
-    <div style={{ ...assignmentDialogBackdropStyle, zIndex: 1 }} onPointerDown={onClose}>
+    <AppModalPortal onRequestClose={saving ? undefined : onClose}>
+    <div style={assignmentDialogBackdropStyle} onPointerDown={() => { if (!saving) onClose(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -2937,7 +2937,7 @@ function ProjectAssignmentsDialog({
       >
         <div style={assignmentDialogHeaderStyle}>
           <h3 id="project-assignments-title" style={assignmentDialogTitleStyle}>Project Assignments</h3>
-          <button type="button" style={assignmentCloseButtonStyle} onClick={onClose}>Close</button>
+          <button type="button" style={assignmentCloseButtonStyle} disabled={saving} onClick={onClose}>Close</button>
         </div>
         <div style={assignmentDialogColumnsStyle}>
           <div style={assignmentSectionStyle}>
@@ -2947,6 +2947,7 @@ function ProjectAssignmentsDialog({
                 <label key={account.account_id} style={assignmentOptionStyle}>
                   <input
                     type="checkbox"
+                    disabled={saving}
                     checked={selectedAccounts.has(account.account_id)}
                     onChange={() => toggleAccount(account.account_id)}
                   />
@@ -2963,6 +2964,7 @@ function ProjectAssignmentsDialog({
                 <label key={group.group_id} style={assignmentOptionStyle}>
                   <input
                     type="checkbox"
+                    disabled={saving}
                     checked={selectedTeams.has(group.group_id)}
                     onChange={() => toggleTeam(group.group_id)}
                   />
@@ -2974,7 +2976,7 @@ function ProjectAssignmentsDialog({
           </div>
         </div>
         <div style={assignmentDialogActionsStyle}>
-          <button type="button" style={assignmentCancelButtonStyle} onClick={onClose}>Cancel</button>
+          <button type="button" style={assignmentCancelButtonStyle} disabled={saving} onClick={onClose}>Cancel</button>
           <button type="button" style={assignmentSaveButtonStyle} disabled={saving} onClick={onSave}>
             {saving ? "Saving" : "Save Assignments"}
           </button>
@@ -3202,7 +3204,7 @@ const plainPillStyle: React.CSSProperties = {
 const assignmentDialogBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 18,

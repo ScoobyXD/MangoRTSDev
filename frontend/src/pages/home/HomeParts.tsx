@@ -777,16 +777,6 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   useEffect(() => setNodeEditorFullscreenChromeActive(popupFullscreen), [popupFullscreen]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  useEffect(() => {
     const onResize = () => setPopupRect((current) => (popupFullscreen ? fullscreenNodeEditorPopupRect() : clampNodeEditorPopupRect(current)));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -1119,7 +1109,7 @@ export function SharedInboxGVICSettingsModal({
 
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onClose}>
-    <div style={{ ...sharedGVICBackdropStyle, zIndex: 1 }}>
+    <div style={sharedGVICBackdropStyle}>
       <section style={sharedGVICModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
@@ -1235,7 +1225,7 @@ export function SharedInboxGVICSettingsModal({
 const sharedGVICBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 80,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 20,
@@ -6168,4 +6158,3 @@ export function DeleteHomeEntitiesConfirmationModal({ targets, busy, position, o
     />
   );
 }
-
