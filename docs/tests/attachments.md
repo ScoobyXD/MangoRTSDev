@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Attachments Tests
 
@@ -71,7 +71,7 @@ ATT38 - Existing supported images are repaired through the human-only `mango-att
 ATT39 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
 ATT40 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
 ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
-ATT42 - Personal `email_draft` attachment list/content/link/unlink authorization is owner-only; new personal draft resource IDs include the exact normalized account as well as user and draft, while legacy user/draft IDs remain owner-only for compatibility. Company manager status is not an override. Shared-draft attachment reads require view access to the exact shared inbox and mutations require edit access. A cross-user/account/shared-inbox identifier cannot expose attachment content or change resource scope.
+ATT42 - Personal `email_draft` attachment reads and account-scoped link/unlink operations are owner-only; new personal draft resource IDs include the exact normalized account as well as user and draft. Legacy user/draft IDs remain owner-only and readable for compatibility but cannot create, link, upload, unlink, or otherwise mutate attachments. Company administrator or manager status is not an override. Shared-draft attachment reads require view access to the exact shared inbox and mutations require edit access. A cross-user/account/shared-inbox identifier cannot expose attachment content or change resource scope.
 
 ## Scenarios
 
@@ -186,7 +186,7 @@ Expected:
 - The backend reads S3 bytes at send time and passes normal files to the provider as ordinary attachments.
 - Each pasted image reference is deduplicated, permission-checked, converted to one inline attachment with a matching alphanumeric CID, and rewritten from the private Mango source to `cid:` in outbound HTML.
 - Personal and Shared Triage use the same conversion while preserving their personal/shared permission and grant scopes.
-- Personal draft attachments remain visible/mutable only to the exact owner account, while shared draft attachment reads require view access and mutations require edit access to the exact shared inbox; managers cannot use company role alone to read another user's personal draft attachments.
+- Personal draft metadata and bytes remain owner-only. New links use the exact owner account; legacy three-part owner/draft links remain readable only by that owner for compatibility and are rejected for new links, uploads, or other mutations. A known account association remains valid while reauthentication is required, but wrong-account identifiers and company administrator/manager roles cannot authorize another user's direct resource operations or attachment-content reads. Shared draft attachment reads require view access and mutations require edit access to the exact shared inbox.
 - Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.
 - Normal durable email payloads do not carry raw base64 `content`.
 - Communications draft and signature upserts reject durable inline data URLs/base64 file bytes.

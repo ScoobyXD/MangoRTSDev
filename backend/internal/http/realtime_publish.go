@@ -10,42 +10,27 @@ import (
 )
 
 func (s *Server) publishRealtimeMessage(companyID, scope string, message any) int {
-	companyID = strings.TrimSpace(companyID)
-	scope = strings.TrimSpace(scope)
-	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
-		return 0
-	}
-	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
-		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
-	}
-	payload, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
-		return 0
-	}
-	published := s.realtimeRegistry.publish(companyID, scope, payload)
-	if published == 0 {
-		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
-	}
-	s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(published), 0)
-	return published
+	return s.publishRealtimeMessageWithAudience(companyID, scope, nil, message)
 }
 
 func (s *Server) publishRealtimeMessageToUsers(companyID, scope string, userIDs []string, message any) int {
-	companyID = strings.TrimSpace(companyID)
-	scope = strings.TrimSpace(scope)
-	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
-		return 0
-	}
 	allowedUserIDs := map[string]struct{}{}
 	for _, userID := range userIDs {
 		if userID = strings.TrimSpace(userID); userID != "" {
 			allowedUserIDs[userID] = struct{}{}
 		}
 	}
-	if len(allowedUserIDs) == 0 || !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+	return s.publishRealtimeMessageWithAudience(companyID, scope, allowedUserIDs, message)
+}
+
+func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
+	companyID = strings.TrimSpace(companyID)
+	scope = strings.TrimSpace(scope)
+	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
+		return 0
+	}
+	restrictedAudience := allowedUserIDs != nil
+	if (restrictedAudience && len(allowedUserIDs) == 0) || !s.realtimeRegistry.hasSubscribers(companyID, scope) {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
 		return 0
 	}
@@ -54,9 +39,18 @@ func (s *Server) publishRealtimeMessageToUsers(companyID, scope string, userIDs 
 		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
 		return 0
 	}
-	published := s.realtimeRegistry.publishToUsers(companyID, scope, payload, allowedUserIDs)
+	published := 0
+	if restrictedAudience {
+		published = s.realtimeRegistry.publishToUsers(companyID, scope, payload, allowedUserIDs)
+	} else {
+		published = s.realtimeRegistry.publish(companyID, scope, payload)
+	}
 	if published == 0 {
-		s.recordOperationalMetric("realtime.publish_skipped_no_authorized_subscribers_count", realtimeScopeType(scope), 1, 0)
+		metric := "realtime.publish_skipped_no_subscribers_count"
+		if restrictedAudience {
+			metric = "realtime.publish_skipped_no_authorized_subscribers_count"
+		}
+		s.recordOperationalMetric(metric, realtimeScopeType(scope), 1, 0)
 		return 0
 	}
 	s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(published), 0)

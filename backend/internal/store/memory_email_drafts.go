@@ -8,7 +8,7 @@ import (
 )
 
 func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return nil, ErrInvalid
 	}
@@ -35,7 +35,7 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -82,7 +82,7 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 	if exists && !communicationsEmailDraftScopesMatch(existing, draft) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
-	if existing.CreatedTimestamp.IsZero() {
+	if !exists {
 		draft.CreatedTimestamp = now
 	} else {
 		draft.CreatedTimestamp = existing.CreatedTimestamp
@@ -95,7 +95,7 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 }
 
 func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error) {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}
@@ -188,7 +188,7 @@ type communicationsEmailScope struct {
 }
 
 func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -227,7 +227,7 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 }
 
 func normalizeCommunicationsEmailSignatureInput(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error) {
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}
@@ -254,7 +254,7 @@ func normalizeCommunicationsEmailSignatureInput(input CommunicationsEmailSignatu
 	}, nil
 }
 
-func normalizeCommunicationsEmailSignatureScope(companyID, personalUserID, personalAccountEmail, sharedInboxID string) (communicationsEmailScope, error) {
+func normalizeCommunicationsEmailScope(companyID, personalUserID, personalAccountEmail, sharedInboxID string) (communicationsEmailScope, error) {
 	scope := communicationsEmailScope{
 		companyID:            strings.TrimSpace(companyID),
 		personalUserID:       strings.TrimSpace(personalUserID),

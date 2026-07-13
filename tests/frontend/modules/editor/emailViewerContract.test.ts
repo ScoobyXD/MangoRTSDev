@@ -96,8 +96,14 @@ test("mailbox live refresh, read-on-open rollback, and draft scope stay wired th
   assert.ok(homePage.includes("onMailboxFolderChanged: onMailboxChanged"));
   assert.ok(homePage.includes("onAccepted: () =>"));
   assert.ok(homePage.includes("if (!acceptedOnce)"));
+  assert.ok(homePage.includes("const mailboxRealtimeScopesKey = useMemo"));
   assert.ok(homePage.includes("invalidateCommunicationsCache({ folders: true, messagePages: true })"));
   assert.ok(homePage.includes("scheduleMessageListRefresh(120, { refresh: true, bumpMailboxRealtimeRevision: true })"));
+  assert.ok(homePage.includes("pendingOptions.refresh = pendingOptions.refresh || options?.refresh === true"));
+  assert.ok(homePage.includes("pendingOptions.bumpMailboxRealtimeRevision = pendingOptions.bumpMailboxRealtimeRevision || options?.bumpMailboxRealtimeRevision === true"));
+  assert.ok(homePage.includes("const hasCanonicalArrivalRefresh = pendingOptions.refresh || pendingOptions.bumpMailboxRealtimeRevision"));
+  assert.ok(homePage.includes("messageListRefreshTimerRef.current = window.setTimeout(runScheduledRefresh, retryDelayMs)"));
+  assert.match(homePage, /if \(localTriageConversionMailNetworkIsSuppressed\(requestKey\)\) \{\s*scheduleMessageListRefresh\(0, \{ refresh: options\.refresh \}\);\s*return;/);
   assert.ok(homePage.includes("setMailboxRealtimeRevision((revision) => revision + 1)"));
 
   assert.ok(homePage.includes("locallyReadMessageKeysRef.current.add(messageKey)"));

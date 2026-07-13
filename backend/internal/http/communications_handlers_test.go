@@ -299,8 +299,11 @@ func seedEmailAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRe
 	return attachmentID
 }
 
-func personalEmailDraftResourceID(userID, draftID string) string {
-	return "personal:" + url.QueryEscape(strings.TrimSpace(userID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+func personalEmailDraftResourceID(userID, accountEmail, draftID string) string {
+	return "personal:" +
+		url.QueryEscape(strings.TrimSpace(userID)) + ":" +
+		url.QueryEscape(normalizeEmailForCompare(accountEmail)) + ":" +
+		url.QueryEscape(strings.TrimSpace(draftID))
 }
 
 func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
@@ -1138,7 +1141,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
 	}
-	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
 	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"note.txt","content_type":"text/plain","size":5}]}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
@@ -1150,7 +1153,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
 		t.Fatalf("attachments = %+v, want attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
-	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
+	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
 	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
 	inlinePayload, err := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -1560,7 +1563,7 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	largeContent := []byte(strings.Repeat("ABC", 280000))
-	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-large"), "large.txt", "text/plain", largeContent)
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-large"), "large.txt", "text/plain", largeContent)
 	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
@@ -2113,6 +2116,33 @@ func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
 	}
 	if _, ok := cache.getMessage("detail-user", "account:user@example.com", fmt.Sprintf("detail-%d", communicationsMaxMessageDetailsPerUser+1), communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
 		t.Fatal("newest per-user message detail was evicted")
+	}
+}
+
+func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
+	t.Parallel()
+
+	changes, err := parseNylasWebhookChanges([]byte(`{
+		"deltas": [
+			{"type": " Message.Created.Truncated ", "data": {"object": {"id": "message-1", "grant_id": "grant-1"}}},
+			{"trigger_type": "FOLDER.UPDATED.extra", "data": {"object": {"id": "folder-1", "grant_id": "grant-1"}}},
+			{"event": "thread.replied", "data": {"object": {"id": "thread-1", "grant_id": "grant-1"}}}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("parseNylasWebhookChanges: %v", err)
+	}
+	if len(changes) != 3 {
+		t.Fatalf("changes = %d, want 3", len(changes))
+	}
+	if changes[0].Trigger != "message.created" {
+		t.Fatalf("created trigger = %q, want canonical message.created", changes[0].Trigger)
+	}
+	if changes[1].Trigger != "folder.updated" {
+		t.Fatalf("folder trigger = %q, want canonical folder.updated", changes[1].Trigger)
+	}
+	if changes[2].Trigger != "" {
+		t.Fatalf("unsupported trigger = %q, want empty", changes[2].Trigger)
 	}
 }
 

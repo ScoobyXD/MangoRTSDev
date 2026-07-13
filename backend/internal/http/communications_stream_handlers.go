@@ -91,10 +91,9 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 	processedChanges := map[string]struct{}{}
 	for _, change := range changes {
 		grantID := strings.TrimSpace(change.GrantID)
-		if !isCommunicationsMailboxTrigger(change.Trigger) || grantID == "" {
+		if change.Trigger == "" || grantID == "" {
 			continue
 		}
-		normalizedTrigger := normalizedNylasMailboxTrigger(change.Trigger)
 		changeKey := nylasWebhookChangeKey(grantID, change)
 		if _, processed := processedChanges[changeKey]; processed {
 			continue
@@ -105,9 +104,8 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		}
 		grantContext, ok := grantContexts[grantID]
 		if !ok {
-			var found bool
 			var err error
-			grantContext, found, err = s.loadCommunicationsWebhookGrantContext(grantID)
+			grantContext, err = s.loadCommunicationsWebhookGrantContext(grantID)
 			if errors.Is(err, store.ErrNotFound) {
 				missingGrants[grantID] = struct{}{}
 				continue
@@ -117,16 +115,12 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 				return
 			}
-			if !found {
-				missingGrants[grantID] = struct{}{}
-				continue
-			}
 			grantContexts[grantID] = grantContext
 		}
-		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) == "" {
+		if change.Trigger == "message.opened" && strings.TrimSpace(change.MessageID) == "" {
 			log.Printf("nylas message.opened webhook missing message_id grant_id=%s", grantID)
 		}
-		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) != "" {
+		if change.Trigger == "message.opened" && strings.TrimSpace(change.MessageID) != "" {
 			signalAt := change.OccurredAt.UTC()
 			if signalAt.IsZero() {
 				signalAt = time.Now().UTC()
@@ -161,10 +155,10 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communicationsWebhookGrantContext, bool, error) {
+func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communicationsWebhookGrantContext, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
-		return communicationsWebhookGrantContext{}, false, store.ErrInvalid
+		return communicationsWebhookGrantContext{}, store.ErrInvalid
 	}
 	connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
 	if err == nil {
@@ -172,29 +166,29 @@ func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communic
 		return communicationsWebhookGrantContext{
 			connection: connection,
 			cacheScope: communicationsConnectionCacheScope(connection),
-		}, true, nil
+		}, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return communicationsWebhookGrantContext{}, false, err
+		return communicationsWebhookGrantContext{}, err
 	}
 
 	companyConnection, err := s.repo.GetCompanyEmailConnectionByGrantID(grantID)
 	if errors.Is(err, store.ErrNotFound) {
-		return communicationsWebhookGrantContext{}, false, store.ErrNotFound
+		return communicationsWebhookGrantContext{}, store.ErrNotFound
 	}
 	if err != nil {
-		return communicationsWebhookGrantContext{}, false, err
+		return communicationsWebhookGrantContext{}, err
 	}
 	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnection(companyConnection)
 	if err != nil {
-		return communicationsWebhookGrantContext{}, false, err
+		return communicationsWebhookGrantContext{}, err
 	}
 	connection = userConnectionForCompanyEmailConnection(companyConnection, companyConnection.ConnectedByUserID)
 	return communicationsWebhookGrantContext{
 		connection:     connection,
 		cacheScope:     communicationsConnectionCacheScope(connection),
 		sharedInboxIDs: sharedInboxIDs,
-	}, true, nil
+	}, nil
 }
 
 func verifyNylasWebhookSignature(rawBody []byte, signatureHeader, secret string) bool {
@@ -237,7 +231,7 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 		for _, delta := range deltas {
 			if deltaMap, ok := delta.(map[string]any); ok {
 				changes = append(changes, nylasWebhookChange{
-					Trigger:     firstStringValue(deltaMap, "type", "trigger_type", "event"),
+					Trigger:     normalizedNylasMailboxTrigger(firstStringValue(deltaMap, "type", "trigger_type", "event")),
 					GrantID:     findStringField(deltaMap, "grant_id"),
 					MessageID:   findNylasMessageID(deltaMap),
 					ThreadID:    findStringField(deltaMap, "thread_id"),
@@ -249,7 +243,7 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 		return changes, nil
 	}
 	return []nylasWebhookChange{{
-		Trigger:     firstStringValue(rootMap, "type", "trigger_type", "event"),
+		Trigger:     normalizedNylasMailboxTrigger(firstStringValue(rootMap, "type", "trigger_type", "event")),
 		GrantID:     findStringField(rootMap, "grant_id"),
 		MessageID:   findNylasMessageID(rootMap),
 		ThreadID:    findStringField(rootMap, "thread_id"),
@@ -261,13 +255,9 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 func nylasWebhookChangeKey(grantID string, change nylasWebhookChange) string {
 	return strings.Join([]string{
 		strings.TrimSpace(grantID),
-		normalizedNylasMailboxTrigger(change.Trigger),
+		strings.TrimSpace(change.Trigger),
 		strings.TrimSpace(change.MessageID),
 	}, communicationsCacheKeySeparator)
-}
-
-func isCommunicationsMailboxTrigger(trigger string) bool {
-	return normalizedNylasMailboxTrigger(trigger) != ""
 }
 
 func normalizedNylasMailboxTrigger(trigger string) string {
@@ -293,18 +283,17 @@ func normalizedNylasMailboxTrigger(trigger string) string {
 }
 
 func (s *Server) applyNylasWebhookCacheInvalidation(userID, accountScope string, change nylasWebhookChange) {
-	trigger := strings.TrimSpace(strings.ToLower(change.Trigger))
-	switch {
-	case strings.HasPrefix(trigger, "folder."):
+	switch change.Trigger {
+	case "folder.created", "folder.updated", "folder.deleted":
 		s.commCache.invalidateFolders(userID, accountScope)
-	case strings.HasPrefix(trigger, "message.created"), strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
+	case "message.created", "message.updated", "message.deleted":
 		// Folder payloads own provider unread and mailbox counts. A message
 		// arriving, moving, changing read state, or being deleted can change
 		// those counts even when Nylas does not emit a companion folder event.
 		s.commCache.invalidateFolders(userID, accountScope)
 		s.commCache.invalidateMessagePages(userID, accountScope)
 		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
-	case strings.HasPrefix(trigger, "message.opened"):
+	case "message.opened":
 		// Read-receipt status is enriched from the store on every response; the
 		// cached provider body and list payload remain valid.
 	default:
@@ -383,7 +372,7 @@ func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string
 }
 
 func realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID string, change nylasWebhookChange) realtimeMailboxChangedMessage {
-	trigger := normalizedNylasMailboxTrigger(change.Trigger)
+	trigger := change.Trigger
 	eventType := realtimeMessageMailboxMessageChanged
 	messageID := strings.TrimSpace(change.MessageID)
 	threadID := strings.TrimSpace(change.ThreadID)

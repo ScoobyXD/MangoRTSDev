@@ -7,6 +7,18 @@ const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
 const HOME_MAIL_SIGNATURE_STORAGE_PREFIX = "mangorts.home.mailSignature.v1";
 const homeMailSignatureRemoteSaveQueues = new Map<string, Promise<void>>();
 const homeMailSignatureLocalRevisions = new Map<string, number>();
+const HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES = new Set([
+  "access_denied",
+  "company_access_denied",
+  "company_not_found",
+  "email_account_not_connected",
+  "email_account_required",
+  "nylas_not_connected",
+  "nylas_reauth_required",
+  "shared_inbox_email_account_not_connected",
+  "shared_inbox_not_found",
+  "shared_inbox_not_mailbox",
+]);
 
 export type HomeMailDraft = {
   id: string;
@@ -341,18 +353,7 @@ export function homeMailDraftScopeFailureRequiresLocalPurge(error: unknown): boo
   const status = typeof failure?.status === "number" ? failure.status : 0;
   const code = typeof failure?.code === "string" ? failure.code.trim().toLowerCase() : "";
   if (status === 401 || status === 403) return true;
-  if (new Set([
-    "access_denied",
-    "company_access_denied",
-    "company_not_found",
-    "email_account_not_connected",
-    "email_account_required",
-    "nylas_not_connected",
-    "nylas_reauth_required",
-    "shared_inbox_email_account_not_connected",
-    "shared_inbox_not_found",
-    "shared_inbox_not_mailbox",
-  ]).has(code)) return true;
+  if (HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES.has(code)) return true;
 
   // Preserve compatibility with callers that still throw plain Errors without
   // the structured API status/code metadata installed by apiFetchJSON.

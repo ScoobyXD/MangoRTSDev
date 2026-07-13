@@ -346,11 +346,10 @@ func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
-	switch store.NormalizeAttachmentResourceType(resourceType) {
-	case "email_draft":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView, false)
-	case "email_message":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView, true)
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	switch resourceType {
+	case "email_draft", "email_message":
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionView)
 	case "email_signature":
 		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView)
 	case "attached_email":
@@ -365,11 +364,10 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
-	switch store.NormalizeAttachmentResourceType(resourceType) {
-	case "email_draft":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit, false)
-	case "email_message":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit, true)
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	switch resourceType {
+	case "email_draft", "email_message":
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionEdit)
 	case "email_signature":
 		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
 	case "attached_email":
@@ -412,13 +410,27 @@ func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *
 }
 
 func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if resourceType == "email_draft" {
+		parsed, ok := parseEmailScopedAttachmentResourceID(resourceType, resourceID)
+		if !ok {
+			return false, nil
+		}
+		if parsed.scope == "personal" {
+			actor, ok := authenticatedActor(r)
+			if !ok || actorRoleForCompany(actor, companyID) == "" {
+				return false, nil
+			}
+			return s.canViewEmailScopedAttachmentResource(companyID, strings.TrimSpace(actor.User.UserID), resourceType, resourceID)
+		}
+	}
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
 		return true, nil
 	}
-	switch store.NormalizeAttachmentResourceType(resourceType) {
+	switch resourceType {
 	case "email_draft", "email_message":
-		return s.canViewEmailScopedAttachmentResource(companyID, userID, resourceID)
+		return s.canViewEmailScopedAttachmentResource(companyID, userID, resourceType, resourceID)
 	case "email_signature":
 		return s.canViewEmailSignatureAttachmentResource(companyID, userID, resourceID)
 	case "attached_email":
@@ -443,7 +455,7 @@ type emailScopedAttachmentResource struct {
 	itemID        string
 }
 
-func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string, allowPersonalCompanyManager bool) bool {
+func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID, accessLevel string) bool {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -454,8 +466,15 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}
-	parsed, ok := parseEmailScopedAttachmentResourceID(resourceID)
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	parsed, ok := parseEmailScopedAttachmentResourceID(resourceType, resourceID)
 	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
+		return false
+	}
+	if resourceType == "email_draft" && accessLevel == store.EntityPermissionEdit && parsed.scope == "personal" && parsed.accountEmail == "" {
+		// Accountless personal draft IDs are read-only compatibility for links
+		// created before mailbox scope became immutable.
 		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
 		return false
 	}
@@ -464,22 +483,15 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 			writeError(w, http.StatusForbidden, "company_access_denied")
 			return false
 		}
-		if strings.TrimSpace(actor.User.UserID) != parsed.userID && (!allowPersonalCompanyManager || !actorCanManageCompany(actor, companyID)) {
+		if strings.TrimSpace(actor.User.UserID) != parsed.userID && (resourceType != "email_message" || !actorCanManageCompany(actor, companyID)) {
 			writeAccessResourceNotFound(w)
 			return false
 		}
-		if parsed.accountEmail != "" {
-			connections, err := s.repo.ListUserEmailConnections(parsed.userID)
+		if resourceType == "email_draft" {
+			accountFound, err := s.personalEmailAttachmentAccountExists(parsed.userID, parsed.accountEmail)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_check_email_account")
 				return false
-			}
-			accountFound := false
-			for _, connection := range connections {
-				if normalizeEmailForCompare(connection.AccountEmail) == normalizeEmailForCompare(parsed.accountEmail) {
-					accountFound = true
-					break
-				}
 			}
 			if !accountFound {
 				writeAccessResourceNotFound(w)
@@ -499,15 +511,45 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 	return true
 }
 
-func (s *Server) canViewEmailScopedAttachmentResource(companyID, userID, resourceID string) (bool, error) {
-	parsed, ok := parseEmailScopedAttachmentResourceID(resourceID)
+func (s *Server) canViewEmailScopedAttachmentResource(companyID, userID, resourceType, resourceID string) (bool, error) {
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	parsed, ok := parseEmailScopedAttachmentResourceID(resourceType, resourceID)
 	if !ok {
 		return false, nil
 	}
 	if parsed.scope == "personal" {
-		return userID == parsed.userID, nil
+		if userID != parsed.userID {
+			return false, nil
+		}
+		if resourceType == "email_draft" {
+			return s.personalEmailAttachmentAccountExists(parsed.userID, parsed.accountEmail)
+		}
+		return true, nil
 	}
 	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+}
+
+func (s *Server) personalEmailAttachmentAccountExists(userID, accountEmail string) (bool, error) {
+	accountEmail = normalizeEmailForCompare(accountEmail)
+	if accountEmail == "" {
+		// Legacy personal draft links predate account-scoped resource IDs. They
+		// remain readable by their exact owner while new links always carry the
+		// account segment.
+		return true, nil
+	}
+	connections, err := s.repo.ListUserEmailConnections(strings.TrimSpace(userID))
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, connection := range connections {
+		if normalizeEmailForCompare(connection.AccountEmail) == accountEmail {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Server) requireEmailSignatureAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {
@@ -563,54 +605,70 @@ func (s *Server) requireAttachedEmailAttachmentResourceAccess(w http.ResponseWri
 	return s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
 }
 
-func parseEmailScopedAttachmentResourceID(resourceID string) (emailScopedAttachmentResource, bool) {
+func parseEmailScopedAttachmentResourceID(resourceType, resourceID string) (emailScopedAttachmentResource, bool) {
+	resourceType = store.NormalizeAttachmentResourceType(resourceType)
 	parts := strings.Split(strings.TrimSpace(resourceID), ":")
-	if len(parts) != 3 && len(parts) != 4 {
+	if len(parts) < 3 {
 		return emailScopedAttachmentResource{}, false
 	}
 	scope := strings.TrimSpace(parts[0])
-	first, err := url.QueryUnescape(parts[1])
-	if err != nil {
-		return emailScopedAttachmentResource{}, false
-	}
-	itemIndex := 2
-	accountEmail := ""
-	if scope == "personal" && len(parts) == 4 {
-		accountEmail, err = url.QueryUnescape(parts[2])
-		if err != nil {
-			return emailScopedAttachmentResource{}, false
-		}
-		accountEmail = normalizeEmailForCompare(accountEmail)
-		if accountEmail == "" {
-			return emailScopedAttachmentResource{}, false
-		}
-		itemIndex = 3
-	} else if len(parts) != 3 {
-		return emailScopedAttachmentResource{}, false
-	}
-	itemID, err := url.QueryUnescape(parts[itemIndex])
-	if err != nil {
-		return emailScopedAttachmentResource{}, false
-	}
-	first = strings.TrimSpace(first)
-	itemID = strings.TrimSpace(itemID)
-	if itemID == "" {
-		return emailScopedAttachmentResource{}, false
-	}
 	switch scope {
 	case "personal":
-		if first == "" {
+		partCount := 3
+		itemIndex := 2
+		if resourceType == "email_draft" {
+			if len(parts) == 4 {
+				partCount = 4
+				itemIndex = 3
+			}
+		} else if resourceType != "email_message" {
 			return emailScopedAttachmentResource{}, false
 		}
-		return emailScopedAttachmentResource{scope: scope, userID: first, accountEmail: accountEmail, itemID: itemID}, true
+		if len(parts) != partCount {
+			return emailScopedAttachmentResource{}, false
+		}
+		userID, ok := unescapeEmailAttachmentResourcePart(parts[1])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		accountEmail := ""
+		if resourceType == "email_draft" && len(parts) == 4 {
+			accountEmail, ok = unescapeEmailAttachmentResourcePart(parts[2])
+			accountEmail = normalizeEmailForCompare(accountEmail)
+			if !ok || accountEmail == "" {
+				return emailScopedAttachmentResource{}, false
+			}
+		}
+		itemID, ok := unescapeEmailAttachmentResourcePart(parts[itemIndex])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		return emailScopedAttachmentResource{scope: scope, userID: userID, accountEmail: accountEmail, itemID: itemID}, true
 	case "shared":
-		if first == "" {
+		if (resourceType != "email_draft" && resourceType != "email_message") || len(parts) != 3 {
 			return emailScopedAttachmentResource{}, false
 		}
-		return emailScopedAttachmentResource{scope: scope, sharedInboxID: first, itemID: itemID}, true
+		sharedInboxID, ok := unescapeEmailAttachmentResourcePart(parts[1])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		itemID, ok := unescapeEmailAttachmentResourcePart(parts[2])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		return emailScopedAttachmentResource{scope: scope, sharedInboxID: sharedInboxID, itemID: itemID}, true
 	default:
 		return emailScopedAttachmentResource{}, false
 	}
+}
+
+func unescapeEmailAttachmentResourcePart(value string) (string, bool) {
+	decoded, err := url.QueryUnescape(value)
+	if err != nil {
+		return "", false
+	}
+	decoded = strings.TrimSpace(decoded)
+	return decoded, decoded != ""
 }
 
 func parseEmailSignatureAttachmentResourceID(resourceID string) (emailScopedAttachmentResource, bool) {

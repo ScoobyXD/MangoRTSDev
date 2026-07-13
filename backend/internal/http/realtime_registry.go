@@ -175,27 +175,24 @@ func (r *realtimeSubscriptionRegistry) hasSubscribers(companyID, scope string) b
 }
 
 func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) int {
-	connections := r.connectionsForScope(companyID, scope)
-	published := 0
-	for _, conn := range connections {
-		if conn.sendText(payload) == nil {
-			published++
-		}
-	}
-	return published
+	return r.publishMatching(companyID, scope, payload, nil)
 }
 
 func (r *realtimeSubscriptionRegistry) publishToUsers(companyID, scope string, payload []byte, allowedUserIDs map[string]struct{}) int {
 	if len(allowedUserIDs) == 0 {
 		return 0
 	}
+	return r.publishMatching(companyID, scope, payload, func(conn *realtimeConnection) bool {
+		_, allowed := allowedUserIDs[strings.TrimSpace(conn.userID)]
+		return allowed
+	})
+}
+
+func (r *realtimeSubscriptionRegistry) publishMatching(companyID, scope string, payload []byte, matches func(*realtimeConnection) bool) int {
 	connections := r.connectionsForScope(companyID, scope)
 	published := 0
 	for _, conn := range connections {
-		if conn == nil {
-			continue
-		}
-		if _, allowed := allowedUserIDs[strings.TrimSpace(conn.userID)]; !allowed {
+		if conn == nil || (matches != nil && !matches(conn)) {
 			continue
 		}
 		if conn.sendText(payload) == nil {

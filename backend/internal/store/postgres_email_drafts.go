@@ -11,7 +11,7 @@ func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDr
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return nil, err
 	}
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (r *PostgresRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraf
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -180,7 +180,7 @@ func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEm
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return err
 	}
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func (r *PostgresRepo) GetCommunicationsEmailSignature(input CommunicationsEmail
 	if err := r.ensureCommunicationsEmailDraftsSchema(); err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}
-	scope, err := normalizeCommunicationsEmailSignatureScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailSignature{}, err
 	}

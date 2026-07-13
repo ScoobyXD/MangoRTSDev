@@ -284,8 +284,6 @@ export type SendEmailInput = {
   reply_to_message_id?: string;
   company_id?: string;
   shared_inbox_id?: string;
-  local_user_id?: string;
-  local_account_email?: string;
 };
 
 export type LocalEmailReplyScope = {
@@ -414,6 +412,7 @@ const recentStarredMessages = new Map<string, ScopedMessageCacheEntry>();
 let statusInflight: Promise<CommunicationsStatus> | null = null;
 const foldersInflight = new Map<string, Promise<EmailFolder[]>>();
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
+const messagePageCacheWriters = new Map<string, Promise<MessagePage>>();
 const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
 const emailThreadInflight = new Map<string, Promise<EmailThread>>();
 const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
@@ -425,16 +424,17 @@ export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus>
   const cached = readCache(statusCache, STATUS_CACHE_TTL_MS, cloneStatus);
   if (cached) return cached;
   if (statusInflight) return cloneStatus(await statusInflight);
-  statusInflight = apiFetchJSON<CommunicationsStatus>("/v1/communications/status")
+  const request = apiFetchJSON<CommunicationsStatus>("/v1/communications/status")
     .then((status) => {
       const value = cloneStatus(status);
-      statusCache = { value, fetchedAt: Date.now() };
+      if (statusInflight === request) statusCache = { value, fetchedAt: Date.now() };
       return value;
     })
     .finally(() => {
-      statusInflight = null;
+      if (statusInflight === request) statusInflight = null;
     });
-  return cloneStatus(await statusInflight);
+  statusInflight = request;
+  return cloneStatus(await request);
 }
 
 export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string, sharedInboxCreate?: CommunicationsSharedInboxCreateIntent): Promise<string> {
@@ -472,11 +472,13 @@ export async function listEmailFolders(params: ListEmailFoldersParams = {}): Pro
   const request = apiFetchJSON<{ folders?: EmailFolder[] }>(cachePath)
     .then((payload) => {
       const folders = cloneFolders(payload.folders ?? []);
-      foldersCache.set(cachePath, { value: folders, fetchedAt: Date.now() });
+      if (foldersInflight.get(cachePath) === request) {
+        foldersCache.set(cachePath, { value: folders, fetchedAt: Date.now() });
+      }
       return folders;
     })
     .finally(() => {
-      foldersInflight.delete(cachePath);
+      if (foldersInflight.get(cachePath) === request) foldersInflight.delete(cachePath);
     });
   foldersInflight.set(cachePath, request);
   try {
@@ -501,26 +503,32 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   }
   const existingInflight = messagePageInflight.get(inflightKey);
   if (existingInflight) return applyLocalMessageOverlaysToPage(cloneMessagePage(await existingInflight), cacheParams);
-  const pagePromise = apiFetchJSON<MessagePage>(requestPath).finally(() => {
-    if (messagePageInflight.get(inflightKey) === pagePromise) messagePageInflight.delete(inflightKey);
-  });
+  const pagePromise = apiFetchJSON<MessagePage>(requestPath)
+    .then((page) => {
+      const normalized = applyLocalMessageOverlaysToPage(cloneMessagePage(page), cacheParams);
+      if (messagePageCacheWriters.get(cachePath) === pagePromise) {
+        messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
+        for (const message of normalized.messages) {
+          if (isEmailMessageDetailed(message)) {
+            primeMessageCaches(message, { companyID: params.companyID, sharedInboxID: params.sharedInboxID });
+          }
+        }
+      }
+      return normalized;
+    })
+    .finally(() => {
+      if (messagePageInflight.get(inflightKey) === pagePromise) messagePageInflight.delete(inflightKey);
+      if (messagePageCacheWriters.get(cachePath) === pagePromise) messagePageCacheWriters.delete(cachePath);
+    });
   messagePageInflight.set(inflightKey, pagePromise);
-  let page: MessagePage;
+  messagePageCacheWriters.set(cachePath, pagePromise);
   try {
-    page = await pagePromise;
+    return cloneMessagePage(await pagePromise);
   } catch (error) {
     const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneMessagePage) : null;
     if (stale) return applyLocalMessageOverlaysToPage(stale, cacheParams);
     throw error;
   }
-  const normalized = applyLocalMessageOverlaysToPage(cloneMessagePage(page), cacheParams);
-  messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
-  for (const message of normalized.messages) {
-    if (isEmailMessageDetailed(message)) {
-      primeMessageCaches(message, { companyID: params.companyID, sharedInboxID: params.sharedInboxID });
-    }
-  }
-  return cloneMessagePage(normalized);
 }
 
 export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): EmailMessage[] {
@@ -561,11 +569,13 @@ export async function getEmailMessage(
         ...readStoredLocalThreadReplies(message.thread_id, replyScope),
       ]);
       const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
-      messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now(), detailFetched: true });
+      if (messageDetailInflight.get(cacheKey) === request) {
+        messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now(), detailFetched: true });
+      }
       return value;
     })
     .finally(() => {
-      messageDetailInflight.delete(cacheKey);
+      if (messageDetailInflight.get(cacheKey) === request) messageDetailInflight.delete(cacheKey);
     });
   messageDetailInflight.set(cacheKey, request);
   try {
@@ -727,13 +737,7 @@ export async function deleteEmailMessage(messageID: string, sharedInboxID?: stri
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
-  const {
-    company_id: companyID,
-    shared_inbox_id: sharedInboxID,
-    local_user_id: localUserID,
-    local_account_email: localAccountEmail,
-    ...messageInput
-  } = input;
+  const { company_id: companyID, shared_inbox_id: sharedInboxID, ...messageInput } = input;
   const cleanCompanyID = companyID?.trim() ?? "";
   const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/send${query}`, {
@@ -747,10 +751,7 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
     ...payload.message,
     body: payload.message.body?.trim() ? payload.message.body : messageInput.body,
   });
-  const localReplyScope = { companyID, sharedInboxID, userID: localUserID, accountEmail: localAccountEmail };
-  primeMessageCaches(message, localReplyScope);
   applyEmailMessageToCachedPages(message, { prependIfMissing: true, companyID, sharedInboxID });
-  if (input.reply_to_message_id?.trim()) addLocalEmailReply(input.reply_to_message_id, message, localReplyScope);
   return message;
 }
 
@@ -773,17 +774,6 @@ export async function listEmailDrafts(companyID: string, scope: CommunicationsEm
   const query = createEmailDraftScopeQuery(cleanCompanyID, scope);
   const payload = await apiFetchJSON<{ drafts?: CommunicationsEmailDraft[] }>(`/v1/communications/drafts?${query.toString()}`);
   return (payload.drafts ?? []).map(cloneCommunicationsEmailDraft);
-}
-
-export async function getEmailDraft(companyID: string, draftID: string, scope: CommunicationsEmailDraftScope): Promise<CommunicationsEmailDraft> {
-  const cleanCompanyID = companyID.trim();
-  const cleanDraftID = draftID.trim();
-  if (!cleanCompanyID || !cleanDraftID) throw new Error("email_draft_id_required");
-  const query = createEmailDraftScopeQuery(cleanCompanyID, scope);
-  const payload = await apiFetchJSON<{ draft: CommunicationsEmailDraft }>(
-    `/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}?${query.toString()}`,
-  );
-  return cloneCommunicationsEmailDraft(payload.draft);
 }
 
 export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): Promise<CommunicationsEmailDraft> {
@@ -1407,10 +1397,6 @@ export function invalidateCommunicationsFolderCache(): void {
   clearEmailFolderCache();
 }
 
-export function markCommunicationsFolderCacheStale(): void {
-  foldersCache.clear();
-}
-
 export function invalidateEmailMessageCache(messageID: string, companyID?: string, sharedInboxID?: string): void {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return;
@@ -1487,21 +1473,6 @@ export function patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(
   });
 }
 
-export function primeEmailMessageCache(message: EmailMessage, scope: LocalEmailReplyScope = {}): void {
-  primeMessageCaches(message, scope);
-}
-
-export function removeEmailMessageFromCache(messageID: string, scope: LocalEmailReplyScope = {}): void {
-  const cleanMessageID = messageID.trim();
-  if (!cleanMessageID) return;
-  const cacheKey = scopedMessageCacheKey(cleanMessageID, scope);
-  recentArchivedMessages.delete(cacheKey);
-  recentPrimaryMessages.delete(cacheKey);
-  recentStarredMessages.delete(cacheKey);
-  invalidateEmailMessageCache(cleanMessageID, scope.companyID, scope.sharedInboxID);
-  removeEmailMessageFromCachedPages(cleanMessageID, scope);
-}
-
 export function emailMessageWithLogicGatePlacement(message: EmailMessage, logicGateID: string): EmailMessage {
   const cleanLogicGateID = logicGateID.trim();
   if (!cleanLogicGateID) return message;
@@ -1558,43 +1529,12 @@ export function addLocalEmailReply(replyToMessageID: string, reply: EmailMessage
   ), scope);
 }
 
-export function reconcileLocalEmailReply(reply: EmailMessage, scope: LocalEmailReplyScope = {}): void {
-  const cleanReplyID = reply.id.trim();
-  const cleanThreadID = reply.thread_id?.trim() ?? "";
-  if (!cleanReplyID && !cleanThreadID) return;
-  const scoped = Boolean(scope.companyID?.trim() || scope.sharedInboxID?.trim());
-  for (const [key, entry] of messageDetailCache.entries()) {
-    if (scoped && !messageDetailCacheKeyMatchesScope(key, scope)) continue;
-    const message = reconcileEmailMessageLocalReply(entry.value, reply);
-    if (message !== entry.value) messageDetailCache.set(key, { ...entry, value: message, fetchedAt: Date.now() });
-  }
-  patchCachedPageMessages((message) => reconcileEmailMessageLocalReply(message, reply), scope);
-}
-
 export function addLocalReplyToEmailMessage(message: EmailMessage, reply: EmailMessage): EmailMessage {
   const cleanMessageID = message.id.trim();
   const cleanReplyID = reply.id.trim();
   if (!cleanMessageID || !cleanReplyID || cleanMessageID === cleanReplyID) return cloneMessage(message);
   const next = cloneMessage(message);
-  next.local_replies = mergeLocalReplies(next.local_replies ?? [], [replyForLocalThread(reply)]);
-  return next;
-}
-
-export function reconcileEmailMessageLocalReply(message: EmailMessage, reply: EmailMessage): EmailMessage {
-  const replies = message.local_replies ?? [];
-  if (replies.length === 0) return message;
-  const cleanReplyID = reply.id.trim();
-  const cleanThreadID = reply.thread_id?.trim() ?? "";
-  if (!cleanReplyID && !cleanThreadID) return message;
-  let changed = false;
-  const reconciled = replies.map((existing) => {
-    if (!emailRepliesRepresentSameMessage(existing, reply)) return existing;
-    changed = true;
-    return mergeLocalReplyMessage(existing, reply);
-  });
-  if (!changed) return message;
-  const next = cloneMessage(message);
-  next.local_replies = mergeLocalReplies(reconciled, []);
+  next.local_replies = mergeLocalReplies(next.local_replies ?? [], [reply]);
   return next;
 }
 
@@ -2087,6 +2027,7 @@ function clearEmailFolderCache(): void {
 function clearMessagePageCache(): void {
   messagePageCache.clear();
   messagePageInflight.clear();
+  messagePageCacheWriters.clear();
 }
 
 function markWorkspacePanelSnapshotScopeStale(companyID: string, options: Parameters<typeof markWorkspaceSnapshotScopeStale>[2]): void {
@@ -2156,7 +2097,7 @@ function primeMessageCaches(message: EmailMessage, scope: LocalEmailReplyScope =
   const hydratedMessage = hydrateEmailMessageLocalReplies(message, scope);
   const hydratedIsDetailed = isEmailMessageDetailed(hydratedMessage);
   for (const [key, entry] of messageDetailCache.entries()) {
-    if (scoped ? key !== targetKey : !messageCacheKeyMatchesID(key, cleanMessageID)) continue;
+    if (key === targetKey || scoped || !messageCacheKeyMatchesID(key, cleanMessageID)) continue;
     const baseMessage = hydratedIsDetailed ? hydratedMessage : mergeEmailMessageForDetailCache(entry.value, hydratedMessage);
     const replies = mergeLocalReplies(entry.value.local_replies ?? [], baseMessage.local_replies ?? []);
     const value = cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined });
