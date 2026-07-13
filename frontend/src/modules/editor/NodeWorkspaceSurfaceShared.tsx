@@ -15,7 +15,7 @@ import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorP
 import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import type { EditorHighlightColor } from "./richTextEditing";
-import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "./useEditorDocumentSurfaceHandlers";
+import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -60,6 +60,7 @@ export type NodeWorkspaceSurfaceProps = {
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
   onFormattingControllerAvailabilityChange?: (available: boolean) => void;
   onRegisterSaveController?: (controller: NodeWorkspaceSaveController | null) => void;
   onError: (message: string) => void;
@@ -208,7 +209,13 @@ export function useCloseFloatingMenu(open: boolean, ref: React.RefObject<HTMLEle
       onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      const trigger = ref.current?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onClose();
+      window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
     };
     const timer = window.setTimeout(() => window.addEventListener("mousedown", onMouseDown, true), 0);
     window.addEventListener("keydown", onKeyDown, true);
@@ -393,13 +400,6 @@ export const MailIcon: React.FC<{ color: string }> = ({ color }) => (
 export const PaperclipIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
     <path d="m7.1 9.7 4.5-4.5a2.2 2.2 0 1 1 3.1 3.1l-6 6a3.8 3.8 0 0 1-5.4-5.4l6-6a3 3 0 0 1 4.2 0" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-export const TableIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
-    <rect x="3" y="4" width="12" height="10" rx="1.4" fill="none" stroke={color} strokeWidth="1.45" />
-    <path d="M3 7.4h12M7 4v10M11 4v10" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
   </svg>
 );
 

@@ -3,6 +3,7 @@ import { getActiveCompanyID } from "../auth/currentCompany";
 import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
+import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
@@ -1863,7 +1864,8 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
 }): React.ReactElement {
   const label = folderName.trim() || "this inbox";
   return (
-    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -1896,6 +1898,7 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
         </div>
       </form>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -1915,7 +1918,8 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
   const parentLabel = parentName.trim();
   const isSharedInbox = mode === "shared_inbox";
   return (
-    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -1960,6 +1964,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
         </div>
       </form>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -1994,7 +1999,8 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCan
   onCancel: () => void;
 }): React.ReactElement {
   return (
-    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={{ ...sharedInboxEmailModalBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -2011,6 +2017,7 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCan
         <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -2168,7 +2175,8 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   }, [deleteBusy, nodeID, onClose, onDeleteNode]);
 
   return (
-    <div
+    <AppModalPortal onRequestClose={onClose}>
+      <div
       style={nodeEditorPopupBackdropStyle}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -2257,7 +2265,8 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
           />
         )}
       </UnifiedNodeShell>
-    </div>
+      </div>
+    </AppModalPortal>
   );
 }
 

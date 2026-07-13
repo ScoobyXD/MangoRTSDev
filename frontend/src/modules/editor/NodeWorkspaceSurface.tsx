@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
+import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
@@ -95,7 +96,6 @@ import {
   parseDraggedEmail,
   PlusIcon,
   projectionsKey,
-  TableIcon,
   uploadEditorAttachment,
   type NodeWorkspaceSurfaceProps,
   type TextBlockImageDraft,
@@ -352,6 +352,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
   onFormattingControllerAvailabilityChange,
   onRegisterSaveController,
   onError,
@@ -360,7 +361,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
   const projectAssignerRef = useRef<HTMLDivElement | null>(null);
-  const nodeEmailModalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
   const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
   const nodeAttachmentUploadFilesRef = useRef(new Map<string, { file: File; blockID: string; controller?: AbortController }>());
@@ -395,7 +395,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
-  const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
@@ -721,34 +720,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
 
-  useEffect(() => {
-    if (!nodeEmailModalMessageID || typeof document === "undefined") return undefined;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusFrame = window.requestAnimationFrame(() => nodeEmailModalCloseButtonRef.current?.focus());
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Tab") {
-        const dialog = nodeEmailModalCloseButtonRef.current?.closest('[role="dialog"]');
-        const focusable = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((element) => element.getClientRects().length > 0) : [];
-        if (focusable.length === 0) return;
-        const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
-        const nextIndex = event.shiftKey
-          ? activeIndex <= 0 ? focusable.length - 1 : activeIndex - 1
-          : activeIndex < 0 || activeIndex === focusable.length - 1 ? 0 : activeIndex + 1;
-        event.preventDefault();
-        focusable[nextIndex]?.focus();
-        return;
-      }
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setNodeEmailModalMessageID("");
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      window.removeEventListener("keydown", onKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [nodeEmailModalMessageID]);
 
   useEffect(() => {
     if (!logicGateAssignerOpen) return;
@@ -757,13 +728,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setLogicGateAssignerOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setLogicGateAssignerOpen(false);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      setLogicGateAssignerOpen(false);
+      window.requestAnimationFrame(() => logicGateAssignerRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
     };
     window.addEventListener("pointerdown", closeOnPointerDown);
-    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", closeOnEscape, true);
     return () => {
       window.removeEventListener("pointerdown", closeOnPointerDown);
-      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("keydown", closeOnEscape, true);
     };
   }, [logicGateAssignerOpen]);
 
@@ -806,13 +782,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setProjectAssignerOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProjectAssignerOpen(false);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      setProjectAssignerOpen(false);
+      window.requestAnimationFrame(() => projectAssignerRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
     };
     window.addEventListener("pointerdown", closeOnPointerDown);
-    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", closeOnEscape, true);
     return () => {
       window.removeEventListener("pointerdown", closeOnPointerDown);
-      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("keydown", closeOnEscape, true);
     };
   }, [projectAssignerOpen]);
 
@@ -970,7 +951,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
-    setTableInsertRequests((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setSidePaneWidths((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setActiveChatMessageIDs((current) => {
       if (nodeChanged) return {};
@@ -1340,12 +1320,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setChatSelectionAnchors((current) => {
-      if (!(blockID in current)) return current;
-      const next = { ...current };
-      delete next[blockID];
-      return next;
-    });
-    setTableInsertRequests((current) => {
       if (!(blockID in current)) return current;
       const next = { ...current };
       delete next[blockID];
@@ -2868,17 +2842,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
                       onError={onError}
                     />
-                    {canEdit && (
-                      <button
-                        type="button"
-                        title="Insert table"
-                        aria-label="Insert table"
-                        onClick={() => setTableInsertRequests((current) => ({ ...current, [block.id]: (current[block.id] ?? 0) + 1 }))}
-                        style={{ width: 26, height: 24, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
-                      >
-                        <TableIcon color={accent} />
-                      </button>
-                    )}
                     <button
                       type="button"
                       title={emailPaneIsVisible ? "Hide email" : "Open email"}
@@ -2926,7 +2889,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     chatNavigationRequest={chatNavigationRequest?.blockID === block.id
                       ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID }
                       : null}
-                    tableInsertRequestID={tableInsertRequests[block.id] ?? 0}
                     surfaceText={surfaceText}
                     accent={accent}
                     outlineStyle={outlineStyle}
@@ -2952,6 +2914,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onSelectionFontSizeChange={onSelectionFontSizeChange}
                     onSelectionInlineFormatChange={onSelectionInlineFormatChange}
                     onSelectionHighlightColorChange={onSelectionHighlightColorChange}
+                    onSelectionTextAlignmentChange={onSelectionTextAlignmentChange}
                   />
                 </div>
                 {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth, emailPaneMaxWidth)}
@@ -3015,12 +2978,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       </div>
 
       {nodeEmailModalMessageID && (
+        <AppModalPortal onRequestClose={() => setNodeEmailModalMessageID("")}>
         <div
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setNodeEmailModalMessageID("");
           }}
-          style={{ position: "fixed", zIndex: 180, inset: 0, display: "grid", placeItems: "stretch", background: "rgba(15,23,42,0.44)", padding: 12 }}
+          style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", placeItems: "stretch", background: "rgba(15,23,42,0.44)", padding: 12 }}
         >
           <div
             role="dialog"
@@ -3033,7 +2997,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 Attached emails
               </div>
               <button
-                ref={nodeEmailModalCloseButtonRef}
                 type="button"
                 title="Close attached emails"
                 aria-label="Close attached emails"
@@ -3069,6 +3032,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             </div>
           </div>
         </div>
+        </AppModalPortal>
       )}
       {canEdit && emailPickerTargetBlockID !== null && (
         <EmailPickerModal

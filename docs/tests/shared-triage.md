@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Shared Triage Tests
 
@@ -115,7 +115,7 @@ ST101 - Shared Triage reply drafts are unique per company, user, shared inbox sc
 ST102 - A saved Shared Triage reply draft stores or reloads the original shared message context, and reopening the draft shows the original email being answered above the compose editor.
 ST103 - Shared Triage compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active shared mailbox address from generated recipients.
 ST104 - Shared Triage scheduled sends are saved as scheduled drafts with the selected `shared_inbox_id`, use the company-owned shared grant when due while the app is open, and delete the scheduled draft only after send succeeds.
-ST105 - Shared Triage compose and reply use the unified editor semantics shared with node, Logic Gate, project, attached-email reply, and signature editor surfaces, including automatic numbering, indent guides, bullet list, checklist, font size, bold, underline, text highlight color, links, paste cleanup, Delete/Backspace, and copy/cut/paste behavior. The visible controls use the shared font-size minus/value/plus, Bold, Underline, highlight-color, and outline-style controls rather than a shared-compose-only implementation.
+ST105 - Shared Triage compose and reply use the unified editor semantics shared with node, Logic Gate, project, attached-email reply, and signature editor surfaces, including automatic numbering, indent guides, bullet list, checklist, font size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, table, links, paste cleanup, Delete/Backspace, and copy/cut/paste behavior. The visible controls use the complete shared toolbar inventory rather than a shared-compose-only implementation.
 ST106 - Shared Triage compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 ST107 - Shared Triage received email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the viewer is allowed to see.
 ST108 - Links in Shared Triage email bodies, forwarded/replied original-message previews, sent reply bodies, and shared email signatures must open in a new browser tab when clicked.
@@ -141,7 +141,7 @@ ST127 - The Shared Triage conversation detail pane is the only vertical scroll c
 ST128 - The newest shared conversation card is expanded by default and older cards are collapsed to headers. When a new inbound or outbound message joins the selected thread it becomes expanded and the previously expanded cards collapse; manual expansion must not introduce nested scrolling.
 ST129 - The shared reply editor has a useful minimum/default height, can be resized vertically, and automatically saves and restores the user's clamped height preference for that shared mailbox scope; layout changes must not squeeze it below the minimum.
 ST130 - Clicking a Shared Triage email row while compose/reply is open quietly preserves the current shared draft, exits compose, selects the clicked row, and displays its detail on the first click without reloading or blanking the list.
-ST131 - Shared compose/reply font-size, Bold, Underline, and highlight controls preserve the editor selection when toolbar focus changes. Font size applies to selected text or pending caret; Bold/Underline toggle off as well as on; highlight applies only to a restored non-collapsed selection and supports clear/no-highlight. Enter commits a numeric font-size value once, while Escape cancels it without a blur commit.
+ST131 - Shared compose/reply font-size, Bold, Underline, Italic, Highlight/**No highlight**, alignment, and table controls preserve the editor selection when toolbar focus changes. Font size and highlight apply to selected text or pending collapsed-caret typing; **No highlight** clears selected/pending highlight; inline controls toggle off as well as on; and hover/focus/active styling applies only to the individual control. Enter commits a numeric font-size value once, while Escape cancels it without a blur commit.
 ST132 - At shared send time, each authorized `mango-attachment:` image reference is deduplicated, resolved from Mango S3 under the selected `shared_inbox_id`, assigned a unique alphanumeric content ID, added as an inline provider attachment, and rewritten to `cid:` in outbound HTML through the company-owned shared grant. Missing or unauthorized references fail the send.
 
 ## Nylas Configuration Contract
@@ -162,7 +162,7 @@ ST133 - Shared Triage automatically inserts the default signature scoped to the 
 ST134 - Shared Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing under the selected shared-inbox scope. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
 ST135 - Shared remote-draft reconciliation keeps the newest reply draft for each user/shared-inbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without adding the active shared mailbox or duplicate recipients.
 ST136 - Shared Save Draft and Send flush the mounted unified editor first and persist or submit the exact sanitized HTML returned by that flush, including the user's final DOM edit.
-ST137 - The shared-inbox signature editor is a `shared_inbox_id`-scoped unified rich editor using the shared toolbar, including working font-size minus/value/plus and highlight controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered shared-inbox pending sync without overtaking newer saves or leaking across inboxes.
+ST137 - The shared-inbox signature editor is a `shared_inbox_id`-scoped unified rich editor using the complete shared toolbar, including font-size, Bold, Underline, Italic, Highlight/**No highlight**, alignment, and table controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered shared-inbox pending sync without overtaking newer saves or leaking across inboxes.
 ST138 - Shared primary-inbox prefetch builds a bounded logical page of at most 12 unique thread rows, stops on repeated tokens or the provider-page budget, and keys all work by company, `shared_inbox_id`, mailbox, filters, and page token.
 ST139 - Shared Advance directly consumes the exact matching prefetch, awaiting matching in-flight work rather than duplicating it; personal or another shared inbox's prefetched page must never be reused.
 ST140 - Shared prefetch and provider mark-read yield foreground priority to the selected shared detail request while retaining immediate optimistic unread UI.
@@ -545,7 +545,7 @@ Expected:
 - Replying to the same shared source email never creates more than one reply draft for that source message and shared mailbox scope.
 - Reopening a shared reply draft shows the original email context above the compose editor.
 - Reply, Reply All, Forward, Cc, Bcc, scheduled send, and rich compose send through the selected shared inbox scope and continue to require edit access.
-- Shared rich compose controls use the unified editor behavior and shared segmented format/outline toolbar controls used by node, Logic Gate, project, and attached-email reply editor surfaces.
+- Shared rich compose controls use the unified editor behavior and complete shared segmented format/outline toolbar used by node, Logic Gate, project, and attached-email reply surfaces.
 - Save Draft and Send flush the compose editor and use the exact returned sanitized HTML.
 - A future scheduled shared send is saved as a scheduled draft with `shared_inbox_id`, is sent through the company-owned shared grant when due while the app is open, and is deleted only after send succeeds.
 - Received Cc recipients are visible in message detail.
@@ -637,12 +637,12 @@ Business logic covered:
 - ST137
 
 Given:
-- A user with edit access opens the signature editor for a shared inbox, formats text with font-size, Bold, Underline, or highlight controls, and saves.
+- A user with edit access opens the signature editor for a shared inbox, formats text with the shared font-size, Bold, Underline, Italic, Highlight/No highlight, alignment, or table controls, and saves.
 - A signature load, legacy backfill, failed retry, or newer save may overlap that edit.
 
 Expected:
 - The signature editor uses the same unified rich editor host, semantics, formatting controller, and toolbar as shared compose/reply; it is not a native textarea.
-- Font-size minus/value/plus and highlight controls operate on the preserved selection.
+- Font-size, inline-format, highlight/No highlight, alignment, and table controls operate on the preserved selection or appropriate collapsed-caret/context semantics.
 - Save Signature persists the exact flushed sanitized HTML for that `shared_inbox_id` and reports success only after the remote save succeeds.
 - Stale hydration cannot overwrite the newer local edit, an empty remote row remains authoritative, and pending retries/backfills are serialized before newer saves without replacing them.
 - Personal signatures and edits or pending retries from another shared inbox never leak into the selected shared-inbox scope.
@@ -700,7 +700,7 @@ Expected:
 - Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable shared draft.
 - Reconciliation removes older remote reply drafts for the same shared-inbox/source-message scope, and reopening Reply All restores saved To/Cc/Bcc recipients with active-mailbox exclusion intact.
 - The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference for that shared mailbox scope.
-- Font-size minus/value/plus applies to the preserved selection or pending caret; Bold and Underline toggle on/off; highlight applies to the preserved selected range and can be cleared; the active indicators follow the current selection.
+- Font-size and highlight apply to the preserved selection or pending collapsed-caret typing style; Bold, Underline, and Italic toggle on/off; **No highlight** clears selected/pending highlight; alignment and table actions use the preserved context; active indicators follow the selection or pending state.
 - Saving, transitioning away, or sending flushes the mounted editor first so the final edit cannot be lost to stale compose state.
 - Clicking a different shared email row quietly saves the active shared draft, closes compose, and shows the clicked message on the first click without replacing the visible list.
 

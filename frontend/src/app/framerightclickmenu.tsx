@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppOverlayPortalTarget } from "./AppModalPortal";
 
 export type FrameRightClickMenuClampInput = {
   x: number;
@@ -39,6 +40,7 @@ export interface FrameRightClickMenuProps {
 const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, maxHeight = "calc(100vh - 16px)", overflow = "hidden" }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
+  const portalTarget = useAppOverlayPortalTarget();
   const updatePosition = useCallback(() => {
     const menu = menuRef.current;
     if (!menu) return;
@@ -92,13 +94,28 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
   }, [closeOnOutside, isConfirmActionMenu, onClose]);
 
   useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const confirmMenuActive = document.querySelector("[data-mango-confirm-action-menu='true']");
+      if (!isConfirmActionMenu && confirmMenuActive) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => {
+      document.removeEventListener("keydown", handler, true);
+    };
+  }, [isConfirmActionMenu, onClose]);
+
+  useEffect(() => {
     if (isConfirmActionMenu) return;
     const handler = () => onClose();
     window.addEventListener("mango:confirm-action-complete", handler);
     return () => window.removeEventListener("mango:confirm-action-complete", handler);
   }, [isConfirmActionMenu, onClose]);
 
-  return createPortal(
+  return portalTarget ? createPortal(
     <div
       data-mango-confirm-action-menu={isConfirmActionMenu ? "true" : undefined}
       className="mango-liquid-context-menu"
@@ -124,8 +141,8 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
     >
       {children}
     </div>,
-    document.body,
-  );
+    portalTarget,
+  ) : null;
 };
 
 export default FrameRightClickMenu;

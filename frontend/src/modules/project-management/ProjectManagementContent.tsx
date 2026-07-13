@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
 import type { ProjectLogicGateReturnContext } from "../../app/projectRouteHistory.js";
@@ -1372,9 +1373,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
       ) : null}
       {projectRenameTarget ? (
+        <AppModalPortal onRequestClose={() => { if (!projectRenameSaving) setProjectRenameTarget(null); }}>
         <div
           role="presentation"
-          style={projectDeleteBackdropStyle}
+          style={{ ...projectDeleteBackdropStyle, zIndex: 1 }}
           onPointerDown={() => {
             if (!projectRenameSaving) setProjectRenameTarget(null);
           }}
@@ -1397,10 +1399,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
                   event.preventDefault();
                   void saveProjectRename();
                 }
-                if (event.key === "Escape" && !projectRenameSaving) {
-                  event.preventDefault();
-                  setProjectRenameTarget(null);
-                }
               }}
             />
             <div style={projectDeleteActionsStyle}>
@@ -1411,6 +1409,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             </div>
           </div>
         </div>
+        </AppModalPortal>
       ) : null}
       {projectDeleteConfirmation ? (
         <ConfirmActionMenu

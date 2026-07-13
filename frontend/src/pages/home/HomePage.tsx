@@ -5,6 +5,7 @@ import { entityMatchesAccountFilter } from "../../modules/accounts/accountsApi";
 import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
 import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
@@ -4738,7 +4739,8 @@ function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDr
   onCancel: () => void;
 }) {
   return (
-    <div style={homeDialogBackdropStyle} onPointerDown={onCancel}>
+    <AppModalPortal onRequestClose={() => { if (!busy) onCancel(); }}>
+    <div style={{ ...homeDialogBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
         role="dialog"
         aria-modal="true"
@@ -4768,6 +4770,7 @@ function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDr
         </div>
       </form>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -4779,7 +4782,8 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, canConnect, onCo
   onCancel: () => void;
 }) {
   return (
-    <div style={homeDialogBackdropStyle} onPointerDown={onCancel}>
+    <AppModalPortal onRequestClose={() => { if (!busy) onCancel(); }}>
+    <div style={{ ...homeDialogBackdropStyle, zIndex: 1 }} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -4798,6 +4802,7 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, canConnect, onCo
         <button type="button" disabled={busy} onClick={onCancel} style={homeDialogSecondaryButtonStyle}>Cancel</button>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 

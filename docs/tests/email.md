@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Email Tests
 
@@ -35,7 +35,7 @@ EMAIL10 - Draft rows store addressing text, subject, sanitized editor body conte
 EMAIL11 - Email signatures store sanitized editor body content and default metadata; signature attachments use `email_signature` resource attachments when images/logos are supported.
 EMAIL12 - Normal file attachments for drafts use `email_draft` resource attachments and are sent by resolving Mango attachment IDs to S3 bytes at send time.
 EMAIL13 - Durable email draft/signature/send payloads must not store raw base64 attachment content or data URLs. Draft and signature API writes must reject embedded inline file bytes before any durable write.
-EMAIL14 - Sending a Mango-authored email must serialize the editor body into professional HTML that preserves line breaks, blank lines, spacing, bullets, numbered lists, links, indentation, font size, bold, underline, and text highlight color. Font-family selection is intentionally ignored until multiple font families exist; this does not disable font-size formatting.
+EMAIL14 - Sending a Mango-authored email must serialize the editor body into professional HTML that preserves line breaks, blank lines, spacing, bullets, numbered lists, tables, links, indentation, font size, bold, underline, italic, text highlight color, and supported left/center/right alignment. Font-family selection is intentionally ignored until multiple font families exist; this does not disable font-size formatting.
 EMAIL15 - Legacy plain text drafts/signatures must still send safely as escaped/linkified HTML.
 EMAIL16 - Scheduled sends are saved as durable drafts with a due timestamp, but V1 scheduled execution remains browser-driven while the app is open.
 EMAIL17 - Successful sends delete the corresponding durable draft only after the provider send succeeds.
@@ -47,7 +47,7 @@ EMAIL22 - Conversation details are newest first with a deterministic message-ID 
 EMAIL23 - A thread detail pane owns the only vertical scrollbar. A selected single-message reader uses all remaining detail-pane height as its flexible minimum, so a short body never leaves a shallow fixed-height reader box; every expanded message document grows to its complete rendered content, including content sized from the document root, without clipping or exposing a per-message body scrollbar. Collapsed cards remain header summaries until expanded.
 EMAIL24 - Reply body editors have a nontrivial minimum/default height, support vertical resizing, and automatically persist a clamped per-user mailbox-scope height preference.
 EMAIL25 - Selecting a mailbox row while compose/reply is open quietly saves eligible draft content, exits compose, and shows the selected message on the first click without reloading the list.
-EMAIL26 - Shared font-size minus/value/plus, Bold, Underline, and highlight-color controls preserve the editor range when toolbar focus changes. Font size applies to a selected range or pending caret, Bold and Underline toggle both on and off, highlight applies to the restored non-collapsed selection and supports clear/no-highlight, and serialized outbound HTML preserves every applied format. Enter commits the numeric font-size value once; Escape cancels the draft value without a later blur commit.
+EMAIL26 - Shared font-size minus/value/plus, Bold, Underline, Italic, Highlight/**No highlight**, left/center/right alignment, and table controls preserve the editor range when toolbar focus changes. Font size and highlight apply to a selected range or pending collapsed-caret typing style; **No highlight** removes selected highlighting or clears the pending style; inline controls toggle both on and off; and serialized outbound HTML preserves supported formats. Hover/focus/active styling applies only to the individual control. Enter commits the numeric font-size value once; Escape cancels the draft value without a later blur commit.
 EMAIL27 - Durable pasted-image bodies store Mango attachment references. At the backend send boundary, authorized references are deduplicated, resolved from S3, converted to inline attachments with unique alphanumeric content IDs, and rewritten to matching `cid:` image sources; normal files remain non-inline and broken/unauthorized inline references reject the send.
 
 EMAIL28 - The default signature for the exact active personal mailbox or Shared Triage inbox is automatically inserted exactly once into every newly created compose, reply, and reply-all body. If database hydration completes after the editor opens, Mango backfills only that still-open new draft, preserves text already typed, never rewrites a reopened saved draft, and never duplicates a signature already present in rich or legacy body content.
@@ -56,7 +56,7 @@ EMAIL30 - Personal, shared, node-attached, and project-attached thread viewers e
 EMAIL31 - Vertical reply resizing ends on pointer-up even outside the handle, pointer-cancel, lost pointer capture, or window blur. Pointer movement after any of those events must not continue changing editor height.
 EMAIL32 - Calendar-invitation metadata (`text/calendar` or `.ics`) may identify a candidate invitation in the viewer, but the backend always derives `METHOD`, `VEVENT`, and UID from authenticated raw MIME. RSVP controls prevent duplicate submission while pending and display a saved/selected response only after provider success; malformed invitations, missing/ambiguous events, expired grants, and provider failures leave no false selected state and surface a recoverable error.
 EMAIL33 - Reopening a saved Reply All draft restores its saved To, Cc, and Bcc fields while still applying the active-mailbox exclusion and case-insensitive recipient deduplication rules.
-EMAIL34 - My Triage compose/reply, Shared Triage compose/reply, attached-email reply, and personal/shared signature editing must use the same `EditorDocumentSurface`, shared behavior/formatting controller, and `EditorTabBar` controls as the other unified editor surfaces. The signature editor must be a unified rich editor rather than a native textarea.
+EMAIL34 - My Triage compose/reply, Shared Triage compose/reply, attached-email reply, and personal/shared signature editing must use the same `EditorDocumentSurface`, shared behavior/formatting controller, and complete `EditorTabBar` formatting inventory as the other unified editor surfaces. The signature editor must be a unified rich editor rather than a native textarea.
 EMAIL35 - Save Draft, Send, and Save Signature must synchronously flush the mounted rich editor and persist or submit the exact sanitized HTML returned by that flush, including the user's final uncommitted DOM edit; cached React state must not substitute an older body.
 EMAIL36 - Signature persistence is scoped to the exact personal account or shared inbox. An in-flight remote load must not overwrite a newer local edit, an existing remote row remains authoritative even when its body is empty, and save success is shown only after the remote write succeeds. A failed save retains the exact mailbox-scoped pending body, retries it before accepting older remote state, serializes retries/backfills with newer saves, and clears pending state only after that same body succeeds.
 EMAIL37 - Selecting a mailbox row makes that message detail the foreground provider read. First body paint must not wait behind unread-state mutation, next-page prefetch, historical thread hydration, collapsed-card attachment reads, or background archive work.
@@ -156,7 +156,7 @@ Expected:
 - Loading compose uses the database signature when available and localStorage only as fallback/migration.
 - New compose, reply, and reply-all editors receive the exact mailbox-scoped default signature automatically, including a safe one-time backfill when remote loading finishes after the editor opens.
 - Reopened saved drafts are left unchanged, and automatic or manual insertion cannot add a duplicate signature.
-- The signature is edited through the shared unified rich editor and shared font-size, Bold, Underline, highlight, and outline controls, not a native textarea.
+- The signature is edited through the shared unified rich editor and shared font-size, Bold, Underline, Italic, Highlight/**No highlight**, alignment, table, and outline controls, not a native textarea.
 - Save Signature flushes the editor and writes exactly that returned HTML for the active personal-account or shared-inbox scope.
 - A stale load cannot overwrite a newer local edit; an empty remote row is authoritative; failed saves remain mailbox-scoped pending sync and cannot overtake newer saves.
 - The durable signature endpoint rejects embedded inline file bytes before persistence.
@@ -176,8 +176,8 @@ Given:
 
 Expected:
 - Sending uses the shared email HTML serializer, not raw draft text.
-- The resulting HTML preserves spacing, line breaks, list structure, links, indentation, selected font sizes, bold, underline, and sanitized text highlight colors.
-- Font-size controls retain the selected range even if the numeric picker receives focus, and Bold/Underline can be toggled off as well as on.
+- The resulting HTML preserves spacing, line breaks, list/table structure, links, indentation, selected font sizes, bold, underline, italic, sanitized text highlight colors, and supported text alignment.
+- Toolbar controls retain the selected range even if a picker receives focus; Bold/Underline/Italic toggle off as well as on, and font/highlight choices become pending typing styles at a collapsed caret.
 - Font-family choice is not part of this contract until Mango supports more than one font family.
 
 ### Scenario EMAIL-S6: Attachments And Provider Boundary

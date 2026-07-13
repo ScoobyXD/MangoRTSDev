@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
@@ -32,7 +32,9 @@ import {
   useEditorDocumentFormattingController,
   useEditorDocumentSurfaceHandlers,
   type EditorDocumentFormattingController,
+  type EditorInlineStyleCommand,
   type EditorSelectionInlineFormatState,
+  type EditorTextAlignment,
 } from "./useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
@@ -268,7 +270,6 @@ type NodeTextBlockEditorProps = {
   chatMessages: EditorTextBlockChatMessage[];
   activeChatAnchorMessageID: string;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
-  tableInsertRequestID: number;
   surfaceText: string;
   accent: string;
   outlineStyle: EditorOutlineStyleID;
@@ -287,6 +288,7 @@ type NodeTextBlockEditorProps = {
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
@@ -680,7 +682,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   chatMessages,
   activeChatAnchorMessageID,
   chatNavigationRequest,
-  tableInsertRequestID,
   surfaceText,
   accent,
   outlineStyle,
@@ -699,6 +700,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -711,11 +713,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
+  const pendingHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
   const publishedFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const formattingControllerWasActivatedRef = useRef(false);
   const indentGuideFrameRef = useRef<number | null>(null);
   const selectionPointerDownRef = useRef(false);
-  const lastHandledTableInsertRequestIDRef = useRef(0);
   const lastAppliedDocumentRef = useRef("");
   const userEditedDocumentRef = useRef(false);
   const deferredExternalDocumentRef = useRef<{ targetKey: string; value: string } | null>(null);
@@ -880,6 +882,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     scrollMemoryRef,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
+    pendingEditorHighlightColorRef: pendingHighlightColorRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: scheduleNodeDocumentSave,
@@ -889,6 +892,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
     onSelectionHighlightColorChange,
+    onSelectionTextAlignmentChange,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
@@ -950,6 +954,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     outlineStyle,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
+    pendingEditorHighlightColorRef: pendingHighlightColorRef,
     restoreSelection,
     insertTable,
     scheduleDocumentSave: scheduleNodeDocumentSave,
@@ -957,6 +962,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
     onSelectionHighlightColorChange,
+    onSelectionTextAlignmentChange,
   });
 
   const activateFormattingController = useCallback(() => {
@@ -980,13 +986,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     }
   }, [formattingControllerRef]);
 
-  useEffect(() => {
-    if (!tableInsertRequestID || !editable) return;
-    if (lastHandledTableInsertRequestIDRef.current === tableInsertRequestID) return;
-    lastHandledTableInsertRequestIDRef.current = tableInsertRequestID;
-    activateFormattingController();
-    formattingController.insertTable();
-  }, [activateFormattingController, editable, formattingController, tableInsertRequestID]);
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
     const deferred = deferredExternalDocumentRef.current;
@@ -2458,6 +2457,8 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -2481,7 +2482,8 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
   }, [attachment, onClose]);
 
   return (
-    <div
+    <AppModalPortal onRequestClose={onClose}>
+      <div
       role="dialog"
       aria-modal="true"
       aria-label={attachment.name}
@@ -2489,7 +2491,7 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(17,24,39,0.46)", display: "grid", placeItems: "center", padding: 18 }}
+      style={{ position: "fixed", inset: 0, zIndex: 1, background: "rgba(17,24,39,0.46)", display: "grid", placeItems: "center", padding: 18 }}
     >
       <div style={{ width: "min(920px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.26)", overflow: "hidden" }}>
         <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: `1px solid ${strokeColor}` }}>
@@ -2508,7 +2510,8 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </AppModalPortal>
   );
 };
 
@@ -2871,6 +2874,7 @@ const AttachmentPreviewModal: React.FC<{
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -2965,11 +2969,12 @@ const AttachmentPreviewModal: React.FC<{
   };
 
   if (typeof document === "undefined") return null;
-  return createPortal(
+  return (
+    <AppModalPortal onRequestClose={onClose}>
     <div
       role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
-      style={{ position: "fixed", zIndex: 240, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.52)", padding: 18 }}
+      style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.52)", padding: 18 }}
     >
       <div
         ref={dialogRef}
@@ -3014,8 +3019,8 @@ const AttachmentPreviewModal: React.FC<{
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+      </div>
+    </AppModalPortal>
   );
 };
 
@@ -4720,8 +4725,9 @@ const EmailBodyFrame: React.FC<{
           style={{ width: "100%", height, border: compact ? 0 : `1px solid ${strokeColor}`, borderRadius: compact ? 0 : 8, background: "#ffffff", boxSizing: "border-box" }}
         />
       </div>
-      {previewImage && typeof document !== "undefined" && createPortal(
-        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+      {previewImage && (
+        <AppModalPortal onRequestClose={() => setPreviewImage(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Email image preview" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
           <img src={previewImage.src} alt={previewImage.filename} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
             <button type="button" onClick={() => triggerEmailBodyImageDownload(previewImage)} style={{ minHeight: 34, display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>
@@ -4730,8 +4736,8 @@ const EmailBodyFrame: React.FC<{
             </button>
             <button type="button" onClick={() => setPreviewImage(null)} style={{ minHeight: 34, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>Close</button>
           </div>
-        </div>,
-        document.body,
+        </div>
+        </AppModalPortal>
       )}
     </>
   );
@@ -4877,15 +4883,16 @@ const EmailMessageAttachments: React.FC<{
           })}
         </div>
       </div>
-      {previewAttachment && typeof document !== "undefined" && createPortal(
-        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewAttachment(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+      {previewAttachment && (
+        <AppModalPortal onRequestClose={() => setPreviewAttachment(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Email attachment image preview" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewAttachment(null); }} style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
           {previewLoading ? <div style={{ color: "#ffffff", fontSize: 12, fontWeight: 850 }}>Loading image</div> : <img src={previewURL} alt={emailAttachmentFilename(previewAttachment)} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />}
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
             <button type="button" onClick={() => { void downloadAttachment(previewAttachment); }} style={{ minHeight: 34, display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}><DownloadIcon color="#0f172a" />Download</button>
             <button type="button" onClick={() => setPreviewAttachment(null)} style={{ minHeight: 34, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>Close</button>
           </div>
-        </div>,
-        document.body,
+        </div>
+        </AppModalPortal>
       )}
     </>
   );
@@ -5199,7 +5206,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [replyOutlineStyle, setReplyOutlineStyle] = useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [replyToolbarTab, setReplyToolbarTab] = useState<EditorTabID>("format");
   const [replySelectionFontSize, setReplySelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [replyTextAlignment, setReplyTextAlignment] = useState<EditorTextAlignment>("left");
   const [replyHighlightColor, setReplyHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -5226,7 +5234,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyAllMode(false);
     setReplyToolbarTab("format");
     setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setReplySelectionInlineFormat({ bold: false, underline: false });
+    setReplySelectionInlineFormat({ bold: false, underline: false, italic: false });
+    setReplyTextAlignment("left");
     setReplyHighlightColor(null);
     setDraftAttachments([]);
     setCcDraft("");
@@ -5584,8 +5593,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const state = replyEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setReplySelectionFontSize(state.fontSize);
-    setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
     setReplyHighlightColor(state.highlightColor);
+    setReplyTextAlignment(state.textAlignment);
   }, []);
   const adjustReplyFontSize = useCallback((delta: number) => {
     replyEditorControllerRef.current?.adjustFontSize(delta);
@@ -5595,12 +5605,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     replyEditorControllerRef.current?.applyFontSizeValue(fontSize);
     syncReplyToolbarFormatState();
   }, [syncReplyToolbarFormatState]);
-  const toggleReplyInlineFormat = useCallback((command: "bold" | "underline") => {
+  const toggleReplyInlineFormat = useCallback((command: EditorInlineStyleCommand) => {
     replyEditorControllerRef.current?.toggleInlineFormat(command);
     syncReplyToolbarFormatState();
   }, [syncReplyToolbarFormatState]);
   const setReplySelectionHighlightColor = useCallback((color: EditorHighlightColor | null) => {
     replyEditorControllerRef.current?.applyHighlightColor(color);
+    syncReplyToolbarFormatState();
+  }, [syncReplyToolbarFormatState]);
+  const setReplySelectionTextAlignment = useCallback((alignment: EditorTextAlignment) => {
+    replyEditorControllerRef.current?.applyTextAlignment(alignment);
     syncReplyToolbarFormatState();
   }, [syncReplyToolbarFormatState]);
   const changeReplyOutlineStyle = useCallback((nextOutlineStyle: EditorOutlineStyleID) => {
@@ -5945,10 +5959,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   onSetSelectionFontSize={setReplyFontSize}
                   boldActive={replySelectionInlineFormat.bold}
                   underlineActive={replySelectionInlineFormat.underline}
+                  italicActive={replySelectionInlineFormat.italic}
                   highlightColor={replyHighlightColor}
+                  textAlignment={replyTextAlignment}
                   onToggleBold={() => toggleReplyInlineFormat("bold")}
                   onToggleUnderline={() => toggleReplyInlineFormat("underline")}
+                  onToggleItalic={() => toggleReplyInlineFormat("italic")}
                   onSetSelectionHighlightColor={setReplySelectionHighlightColor}
+                  onSetTextAlignment={setReplySelectionTextAlignment}
+                  onInsertTable={() => replyEditorControllerRef.current?.insertTable()}
                   onOutlineStyleFocus={() => setReplyToolbarTab("outline-styles")}
                   onOutlineStyleChange={changeReplyOutlineStyle}
                   reserveHeaderOffset={false}
@@ -5972,6 +5991,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 onSelectionHighlightColorChange={setReplyHighlightColor}
+                onSelectionTextAlignmentChange={setReplyTextAlignment}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
@@ -6101,13 +6121,6 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
     return nextToken;
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6294,10 +6307,11 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   };
 
   return (
-    <div
+    <AppModalPortal onRequestClose={onClose}>
+      <div
       role="dialog"
       aria-modal="true"
-      style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      style={{ position: "fixed", inset: 0, zIndex: 1, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -6405,7 +6419,8 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
           </>
         </div>
       </div>
-    </div>
+      </div>
+    </AppModalPortal>
   );
 };
 

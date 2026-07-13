@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import type { BoundRequestJSON } from "../api/requestJSON";
 import { listCompanyUsers } from "../communications/communicationsApi";
 
@@ -565,7 +566,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   );
 
   return (
-    <div className="mango-editor-hover-highlight" style={containerStyle}>
+    <div className="mango-editor-hover-highlight" role={dialogMode ? "dialog" : undefined} aria-modal={dialogMode ? true : undefined} aria-label={dialogMode ? `Permissions for ${title}` : undefined} style={containerStyle}>
       <div style={permissionHeaderStyle}>
         <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
           <h2 style={permissionTitleStyle}>Permissions</h2>
@@ -619,23 +620,30 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 };
 
 export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (props) => {
+  const dialogRef = React.useRef<HTMLDivElement | null>(null);
+  const requestClose = () => {
+    dialogRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close permissions"]')?.click();
+  };
+
   return (
-    <div style={permissionBackdropStyle}>
-      <div onPointerDown={(event) => event.stopPropagation()}>
-        <EntityPermissionsPanel
-          requestJSON={props.requestJSON}
-          companyID={props.companyID}
-          entityType={props.entityType}
-          entityID={props.entityID}
-          title={props.title}
-          onClose={props.onClose}
-          onSaved={props.onSaved}
-          variant="dialog"
-          readOnly={props.readOnly}
-          permissionsPath={props.permissionsPath}
-        />
+    <AppModalPortal onRequestClose={requestClose}>
+      <div style={{ ...permissionBackdropStyle, zIndex: 1 }}>
+        <div ref={dialogRef} onPointerDown={(event) => event.stopPropagation()}>
+          <EntityPermissionsPanel
+            requestJSON={props.requestJSON}
+            companyID={props.companyID}
+            entityType={props.entityType}
+            entityID={props.entityID}
+            title={props.title}
+            onClose={props.onClose}
+            onSaved={props.onSaved}
+            variant="dialog"
+            readOnly={props.readOnly}
+            permissionsPath={props.permissionsPath}
+          />
+        </div>
       </div>
-    </div>
+    </AppModalPortal>
   );
 };
 

@@ -24,6 +24,7 @@ export const EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE = "data-mango-editor-table-col
 export const EDITOR_TABLE_WIDTH_ATTRIBUTE = "data-mango-editor-table-width";
 export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
 export const EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-table-text-align";
+export const EDITOR_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-text-align";
 export const EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE = "data-mango-editor-table-align-controls";
 export const EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE = "data-mango-editor-table-align-action";
 export const EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE = "data-mango-editor-table-align-icon";
@@ -40,6 +41,46 @@ export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-sq
 export type EditorTableTextAlign = "left" | "center" | "right";
 export type EditorHighlightColor = `#${string}`;
 export type EditorHighlightColorItem = { id: string; label: string; color: EditorHighlightColor };
+export function splitEditorSelectedTextRunOffsets(text: string, startOffset: number, endOffset: number): Array<{ startOffset: number; endOffset: number }> {
+  const runs: Array<{ startOffset: number; endOffset: number }> = [];
+  let runStart = Math.max(0, startOffset);
+  const safeEnd = Math.min(text.length, endOffset);
+  for (let offset = runStart; offset < safeEnd; offset += 1) {
+    if (text[offset] !== "\n" && text[offset] !== "\r") continue;
+    if (offset > runStart) runs.push({ startOffset: runStart, endOffset: offset });
+    runStart = offset + 1;
+  }
+  if (safeEnd > runStart) runs.push({ startOffset: runStart, endOffset: safeEnd });
+  return runs;
+}
+export type EditorSelectionTextNode = { text: string; selectable?: boolean };
+export type EditorSelectedTextNodeRun = {
+  nodeIndex: number;
+  startOffset: number;
+  endOffset: number;
+};
+
+export function mapEditorSelectedTextRunOffsets(
+  nodes: readonly EditorSelectionTextNode[],
+  selectionStart: number,
+  selectionEnd: number,
+): EditorSelectedTextNodeRun[] {
+  const runs: EditorSelectedTextNodeRun[] = [];
+  let currentOffset = 0;
+  nodes.forEach((node, nodeIndex) => {
+    const nodeStart = currentOffset;
+    currentOffset += node.text.length;
+    if (!node.text.length || node.selectable === false) return;
+    const startOffset = Math.max(0, selectionStart - nodeStart);
+    const endOffset = Math.min(node.text.length, selectionEnd - nodeStart);
+    splitEditorSelectedTextRunOffsets(node.text, startOffset, endOffset).forEach((run) => {
+      runs.push({ nodeIndex, ...run });
+    });
+  });
+  return runs;
+}
+
+
 
 export const EDITOR_HIGHLIGHT_COLOR_ITEMS: readonly EditorHighlightColorItem[] = [
   { id: "yellow", label: "Yellow", color: "#fef08a" },
@@ -273,6 +314,16 @@ export function readEditorTableTextAlignValue(value: string | null | undefined):
 export function readEditorTableTextAlign(table: HTMLElement): EditorTableTextAlign | null {
   return readEditorTableTextAlignValue(table.getAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE))
     ?? readEditorTableTextAlignValue(table.style.textAlign);
+}
+
+export function readEditorTextAlign(element: HTMLElement): EditorTableTextAlign | null {
+  return readEditorTableTextAlignValue(element.getAttribute(EDITOR_TEXT_ALIGN_ATTRIBUTE))
+    ?? readEditorTableTextAlignValue(element.style.textAlign);
+}
+
+function applyEditorTextAlign(element: HTMLElement, align: EditorTableTextAlign) {
+  element.setAttribute(EDITOR_TEXT_ALIGN_ATTRIBUTE, align);
+  element.style.textAlign = align;
 }
 
 function clampEditorTableSize(value: number, min: number, max: number): number {
@@ -721,6 +772,15 @@ function appendSanitizedIndentedBlock(element: HTMLElement, target: Node, ownerD
   target.appendChild(ownerDocument.createTextNode("\n"));
 }
 
+function appendSanitizedAlignedBlock(element: HTMLElement, target: Node, ownerDocument: Document, align: EditorTableTextAlign, indent = "") {
+  const block = ownerDocument.createElement("div");
+  applyEditorTextAlign(block, align);
+  if (indent) block.style.marginLeft = indent;
+  appendSanitizedChildren(element, block, ownerDocument);
+  target.appendChild(block);
+}
+
+
 function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
   if (source.nodeType === Node.TEXT_NODE) {
     target.appendChild(ownerDocument.createTextNode(normalizeEditorArrowLigatureText(source.textContent ?? "")));
@@ -859,7 +919,12 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   }
 
   if (tagName === "blockquote" || tagName === "div" || tagName === "p") {
+    const align = readEditorTextAlign(element);
     const indent = safeBlockIndentForElement(element, tagName);
+    if (align) {
+      appendSanitizedAlignedBlock(element, target, ownerDocument, align, indent);
+      return;
+    }
     if (indent) {
       appendSanitizedIndentedBlock(element, target, ownerDocument, indent);
       return;

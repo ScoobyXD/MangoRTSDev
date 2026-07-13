@@ -24,7 +24,9 @@ const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Increase font size",
   "Bold",
   "Underline",
+  "Italic",
   "Text highlight",
+  "Insert table",
   "Outline styles",
 ] as const;
 
@@ -39,11 +41,14 @@ function assertSharedToolbarControls(editorTabBarSource: string, preferencesSour
   assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar-tabs=/);
   assert.match(editorTabBarSource, /hoveredFormatControl/);
   assert.match(editorTabBarSource, /formatControlDivider/);
-  for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline", "highlight"]) {
+  for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline", "italic", "highlight", "table"]) {
     assert.match(editorTabBarSource, new RegExp(`data-mango-editor-format-control="${controlID}"`));
   }
+  assert.match(editorTabBarSource, /\(\["left", "center", "right"\] as const\)\.map\(\(alignment\) =>/);
+  assert.match(editorTabBarSource, /const label = `Align \$\{alignment\}`/);
+  assert.match(editorTabBarSource, /data-mango-editor-format-control=\{controlID\}/);
   assert.match(editorTabBarSource, /aria-label="Text highlight colors"/);
-  assert.match(editorTabBarSource, /Clear highlight/);
+  assert.match(editorTabBarSource, /No highlight/);
   assert.match(editorTabBarSource, /Custom highlight color/);
 }
 
@@ -108,7 +113,12 @@ test("unified rich editor contract lists every declared target surface", () => {
     "font-size",
     "bold",
     "underline",
+    "italic",
     "highlight",
+    "align-left",
+    "align-center",
+    "align-right",
+    "table",
     "outline-style",
   ]);
   assert.deepEqual(UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, ["format", "outline-styles"]);
@@ -131,7 +141,7 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(nodeWorkspaceParts, /"Project text block"/);
   assert.match(projectSummary, /surfaceKind="project"/);
   assert.match(projectSummary, /const \[activeRichTextBlockID, setActiveRichTextBlockID\] = useState\(""\)/);
-  assert.match(projectSummary, /disabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
+  assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
   assert.match(projectSummary, /setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
   assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]*attachmentResourceType="project"[\s\S]*attachmentResourceID=\{projectID\}[\s\S]*attachmentInformationID=\{block\.id\}/);
   assert.match(nodeWorkspaceParts, /resourceType: attachmentResourceType/);
@@ -490,7 +500,7 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(editorTabBar, /data-mango-unified-editor-toolbar="true"/);
   assertUsesUnifiedFormatToolbarTabs(homeParts);
   assertUsesUnifiedFormatToolbarTabs(nodeWorkspaceParts);
-  assertUsesUnifiedFormatToolbarTabs(projectSummary);
+  assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   assert.doesNotMatch(projectSummary, /PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS/);
 
   for (const source of [editorContent, nodeWorkspaceParts, unifiedRichEditorSurface]) {
@@ -535,15 +545,196 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(formattingHook, /insertList: \(kind\) => \{\s*const editor = restoreFormattingSelection\(\)/);
   assert.match(formattingHook, /pendingEditorFontSizeRef\.current[\s\S]*fontSize: pendingEditorFontSizeRef\.current/);
   assert.match(fontSizeCommand, /if \(!range \|\| range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize/);
-  assert.match(editorSurfaceHandlers, /function editorSelectedTextRuns\(root: HTMLElement, range: Range\)/);
+  assert.match(editorSurfaceHandlers, /function editorSelectedTextRuns\(root: HTMLElement, _range: Range\)/);
   assert.match(editorSurfaceHandlers, /const spans = wrapEditorSelectedTextRuns\([\s\S]*span\.style\.fontSize/);
   assert.match(editorSurfaceHandlers, /function normalizeEditorFontSizeSpans\(root: HTMLElement, spans: readonly HTMLSpanElement\[\]\)/);
   assert.match(fontSizeCommand, /normalizeEditorFontSizeSpans\(root, spans\)/);
   assert.doesNotMatch(fontSizeCommand, /span\.appendChild\(fragment\);\s*range\.insertNode\(span\)/);
-  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*const pendingFontSize = pendingEditorFontSizeRef\.current[\s\S]*applyEditorSelectionFontSizeToRoot\(root, pendingFontSize/);
+  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*const pendingFontSize = pendingEditorFontSizeRef\.current[\s\S]*const pendingHighlightColor = pendingEditorHighlightColorRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)/);
   assert.match(editorSurfaceHandlers, /onCompositionStart\(event\) \{[\s\S]*pendingCompositionUndoSnapshotRef\.current[\s\S]*snapshotEditorDocumentRoot\(event\.currentTarget\)/);
-  assert.match(editorSurfaceHandlers, /undoBefore: undoBefore \?\? undefined/);
+  assert.match(editorSurfaceHandlers, /const mutationUndoBefore = undoBefore \?\? snapshotEditorDocumentRoot\(root\)/);
   assert.match(editorSurfaceHandlers, /setEditorSelectionByOffsets\(root, endOffset, endOffset\)/);
+});
+
+test("shared toolbar hover and focus styling is scoped to each clickable control", () => {
+  const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
+  const indexCSS = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+  const formatGroupOpening = sourceSliceBetween(
+    editorTabBar,
+    'data-mango-editor-format-group="true"',
+    ">",
+    "format control group opening tag",
+  );
+
+  assert.doesNotMatch(formatGroupOpening, /onMouseEnter|onMouseLeave|hoveredFormatControl/);
+  assert.match(editorTabBar, /const hovered = hoveredFormatControl === id && !formatControlsDisabled/);
+  assert.match(editorTabBar, /const formatControlHoverHandlers = \(id: EditorFormatControlID\) => \(\{/);
+  for (const controlID of ["decrease-font", "increase-font", "bold", "underline", "italic", "highlight", "table"]) {
+    const controlIndex = editorTabBar.indexOf(`data-mango-editor-format-control="${controlID}"`);
+    const hoverIndex = editorTabBar.indexOf(`formatControlHoverHandlers("${controlID}")`, controlIndex);
+    assert.ok(controlIndex >= 0, controlID + " control marker must exist");
+    assert.ok(hoverIndex > controlIndex && hoverIndex - controlIndex < 240, controlID + " must own its hover handlers");
+  }
+  assert.match(editorTabBar, /data-mango-editor-format-control="font-size"[\s\S]*onMouseEnter=\{\(\) => setHoveredFormatControl\("font-size"\)\}/);
+  assert.match(editorTabBar, /data-mango-editor-format-control=\{controlID\}[\s\S]*formatControlHoverHandlers\(controlID\)/);
+  assert.match(indexCSS, /\[data-mango-editor-format-control\]:focus-visible/);
+});
+
+test("collapsed-caret font size and highlight are retained as pending typing styles", () => {
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const fontSizeCommand = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "export function applyEditorSelectionFontSizeToRoot(",
+    "function stripNestedEditorHighlights",
+    "shared font-size command",
+  );
+  const highlightCommand = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "export function applyEditorHighlightColorToRoot(",
+    "export function insertEditorListKindToRoot(",
+    "shared highlight command",
+  );
+  const beforeInput = sourceSliceBetween(editorSurfaceHandlers, "onBeforeInput(event) {", "onPaste(event) {", "shared before-input handler");
+  const formattingHook = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "export function useEditorDocumentFormattingController(",
+    "export function useEditorDocumentSurfaceHandlers(",
+    "shared formatting-controller hook",
+  );
+
+  assert.match(fontSizeCommand, /if \(!range \|\| range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize;\s*return true/);
+  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*return true/);
+  assert.match(highlightCommand, /options\.pendingEditorHighlightColorRef\.current = undefined/);
+  assert.match(formattingHook, /fontSize: pendingEditorFontSizeRef\.current \?\? state\.fontSize/);
+  assert.match(formattingHook, /pendingEditorHighlightColorRef\.current === undefined \? state\.highlightColor : pendingEditorHighlightColorRef\.current/);
+  assert.match(beforeInput, /pendingFontSize !== null \|\| pendingHighlightColor !== undefined/);
+  assert.match(beforeInput, /if \(pendingStyle && pendingFontSize !== null\) pendingStyle\.fontSize = pendingFontSize/);
+  assert.match(beforeInput, /if \(pendingStyle && pendingHighlightColor !== undefined\) pendingStyle\.highlightColor = pendingHighlightColor/);
+  assert.match(beforeInput, /const selectionFormat = readEditorSelectionFormatState\(root\)/);
+  assert.match(beforeInput, /if \(selectionFormat\) \{\s*scriptedTypingStyle\.inlineFormat = \{\s*bold: selectionFormat\.bold,\s*underline: selectionFormat\.underline,\s*italic: selectionFormat\.italic/);
+  assert.ok(beforeInput.indexOf("startEditorListFromBlankLine") < beforeInput.indexOf("pendingNativeStyledInsertionRef.current = { text"));
+  assert.match(editorSurfaceHandlers, /onInput\(event\) \{[\s\S]*pendingNativeStyledInsertionRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, pendingStyledInsertion\.text, pendingStyledInsertion\.style\)/);
+  assert.match(editorSurfaceHandlers, /function wrapEditorSelectedTextRunsWithInlineFormat[\s\S]*editorTextNodeHasInlineFormatDefinition\(root, run\.node, command\)/);
+  assert.match(editorSurfaceHandlers, /if \(format\[command\]\) continue;[\s\S]*liftEditorInlineTargetOutOfAncestor\(target, ancestor\)/);
+  assert.match(editorSurfaceHandlers, /if \(style\.inlineFormat\) \{\s*const range = selectInsertedText\(\)/);
+  assert.doesNotMatch(editorSurfaceHandlers, /style\.inlineFormat && \(style\.inlineFormat\.bold \|\| style\.inlineFormat\.underline \|\| style\.inlineFormat\.italic\)/);
+  assert.match(editorSurfaceHandlers, /const tagName = command === "bold" \? "strong" : command === "underline" \? "u" : "em"/);
+  assert.match(beforeInput, /const anchor = getCollapsedAnchorAtSelectionEnd\(root\)[\s\S]*applyScriptedTypingStyle\(\)/);
+  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)[\s\S]*recordEditorDocumentMutation\([^\n]*"typing"\)/);
+  assert.match(editorSurfaceHandlers, /onKeyUp\(event\) \{\s*rememberEditorSelectionRange\(event\.currentTarget\);\s*refreshMentionDraft\(event\.currentTarget\)/);
+  assert.match(editorSurfaceHandlers, /const alreadyStyled = editorSelectedTextRuns\(root, range\)\.every\(\(run\) => readEditorTextNodeEffectiveFontSize\(root, run\.node\) === nextFontSize\);\s*if \(!alreadyStyled\)/);
+  assert.match(editorSurfaceHandlers, /readSelectionHighlightColor\(root, run\.node\.parentElement \?\? root\) === color\);\s*if \(!alreadyStyled\)/);
+});
+
+test("italic, alignment, and table insertion route through the shared toolbar and controller", () => {
+  const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+
+  const toolbarOrder = [
+    'data-mango-editor-format-control="bold"',
+    'data-mango-editor-format-control="underline"',
+    'data-mango-editor-format-control="italic"',
+    'data-mango-editor-format-control="highlight"',
+    '(["left", "center", "right"] as const).map',
+    "{onInsertTable && (",
+  ];
+  let previousIndex = -1;
+  for (const marker of toolbarOrder) {
+    const markerIndex = editorTabBar.indexOf(marker);
+    assert.ok(markerIndex > previousIndex, marker + " must retain the shared toolbar order");
+    previousIndex = markerIndex;
+  }
+
+  assert.match(editorSurfaceHandlers, /export type EditorInlineStyleCommand = "bold" \| "underline" \| "italic"/);
+  assert.match(editorSurfaceHandlers, /const italicCommandState = readDocumentCommandState\(root, "italic"\)/);
+  assert.match(editorSurfaceHandlers, /applyEditorInlineFormatToRoot\(editor, command/);
+  assert.match(editorSurfaceHandlers, /export function applyEditorTextAlignmentToRoot/);
+  assert.match(editorSurfaceHandlers, /applyEditorTableTextAlign\(table, alignment\)/);
+  assert.match(editorSurfaceHandlers, /alignment === "center" \? "justifyCenter" : alignment === "right" \? "justifyRight" : "justifyLeft"/);
+  assert.match(editorSurfaceHandlers, /applyTextAlignment: \(alignment\) => \{[\s\S]*applyEditorTextAlignmentToRoot\(editor, alignment/);
+  assert.match(editorTabBar, /aria-label="Italic"[\s\S]*aria-pressed=\{italicActive\}/);
+  assert.match(editorTabBar, /const label = `Align \$\{alignment\}`[\s\S]*aria-pressed=\{active\}/);
+  assert.match(editorTabBar, /aria-label="Insert table"[\s\S]*if \(!formatControlsDisabled\) onInsertTable\(\)/);
+
+  for (const source of [editorContent, nodeWorkspaceParts, projectSummary, homeParts]) {
+    assert.match(source, /onToggleItalic=/);
+    assert.match(source, /onSetTextAlignment=/);
+    assert.match(source, /onInsertTable=/);
+  }
+  assert.match(unifiedRichEditorSurface, /onSelectionTextAlignmentChange/);
+  assert.doesNotMatch(nodeWorkspace, /aria-label="Insert table"|tableInsertRequest|TableIcon/);
+  assert.doesNotMatch(projectSummary, /aria-label="Insert table"|tableInsertRequest|TableIcon/);
+});
+
+test("editor header keeps primary controls visible and preserves all secondary overflow actions", () => {
+  const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+
+  assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
+  assert.match(editorTabBar, /const overflowTabs = visibleTabs\.filter\(\(tab\) => EDITOR_OVERFLOW_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
+  assert.match(editorTabBar, /data-mango-editor-header-primary=\{primaryTabs\.map\(\(tab\) => tab\.id\)\.join\(" "\)\}/);
+  assert.match(editorTabBar, /aria-label="More editor actions"[\s\S]*aria-haspopup="menu"[\s\S]*data-mango-editor-header-overflow-trigger="true"/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow-menu="true"[\s\S]*\["ArrowDown", "ArrowUp", "Home", "End"\]/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{tab\.id\}/);
+  assert.match(editorTabBar, /secondaryActions\.map\(\(action\) =>/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{action\.id\}/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow-action="save-version"/);
+  assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
+  assert.match(editorContent, /onCreateRelatedNode=/);
+  assert.match(editorContent, /onSaveCurrentVersion=/);
+  assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
+  for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
+    assert.match(projectSummary, new RegExp(`id: "${projectAction}"`));
+  }
+});
+
+test("blocking editor and node overlays use the app modal layer above feature stacking contexts", () => {
+  const modalPortal = readFileSync(resolve(process.cwd(), "frontend/src/app/AppModalPortal.tsx"), "utf8");
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const frameRightClickMenu = readFileSync(resolve(process.cwd(), "frontend/src/app/framerightclickmenu.tsx"), "utf8");
+  const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
+  const consumerPaths = [
+    "frontend/src/app/AppSidebarChrome.tsx",
+    "frontend/src/modules/company-explorer/CompanyExplorerDialogs.tsx",
+    "frontend/src/modules/editor/NodeWorkspaceSurface.tsx",
+    "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
+    "frontend/src/modules/kanban/KanbanOverlays.tsx",
+    "frontend/src/modules/permissions/EntityPermissionsDialog.tsx",
+    "frontend/src/modules/project-management/ProjectManagementContent.tsx",
+    "frontend/src/modules/project-management/ProjectSummaryContent.tsx",
+    "frontend/src/pages/home/HomePage.tsx",
+    "frontend/src/pages/home/HomeParts.tsx",
+  ];
+  assert.match(modalPortal, /export const APP_MODAL_LAYER_Z_INDEX = 10100/);
+  assert.match(modalPortal, /data-mango-modal-layer="true"/);
+  assert.match(modalPortal, /createPortal\([\s\S]*targetDocument\.body/);
+  assert.match(modalPortal, /export function useAppOverlayPortalTarget/);
+  assert.match(modalPortal, /data-mango-modal-focus-trap=\{trapFocus \? "true" : "false"\}/);
+  assert.match(modalPortal, /const trappingLayers = layers\.filter[\s\S]*const activeLayers = trappingLayers\.length > 0 \? trappingLayers : layers/);
+  assert.match(modalPortal, /zIndex: trapFocus \? APP_MODAL_LAYER_Z_INDEX : APP_MODAL_LAYER_Z_INDEX - 10/);
+  assert.match(modalPortal, /targetDocument\.addEventListener\("keydown", onKeyDown\)/);
+  assert.match(modalPortal, /targetDocument\.addEventListener\("focusin", onFocusIn, true\)/);
+  assert.match(modalPortal, /previousFocus\?\.isConnected[\s\S]*previousFocus\.focus\(\{ preventScroll: true \}\)/);
+  for (const path of consumerPaths) {
+    const source = readFileSync(resolve(process.cwd(), path), "utf8");
+    assert.match(source, /AppModalPortal/, path + " must escape feature-local stacking contexts");
+  }
+  assert.match(editorSurfaceHandlers, /React\.createElement\(AppModalPortal, \{ onRequestClose: \(\) => setActiveImagePreview\(null\) \}, imagePreviewModal\)/);
+  assert.match(frameRightClickMenu, /const portalTarget = useAppOverlayPortalTarget\(\)[\s\S]*portalTarget \? createPortal/);
+  assert.match(linkedDocumentPanels, /const floatingPortalTarget = useAppOverlayPortalTarget\(\)[\s\S]*createPortal\([\s\S]*floatingPortalTarget/);
+  const kanbanOverlay = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanOverlays.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  assert.match(kanbanOverlay, /useAppViewportAnchorRect\(boardRootRef\)/);
+  assert.match(projectSummary, /useAppViewportAnchorRect\(containerRef\)/);
+  assert.match(kanbanOverlay, /data-mango-editor-overlay-backdrop=\{fullscreen \? "modal" : "modeless"\}/);
+  assert.match(kanbanOverlay, /trapFocus=\{fullscreen\}/);
 });
 
 test("highlight control, active selection state, mutation, and sanitization share one source", () => {
@@ -570,15 +761,15 @@ test("highlight control, active selection state, mutation, and sanitization shar
   assert.match(editorTabBar, /onSetSelectionHighlightColor: \(color: EditorHighlightColor \| null\) => void/);
   assert.match(editorTabBar, /data-mango-editor-format-control="highlight"/);
   assert.match(editorTabBar, /aria-label="Text highlight colors"/);
-  assert.match(editorTabBar, /Clear highlight/);
+  assert.match(editorTabBar, /aria-label="No highlight"[\s\S]*onSetSelectionHighlightColor\(null\)[\s\S]*No highlight/);
   assert.match(editorTabBar, /Custom highlight color/);
 
   assert.match(editorSurfaceHandlers, /export function applyEditorHighlightColorToRoot/);
   assert.match(editorSurfaceHandlers, /applyHighlightColor: \(color: EditorHighlightColor \| null\) => boolean/);
   assert.match(editorSurfaceHandlers, /highlightColor: EditorHighlightColor \| null/);
-  assert.match(highlightCommand, /if \(!range \|\| range\.collapsed\) return false/);
-  assert.match(formattingHook, /applyHighlightColor: \(color\) => \{\s*const editor = restoreFormattingSelection\(\)[\s\S]*applyEditorHighlightColorToRoot\(editor, color/);
-  assert.doesNotMatch(editorSurfaceHandlers, /pendingEditorHighlightColorRef/);
+  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*return true/);
+  assert.match(formattingHook, /applyHighlightColor: \(color\) => \{\s*const editor = restoreFormattingSelection\(\)[\s\S]*applyEditorHighlightColorToRoot\(editor, color[\s\S]*pendingEditorHighlightColorRef/);
+  assert.match(editorSurfaceHandlers, /pendingEditorHighlightColorRef: React\.MutableRefObject<EditorHighlightColor \| null \| undefined>/);
 
   assert.match(richTextEditing, /EDITOR_HIGHLIGHT_ATTRIBUTE/);
   assert.match(richTextEditing, /EDITOR_HIGHLIGHT_COLOR_ITEMS/);
@@ -588,7 +779,7 @@ test("highlight control, active selection state, mutation, and sanitization shar
 
   for (const source of [editorContent, nodeWorkspaceParts, unifiedRichEditorSurface]) {
     assert.match(source, /onSelectionHighlightColorChange/);
-    assert.doesNotMatch(source, /pendingEditorHighlightColorRef/);
+    assert.match(source, /pendingEditorHighlightColorRef/);
   }
 });
 
@@ -868,7 +1059,9 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(kanbanOverlays, /surfaceID="kanban-my-work-node-overlay"/);
   assert.match(kanbanOverlays, /id: "fullscreen"/);
   assert.match(kanbanOverlays, /pressed: fullscreen/);
-  assert.match(kanbanOverlays, /position: fullscreen \? "fixed" : "absolute"/);
+  assert.match(kanbanOverlays, /<AppModalPortal ownerDocument=\{boardRootRef\.current\?\.ownerDocument\} trapFocus=\{fullscreen\} onRequestClose=\{onClose\}>/);
+  assert.match(kanbanOverlays, /position: "fixed"/);
+  assert.match(kanbanOverlays, /top: fullscreen \? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : normalTopPx/);
   assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
   assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
   assert.match(kanbanOverlays, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);

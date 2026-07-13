@@ -18,6 +18,7 @@ import {
   type EditorDocumentFormattingController,
   type EditorImageAttachmentContext,
   type EditorSelectionInlineFormatState,
+  type EditorTextAlignment,
 } from "./useEditorDocumentSurfaceHandlers";
 import { hydrateEditorAttachmentImageFrames } from "./editorImages";
 import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
@@ -53,6 +54,7 @@ type UnifiedRichEditorSurfaceProps = {
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
 };
 
 export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = ({
@@ -78,6 +80,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const attachmentHydrationCleanupRef = useRef<(() => void) | null>(null);
@@ -86,6 +89,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
+  const pendingHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
   const restoreSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
   const indentGuideFrameRef = useRef<number | null>(null);
   const targetKeyRef = useRef(`unified-rich-editor:${surfaceID}`);
@@ -197,6 +201,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     scrollMemoryRef,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
+    pendingEditorHighlightColorRef: pendingHighlightColorRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave,
@@ -206,6 +211,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
     onSelectionHighlightColorChange,
+    onSelectionTextAlignmentChange,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
@@ -230,6 +236,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     outlineStyle,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
+    pendingEditorHighlightColorRef: pendingHighlightColorRef,
     restoreSelection,
     insertTable,
     scheduleDocumentSave,
@@ -237,6 +244,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
     onSelectionHighlightColorChange,
+    onSelectionTextAlignmentChange,
   });
 
   const formattingController = useMemo<UnifiedRichEditorFormattingController>(() => ({

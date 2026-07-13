@@ -1,4 +1,5 @@
 import React from "react";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type {
   CompanyExplorerDeleteConfirmationSummary,
@@ -32,10 +33,11 @@ export function CompanyExplorerFolderShareDialogView({
 }: CompanyExplorerFolderShareDialogViewProps): React.ReactElement {
   const actionDisabled = dialog.busy || !dialog.email.trim();
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center", padding: 12 }}>
-      <div style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(100,116,139,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
+    <AppModalPortal onRequestClose={onClose}>
+    <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 1, display: "grid", placeItems: "center", padding: 12 }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="company-explorer-folder-share-title" style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(100,116,139,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
         <div style={{ display: "grid", gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Share folder</div>
+          <div id="company-explorer-folder-share-title" style={{ fontSize: 13, fontWeight: 800 }}>Share folder</div>
           <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#333333", overflowWrap: "anywhere" }}>{dialog.label}</div>
         </div>
         <form
@@ -112,6 +114,7 @@ export function CompanyExplorerFolderShareDialogView({
         </div>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -123,9 +126,10 @@ type CompanyExplorerDeleteBlockedDialogProps = {
 
 export function CompanyExplorerDeleteBlockedDialog({ message, isDarkTheme, onClose }: CompanyExplorerDeleteBlockedDialogProps): React.ReactElement {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
+    <AppModalPortal onRequestClose={onClose}>
+    <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 1, display: "grid", placeItems: "center" }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="company-explorer-delete-blocked-title" style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+        <div id="company-explorer-delete-blocked-title" style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
         <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>{message}</div>
         <button
           type="button"
@@ -136,6 +140,7 @@ export function CompanyExplorerDeleteBlockedDialog({ message, isDarkTheme, onClo
         </button>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 

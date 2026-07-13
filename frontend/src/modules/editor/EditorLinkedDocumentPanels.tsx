@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppOverlayPortalTarget } from "../../app/AppModalPortal";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
@@ -357,8 +358,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setStatusMenuOpen(false);
         setHoveredStatusValue("");
+        window.requestAnimationFrame(() => statusMenuRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
       }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -378,8 +383,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setPriorityMenuOpen(false);
         setHoveredPriorityValue("");
+        window.requestAnimationFrame(() => priorityMenuRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true }));
       }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -1002,6 +1011,7 @@ function GVICRoleEditor({
   onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 }) {
+  const floatingPortalTarget = useAppOverlayPortalTarget();
   const inputID = useId();
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
@@ -1202,8 +1212,15 @@ function GVICRoleEditor({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        const trigger = open
+          ? inputAnchorRef.current?.querySelector<HTMLButtonElement>(":scope > button")
+          : assignedAnchorRef.current?.querySelector<HTMLButtonElement>(":scope > button");
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setOpen(false);
         setAssignedOpen(false);
+        window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
       }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -1294,7 +1311,7 @@ function GVICRoleEditor({
               {assignmentChipLabel}
             </span>
           )}
-          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && typeof document !== "undefined" && createPortal(
+          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && floatingPortalTarget && createPortal(
           <div
             ref={assignedListRef}
             id={`${inputID}-assigned-users`}
@@ -1338,7 +1355,7 @@ function GVICRoleEditor({
               );
             })}
           </div>,
-          document.body,
+          floatingPortalTarget,
           )}
         </div>
         <div
@@ -1398,7 +1415,7 @@ function GVICRoleEditor({
             {disabledReason}
           </div>
         )}
-        {canEdit && open && pickerListPosition && typeof document !== "undefined" && createPortal(
+        {canEdit && open && pickerListPosition && floatingPortalTarget && createPortal(
           <div
             ref={pickerListRef}
             id={`${inputID}-options`}
@@ -1476,7 +1493,7 @@ function GVICRoleEditor({
               })}
             </div>
           </div>,
-          document.body,
+          floatingPortalTarget,
         )}
         </div>
       </div>

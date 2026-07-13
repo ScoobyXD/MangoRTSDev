@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Explorer Tests
 
@@ -46,7 +46,7 @@ E35 - Company Explorer search results include resource_type, resource_id, displa
 E36 - Search result display renders the Explorer location path as nested Explorer rows with normal icons.
 E37 - Node search result rows are open-only: they can be opened, but cannot be expanded, renamed, deleted, pinned, dragged, dropped, or used as creation targets.
 E38 - The default Unfiled folder and its Projects and Logic Gates child folders cannot be renamed or deleted, but resources inside those folders can still be moved or deleted through normal resource actions.
-E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
+E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer has no cross-user realtime subscription. It patches the initiating browser from committed command results and otherwise reloads canonical branches on navigation or explicit refresh.
 E42 - Node-map folder-scoped queries through Company Explorer return no nodes for non-root folders because nodes no longer have Company Explorer folder placement.
@@ -204,6 +204,7 @@ Given:
 - A matching node is related to a visible project.
 - A matching source-of-truth node has no visible Explorer path.
 - Another matching resource exists under an Explorer folder the viewer cannot access.
+- A blocking node/editor popup, dialog, preview, or expanded/fullscreen panel opens while Search Explorer has a query.
 
 Expected:
 - Search returns matches from the whole company, not only loaded UI branches.
@@ -216,6 +217,7 @@ Expected:
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
 - The UI renders the location path as nested Explorer rows and selecting a resource result opens that resource directly.
 - Node result rows are open-only and do not expose Explorer mutation affordances.
+- The blocking surface paints and receives interaction above Search Explorer regardless of feature-local stacking contexts; after it closes, the previous search query and results remain.
 
 ### Scenario E-S6: Folder Drops And Source-Truth Relationships
 
