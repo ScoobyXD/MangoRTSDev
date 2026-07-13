@@ -12,7 +12,9 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-expl
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
+import { subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
 import { requestAppSidebarPin, type SidebarPin } from "./sidebarPins";
+import { resolveCurrentAppSidebarPin } from "./appCommittedTitleState";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
@@ -302,6 +304,27 @@ export function AppSidebar({
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID.trim() || update.entityType !== "logic_gate") return;
+    const title = update.title.trim();
+    if (!title) return;
+    setExplorerTriagePriorityMenu((current) => {
+      if (!current || current.target.logicGateID.trim() !== update.resourceID || current.target.label === title) return current;
+      return { ...current, target: { ...current.target, label: title } };
+    });
+  }), [companyID]);
+  useEffect(() => {
+    setPinContextMenu((current) => {
+      if (!current) return current;
+      const pin = resolveCurrentAppSidebarPin(pins, current.pin);
+      return pin === current.pin ? current : { ...current, pin };
+    });
+    setPinTriagePriorityMenu((current) => {
+      if (!current) return current;
+      const pin = resolveCurrentAppSidebarPin(pins, current.action.pin);
+      return pin === current.action.pin ? current : { ...current, action: { ...current.action, pin } };
+    });
+  }, [pins]);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
     () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],

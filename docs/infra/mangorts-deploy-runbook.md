@@ -21,7 +21,7 @@ This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OI
 
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
 9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `ORIGIN_VERIFY_SECRET`.
-10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below. Realtime inbox updates require a Nylas webhook destination and webhook secret after the first deploy exposes the webhook URL.
+10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below. Provider-side synchronization requires a Nylas webhook destination and webhook secret after the first deploy exposes the webhook URL; browser mail surfaces remain canonical HTTP loads/manual refresh and do not use MangoRTS WebSocket delivery.
 11. Apply database schema/migrations from a machine that can reach the DB, then bootstrap the first dev admin. Prefer setting `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` for the first deploy, signing in once, and clearing it after the dev admin can invite users. The older manual fallback is to seed the dev company membership after the first Cognito user exists.
 
 ## GitHub Configuration
@@ -62,7 +62,7 @@ Nylas Communications variables:
 - `TF_NYLAS_CLIENT_ID`: Nylas application ID/client ID.
 - `TF_NYLAS_API_KEY_SECRET_ARN`: AWS Secrets Manager ARN containing the Nylas API key.
 - `TF_NYLAS_STATE_SECRET_ARN`: AWS Secrets Manager ARN containing a long random state-signing secret.
-- `TF_NYLAS_WEBHOOK_SECRET_ARN`: optional until the webhook exists; AWS Secrets Manager ARN containing the `webhook_secret` returned by the Nylas webhook destination. Required for realtime Communications updates.
+- `TF_NYLAS_WEBHOOK_SECRET_ARN`: optional until the webhook exists; AWS Secrets Manager ARN containing the `webhook_secret` returned by the Nylas webhook destination. Required to authenticate provider webhook synchronization, not for browser WebSocket delivery.
 - `TF_NYLAS_API_BASE_URL`: optional, defaults to `https://api.us.nylas.com`; use `https://api.eu.nylas.com` only for EU Nylas apps.
 - `TF_NYLAS_GOOGLE_SCOPES`: optional, defaults to the fully qualified Gmail scopes required by Mango.
 - `TF_NYLAS_MICROSOFT_SCOPES`: optional, defaults to `offline_access User.Read Mail.ReadWrite Mail.Send`.
@@ -97,6 +97,8 @@ https://api.dev.<domain>/nylas/webhook
 ```
 
 Subscribe the webhook to these triggers: `message.created`, `message.updated`, `message.deleted`, `message.opened`, `folder.created`, `folder.updated`, and `folder.deleted`. Nylas sends update suffixes such as `.truncated` or `.transformed` without subscribing to those suffixes separately; the backend accepts them by prefix.
+
+These triggers update backend/provider-backed state only. They do not publish a Communications realtime scope to browsers; mail views load canonical data on open or manual refresh.
 
 If using the Nylas API instead of the dashboard, create the webhook after the first deploy:
 

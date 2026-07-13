@@ -53,6 +53,10 @@ import { buildReplyAllRecipients } from "../../modules/communications/emailRecip
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
+import {
+  reconcileCommittedLogicGateRecordTitles,
+  reconcileCommittedNodeTitleInSnapshot,
+} from "../../modules/map/committedTitleSnapshotReconciliation";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
@@ -66,6 +70,12 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type
 
 import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
+import {
+  commitEntityTitleMutation,
+  foldCommittedEntityTitlesSince,
+  readCommittedEntityTitleVersion,
+  subscribeCommittedEntityTitleUpdates,
+} from "../../modules/realtime/committedEntityTitleUpdates";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
@@ -129,6 +139,7 @@ function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: Email
   }
   return sortEmailConversationMessagesNewestFirst(Array.from(byID.values()));
 }
+
 
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
@@ -580,6 +591,27 @@ export function HomePage({
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!appSidebarOwnsNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID) return;
+    const title = update.title.trim();
+    if (!title) return;
+    setEntityDeleteConfirmation((current) => {
+      if (!current) return current;
+      let changed = false;
+      const targets = current.targets.map((target) => {
+        if (target.kind !== update.entityType || target.id !== update.resourceID || target.label === title) return target;
+        changed = true;
+        return { ...target, label: title };
+      });
+      return changed ? { ...current, targets } : current;
+    });
+    if (update.entityType === "node") {
+      setNodes((current) => reconcileCommittedNodeTitleInSnapshot(current, update));
+      setNodeEditorOverlay((current) => current?.nodeID === update.resourceID ? { ...current, nodeTitle: title } : current);
+      return;
+    }
+    setLogicGates((current) => reconcileCommittedLogicGateRecordTitles(current, update));
+  }), [companyID]);
   useEffect(() => {
     setOptimisticMyWorkDeletedNodeIDs(new Set());
     setSharedInboxesLoaded(false);
@@ -1194,14 +1226,21 @@ export function HomePage({
     setLoadingLogicGates(true);
     setLoadingNodes(true);
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const panel = await fetchCommunicationsWorkspacePanel(companyID);
       setLogicGateFolders(panel.logicGateFolders);
       setLogicGateFolderItems(panel.logicGateFolderItems);
-      setLogicGates(panel.logicGates);
+      setLogicGates(foldCommittedEntityTitlesSince(
+        panel.logicGates, companyID, titleVersionAtStart,
+        reconcileCommittedLogicGateRecordTitles,
+      ));
       setMyLogicGateShortcuts(sortLogicGateShortcuts(panel.myLogicGateShortcuts));
       setNodeFolders(panel.nodeFolders);
       setNodeFolderItems(panel.nodeFolderItems);
-      setNodes(panel.nodes);
+      setNodes(foldCommittedEntityTitlesSince(
+        panel.nodes, companyID, titleVersionAtStart,
+        reconcileCommittedNodeTitleInSnapshot,
+      ));
       setLogicGateExpandedIDs((previous) => {
         const next = new Set(previous);
         for (const folder of panel.logicGateFolders) next.add(`workspace-folder-${folder.folder_id}`);
@@ -2881,6 +2920,7 @@ export function HomePage({
       .filter((logicGateID) => (failedRepairIDs.get(logicGateID) ?? 0) <= now);
     if (missingIDs.length === 0) return undefined;
     let cancelled = false;
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     const fetched: LogicGateRecord[] = [];
     let nextIndex = 0;
     const runRepairWorker = async () => {
@@ -2905,9 +2945,13 @@ export function HomePage({
       if (cancelled) return;
       if (fetched.length === 0) return;
       setLogicGates((previous) => {
+        const reconciledFetched = foldCommittedEntityTitlesSince(
+          fetched, companyID, titleVersionAtStart,
+          reconcileCommittedLogicGateRecordTitles,
+        );
         const byID = new Map(previous.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
         let changed = false;
-        for (const logicGate of fetched) {
+        for (const logicGate of reconciledFetched) {
           const current = byID.get(logicGate.logic_gate_id);
           if (current?.header === logicGate.header && current?.gvic_assignments === logicGate.gvic_assignments) continue;
           byID.set(logicGate.logic_gate_id, logicGate);
@@ -3428,23 +3472,28 @@ export function HomePage({
       .filter((id) => logicGateByID.has(id));
     return selectedLogicGateIDs.length > 0 ? selectedLogicGateIDs : [cleanLogicGateID];
   }, [logicGateByID, selectedLogicGateRowIDs]);
-  const mergeUpdatedNode = useCallback((node: NodeRecord) => {
+  const mergeUpdatedNode = useCallback((node: NodeRecord, titleVersionAtStart: number, invalidateRecordCache = true) => {
+    const reconciledNode = foldCommittedEntityTitlesSince(
+      [node], companyID, titleVersionAtStart,
+      reconcileCommittedNodeTitleInSnapshot,
+    )[0] ?? node;
     setNodes((previous) => {
       let found = false;
       const next = previous.map((item) => {
-        if (item.node_id !== node.node_id) return item;
+        if (item.node_id !== reconciledNode.node_id) return item;
         found = true;
-        return node;
+        return reconciledNode;
       });
-      return found ? next : [...next, node];
+      return found ? next : [...next, reconciledNode];
     });
-    invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
-    upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+    if (invalidateRecordCache) invalidateNodeRecordStoreCaches(apiBase, companyID, reconciledNode.node_id);
+    upsertNodeRelationshipGraphNode(apiBase, companyID, reconciledNode);
   }, [apiBase, companyID]);
   const applyGVICMatrixProjectionRows = useCallback((rows: GVICMatrixProjectionRow[], options: {
     mode?: "merge" | "replace";
     logicGates?: LogicGateRecord[];
-  } = {}) => {
+    titleVersionAtStart: number;
+  }) => {
     if (!companyID || !activeGVICMatrixUserID) return;
     const mode = options.mode ?? "merge";
     const cleanRows = rows.filter((row) => (
@@ -3504,7 +3553,10 @@ export function HomePage({
         });
         invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
       }
-      return Array.from(byID.values());
+      return foldCommittedEntityTitlesSince(
+        Array.from(byID.values()), companyID, options.titleVersionAtStart,
+        reconcileCommittedNodeTitleInSnapshot,
+      );
     });
 
     setLogicGates((previous) => {
@@ -3536,9 +3588,17 @@ export function HomePage({
           can_edit: projectedLogicGate?.can_edit ?? previousLogicGate?.can_edit ?? true,
           can_admin: projectedLogicGate?.can_admin ?? previousLogicGate?.can_admin ?? false,
         });
-        upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(byID.get(logicGateID)!));
       }
-      return Array.from(byID.values());
+      const reconciledLogicGates = foldCommittedEntityTitlesSince(
+        Array.from(byID.values()), companyID, options.titleVersionAtStart,
+        reconcileCommittedLogicGateRecordTitles,
+      );
+      const reconciledByID = new Map(reconciledLogicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+      for (const logicGateID of nextProjectedLogicGateIDs) {
+        const logicGate = reconciledByID.get(logicGateID);
+        if (logicGate) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
+      }
+      return reconciledLogicGates;
     });
 
     if (mode === "replace") {
@@ -3556,6 +3616,7 @@ export function HomePage({
     const requestScopeKey = `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}`;
     GVICMatrixProjectionRefetchInFlightRef.current = true;
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const [projection, projectedLogicGates] = await Promise.all([
         listGVICMatrixProjectionRows({ apiBase, companyID, targetUserID: activeGVICMatrixUserID, limit: 500 }),
         listMyLogicGates({ apiBase, companyID, targetUserID: activeGVICMatrixUserID, limit: 500 }),
@@ -3564,6 +3625,7 @@ export function HomePage({
       applyGVICMatrixProjectionRows(projection.rows ?? [], {
         mode: "replace",
         logicGates: projectedLogicGates.logic_gates ?? [],
+        titleVersionAtStart,
       });
     } catch (projectionError) {
       setError(formatError(projectionError, "Failed to refresh GVIC matrix"));
@@ -3593,21 +3655,27 @@ export function HomePage({
       upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
     }
   }, [apiBase, companyID]);
-  const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, folderItems: CompanyExplorerFolderItem[]) => {
+  const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, folderItems: CompanyExplorerFolderItem[], titleVersionAtStart: number) => {
+    const reconciledLogicGate = foldCommittedEntityTitlesSince(
+      [logicGate], companyID, titleVersionAtStart,
+      reconcileCommittedLogicGateRecordTitles,
+    )[0] ?? logicGate;
     setLogicGates((previous) => {
-      const next = previous.filter((item) => item.logic_gate_id !== logicGate.logic_gate_id);
-      return [...next, logicGate];
+      const next = previous.filter((item) => item.logic_gate_id !== reconciledLogicGate.logic_gate_id);
+      return [...next, reconciledLogicGate];
     });
     mergeCreatedFolderItems(folderItems);
-    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
+    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(reconciledLogicGate));
+    return reconciledLogicGate;
   }, [apiBase, companyID, mergeCreatedFolderItems]);
   const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: GVICInboxStatus }) => {
     setBusy("create-node");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeNodeCommand({ apiBase, companyID });
       mergeCreatedFolderItems(result.folderItems);
-      mergeUpdatedNode(result.node);
+      mergeUpdatedNode(result.node, titleVersionAtStart);
       if (assignment?.logicGateID.trim()) {
         const nodeMap = new Map(nodeByID);
         nodeMap.set(result.node.node_id, result.node);
@@ -3621,8 +3689,8 @@ export function HomePage({
           nodeByID: nodeMap,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
-        for (const node of dropResult.nodes) mergeUpdatedNode(node);
+        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
+        for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
         setNotice("Node created and added to Logic Gate.");
         return;
       }
@@ -3638,9 +3706,9 @@ export function HomePage({
     setError("");
     try {
       const creatorGVICRole = options.creatorGVICRole ?? (options.assignCurrentUser ? "generated" : undefined);
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorGVICRole });
-      const logicGate = result.logicGate;
-      mergeCreatedLogicGate(logicGate, result.folderItems);
+      const logicGate = mergeCreatedLogicGate(result.logicGate, result.folderItems, titleVersionAtStart);
       setNotice(creatorGVICRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
       if (options.openArena ?? true) {
         openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
@@ -3661,6 +3729,7 @@ export function HomePage({
     setBusy("create-node");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeGVICMatrixNodeCommand({
         apiBase,
         companyID,
@@ -3669,10 +3738,10 @@ export function HomePage({
         creatorGVICRole: input.creatorGVICRole,
         createLogicGateTitle: "new logic gate",
       });
-      if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
+      if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"), titleVersionAtStart);
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
-      applyGVICMatrixProjectionRows(result.gvic_projection_rows);
-      mergeUpdatedNode(result.node);
+      applyGVICMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
+      mergeUpdatedNode(result.node, titleVersionAtStart);
       scheduleCurrentUserMyWorkRefresh();
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
@@ -3723,6 +3792,7 @@ export function HomePage({
     setBusy("my-work-node-drop");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await moveMyWorkNodesToCellCommand({
         apiBase,
         companyID,
@@ -3734,8 +3804,8 @@ export function HomePage({
         fromLogicGateID: input.fromLogicGateID,
         nodeByID,
       });
-      applyGVICMatrixProjectionRows(result.gvic_projection_rows);
-      for (const node of result.nodes) mergeUpdatedNode(node);
+      applyGVICMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
+      for (const node of result.nodes) mergeUpdatedNode(node, titleVersionAtStart);
       setNotice(nodeIDs.length === 1 ? "My Work node moved." : `${nodeIDs.length} My Work nodes moved.`);
       return result;
     } catch (dropError) {
@@ -3753,6 +3823,7 @@ export function HomePage({
     setBusy("inbox-node-drop");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const dropResult = await dropNodesIntoInboxLogicGateCommand({
         apiBase,
         companyID,
@@ -3764,9 +3835,9 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
+      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
       for (const node of dropResult.nodes) {
-        if (node) mergeUpdatedNode(node);
+        if (node) mergeUpdatedNode(node, titleVersionAtStart);
       }
       scheduleCurrentUserMyWorkRefresh();
       if (fromLogicGateID === logicGateID) {
@@ -3787,9 +3858,10 @@ export function HomePage({
     setBusy("inbox-node-drop");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorGVICRole: input.creatorGVICRole });
       const logicGate = logicGateResult.logicGate;
-      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
+      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems, titleVersionAtStart);
       const dropResult = await dropNodesIntoInboxLogicGateCommand({
         apiBase,
         companyID,
@@ -3801,8 +3873,8 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
-      for (const node of dropResult.nodes) mergeUpdatedNode(node);
+      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
+      for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
       scheduleCurrentUserMyWorkRefresh();
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
@@ -3817,6 +3889,7 @@ export function HomePage({
     setBusy("inbox-logic-gate-drop");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const targetRole = input.creatorGVICRole;
       if (currentUserID && targetRole) {
         const GVICRoles: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
@@ -3862,9 +3935,9 @@ export function HomePage({
           nodeByID,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
+        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
         movedNodeCount += dropResult.nodes.length;
-        for (const node of dropResult.nodes) mergeUpdatedNode(node);
+        for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
       }
       scheduleCurrentUserMyWorkRefresh();
       setNotice(logicGateIDs.length === 1
@@ -3920,6 +3993,7 @@ export function HomePage({
     setBusy("bulk-node-edit");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const updatedNodes = await addNodesToLogicGateCommand({
         apiBase,
         companyID,
@@ -3928,7 +4002,7 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      for (const node of updatedNodes) mergeUpdatedNode(node);
+      for (const node of updatedNodes) mergeUpdatedNode(node, titleVersionAtStart);
       invalidateLogicGateArenaViewCache(apiBase, companyID, cleanLogicGateID);
       setNotice(ids.length === 1 ? "Node added to Logic Gate." : `${ids.length} nodes added to Logic Gate.`);
     } catch (addError) {
@@ -3997,20 +4071,22 @@ export function HomePage({
     setBusy("rename-node");
     setError("");
     try {
-      const updated = await requestJSON<NodeRecord>(apiBase, `/v1/nodes/${encodeURIComponent(cleanNodeID)}`, {
-        method: "PUT",
-        body: JSON.stringify({ company_id: companyID, name: nextTitle }),
-      });
-      mergeUpdatedNode(updated);
-      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
-      scheduleMyWorkLiveRefresh();
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
+      const updated = await commitEntityTitleMutation(
+        () => requestJSON<NodeRecord>(apiBase, `/v1/nodes/${encodeURIComponent(cleanNodeID)}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, name: nextTitle }),
+        }),
+        (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: nodeTitle(result) }),
+      );
+      mergeUpdatedNode(updated, titleVersionAtStart, false);
       setNotice("Node renamed.");
     } catch (renameError) {
       setError(formatError(renameError, "Failed to rename node"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID, scheduleMyWorkLiveRefresh]);
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
   const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[], confirmationDisplayName: string): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
@@ -4103,6 +4179,7 @@ export function HomePage({
     setBusy("bulk-node-edit");
     setError("");
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const updatedNodes = await applyBulkNodePatchCommand({
         apiBase,
         companyID,
@@ -4112,7 +4189,7 @@ export function HomePage({
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
       for (const node of updatedNodes) {
-        mergeUpdatedNode(node);
+        mergeUpdatedNode(node, titleVersionAtStart);
       }
       for (const node of updatedNodes) {
         for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
@@ -4407,6 +4484,10 @@ export function HomePage({
               resolveNodeDetails={(nodeID) => {
                 const node = nodeByID.get(nodeID);
                 return node ? { title: nodeTitle(node), status: node.status, priority: node.priority } : null;
+              }}
+              resolveLogicGateDetails={(logicGateID) => {
+                const logicGate = logicGateByID.get(logicGateID);
+                return logicGate ? { title: logicGateTitle(logicGate) } : null;
               }}
               resolveUserLabel={(userID) => homeCompanyUserLabel(companyUserByID.get(userID), userID)}
             />

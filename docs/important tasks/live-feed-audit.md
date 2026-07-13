@@ -1,6 +1,6 @@
 # Live Feed And Realtime Fan-Out Audit And One-Shot Removal Charter
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 Status: implemented and complete on 2026-07-12. The body below is retained as the pre-implementation audit, deletion rationale, and acceptance history; it no longer describes the current runtime. The current architecture contract is `docs/v4-architecture-doc.md`.
 
@@ -10,9 +10,9 @@ The one-shot simplification is implemented on `codex/019f5860-1682-7782-92ae-081
 
 Final product realtime scopes:
 
-- `notifications:user:{user_id}` is owned once at app lifetime and drives one notification summary plus bounded Updates reconciliation only while Updates is open.
-- `chat:node:{node_id}` publishes compact durable Node-chat create/delete hints while that Node chat is mounted. Project chat is non-live.
-- `board:{board_id}` publishes compact `kanban.changed` hints for committed card/column-visible changes while that Logic Gate board is mounted; clients coalesce a canonical `/work` reload.
+- `notifications:user:{user_id}` is owned once at app lifetime by `NotificationRealtimeBridge`; first subscription acceptance, reconnect acceptance, and notification hints share one canonical summary coalescer, plus bounded Updates reconciliation only while Updates is open.
+- `chat:node:{node_id}` publishes compact durable Node-chat create/delete hints while that Node chat is mounted and performs one coalesced canonical refresh on first acceptance and reconnect. Project chat is non-live.
+- `board:{board_id}` publishes compact `kanban.changed` hints for committed card/column-visible changes while that Logic Gate board is mounted; first acceptance, reconnect, and hints coalesce canonical `/work` reloads.
 
 Deleted systems:
 
@@ -38,7 +38,26 @@ Verification recorded at completion:
 - focused backend realtime, store, notification, and schema/source-guard tests passed;
 - `node scripts/run_all_tests.mjs` passed before worker commit and again through the repository merge helper on local `main`.
 
-Genuine remaining limitations are deliberate: realtime delivery is process-local until a future broker is needed, and exact multi-user document coediting remains a separate future Huddle/CRDT/OT project. Non-live cross-user surfaces may remain stale until navigation, open, reload, or explicit refresh.
+Follow-up hardening completed on 2026-07-13:
+
+- every successful Node or Logic Gate rename entry point publishes the concrete same-window committed-title event so mounted Explorer, Kanban, Editor, Node/Logic Gate Maps, Home/My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin labels, AppTimeline labels, and Project Management caches converge without a cross-user fan-out plane; Logic Gate titles also update Updates saved Logic Gate grouping headers and sort values, while notification prose remains historical and active title drafts/carets and passive dock/pin metadata are preserved;
+- backend WebSocket writes have a bounded deadline, failed connections are removed and closed, and metrics distinguish delivery failures from no-subscriber publishes; and
+- ordinary `node_updated` processing skips Kanban projection lookup when there are no relevant local board subscribers.
+
+Follow-up focused automated evidence:
+
+Frontend evidence combines direct behavior tests of `createCoalescedCanonicalRefresh` (one active request, one queued final request, and disposal) and `createCommittedTitleEditBuffer` (same-entity deferral/latest flush, unrelated-entity passthrough, and reset cancellation), shared socket/coordinator/local-event helper tests, the exact-three-subscription-owner inventory, and one AppLayout cache-coordinator installation guard. It is not a mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Backend evidence exercises the server, authorization, registry, routing, deadline, and lookup-guard paths.
+
+- shared-client first/reconnect/late-handler acceptance behavior plus single-flight/queued-final helpers and a source inventory proving only the notification bridge, mounted Node chat, and mounted Kanban own product subscriptions;
+- coordinator-level local notification HTTP delete/clear plus matching socket-echo cardinality, including socket-first response-loss ordering whose canonical source requires a mounted feed reconciliation;
+- same-window local-event/edit-buffer/reducer behavior and direct publication-time communications/Kanban/graph cache tests, plus the AppLayout coordinator-installation and Editor blur-suppression wiring guards;
+- unauthenticated and token-query handshake rejection, cross-Server signed tickets, per-family authorization denial/not-stored behavior, and normal-close cleanup;
+- notification create/delete/clear routing, bounded failed/stalled delivery with a healthy co-subscriber, and distinct failure/no-subscriber metrics; and
+- the no-local-board-subscriber Kanban projection lookup guard plus mounted-board correctness.
+
+Same-window title convergence also uses one company/type/resource registry with a monotonic version. The implemented Home, Company Explorer/GVIC/search, Editor entity-detail, NodeWorkspace assigned Logic Gate/options/search, Kanban, Node/Logic Gate Map graph/detail, My Work, and Project Management async title-bearing paths capture the version at request start and overlay only newer commits before storing a response. The app-lifetime committed-title cache reconciliation coordinator synchronously patches or invalidates affected communications, project-relationship, Kanban, My Work matrix, record-store, workspace-snapshot, and graph caches. Request-start version folding and targeted cache generation/invalidation guards prevent pre-commit requests from repopulating older titles. Cache hits and remounts therefore retain the committed label, while a genuine request begun after the commit remains authoritative. Denormalized persisted sidebar-pin responses instead overlay all latest local commits after fetch/create/reorder/rollback so stale pin-row names cannot overwrite the current visible label. This is targeted fencing of the enumerated caches/setters, not a generalized client replication layer or a claim about unrelated async state.
+
+Genuine remaining limitations are deliberate: realtime delivery is process-local while the committed dev and prod Terraform roots both default to two backend tasks and the target groups configure no stickiness. A mutation HTTP request and the recipient's WebSocket may therefore land on different tasks, making cross-user live delivery nondeterministic whenever two tasks run. A broker/stickiness change and backend task-count changes are deferred. `domain_events` retention/archive cleanup is deferred, and the workspace-derived 200-company catch-up limit is unchanged. Exact multi-user document coediting remains a separate future Huddle/CRDT/OT project. No replay, gap, generalized event-history, or notification-recovery plane is added. Non-live cross-user surfaces may remain stale until navigation, open, reload, or explicit refresh.
 
 Original audit branch: codex/live-feed-audit
 
@@ -72,7 +91,7 @@ Exact document coediting should not be counted as an existing keep-surface. The 
 | Mounted Logic Gate Kanban board | Yes | Board-targeted committed node-card title, add/remove, move/reorder, column, and other explicitly card-visible changes |
 | Node or Logic Gate document typing | No | Durable HTTP autosave; reopen/reload for another user; delete current collaboration relay |
 | The initiating user's own title/card/tree changes | Immediate locally | Patch from the mutation response; never bounce through the server fan-out |
-| Kanban changes made by another user | Yes only on the relevant mounted Logic Gate board | Receive a compact committed board-change hint; refetch the canonical board snapshot on open/reconnect/gap |
+| Kanban changes made by another user | Yes only on the relevant mounted Logic Gate board | Receive a compact committed board-change hint; first subscription acceptance, reconnect acceptance, and hints share the guarded canonical board loader |
 | Company Explorer changes made by another user | No | Reload on navigation/manual refresh if needed; temporary staleness during development is accepted |
 | Node/Logic Gate maps and relationships | No | Reload on navigation/manual refresh if needed; no cross-user subscription |
 | My Work/GVIC/Project Management | No | Load when opened and patch only concrete same-user command results |
@@ -83,7 +102,7 @@ Exact document coediting should not be counted as an existing keep-surface. The 
 
 1. A future Huddle is the candidate home for intentional simultaneous document editing. Huddle may use CRDT/OT, explicit session membership, presence, cursor state, and a collaboration-specific persistence model. Do not build it in this cleanup and do not preserve the current whole-document relay for it.
 2. Cross-user live delivery is retained only for node chat, the user notification/Updates lane, and the currently mounted Logic Gate Kanban board.
-3. The Updates sidebar badges for urgent `!` mentions, normal `@` mentions, and regular non-mention updates must change immediately from the one notification summary source. This restates docs/tests/updates.md:79 and 366-367.
+3. The Updates sidebar badges for urgent `!` mentions, normal `@` mentions, and regular non-mention updates must change immediately from the one notification summary source. This restates the stable U69 contract in `docs/tests/updates.md`.
 4. Node-card title and placement changes on a Logic Gate Kanban board should be visible to other users who currently have that same board open. This does not justify company-wide workspace fan-out or background subscriptions for every board.
 5. The notification domain-event catch-up/checkpoint worker is not a product requirement. Delete checkpoint initialization, the 30-second scan, ReplayDomainEvents notification recovery, repository plumbing used only by that recovery, and their tests in this task. Preserve the existing immediate notification projection and durable notification rows. Missed asynchronous recovery is an accepted single-user development limitation; do not build a replacement recovery system.
 6. The initiating user's successful mutation must still update every relevant surface in that app session immediately from the committed response. Other users do not receive generic title/tree/map/Explorer live replication unless the change is part of the retained active Kanban contract.

@@ -48,7 +48,7 @@ type LogicGateMapNodeCardProps = {
   onSetSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   onSetDragState: React.Dispatch<React.SetStateAction<NodeMapDragState | null>>;
   onSetRelationshipDraft: React.Dispatch<React.SetStateAction<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>>;
-  onSetEditingNodeTitleNodeID: React.Dispatch<React.SetStateAction<string | null>>;
+  onSetEditingNodeTitleNodeID: (nodeID: string | null) => void;
   onSetError: React.Dispatch<React.SetStateAction<string>>;
   onCreateLinkedNode: (sourceNodeID: string, direction: NodeDirection) => Promise<void>;
   onCommitRelationshipBetweenNodes: (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => Promise<void>;

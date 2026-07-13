@@ -16,9 +16,15 @@ import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
 import type { Account } from "../accounts/accountsApi.js";
 import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
+import {
+  foldCommittedEntityTitlesSince,
+  readCommittedEntityTitleVersion,
+  subscribeCommittedEntityTitleUpdates,
+} from "../realtime/committedEntityTitleUpdates.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
+import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore.js";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
@@ -106,6 +112,11 @@ import {
   type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "./projectManagementApi.js";
+import {
+  reconcileProjectResourceDisplayTitles,
+  reconcileRelationshipContextTitle,
+  reconcileSelectedNodeTitle,
+} from "./projectManagementCommittedTitles.js";
 import {
   buildProjectRelationshipGroupingModel,
   buildVisibleProjectLogicGateIndex,
@@ -307,6 +318,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
+
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    setRelationships((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
+    setCriticalPath((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
+    setSelectedCriticalPathNode((current) => reconcileSelectedNodeTitle(current, update, companyID));
+    setSelectedRelationshipNodePanel((current) => reconcileSelectedNodeTitle(current, update, companyID));
+    setRelationshipContextMenu((current) => {
+      if (!current?.relationship) return current;
+      const relationship = reconcileRelationshipContextTitle(current.relationship, update, companyID);
+      return relationship === current.relationship ? current : { ...current, relationship };
+    });
+  }), [companyID]);
+
   projectSaveScopeRef.current = projectSaveScope;
   const projectTextBlockSaveController = useMemo<TextBlockProjectionSaveController<EditorTextBlockContent>>(
     () => createTextBlockProjectionSaveController<EditorTextBlockContent>(),
@@ -352,6 +376,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const requestScope = `${companyID}:${cleanProjectID}`;
     const contentRevisionAtStart = projectTextBlockContentRevisionRef.current;
     const contentSaveWasPendingAtStart = projectTextBlockSaveController.hasAnyChangedOrSaveInProgress();
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     if (options.showLoading !== false) setLoading(true);
     setError("");
     try {
@@ -364,8 +389,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setProject(view.project);
       setProjectTitleDraft(view.project.name || "");
-      setRelationships(view.relationships ?? []);
-      setCriticalPath(orderCriticalPathSteps(view.critical_path ?? []));
+      setRelationships(foldCommittedEntityTitlesSince(
+        view.relationships ?? [], companyID, titleVersionAtStart,
+        (current, update) => reconcileProjectResourceDisplayTitles(current, update, companyID),
+      ));
+      setCriticalPath(foldCommittedEntityTitlesSince(
+        orderCriticalPathSteps(view.critical_path ?? []), companyID, titleVersionAtStart,
+        (current, update) => reconcileProjectResourceDisplayTitles(current, update, companyID),
+      ));
       setCompanyUsers(users);
       setGroups(userGroups.groups);
       setAssignmentAccountIDs(projectAccountIDs(view.project));
@@ -2222,6 +2253,10 @@ function CriticalPathTable({
       .filter((row) => row.syntheticKind === "search_result" && row.kind === "node" && row.nodeID)
   ), [nodePickerResults]);
 
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    setNodePickerResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
+  }), [companyID]);
+
   useEffect(() => {
     if (!nodePickerStepID || !nodePickerSearchText) {
       setNodePickerResults([]);
@@ -2234,10 +2269,14 @@ function CriticalPathTable({
     let cancelled = false;
     setNodePickerLoading(true);
     setNodePickerError("");
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     void fetchCompanyExplorerSearchResults(apiBase, companyID, nodePickerSearchText, 20)
       .then((payload) => {
         if (cancelled || nodePickerRequestRef.current !== requestID) return;
-        setNodePickerResults(payload.results ?? []);
+        setNodePickerResults(foldCommittedEntityTitlesSince(
+          payload.results ?? [], companyID, titleVersionAtStart,
+          reconcileCompanyExplorerSearchResultTitles,
+        ));
       })
       .catch((searchError) => {
         if (cancelled || nodePickerRequestRef.current !== requestID) return;

@@ -10,22 +10,22 @@ type realtimeScopeKey struct {
 	scope     string
 }
 
-type realtimeSubscription struct {
-	CompanyID string
-	Scope     string
-}
-
 type realtimeSubscriptionRegistry struct {
 	mu               sync.RWMutex
 	connections      map[string]*realtimeConnection
-	connectionScopes map[string]map[string]realtimeSubscription
+	connectionScopes map[string]map[realtimeScopeKey]struct{}
 	scopeConnections map[realtimeScopeKey]map[string]*realtimeConnection
+}
+
+type realtimePublishResult struct {
+	delivered int
+	failed    int
 }
 
 func newRealtimeSubscriptionRegistry() *realtimeSubscriptionRegistry {
 	return &realtimeSubscriptionRegistry{
 		connections:      map[string]*realtimeConnection{},
-		connectionScopes: map[string]map[string]realtimeSubscription{},
+		connectionScopes: map[string]map[realtimeScopeKey]struct{}{},
 		scopeConnections: map[realtimeScopeKey]map[string]*realtimeConnection{},
 	}
 }
@@ -47,8 +47,7 @@ func (r *realtimeSubscriptionRegistry) removeConnection(connectionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.connections, connectionID)
-	for _, sub := range r.connectionScopes[connectionID] {
-		key := realtimeScopeKey{companyID: sub.CompanyID, scope: sub.Scope}
+	for key := range r.connectionScopes[connectionID] {
 		if bucket := r.scopeConnections[key]; bucket != nil {
 			delete(bucket, connectionID)
 			if len(bucket) == 0 {
@@ -73,11 +72,11 @@ func (r *realtimeSubscriptionRegistry) subscribe(conn *realtimeConnection, scope
 	r.connections[conn.id] = conn
 	scopes := r.connectionScopes[conn.id]
 	if scopes == nil {
-		scopes = map[string]realtimeSubscription{}
+		scopes = map[realtimeScopeKey]struct{}{}
 		r.connectionScopes[conn.id] = scopes
 	}
-	scopes[scope] = realtimeSubscription{CompanyID: companyID, Scope: scope}
 	key := realtimeScopeKey{companyID: companyID, scope: scope}
+	scopes[key] = struct{}{}
 	bucket := r.scopeConnections[key]
 	if bucket == nil {
 		bucket = map[string]*realtimeConnection{}
@@ -95,42 +94,19 @@ func (r *realtimeSubscriptionRegistry) unsubscribe(connectionID, companyID, scop
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	key := realtimeScopeKey{companyID: companyID, scope: scope}
 	if scopes := r.connectionScopes[connectionID]; scopes != nil {
-		delete(scopes, scope)
+		delete(scopes, key)
 		if len(scopes) == 0 {
 			delete(r.connectionScopes, connectionID)
 		}
 	}
-	key := realtimeScopeKey{companyID: companyID, scope: scope}
 	if bucket := r.scopeConnections[key]; bucket != nil {
 		delete(bucket, connectionID)
 		if len(bucket) == 0 {
 			delete(r.scopeConnections, key)
 		}
 	}
-}
-
-func (r *realtimeSubscriptionRegistry) hasSubscription(connectionID, companyID, scope string) bool {
-	connectionID = strings.TrimSpace(connectionID)
-	companyID = strings.TrimSpace(companyID)
-	scope = strings.TrimSpace(scope)
-	if r == nil || connectionID == "" || companyID == "" || scope == "" {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	sub, ok := r.connectionScopes[connectionID][scope]
-	return ok && sub.CompanyID == companyID
-}
-
-func (r *realtimeSubscriptionRegistry) connectionSubscriptionCount(connectionID string) int {
-	connectionID = strings.TrimSpace(connectionID)
-	if r == nil || connectionID == "" {
-		return 0
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.connectionScopes[connectionID])
 }
 
 func (r *realtimeSubscriptionRegistry) connectionCount() int {
@@ -174,32 +150,34 @@ func (r *realtimeSubscriptionRegistry) hasSubscribers(companyID, scope string) b
 	return r.scopeSubscriptionCount(companyID, scope) > 0
 }
 
-func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) int {
-	connections := r.connectionsForScope(companyID, scope)
-	published := 0
-	for _, conn := range connections {
-		if conn.sendText(payload) == nil {
-			published++
-		}
-	}
-	return published
-}
-
-func (r *realtimeSubscriptionRegistry) publishToConnection(connectionID, companyID, scope string, payload []byte) bool {
-	conn := r.connectionForSubscription(connectionID, companyID, scope)
-	return conn != nil && conn.sendText(payload) == nil
-}
-
-func (r *realtimeSubscriptionRegistry) connectionForSubscription(connectionID, companyID, scope string) *realtimeConnection {
-	connectionID = strings.TrimSpace(connectionID)
+func (r *realtimeSubscriptionRegistry) hasScopeTypeSubscribers(companyID, scopeType string) bool {
 	companyID = strings.TrimSpace(companyID)
-	scope = strings.TrimSpace(scope)
-	if r == nil || connectionID == "" || companyID == "" || scope == "" {
-		return nil
+	scopeType = strings.TrimSpace(scopeType)
+	if r == nil || companyID == "" || scopeType == "" {
+		return false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.scopeConnections[realtimeScopeKey{companyID: companyID, scope: scope}][connectionID]
+	for key, bucket := range r.scopeConnections {
+		if key.companyID == companyID && len(bucket) > 0 && realtimeScopeType(key.scope) == scopeType {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) realtimePublishResult {
+	connections := r.connectionsForScope(companyID, scope)
+	result := realtimePublishResult{}
+	for _, conn := range connections {
+		if err := conn.sendText(payload); err != nil {
+			result.failed++
+			r.removeConnection(conn.id)
+			continue
+		}
+		result.delivered++
+	}
+	return result
 }
 
 func (r *realtimeSubscriptionRegistry) connectionsForScope(companyID, scope string) []*realtimeConnection {

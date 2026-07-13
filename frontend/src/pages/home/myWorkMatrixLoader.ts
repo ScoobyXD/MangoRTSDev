@@ -1,5 +1,6 @@
 import type { MyWorkMatrixResponse, MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi.js";
 import type { MyWorkSelectedScope } from "./myWorkGrouping.js";
+import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, type CommittedEntityTitleUpdate } from "../../modules/realtime/committedEntityTitleUpdates.js";
 import {
   myWorkDebugDurationMs,
   myWorkDebugEnabled,
@@ -19,21 +20,23 @@ export type MyWorkMatrixLoadFailure = {
   message: string;
 };
 
-export type MyWorkMatrixLoadResult = {
+type MyWorkMatrixLoadResult = {
   cells: MyWorkMatrixCellWithUser[];
   failures: MyWorkMatrixLoadFailure[];
 };
 
-export type MyWorkMatrixPatch = {
+type MyWorkMatrixPatch = {
   companyID: string;
   rows: MyWorkMatrixRow[];
   removedProjectionRowIDs: string[];
   targetUserIDs?: string[];
+  titleVersionAtStart: number;
 };
 
-export type MyWorkMatrixFetcher = (targetUserID: string) => Promise<MyWorkMatrixResponse>;
 
-export type MyWorkMatrixCacheState = MyWorkMatrixLoadResult & {
+type MyWorkMatrixFetcher = (targetUserID: string) => Promise<MyWorkMatrixResponse>;
+
+type MyWorkMatrixCacheState = MyWorkMatrixLoadResult & {
   companyID: string;
   targetUserIDs: string[];
   loading: boolean;
@@ -130,7 +133,12 @@ export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch:
   }
   const next = [...passthrough, ...byProjectionID.values()];
   next.sort(sortMyWorkMatrixCells);
-  return next;
+  return foldCommittedEntityTitlesSince(
+    next,
+    cleanCompanyID,
+    patch.titleVersionAtStart,
+    patchMyWorkMatrixCellsForCommittedTitle,
+  );
 }
 
 export function patchMyWorkMatrixCacheEntry(cacheKey: string, patch: MyWorkMatrixPatch): void {
@@ -153,6 +161,46 @@ export function patchMyWorkMatrixCacheEntry(cacheKey: string, patch: MyWorkMatri
     removedProjectionRowIDs: patch.removedProjectionRowIDs.length,
     cells: next.cells.length,
   });
+}
+
+export function patchMyWorkMatrixCellsForCommittedTitle(
+  cells: MyWorkMatrixCellWithUser[],
+  patch: CommittedEntityTitleUpdate,
+): MyWorkMatrixCellWithUser[] {
+  const companyID = patch.companyID.trim();
+  const resourceID = patch.resourceID.trim();
+  const title = patch.title.trim();
+  if (!companyID || !resourceID || !title) return cells;
+  let changed = false;
+  const next = cells.map((cell) => {
+    const cellCompanyID = cell.companyID?.trim() || cell.company_id?.trim() || "";
+    if (cellCompanyID && cellCompanyID !== companyID) return cell;
+    if (patch.entityType === "node") {
+      if (cell.node_id?.trim() !== resourceID || cell.node_name === title) return cell;
+      changed = true;
+      return { ...cell, node_name: title };
+    }
+    if (cell.logic_gate_id?.trim() !== resourceID || cell.logic_gate_name === title) return cell;
+    changed = true;
+    return { ...cell, logic_gate_name: title };
+  });
+  return changed ? next : cells;
+}
+
+export function patchMyWorkMatrixCachesForCommittedTitle(patch: CommittedEntityTitleUpdate): void {
+  const companyID = patch.companyID.trim();
+  if (!companyID) return;
+  for (const [cacheKey, entry] of myWorkMatrixCache.entries()) {
+    if (entry.companyID !== companyID) continue;
+    const cells = patchMyWorkMatrixCellsForCommittedTitle(entry.cells, patch);
+    if (cells === entry.cells) continue;
+    const next = { ...entry, cells };
+    myWorkMatrixCache.set(cacheKey, next);
+    publishMyWorkMatrixCacheSummary(cacheKey, next, "title-patched", next.targetUserIDs);
+  }
+}
+export function resetMyWorkMatrixLoaderForTests(): void {
+  myWorkMatrixCache.clear();
 }
 
 export function markMyWorkMatrixCacheStale(cacheKey: string): void {
@@ -248,15 +296,25 @@ export function loadMyWorkMatrixCacheEntry({
     stale: current?.stale ?? true,
     force,
   });
+  const titleCommitVersionAtStart = readCommittedEntityTitleVersion();
   const promise = loadMyWorkMatrixCellsForUsers({
     companyID,
     targetUserIDs: cleanTargetUserIDs,
     fetchMatrix,
   }).then((result) => {
     const durationMs = debugEnabled ? myWorkDebugDurationMs(startedAt) : 0;
+    const reconciledResult = {
+      ...result,
+      cells: foldCommittedEntityTitlesSince(
+        result.cells,
+        cleanCompanyID,
+        titleCommitVersionAtStart,
+        patchMyWorkMatrixCellsForCommittedTitle,
+      ),
+    };
     if (cleanCacheKey) {
       myWorkMatrixCache.set(cleanCacheKey, {
-        ...result,
+        ...reconciledResult,
         companyID: cleanCompanyID,
         targetUserIDs: cleanTargetUserIDs,
         loading: false,
@@ -271,11 +329,11 @@ export function loadMyWorkMatrixCacheEntry({
     myWorkDebugLog("cache.load.done", {
       cacheKey: cleanCacheKey,
       durationMs,
-      cells: result.cells.length,
-      failures: result.failures.length,
+      cells: reconciledResult.cells.length,
+      failures: reconciledResult.failures.length,
       targetUserCount: cleanTargetUserIDs.length,
     });
-    return result;
+    return reconciledResult;
   }).catch((error) => {
     const durationMs = debugEnabled ? myWorkDebugDurationMs(startedAt) : 0;
     if (cleanCacheKey) {

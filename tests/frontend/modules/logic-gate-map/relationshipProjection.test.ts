@@ -2,6 +2,8 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { reconcileCommittedLogicGateRecordTitles, reconcileCommittedLogicGateTitleInSnapshot } from "../../../../frontend/src/modules/map/committedTitleSnapshotReconciliation.js";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/logic-gate-map/relationshipProjection.js";
 import { NodeRelationship } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 
@@ -149,4 +151,42 @@ test("disabled logic-gate relationship colors fall back fully to the map accent"
 
   assert.equal(projected.selectedRole, "Output");
   assert.equal(projected.strokeColor, "#0ff");
+});
+
+test("logic-gate graph title reconciliation keeps raw and canvas snapshots aligned", () => {
+  const logicGates = [
+    { company_id: "company-1", logic_gate_id: "gate-1", header: "Stale gate" },
+    { company_id: "company-1", logic_gate_id: "gate-2", header: "Other gate" },
+    { company_id: "company-2", logic_gate_id: "gate-1", header: "Foreign gate" },
+  ];
+  const update = {
+    companyID: "company-1",
+    entityType: "logic_gate",
+    resourceID: "gate-1",
+    title: "Committed gate",
+  };
+  const reconciledRecords = reconcileCommittedLogicGateRecordTitles(logicGates, update);
+  assert.deepEqual(reconciledRecords.map((gate) => gate.header), ["Committed gate", "Other gate", "Foreign gate"]);
+  assert.equal(reconciledRecords[1], logicGates[1]);
+  assert.equal(reconciledRecords[2], logicGates[2]);
+
+  const canvasNodes = [
+    { company_id: "company-1", node_id: "gate-1", header: "Stale gate", title: "Stale gate" },
+    { company_id: "company-1", node_id: "gate-2", header: "Other gate", title: "Other gate" },
+    { company_id: "company-2", node_id: "gate-1", header: "Foreign gate", title: "Foreign gate" },
+  ];
+  const reconciledNodes = reconcileCommittedLogicGateTitleInSnapshot(canvasNodes, update);
+  assert.deepEqual(reconciledNodes.map((gate) => [gate.header, gate.title]), [
+    ["Committed gate", "Committed gate"],
+    ["Other gate", "Other gate"],
+    ["Foreign gate", "Foreign gate"],
+  ]);
+  assert.equal(reconciledNodes[1], canvasNodes[1]);
+  assert.equal(reconciledNodes[2], canvasNodes[2]);
+});
+
+test("logic-gate graph cache fences in-flight title commits", () => {
+  const graphSource = readFileSync("frontend/src/modules/logic-gate-map/LogicGateRelationshipGraph.ts", "utf8");
+  assert.match(graphSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)[\s\S]*await fetchWorkspaceSnapshot[\s\S]*foldCommittedEntityTitlesSince\(/);
+  assert.match(graphSource, /!result\.changed && entry\.hydrated && readCommittedEntityTitleVersion\(\) === requestStartTitleVersion/);
 });

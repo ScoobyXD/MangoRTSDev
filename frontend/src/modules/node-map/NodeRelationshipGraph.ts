@@ -1,7 +1,9 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
+import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, type CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import { reconcileCommittedNodeTitleInSnapshot } from "../map/committedTitleSnapshotReconciliation.js";
+import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache.js";
+import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared.js";
 
 export type NodeRelationshipGraphSnapshot = {
   nodes: NodeRecord[];
@@ -21,7 +23,6 @@ type CacheEntry = {
   subscribers: Set<Subscriber>;
   loading: boolean;
   hydrated: boolean;
-  folderID: string;
 };
 // Initial cache snapshot so subscribers always receive a consistent shape.
 const EMPTY_SNAPSHOT: NodeRelationshipGraphSnapshot = { nodes: [], relationships: [] };
@@ -41,7 +42,7 @@ function getEntry(apiBase: string, companyID: string, options: NodeRelationshipG
   const key = graphCacheKey(apiBase, companyID, { folderID });
   const existing = nodeRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false, folderID };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
   nodeRelationshipGraphCache.set(key, created);
   return created;
 }
@@ -63,15 +64,21 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
-export function invalidateNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
+// Local mutation helper: lets hot-path UI actions apply immediate cache updates without
+// forcing a full snapshot refetch. Canonical snapshot reads remain the source of truth.
+export function reconcileNodeRelationshipGraphTitle(
+  apiBase: string,
+  companyID: string,
+  update: CommittedEntityTitleUpdate,
+): void {
   for (const entry of getCompanyEntries(apiBase, companyID)) {
-    entry.hydrated = false;
-    if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+    const nodes = reconcileCommittedNodeTitleInSnapshot(entry.snapshot.nodes ?? [], update);
+    if (nodes === entry.snapshot.nodes) continue;
+    entry.snapshot = { ...entry.snapshot, nodes };
+    notify(entry);
   }
 }
 
-// Local mutation helper: lets hot-path UI actions apply immediate cache updates without
-// forcing a full snapshot refetch. Canonical snapshot reads remain the source of truth.
 export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: string, node: NodeRecord): void {
   const generatedAt = new Date().toISOString();
   for (const entry of getMutationEntries(apiBase, companyID)) {
@@ -127,22 +134,6 @@ export function removeNodeRelationshipGraphNode(apiBase: string, companyID: stri
       folders: entry.snapshot.folders ?? [],
       folder_items: nextFolderItems,
       node_map_positions: (entry.snapshot.node_map_positions ?? []).filter((position) => (position.node_id || position.entity_id) !== nodeID),
-      generated_at: generatedAt,
-    };
-    notify(entry);
-  }
-}
-
-export function removeNodeRelationshipGraphRelationshipsForNode(apiBase: string, companyID: string, nodeID: string): void {
-  if (!nodeID) return;
-  const generatedAt = new Date().toISOString();
-  for (const entry of getMutationEntries(apiBase, companyID)) {
-    const currentRelationships = entry.snapshot.relationships ?? [];
-    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
-    if (nextRelationships.length === currentRelationships.length) continue;
-    entry.snapshot = {
-      ...entry.snapshot,
-      relationships: nextRelationships,
       generated_at: generatedAt,
     };
     notify(entry);
@@ -243,6 +234,7 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
   const folderID = normalizeGraphFolderID(options);
   const entry = getEntry(apiBase, companyID, { folderID });
   if (entry.loading) return;
+  const requestStartTitleVersion = readCommittedEntityTitleVersion();
   entry.loading = true;
   try {
     const result = await fetchWorkspaceSnapshot(apiBase, companyID, {
@@ -250,13 +242,19 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
       folderID: folderID || undefined,
     });
     if (!result.payload) return;
-    if (!result.changed && entry.hydrated) {
+    if (!result.changed && entry.hydrated && readCommittedEntityTitleVersion() === requestStartTitleVersion) {
       entry.hydrated = true;
       return;
     }
     const payload = result.payload as NodeRelationshipGraphSnapshot;
+    const nodes = foldCommittedEntityTitlesSince(
+      payload.nodes ?? [],
+      companyID,
+      requestStartTitleVersion,
+      reconcileCommittedNodeTitleInSnapshot,
+    );
     entry.snapshot = {
-      nodes: payload.nodes ?? [],
+      nodes,
       relationships: payload.relationships ?? [],
       folders: payload.folders ?? [],
       folder_items: payload.folder_items ?? [],

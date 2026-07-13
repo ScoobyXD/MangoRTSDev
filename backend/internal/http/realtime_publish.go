@@ -9,28 +9,36 @@ import (
 	"strings"
 )
 
-func (s *Server) publishRealtimeMessage(companyID, scope string, message any) int {
+func (s *Server) publishRealtimeMessage(companyID, scope string, message any) {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
 	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
-		return 0
+		return
 	}
 	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
+		return
 	}
 	payload, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
-		return 0
+		return
 	}
-	published := s.realtimeRegistry.publish(companyID, scope, payload)
-	if published == 0 {
+	result := s.realtimeRegistry.publish(companyID, scope, payload)
+	attempted := result.delivered + result.failed
+	if result.failed > 0 {
+		log.Printf("realtime_delivery_failed company_id=%s scope_type=%s scope=%s attempted=%d failed=%d", companyID, realtimeScopeType(scope), scope, attempted, result.failed)
+		s.recordOperationalMetric("realtime.delivery_failure_count", realtimeScopeType(scope), int64(result.failed), 0)
+		s.recordRealtimeActiveConnections()
+		s.recordRealtimeActiveSubscriptions()
+	}
+	if attempted == 0 {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
+		return
 	}
-	s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(published), 0)
-	return published
+	if result.delivered > 0 {
+		s.recordOperationalMetric("realtime.messages_published", realtimeScopeType(scope), int64(result.delivered), 0)
+	}
 }
 
 func nodeChatProjectionDetails(items []domain.NodeProjection, messageID string) (string, bool) {
@@ -145,6 +153,9 @@ func (s *Server) publishKanbanChangesForEvents(events []domain.DomainEvent) {
 			}
 		}
 		if strings.TrimSpace(event.Type) != "node_updated" {
+			continue
+		}
+		if !s.realtimeRegistry.hasScopeTypeSubscribers(companyID, "board") {
 			continue
 		}
 		nodeID := domainEventPayloadString(event.Payload, "node_id")

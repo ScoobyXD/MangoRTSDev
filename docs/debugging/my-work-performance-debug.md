@@ -61,7 +61,7 @@ The debug flag is resolved once when the debug helper module loads. Changing loc
 - `render commit`: full matrix render-to-commit duration when React commits a debug-instrumented render.
 - `cell filter/sort/group`: aggregate per-cell filtering, sorting, and grouping duration across the 24 role/priority cells.
 - `slow cells`: the slowest role/priority cells by combined filter/sort/group time.
-- `recent causes`: local mutation, live refresh token, realtime delta/refetch, cache stale, cache fresh hit, and in-flight request joins.
+- `recent causes`: structural local mutation (`liveRefreshToken` is the structural local-mutation refresh signal), cache stale, cache fresh hit, and in-flight request joins. Title-only commits patch mounted and cached matrices through the shared committed-title path without scheduling this refresh. My Work no longer consumes realtime deltas or realtime refetch messages.
 - `memory`: Chrome `performance.memory` values when available.
 
 ## Interpreting common findings

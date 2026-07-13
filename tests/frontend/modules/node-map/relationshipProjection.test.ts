@@ -2,6 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
+import { reconcileCommittedNodeTitleInSnapshot } from "../../../../frontend/src/modules/map/committedTitleSnapshotReconciliation.js";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/node-map/relationshipProjection.js";
 import { NodeRelationship } from "../../../../frontend/src/modules/node-map/shared.js";
 
@@ -136,4 +137,27 @@ test("disabled relationship colors fall back fully to the map accent", () => {
 
   assert.equal(projected.selectedRole, "Parent");
   assert.equal(projected.strokeColor, "#0ff");
+});
+
+test("node graph title reconciliation patches only the matching node and keeps unrelated identity", () => {
+  const nodes = [
+    { company_id: "company-1", node_id: "node-1", name: "Stale node" },
+    { company_id: "company-1", node_id: "node-2", name: "Other node" },
+    { company_id: "company-2", node_id: "node-1", name: "Foreign node" },
+  ];
+  const reconciled = reconcileCommittedNodeTitleInSnapshot(nodes, {
+    companyID: "company-1",
+    entityType: "node",
+    resourceID: "node-1",
+    title: "Committed node",
+  });
+  assert.deepEqual(reconciled.map((node) => node.name), ["Committed node", "Other node", "Foreign node"]);
+  assert.equal(reconciled[1], nodes[1]);
+  assert.equal(reconciled[2], nodes[2]);
+  assert.equal(reconcileCommittedNodeTitleInSnapshot(nodes, {
+    companyID: "company-1",
+    entityType: "logic_gate",
+    resourceID: "node-1",
+    title: "Wrong family",
+  }), nodes);
 });

@@ -38,7 +38,7 @@ import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadHo
 import { LazyAccountManagerPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
-import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
+import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeKeyViewID, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinRequestDetail } from "./sidebarPins";
@@ -55,6 +55,16 @@ import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
 import { removeNodeRelationshipGraphNode } from "../modules/node-map/NodeRelationshipGraph";
+import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
+import { reconcileCachesForCommittedEntityTitle } from "./committedTitleCacheReconciliation";
+import {
+  isCommittedTitleUpdateForCompany,
+  reconcileAppDockTabTitles,
+  reconcileAppLogicGateTargetTitle,
+  reconcileAppNodePopupTitle,
+  reconcileAppSidebarPinTitles,
+  reconcileAppTimelineTitles,
+} from "./appCommittedTitleState";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -618,7 +628,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     let cancelled = false;
     fetchSidebarPins(apiBase, cleanCompanyID)
       .then((pins) => {
-        if (!cancelled) setSidebarPins(pins);
+        if (!cancelled) setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -649,6 +659,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (taskbarData.scope !== taskbarScope) return;
     saveAppTimelineState(taskbarData.scope, taskbarData.timelineState);
   }, [taskbarData.scope, taskbarData.timelineState, taskbarScope]);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    reconcileCachesForCommittedEntityTitle(apiBase, update);
+    if (!isCommittedTitleUpdateForCompany(update, activeCompanyID)) return;
+    setDockTabs((current) => reconcileAppDockTabTitles(current, update));
+    setTimelineState((current) => reconcileAppTimelineTitles(current, update));
+    setSidebarPins((current) => reconcileAppSidebarPinTitles(current, update));
+    setExplorerNodePopup((current) => reconcileAppNodePopupTitle(current, update));
+    setLogicGateArenaTarget((current) => reconcileAppLogicGateTargetTitle(current, update));
+  }), [activeCompanyID, apiBase, setDockTabs, setTimelineState]);
   useEffect(() => {
     const rollCurrentTimeline = () => setTimelineState((current) => rollTimelineStateToDate(current));
     rollCurrentTimeline();
@@ -1178,7 +1197,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       for (const pin of cleanPins) {
         try {
           const saved = await createSidebarPin(apiBase, cleanCompanyID, pin);
-          setSidebarPins((previous) => upsertSidebarPin(previous, saved));
+          setSidebarPins((previous) => foldLatestCommittedEntityTitles(upsertSidebarPin(previous, saved), cleanCompanyID, reconcileAppSidebarPinTitles));
         } catch (error) {
           console.error("Failed to save sidebar pin", error);
         }
@@ -1194,22 +1213,24 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (!cleanCompanyID || !pinID) return;
     void deleteSidebarPin(apiBase, cleanCompanyID, pinID).catch((error) => {
       console.error("Failed to remove sidebar pin", error);
-      setSidebarPins(previousPins);
+      setSidebarPins(foldLatestCommittedEntityTitles(previousPins, cleanCompanyID, reconcileAppSidebarPinTitles));
     });
   }, [activeCompanyID, apiBase]);
 
   const reorderSidebarPin = useCallback((moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => {
     const cleanCompanyID = activeCompanyID.trim();
     const nextPins = moveSidebarPin(sidebarPinsRef.current, moving, target, placement);
-    setSidebarPins(nextPins);
+    setSidebarPins(foldLatestCommittedEntityTitles(nextPins, cleanCompanyID, reconcileAppSidebarPinTitles));
     if (!cleanCompanyID) return;
     const pinIDs = nextPins.map((pin) => pin.pinID.trim()).filter(Boolean);
     if (pinIDs.length !== nextPins.length) return;
     void reorderSidebarPins(apiBase, cleanCompanyID, pinIDs)
-      .then((pins) => setSidebarPins(pins))
+      .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
       .catch((error) => {
         console.error("Failed to reorder sidebar pins", error);
-        void fetchSidebarPins(apiBase, cleanCompanyID).then(setSidebarPins).catch(() => {});
+        void fetchSidebarPins(apiBase, cleanCompanyID)
+          .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
+          .catch(() => {});
       });
   }, [activeCompanyID, apiBase]);
 
@@ -1684,7 +1705,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
-      <AppLiveFreshnessBridge />
+      <NotificationRealtimeBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
         accent={UI_THEME.panel}

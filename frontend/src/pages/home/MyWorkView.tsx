@@ -6,6 +6,7 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../../modules/realtime/committedEntityTitleUpdates";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
@@ -30,6 +31,7 @@ import {
   myWorkMatrixCacheKey,
   patchMyWorkMatrixCacheEntry,
   patchMyWorkMatrixCells,
+  patchMyWorkMatrixCellsForCommittedTitle,
   readMyWorkMatrixCache,
   readMyWorkMatrixCacheSummary,
   uniqueMyWorkTargetUserIDs,
@@ -262,6 +264,12 @@ export function MyWorkView({
     window.addEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
     return () => window.removeEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
   }, []);
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    const title = update.title.trim();
+    const resourceID = update.resourceID.trim();
+    if (update.companyID !== companyID || !resourceID || !title) return;
+    setMatrixCells((current) => patchMyWorkMatrixCellsForCommittedTitle(current, update));
+  }), [companyID]);
 
   useEffect(() => {
     setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
@@ -449,7 +457,7 @@ export function MyWorkView({
     requestMatrixRefresh(matrixTargetUserIDs, "liveRefreshToken");
   }, [apiBase, companyID, liveRefreshToken, matrixTargetUserIDs, requestMatrixRefresh]);
 
-  const applyNodeDropResult = useCallback((result: MyWorkNodeDropResult) => {
+  const applyNodeDropResult = useCallback((result: MyWorkNodeDropResult, titleVersionAtStart: number) => {
     const rows = result?.gvic_projection_rows ?? [];
     const removedProjectionRowIDs = result?.removed_projection_row_ids ?? [];
     if (rows.length === 0 && removedProjectionRowIDs.length === 0) return;
@@ -458,6 +466,7 @@ export function MyWorkView({
       rows,
       removedProjectionRowIDs,
       targetUserIDs: matrixTargetUserIDs,
+      titleVersionAtStart,
     };
     setMatrixCells((previous) => patchMyWorkMatrixCells(previous, patch));
     setMatrixStateCacheKey(matrixCacheKey);
@@ -465,12 +474,13 @@ export function MyWorkView({
   }, [companyID, matrixCacheKey, matrixTargetUserIDs]);
 
   const handleDropNodes = useCallback((input: MyWorkNodeDropInput) => {
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     const result = onDropNodes?.(input);
     if (result && typeof (result as Promise<MyWorkNodeDropResult>).then === "function") {
-      void (result as Promise<MyWorkNodeDropResult>).then(applyNodeDropResult);
+      void (result as Promise<MyWorkNodeDropResult>).then((resolved) => applyNodeDropResult(resolved, titleVersionAtStart));
       return;
     }
-    applyNodeDropResult(result as MyWorkNodeDropResult);
+    applyNodeDropResult(result as MyWorkNodeDropResult, titleVersionAtStart);
   }, [applyNodeDropResult, onDropNodes]);
 
   const defaultScopeForLevel = useCallback((level: MyWorkScopeLevel): MyWorkSelectedScope => {

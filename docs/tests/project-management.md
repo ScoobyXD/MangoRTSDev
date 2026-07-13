@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Project Management Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model, including normalization, empty Logic Gates, flat rows, collapsed visible-node ordering, and the embedded node-panel opener; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project text-block envelopes; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the shared Project relationship node shell/fullscreen action, project attached-reply resource context, and formatting-owner invalidation; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers shared status precedence; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project return route and project-matched work-panel history state; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers the Backspace editing boundary; other rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model, including normalization, empty Logic Gates, flat rows, collapsed visible-node ordering, and the embedded node-panel opener; `tests/frontend/modules/project-management/projectManagementApi.test.ts` covers PM55 timeline/workspace/project-detail title reducers and current Critical Path picker labels; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project text-block envelopes; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the shared Project relationship node shell/fullscreen action, project attached-reply resource context, and formatting-owner invalidation; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers shared status precedence; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project return route and project-matched work-panel history state; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers the Backspace editing boundary; other rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -62,6 +62,7 @@ PM51 - Status grouping uses one shared contract across Updates, My Work, and Pro
 PM52 - Project information text-block persistence uses the project-scoped latest-content save controller. Title, document, and attachment references are saved as one coherent envelope; saves do not overlap, later edits coalesce, deletion waits for an in-progress save, stale reloads cannot replace dirty local content, and project-scope teardown drains changed blocks.
 PM53 - An attached-email reply opened from Project Management keeps project attachment ownership and the originating information ID for files and inline images, while mailbox provenance continues to determine the provider thread, reply, draft, and send scope.
 PM54 - Node-open project-relationship reads use a company/resource-scoped shared singleflight/cache. Creating, updating, or deleting a project relationship invalidates that exact cache before any local refresh signal, so React StrictMode and multiple node windows do not duplicate the same canonical relationship request or restore a stale result.
+PM55 - A successful same-window Node or Logic Gate rename patches matching Project Management timeline `display_title`, workspace Node/Logic Gate labels, Project detail relationship/critical-path `display_title`, and active selected/context entity labels from the concrete committed-title event. It does not create a Project Management realtime scope or canonical reload and must not replace generic multi-resource delete-confirmation labels.
 
 ## Scenarios
 
@@ -166,10 +167,11 @@ Business logic covered:
 - PM28
 - PM29
 - PM30
+- PM55
 
 Given:
 - A user views Project Management timeline data for themself or another user.
-- Timeline items target nodes or logic gates.
+- Timeline items target nodes or logic gates, and the same entities are visible in Project Management workspace/project-detail caches when a rename commits elsewhere in the window.
 
 Expected:
 - Timeline reads use the canonical work-item read model with company, authorized viewer, target user, bounded limit, and current rows only.
@@ -179,6 +181,7 @@ Expected:
 - A user can create timeline items for themself when access allows.
 - Creating for another user requires company manager authorization.
 - Updating or deleting a timeline item requires authorization for the item owner's timeline.
+- The committed-title event patches all matching timeline/workspace/project-detail entity labels locally without a reload, while generic delete-confirmation noun/count labels remain unchanged.
 
 ### Scenario PM-S5: Assign Existing Node From Node Workspace
 

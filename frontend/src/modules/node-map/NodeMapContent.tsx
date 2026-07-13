@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, canAdminResourceAccess, canEditResourceAccess, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -28,6 +28,8 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
+import { commitEntityTitleMutation, createCommittedTitleEditBuffer, preserveEditingEntityTitleInSnapshot, subscribeCommittedEntityTitleUpdates, type CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates";
+import { reconcileCommittedNodeTitleInSnapshot } from "../map/committedTitleSnapshotReconciliation";
 
 type NodeWorkspaceEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -86,6 +88,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
   const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const allNodesRef = useRef<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -151,6 +154,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);
   const editingNodeTitleDraftRef = useRef("");
   const editingNodeTitleElementRef = useRef<HTMLDivElement | null>(null);
+  const editingNodeTitleNodeIDRef = useRef<string | null>(null);
+  const committedTitleEditBufferRef = useRef(createCommittedTitleEditBuffer());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const isDarkTheme = theme === "dark";
@@ -234,6 +239,44 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       top: pan.y + position.y * zoom,
     };
   }, [activeInlineCommentThread, nodePositions, nodeSizes, pan.x, pan.y, zoom]);
+
+  const applyCommittedNodeTitle = useCallback((update: CommittedEntityTitleUpdate) => {
+    const title = update.title.trim();
+    if (!title) return;
+    const patchTitle = (items: NodeRecord[]) => reconcileCommittedNodeTitleInSnapshot(items, update);
+    setAllNodes((current) => {
+      const next = patchTitle(current);
+      allNodesRef.current = next;
+      return next;
+    });
+    setNodes(patchTitle);
+    setDetails((current) => current?.node.node_id === update.resourceID
+      ? { ...current, node: { ...current.node, name: title } }
+      : current);
+  }, []);
+
+  const updateEditingNodeTitleNodeID = useCallback((nextNodeID: string | null) => {
+    const previousNodeID = editingNodeTitleNodeIDRef.current;
+    if (nextNodeID && previousNodeID && nextNodeID !== previousNodeID) {
+      const deferred = committedTitleEditBufferRef.current.finish("node", previousNodeID);
+      if (deferred) applyCommittedNodeTitle(deferred);
+    }
+    editingNodeTitleNodeIDRef.current = nextNodeID;
+    setEditingNodeTitleNodeID(nextNodeID);
+    if (nextNodeID) {
+      committedTitleEditBufferRef.current.begin("node", nextNodeID);
+      return;
+    }
+    if (!previousNodeID) return;
+    const deferred = committedTitleEditBufferRef.current.finish("node", previousNodeID);
+    if (deferred) applyCommittedNodeTitle(deferred);
+  }, [applyCommittedNodeTitle]);
+
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID || update.entityType !== "node" || !update.title.trim()) return;
+    const immediate = committedTitleEditBufferRef.current.receive(update);
+    if (immediate) applyCommittedNodeTitle(immediate);
+  }), [applyCommittedNodeTitle, companyID]);
 
   useEffect(() => {
     writeNodeInlineCommentThreads(inlineCommentStorageKey, inlineCommentThreads);
@@ -326,20 +369,27 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderIDRef.current,
   ) => {
+    const reconciledSnapshotNodes = preserveEditingEntityTitleInSnapshot(
+      snapshotNodes,
+      allNodesRef.current,
+      editingNodeTitleNodeIDRef.current,
+      (incoming, current) => getNodeTitle(incoming) === getNodeTitle(current) ? incoming : { ...incoming, name: getNodeTitle(current) },
+    );
     const scoped = structureFocusNodeID
       ? filterNodeGraphToStructure({
-        nodes: snapshotNodes,
+        nodes: reconciledSnapshotNodes,
         relationships: snapshotRelationships,
         focusNodeID: structureFocusNodeID,
       })
       : filterNodeGraphToFolderScope({
-        nodes: snapshotNodes,
+        nodes: reconciledSnapshotNodes,
         relationships: snapshotRelationships,
         folders: snapshotFolders,
         folderItems: snapshotFolderItems,
         folderID,
       });
-    setAllNodes(snapshotNodes);
+    allNodesRef.current = reconciledSnapshotNodes;
+    setAllNodes(reconciledSnapshotNodes);
     setFolders(snapshotFolders);
     setFolderItems(snapshotFolderItems);
     setNodes(scoped.nodes);
@@ -948,10 +998,13 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     if (!value) return;
     setError("");
     try {
-      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
-        method: "PUT",
-        body: JSON.stringify({ company_id: companyID, name: value }),
-      });
+      const updated = await commitEntityTitleMutation(
+        () => requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, name: value }),
+        }),
+        (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: getNodeTitle(result) }),
+      );
       // Latency rule: update in-memory graph cache directly so we avoid a snapshot re-fetch.
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       if (details?.node.node_id === nodeID) {
@@ -1403,7 +1456,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
-  }, [editingNodeTitleNodeID, nodeByID]);
+  }, [editingNodeTitleNodeID]);
 
   const viewportHandlers = useNodeMapViewportHandlers({
     viewportRef,
@@ -1515,7 +1568,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               onSetSelectedNodeIDs={setSelectedNodeIDs}
               onSetDragState={setDragState}
               onSetRelationshipDraft={setRelationshipDraft}
-              onSetEditingNodeTitleNodeID={setEditingNodeTitleNodeID}
+              onSetEditingNodeTitleNodeID={updateEditingNodeTitleNodeID}
               onSetInlineCommentDraft={setInlineCommentDraft}
               onSetError={setError}
               onCreateInlineCommentThread={createInlineCommentThreadFromDraft}
@@ -1641,7 +1694,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               return;
             }
             editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
-            setEditingNodeTitleNodeID(nodeID);
+            updateEditingNodeTitleNodeID(nodeID);
             setNodeContextMenu(null);
           }}
           onOpenPermissions={(nodeID) => {

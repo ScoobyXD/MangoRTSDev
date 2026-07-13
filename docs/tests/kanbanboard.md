@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Kanban Board Tests
 
@@ -106,7 +106,7 @@ KB74 - Account filters cards before subgrouping is built.
 KB75 - Subgroup headers should reflect only the cards currently visible after search and account filters.
 KB76 - After a committed card-visible change, the backend publishes one compact `kanban.changed` hint only to the affected mounted `board:{board_id}` scope; card metadata remains in the canonical board response.
 KB77 - A `kanban.changed` hint for card placement, title, priority, due date, issue state, accounts, requested-by, placed-by, creation timestamp, or column structure coalesces one canonical mounted-board refresh without a full page refresh.
-KB78 - Board open/reconnect and a `kanban.changed` hint use one targeted canonical board refresh; there is no projection sequence or replay log.
+KB78 - First mounted-board subscription acceptance, reconnect acceptance, and `kanban.changed` hints use one active targeted canonical board refresh plus at most one queued final refresh; they never overlap or abort/restart the active read. A later local board handler joining the accepted shared scope receives immediate acceptance. There is no projection sequence, replay log, or gap protocol.
 
 ### Date Added, Manual Order, And Grouped Drops
 
@@ -142,12 +142,12 @@ KB105 - We want multi browser click-drag ability. So I can drag an email from My
 KB106 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
 KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible; while a node editor is fullscreen, the Explorer search box is hidden without clearing the user's current search query.
 KB108 - Direct email-to-Kanban conversion and later email-card transfer preserve mailbox provenance in the attached-email projection: personal mail retains `account_email`, and Shared Triage mail retains both `shared_inbox_id` and `account_email`, so later node email operations use the originating grant.
-KB109 - Forced Logic Gate props and live Logic Gate selection must converge on one guarded board loader; one logical selection must not issue duplicate `/work` requests or apply the same snapshot twice.
+KB109 - Forced Logic Gate props and the current Logic Gate selection must converge on one guarded board loader; one logical selection must not issue duplicate `/work` requests or apply the same snapshot twice.
 KB110 - Concurrent loads for the same company and Logic Gate board share one in-flight promise, while changing to a different Logic Gate aborts the obsolete request and prevents its late response from rendering.
 KB111 - A complete cached board snapshot renders immediately. A stale cached snapshot remains visible while one targeted revalidation runs; invalidation must not discard the snapshot or create a second in-flight request.
 KB112 - Selection generations guard A-to-B and A-to-B-to-A navigation so an older response for the same board key cannot overwrite the latest selection.
 KB113 - Mounted Kanban consumes only `kanban.changed` on `board:{board_id}` and coalesces one canonical `/work` reload; no projection delta or sequence is applied in the browser.
-KB114 - Board open, reconnect, or a compact change hint causes at most one targeted board revalidation and never a broad workspace reload.
+KB114 - First/reconnect/late-handler acceptance and compact change hints route through one single-flight targeted board revalidation with at most one queued final request; they never abort/restart an active request or trigger a broad workspace reload.
 KB115 - The canonical `/work` response preserves every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
 KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, and minimal `cards`; no projection sequence or replay cursor is serialized.
 KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full GVIC collection.
@@ -156,6 +156,8 @@ KB119 - Database ordering uses the canonical stored status rank requested, backl
 KB120 - Owning-Logic-Gate authorization runs before a cached ETag can produce `304 Not Modified`; a permission revocation must never expose or preserve unauthorized board data.
 KB121 - The dedicated Logic Gate work version changes for gate/header/default/permission/request-owner, assignment, projection-card, and email-origin mutations that affect the response, and that version participates in the actor-safe work ETag.
 KB122 - Logic Gate boards and columns remain synthesized contract data rather than persisted legacy Kanban board/column rows; a response-contract salt invalidates ETags when synthesized shapes or ordering constants change.
+KB123 - Ordinary `node_updated` processing performs no Kanban projection-row lookup when that company has no relevant local board subscriber. With a mounted board subscriber, it resolves affected boards and preserves exact board-scoped publication correctness.
+KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
 
 ## Scenarios
 
@@ -477,17 +479,24 @@ Business logic covered:
 - KB120
 - KB121
 - KB122
+- KB123
+- KB124
 
 Given:
-- Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching live selection event.
+- Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching current-selection event.
 - The user quickly selects Logic Gate B and may then return to A.
-- A compact `kanban.changed` hint arrives and the socket later reconnects.
+- The board subscription is first accepted, compact hints arrive while a canonical read is slow, the socket later reconnects, and another local board handler may join the accepted scope.
+- The same Node is renamed successfully from Kanban while other title-bearing surfaces are mounted.
+- An ordinary `node_updated` is published once with no local board subscriber and once with a relevant mounted board subscriber.
 
 Expected:
 - A renders from cache immediately and starts at most one same-key revalidation.
-- Forced and live paths do not create a second request or duplicate snapshot application.
+- Forced-prop and current-selection paths do not create a second request or duplicate snapshot application.
 - Selecting B aborts A's obsolete request; an old A response cannot overwrite B or a newer A generation.
-- The hint and reconnect each coalesce through the guarded loader; the canonical response refreshes rendered and cached minimal cards, including `created_from_email`.
+- First/reconnect/late-handler acceptance and hints use one active guarded loader plus at most one queued final request; the canonical response refreshes rendered and cached minimal cards, including `created_from_email`.
+- The no-subscriber publish does not query Kanban projection rows; the mounted-board case preserves exact affected-board lookup and delivery.
+- Each successful Kanban Node/owning-Logic-Gate title rename publishes one committed-title event and non-edited mounted labels converge without changing dirty editor text or an active title draft/caret.
+- Duplicate acceptance/hint work does not create concurrent or abort/restarted `/work` requests.
 - No projection replay or sequence-gap path exists.
 - The work payload contains the required minimal collections and none of the redundant collections.
 - Authorization is checked before any `304`, and canonical status rank preserves business ordering.

@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Logic Gates Tests
 
@@ -41,15 +41,16 @@ LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared formatting controller. Font-size minus/value/plus, bold, underline, highlight color, and the outline-style dropdown must match node text boxes, project text boxes, mail editor surfaces, and email signatures in look and selected-text behavior.
 LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; read-only and denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
 LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
-LG31 - Logic Gate Arena work loads use one cache-first, cancelable, single-flight loader whether the gate came from forced Arena props or live selection.
+LG31 - Logic Gate Arena work loads use one cache-first, cancelable, single-flight loader whether the gate came from forced Arena props or the current selection.
 LG32 - Changing the selected Logic Gate aborts the obsolete request, and selection generation prevents a late A response from overwriting B or a newer A selection.
-LG33 - A compact `kanban.changed` hint on the mounted `board:{board_id}` scope coalesces one targeted canonical Logic Gate work reload. No projection delta, sequence, or replay protocol exists.
+LG33 - First mounted-board subscription acceptance, reconnect acceptance, and compact `kanban.changed` hints share one single-flight targeted Logic Gate work loader with at most one queued final read; they do not overlap or abort/restart an active read. A later local board handler joining an accepted shared scope receives immediate acceptance. No projection delta, sequence, replay, or gap protocol exists.
 LG34 - The Logic Gate work response exposes only the minimal Logic Gate header/default/request-owner data, actor permission flags, board, columns, and minimal cards.
 LG35 - The work ETag uses one dedicated Logic Gate work-version row plus actor permission identity/flags and a response-contract salt; authorization is evaluated before `304 Not Modified`.
 LG36 - The board request owner is the Logic Gate's Generated user ID. The work payload does not ship the full GVIC assignment collection, and GVIC still does not grant resource permission.
 LG37 - Logic Gate text highlighting must use the shared `EditorTabBar` palette/custom/clear control and shared formatting controller. Highlight applies only to the restored non-collapsed selection, reports the active selection color, and round-trips through sanitized rich HTML; a collapsed caret does not create sticky highlight state.
 LG38 - Hydrating changed Logic Gate editor content while the editor or one of its shared toolbar controls owns focus must preserve the logical selection. The editor restores the last valid range, records text offsets before replacing the DOM, and restores those offsets afterward so toolbar focus does not move formatting to an unrelated location.
 LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settings isolation, its rich editor must also be hidden and formatting commands must be disabled. Editor navigation tabs remain usable so the user can return to the document.
+LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor or Logic Gate Map title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
 
 ## Scenarios
 
@@ -246,14 +247,18 @@ Business logic covered:
 - LG34
 - LG35
 - LG36
+- LG40
 
 Given:
-- A Logic Gate with a Generated user is opened in Arena from forced props and a matching live selection.
-- A cached snapshot exists, the user quickly changes gates, and a `kanban.changed` hint arrives for the mounted board.
+- A Logic Gate with a Generated user is opened in Arena from forced props and the matching current selection.
+- A cached snapshot exists, the user quickly changes gates, and acceptance/hints arrive while one mounted-board read is slow; another local board handler may join the accepted scope.
+- The same Logic Gate is renamed successfully from each supported entry point while multiple applicable RW15 consumers are mounted; one title `contentEditable` has a live draft/caret.
 
 Expected:
 - The cached board renders immediately and the duplicate selection paths share one request.
 - The obsolete gate request is aborted and cannot commit stale state.
-- The hint uses the guarded single-flight loader for one canonical targeted reload; no broad workspace reload or projection replay runs.
+- First/reconnect/late-handler acceptance and hints use one active targeted loader plus at most one queued final reload; no overlap/restart, broad workspace reload, projection replay, or gap protocol runs.
+- Each successful rename publishes one committed-title event after commit and all non-edited mounted same-window labels converge immediately; the edited title applies its deferred update only after editing ends.
+- Failed renames publish no event, and title draft/caret plus dirty or in-flight editor text remain untouched.
 - The response carries `request_owner_user_id` and actor permission flags but no full GVIC, node, assignment, or status collections.
 - Authorization runs before conditional-response handling, and changes that affect the representation advance its version or contract fingerprint.

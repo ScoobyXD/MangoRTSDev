@@ -43,7 +43,7 @@ type NodeMapNodeCardProps = {
   onSetSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   onSetDragState: React.Dispatch<React.SetStateAction<NodeMapDragState | null>>;
   onSetRelationshipDraft: React.Dispatch<React.SetStateAction<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>>;
-  onSetEditingNodeTitleNodeID: React.Dispatch<React.SetStateAction<string | null>>;
+  onSetEditingNodeTitleNodeID: (nodeID: string | null) => void;
   onSetInlineCommentDraft: React.Dispatch<React.SetStateAction<NodeInlineCommentDraft | null>>;
   onSetError: React.Dispatch<React.SetStateAction<string>>;
   onCreateInlineCommentThread: (draft: NodeInlineCommentDraft) => void;

@@ -67,11 +67,13 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 - Add ALB listener rule requiring that header before forwarding to ECS.
 - Keep frontend route rewrites at CloudFront so static Vite routes land on `index.html`.
 
-### Phase 5: Fix Authenticated Streaming
+### Phase 5: Keep Authenticated Retained Realtime
 - Keep browser live updates on `/v1/realtime/ws`.
 - Mint the short-lived WebSocket ticket through authenticated `fetch`, then connect without token-bearing URL query params.
-- Keep node graph, logic gate graph, notification, communication, RACI, and Kanban live updates on the shared WebSocket client.
-- Add frontend tests for reconnect and scope-specific message routing where practical.
+- Keep exactly three product scopes on the shared WebSocket client: user notifications/Updates, mounted Node chat, and the mounted Logic Gate Kanban board.
+- Reconcile canonical state on first subscription acceptance and reconnect acceptance; Updates fetches its feed only while open.
+- Keep retained delivery process-local for now. The committed dev and prod roots both default to two backend tasks and the target groups configure no stickiness, so mutation HTTP requests and recipient WebSockets may reach different tasks and cross-user live delivery is nondeterministic while two tasks run. A future broker may preserve the same publisher boundary; broker/stickiness work and task-count changes are deliberately deferred.
+- Add frontend tests for first acceptance, reconnect, and scope-specific message routing.
 
 ### Phase 6: Tenant/Auth Safety
 - Keep explicit `company_id` in the API for now.

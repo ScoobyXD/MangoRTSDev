@@ -11,6 +11,11 @@ import { entityMatchesAccountFilter } from "../accounts/accountsApi.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
+import {
+  foldCommittedEntityTitlesSince,
+  readCommittedEntityTitleVersion,
+  subscribeCommittedEntityTitleUpdates,
+} from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
@@ -47,6 +52,10 @@ import {
   type ProjectManagementEntityType,
   type ProjectManagementTimelineRow,
 } from "./projectManagementApi.js";
+import {
+  reconcileProjectResourceDisplayTitles,
+  reconcileProjectManagementWorkspaceTitles,
+} from "./projectManagementCommittedTitles.js";
 import { ProjectSummaryContent } from "./ProjectSummaryContent.js";
 
 type ProjectManagementContentProps = {
@@ -677,12 +686,21 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [projectRenameSaving, setProjectRenameSaving] = useState(false);
   const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
 
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    setWorkspace((current) => reconcileProjectManagementWorkspaceTitles(current, update, companyID));
+    setTimelineRows((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
+  }), [companyID]);
+
   const loadWorkspacePanel = useCallback(async () => {
     const cleanCompanyID = companyID.trim();
     if (!cleanCompanyID) return;
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const panel = await fetchCommunicationsWorkspacePanel(cleanCompanyID);
-      setWorkspace(workspacePanelStateFromResponse(panel));
+      setWorkspace(foldCommittedEntityTitlesSince(
+        workspacePanelStateFromResponse(panel), cleanCompanyID, titleVersionAtStart,
+        (current, update) => reconcileProjectManagementWorkspaceTitles(current, update, cleanCompanyID),
+      ));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load project management data");
     }
@@ -731,6 +749,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     let cancelled = false;
     setLoading(true);
     setError("");
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     Promise.all([
       fetchCurrentUser().catch(() => null),
       fetchCommunicationsWorkspacePanel(companyID),
@@ -744,7 +763,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         setCompanyUsers(users);
         setGroups(userGroups.groups);
         setGroupMembers(userGroups.members);
-        setWorkspace(workspacePanelStateFromResponse(panel));
+        setWorkspace(foldCommittedEntityTitlesSince(
+          workspacePanelStateFromResponse(panel), companyID, titleVersionAtStart,
+          (currentValue, update) => reconcileProjectManagementWorkspaceTitles(currentValue, update, companyID),
+        ));
         const defaultPerspective = defaultUserPerspective(userID);
         setTimelinePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
         setExplorerPerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
@@ -807,6 +829,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
     if (showLoading) setTimelineLoading(true);
     setError("");
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     const settled = await Promise.allSettled(timelineTargetUserIDs.map((userID) => fetchProjectManagementTimeline(companyID, userID)));
     const rows: ProjectManagementTimelineRow[] = [];
     let failureCount = 0;
@@ -817,7 +840,13 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         failureCount += 1;
       }
     });
-    setTimelineRows((current) => orderTimelineRows(rows, current.length > 0 ? current : timelineRowsRef.current));
+    setTimelineRows((current) => {
+      const orderedRows = orderTimelineRows(rows, current.length > 0 ? current : timelineRowsRef.current);
+      return foldCommittedEntityTitlesSince(
+        orderedRows, companyID, titleVersionAtStart,
+        (currentRows, update) => reconcileProjectResourceDisplayTitles(currentRows, update, companyID),
+      );
+    });
     if (failureCount > 0 && rows.length === 0) {
       setError("Failed to load project management timeline");
     }

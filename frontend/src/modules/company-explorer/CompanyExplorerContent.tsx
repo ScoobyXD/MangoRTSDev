@@ -69,13 +69,25 @@ import {
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
-  applyCompanyExplorerSearchTitleUpdate,
+  applyCompanyExplorerSnapshotTitleUpdate,
+  reconcileCompanyExplorerSearchResultTitles,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldLoadCompanyExplorerBranchChildren,
   shouldRefreshKanbanBoardsAfterUpdate,
 } from "./companyExplorerStore";
-import { subscribeCompanyExplorerEntityTitleUpdates } from "./companyExplorerLocalEntityUpdates";
+import {
+  commitEntityTitleMutation,
+  foldCommittedEntityTitlesSince,
+  readCommittedEntityTitleVersion,
+  subscribeCommittedEntityTitleUpdates,
+} from "../realtime/committedEntityTitleUpdates";
+import {
+  reconcileGVICProjectionLogicGateTitles,
+  reconcileGVICProjectionRowTitles,
+  reconcileGVICProjectionTitlesByUserID,
+  type GVICProjectionTitleCacheEntry,
+} from "./companyExplorerGVICCommittedTitles";
 import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, fetchCompanyExplorerSearchResults, type CompanyExplorerLazyScope, type CompanyExplorerSearchResult, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
 import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShell } from "./companyExplorerGVICVisibility";
 
@@ -113,7 +125,7 @@ const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLO
 type CompanyExplorerScopeView = "mine" | "team" | "company";
 type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "gvic_assignments">>;
 type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
-type GVICProjectionCacheEntry = { rows: GVICMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
+type GVICProjectionCacheEntry = GVICProjectionTitleCacheEntry<ExplorerLogicGateRecord>;
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
 type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; sharedInboxID?: string; x: number; y: number };
@@ -1344,10 +1356,23 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => {
     companyExplorerV2RowsRef.current = companyExplorerV2Rows;
   }, [companyExplorerV2Rows]);
-  useEffect(() => subscribeCompanyExplorerEntityTitleUpdates((update) => {
-    if (update.companyID !== companyID) return;
+  useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
+    if (update.companyID.trim() !== companyID.trim()) return;
     dispatchExplorerStore({ type: "applyEntityTitleUpdate", update });
-    setCompanyExplorerSearchResults((current) => applyCompanyExplorerSearchTitleUpdate(current, update));
+    setCompanyExplorerSearchResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
+    setGVICProjectionRows((current) => reconcileGVICProjectionRowTitles(current, update, companyID));
+    setGVICProjectionLogicGates((current) => reconcileGVICProjectionLogicGateTitles(current, update, companyID));
+    setGVICProjectionByUserID((current) => reconcileGVICProjectionTitlesByUserID(current, update, companyID));
+    setDeleteConfirmation((current) => {
+      if (!current) return current;
+      let changed = false;
+      const targets = current.targets.map((target) => {
+        if (target.kind !== update.entityType || target.id !== update.resourceID || target.label === update.title) return target;
+        changed = true;
+        return { ...target, label: update.title };
+      });
+      return changed ? { ...current, targets } : current;
+    });
   }), [companyID]);
   useEffect(() => {
     if (!internalTriageDropSuccess) return undefined;
@@ -1403,8 +1428,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     resetCompanyExplorerLazyCache();
     dispatchExplorerStore({ type: "resetSnapshot" });
     setError("");
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
-    dispatchExplorerStore({ type: "applySnapshot", snapshot: snapshot ?? {} });
+    const reconciledSnapshot = foldCommittedEntityTitlesSince(
+      snapshot ?? {}, companyID, titleVersionAtStart, applyCompanyExplorerSnapshotTitleUpdate,
+    );
+    dispatchExplorerStore({ type: "applySnapshot", snapshot: reconciledSnapshot });
     loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
   }, [apiBase, companyExplorerLazyScope, companyID, resetCompanyExplorerLazyCache]);
 
@@ -1423,11 +1452,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (!shouldLoadBranch) return;
     inflightCompanyExplorerBranchesRef.current.add(branchKey);
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, cleanParentEntityID);
+      const reconciledSnapshot = foldCommittedEntityTitlesSince(
+        snapshot ?? {}, companyID, titleVersionAtStart, applyCompanyExplorerSnapshotTitleUpdate,
+      );
       if (branchStale) {
-        dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: snapshot?.rows ?? [] });
+        dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: reconciledSnapshot.rows ?? [] });
       } else {
-        dispatchExplorerStore({ type: "mergeSnapshot", snapshot: snapshot ?? {} });
+        dispatchExplorerStore({ type: "mergeSnapshot", snapshot: reconciledSnapshot });
       }
       loadedCompanyExplorerBranchesRef.current.add(branchKey);
       staleCompanyExplorerBranchesRef.current.delete(branchKey);
@@ -1484,10 +1517,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
     inflightCompanyExplorerBranchesRef.current.add(branchKey);
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const snapshot = cleanParentEntityID
         ? await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, cleanParentEntityID)
         : await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
-      dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: snapshot?.rows ?? [] });
+      const reconciledSnapshot = foldCommittedEntityTitlesSince(
+        snapshot ?? {}, companyID, titleVersionAtStart, applyCompanyExplorerSnapshotTitleUpdate,
+      );
+      dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: reconciledSnapshot.rows ?? [] });
       loadedCompanyExplorerBranchesRef.current.add(branchKey);
       staleCompanyExplorerBranchesRef.current.delete(branchKey);
       setError("");
@@ -1505,9 +1542,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     (async () => {
       try {
         setError("");
+        const titleVersionAtStart = readCommittedEntityTitleVersion();
         const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
         if (cancelled) return;
-        dispatchExplorerStore({ type: "applySnapshot", snapshot: snapshot ?? {} });
+        const reconciledSnapshot = foldCommittedEntityTitlesSince(
+          snapshot ?? {}, companyID, titleVersionAtStart, applyCompanyExplorerSnapshotTitleUpdate,
+        );
+        dispatchExplorerStore({ type: "applySnapshot", snapshot: reconciledSnapshot });
         loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "failed_to_load_company_explorer_roots");
@@ -1664,10 +1705,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const requestID = GVICProjectionRequestIDRef.current + 1;
     GVICProjectionRequestIDRef.current = requestID;
     try {
+      const titleVersionAtStart = readCommittedEntityTitleVersion();
       const projection = await fetchGVICProjectionForUser(targetUserID);
       if (GVICProjectionRequestIDRef.current !== requestID) return;
-      setGVICProjectionRows(projection.rows);
-      setGVICProjectionLogicGates(projection.logicGates);
+      setGVICProjectionRows(foldCommittedEntityTitlesSince(
+        projection.rows, companyID, titleVersionAtStart,
+        (current, update) => reconcileGVICProjectionRowTitles(current, update, companyID),
+      ));
+      setGVICProjectionLogicGates(foldCommittedEntityTitlesSince(
+        projection.logicGates, companyID, titleVersionAtStart,
+        (current, update) => reconcileGVICProjectionLogicGateTitles(current, update, companyID),
+      ));
       setGVICProjectionLoaded(true);
     } catch (err) {
       if (GVICProjectionRequestIDRef.current !== requestID) return;
@@ -1683,6 +1731,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
     const requestID = GVICMultiProjectionRequestIDRef.current + 1;
     GVICMultiProjectionRequestIDRef.current = requestID;
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     const results = await Promise.allSettled(GVICScopeTargetUserIDs.map(async (targetUserID) => {
       const projection = await fetchGVICProjectionForUser(targetUserID);
       return [cleanExplorerID(targetUserID), projection] as const;
@@ -1694,8 +1743,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const [userID, projection] = result.value;
       if (userID) next[userID] = projection;
     }
-    setGVICProjectionByUserID(next);
-  }, [fetchGVICProjectionForUser, GVICScopeTargetUserIDs, scopeView, scopeViewsEnabled]);
+    setGVICProjectionByUserID(foldCommittedEntityTitlesSince(
+      next, companyID, titleVersionAtStart,
+      (current, update) => reconcileGVICProjectionTitlesByUserID(current, update, companyID),
+    ));
+  }, [companyID, fetchGVICProjectionForUser, GVICScopeTargetUserIDs, scopeView, scopeViewsEnabled]);
   requestGVICExplorerProjectionRefreshRef.current = () => {
     if (GVICExplorerActive) void refreshGVICExplorerProjection();
     else if (scopeViewsEnabled && scopeView !== "mine") void refreshScopedGVICExplorerProjections();
@@ -1870,10 +1922,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const requestID = companyExplorerSearchRequestRef.current + 1;
     companyExplorerSearchRequestRef.current = requestID;
     let cancelled = false;
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
     void fetchCompanyExplorerSearchResults(apiBase, companyID, explorerSearchText)
       .then((payload) => {
         if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
-        setCompanyExplorerSearchResults(payload.results ?? []);
+        setCompanyExplorerSearchResults(foldCommittedEntityTitlesSince(
+          payload.results ?? [], companyID, titleVersionAtStart, reconcileCompanyExplorerSearchResultTitles,
+        ));
       })
       .catch((err) => {
         if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
@@ -2762,10 +2817,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
         upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       } else if (activeRename.target.kind === "logic_gate") {
-        const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ company_id: companyID, header: value }),
-        });
+        const updated = await commitEntityTitleMutation(
+          () => requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ company_id: companyID, header: value }),
+          }),
+          (result) => ({ companyID, entityType: "logic_gate", resourceID: result.logic_gate_id, title: result.header }),
+        );
         const logicGate = toLogicGateCanvasRecord(updated);
         dispatchExplorerStore({ type: "replaceLogicGate", logicGate });
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);

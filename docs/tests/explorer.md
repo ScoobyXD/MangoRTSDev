@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Explorer Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and GVIC title reconcilers. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -30,7 +30,7 @@ E19 - Deleting an Explorer edge removes that placement without deleting the unde
 E20 - Protected or system Explorer folders cannot be renamed or deleted.
 E21 - Explorer target deletion removes the underlying target only through the explicit target deletion path, not by deleting a placement edge.
 E22 - Explorer placement, update, and removal mutations preserve the affected parent entity ID in independently required durable domain facts and committed responses; they do not publish a Company Explorer or workspace browser event.
-E23 - Company Explorer patches concrete mounted state from the initiating command response or a narrowly scoped same-browser local mutation event; other changes reconcile when the relevant canonical branch is opened or explicitly refreshed.
+E23 - Company Explorer patches concrete mounted state from the initiating command response or the concrete same-window committed-title event; other changes reconcile when the relevant canonical branch is opened or explicitly refreshed.
 E24 - Company Explorer does not use event context or parent-entity fallback to drive background branch refreshes. Canonical branch identity and parent data are resolved by the explicit branch read.
 E25 - Every company has one default root folder named Unfiled.
 E26 - Unfiled has exactly two default child folders, in this order: Projects, Logic Gates.
@@ -62,6 +62,7 @@ E51 - Double-clicking a Company Explorer row label must not enter inline rename 
 E52 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 E53 - Permissions opened from Company Explorer for folders, projects, or Logic Gates use the shared permission view and always expose a visible **Save** action when editable. Node search results remain open-only and do not gain Explorer permission actions.
 E54 - An email conversion through Company Explorer persists mailbox provenance in the created node's attached-email projection: personal/My Triage conversions retain `account_email`, and Shared Triage conversions retain both `shared_inbox_id` and `account_email`, so later reads, replies, attachments, drafts, and invitation responses use the source mailbox scope.
+E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted GVIC-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
 
 
 ## Bug History
@@ -152,14 +153,17 @@ Business logic covered:
 - E23
 - E24
 - E41
+- E55
 
 Given:
 - A user has several Explorer branches loaded.
-- The user commits a folder, project, Logic Gate, or title mutation from a mounted local surface.
+- The user commits a folder or project mutation, or successfully renames a Node or Logic Gate from each supported Editor, Kanban, map, Home/My Work, or Company Explorer entry point.
 - Another browser may change an Explorer resource while this browser remains open.
 
 Expected:
-- The committed response or concrete same-browser local title event patches only the initiating browser's mounted state.
+- The committed response or concrete same-window committed-title event patches matching Explorer Logic Gate rows, Node search results, and materialized/scoped GVIC-mode Node and Logic Gate names in the initiating browser.
+- Editor, Kanban, Node Map, and Logic Gate Map labels converge from that same event as applicable.
+- Failed renames publish no title event; no generalized server fan-out or full reload is required.
 - Durable domain facts may retain the affected parent entity ID for independently required consumers, but no Company Explorer or workspace browser event is published.
 - Another browser's changes can remain stale until navigation, branch reopen, or explicit refresh performs the canonical branch read.
 - Node, relationship, and Explorer domain events do not cause background Company Explorer branch refresh work.

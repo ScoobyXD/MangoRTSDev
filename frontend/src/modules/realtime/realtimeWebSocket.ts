@@ -6,7 +6,7 @@ import {
 import { isTerminalAuthFailureError, requestJSON } from "../api/requestJSON.js";
 import type { NotificationItem } from "../notifications/notificationsApi.js";
 
-export type RealtimeMessageType =
+type RealtimeMessageType =
   | "ready"
   | "subscription.accepted"
   | "subscription.rejected"
@@ -20,13 +20,13 @@ export type RealtimeMessageType =
   | "pong"
   | "error";
 
-export type RealtimeBaseMessage = {
+type RealtimeBaseMessage = {
   type: RealtimeMessageType;
   company_id?: string;
   scope?: string;
 };
 
-export type RealtimeReadyMessage = RealtimeBaseMessage & {
+type RealtimeReadyMessage = RealtimeBaseMessage & {
   type: "ready";
   user_id?: string;
   connection_id?: string;
@@ -103,7 +103,7 @@ export type RealtimeErrorMessage = RealtimeBaseMessage & {
   message?: string;
 };
 
-export type RealtimeInboundMessage =
+type RealtimeInboundMessage =
   | RealtimeReadyMessage
   | RealtimeSubscriptionAcceptedMessage
   | RealtimeSubscriptionRejectedMessage
@@ -116,8 +116,7 @@ export type RealtimeInboundMessage =
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
-export type RealtimeSubscriptionHandlers = {
-  onReady?: (message: RealtimeReadyMessage) => void;
+type RealtimeSubscriptionHandlers = {
   onAccepted?: (message: RealtimeSubscriptionAcceptedMessage) => void;
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
@@ -127,10 +126,6 @@ export type RealtimeSubscriptionHandlers = {
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
-};
-
-type RealtimeSubscription = RealtimeSubscriptionHandlers & {
-  scope: string;
 };
 
 type RealtimeClientOptions = {
@@ -268,7 +263,7 @@ export function realtimeWebSocketURL(apiBase: string, companyID: string): string
   return url.toString();
 }
 
-export async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string, getAccessToken: () => Promise<string> = getApiAccessToken): Promise<void> {
+async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string, getAccessToken: () => Promise<string> = getApiAccessToken): Promise<void> {
   await requestJSON<RealtimeTicketResponse>(apiBase, "/v1/realtime/ticket", {
     method: "POST",
     credentials: "include",
@@ -284,12 +279,12 @@ export class MangoRealtimeClient {
   private readonly getTicket: () => Promise<void>;
   private readonly WebSocketCtor: typeof WebSocket;
   private readonly reconnectDelayMs: number;
-  private readonly subscriptions = new Map<string, Set<RealtimeSubscription>>();
+  private readonly subscriptions = new Map<string, Set<RealtimeSubscriptionHandlers>>();
+  private readonly acceptedScopes = new Set<string>();
   private socket: WebSocket | null = null;
   private opening = false;
   private manualClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  private subscriptionsSentForSocket = false;
   private openAttemptID = 0;
   private reconnectAttempts = 0;
 
@@ -306,20 +301,27 @@ export class MangoRealtimeClient {
   subscribe(scope: string, handlers: RealtimeSubscriptionHandlers = {}): () => void {
     const cleanScope = scope.trim();
     if (!isSupportedRealtimeScope(cleanScope)) throw new Error("unsupported_realtime_scope");
-    const subscription: RealtimeSubscription = { ...handlers, scope: cleanScope };
-    const bucket = this.subscriptions.get(cleanScope) ?? new Set<RealtimeSubscription>();
+    const subscription: RealtimeSubscriptionHandlers = { ...handlers };
+    const bucket = this.subscriptions.get(cleanScope) ?? new Set<RealtimeSubscriptionHandlers>();
     const firstForScope = bucket.size === 0;
     bucket.add(subscription);
     this.subscriptions.set(cleanScope, bucket);
     this.ensureOpen();
+    if (this.acceptedScopes.has(cleanScope)) {
+      subscription.onAccepted?.({ type: "subscription.accepted", scope: cleanScope });
+    }
     if (firstForScope && this.socket?.readyState === WebSocket.OPEN) this.sendSubscribe(cleanScope);
     return () => {
       const current = this.subscriptions.get(cleanScope);
       current?.delete(subscription);
       if (current && current.size > 0) return;
       this.subscriptions.delete(cleanScope);
+      this.acceptedScopes.delete(cleanScope);
+      if (this.subscriptions.size === 0) {
+        this.close();
+        return;
+      }
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
-      this.closeIfIdle();
     };
   }
 
@@ -328,6 +330,7 @@ export class MangoRealtimeClient {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
+    this.acceptedScopes.clear();
     const attemptID = this.openAttemptID + 1;
     this.openAttemptID = attemptID;
     void this.getTicket()
@@ -335,7 +338,6 @@ export class MangoRealtimeClient {
         if (this.manualClose || attemptID !== this.openAttemptID) return;
         const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID));
         this.socket = socket;
-        this.subscriptionsSentForSocket = false;
         socket.onopen = () => {
           if (this.socket !== socket || attemptID !== this.openAttemptID) {
             socket.close();
@@ -343,7 +345,7 @@ export class MangoRealtimeClient {
           }
           this.opening = false;
           this.reconnectAttempts = 0;
-          this.sendSubscriptionsForCurrentSocket();
+          for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
         };
         socket.onmessage = (event) => {
           if (this.socket === socket) this.handleMessage(typeof event.data === "string" ? event.data : "");
@@ -355,7 +357,7 @@ export class MangoRealtimeClient {
           if (this.socket !== socket) return;
           this.socket = null;
           this.opening = false;
-          this.subscriptionsSentForSocket = false;
+          this.acceptedScopes.clear();
           if (!this.manualClose && this.subscriptions.size > 0) this.scheduleReconnect();
         };
       })
@@ -379,12 +381,7 @@ export class MangoRealtimeClient {
     this.socket?.close();
     this.socket = null;
     this.opening = false;
-    this.subscriptionsSentForSocket = false;
-  }
-
-  private closeIfIdle(): void {
-    if (this.subscriptions.size > 0) return;
-    this.close();
+    this.acceptedScopes.clear();
   }
 
   private scheduleReconnect(): void {
@@ -405,14 +402,8 @@ export class MangoRealtimeClient {
     this.socket?.close();
     this.socket = null;
     this.opening = false;
-    this.subscriptionsSentForSocket = false;
+    this.acceptedScopes.clear();
     this.reconnectAttempts = 0;
-  }
-
-  private sendSubscriptionsForCurrentSocket(): void {
-    if (this.subscriptionsSentForSocket) return;
-    this.subscriptionsSentForSocket = true;
-    for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
   }
 
   private sendSubscribe(scope: string): void {
@@ -432,17 +423,18 @@ export class MangoRealtimeClient {
       this.socket?.send(JSON.stringify({ type: "pong" }));
       return;
     }
-    if (message.type === "ready") {
-      for (const sub of this.allSubscriptions()) sub.onReady?.(message);
-      this.sendSubscriptionsForCurrentSocket();
-      return;
-    }
+    if (message.type === "ready") return;
     if (message.type === "error") {
       this.dispatchError(message);
       return;
     }
     const bucket = message.scope ? this.subscriptions.get(message.scope) : undefined;
     if (!bucket || bucket.size === 0) return;
+    if (message.type === "subscription.accepted") {
+      this.acceptedScopes.add(message.scope);
+    } else if (message.type === "subscription.rejected") {
+      this.acceptedScopes.delete(message.scope);
+    }
     for (const sub of bucket) {
       switch (message.type) {
         case "subscription.accepted":
@@ -473,12 +465,10 @@ export class MangoRealtimeClient {
     }
   }
 
-  private allSubscriptions(): RealtimeSubscription[] {
-    return Array.from(this.subscriptions.values()).flatMap((bucket) => Array.from(bucket));
-  }
-
   private dispatchError(message: RealtimeErrorMessage): void {
-    for (const sub of this.allSubscriptions()) sub.onError?.(message);
+    for (const bucket of this.subscriptions.values()) {
+      for (const subscription of bucket) subscription.onError?.(message);
+    }
   }
 }
 
@@ -489,7 +479,7 @@ function ensureTerminalAuthFailureRealtimeListener(): void {
   });
 }
 
-export function getMangoRealtimeClient(apiBase: string, companyID: string, options: RealtimeClientOptions = {}): MangoRealtimeClient {
+function getMangoRealtimeClient(apiBase: string, companyID: string, options: RealtimeClientOptions = {}): MangoRealtimeClient {
   const key = `${apiBase}:${companyID}`;
   const existing = realtimeClients.get(key);
   if (existing) return existing;

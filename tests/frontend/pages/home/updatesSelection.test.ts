@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
   const orderedIDs = ["a", "b", "c", "d"];
@@ -87,4 +88,41 @@ test("local Seen events do not reload Updates, while external same-company event
     source: "realtime",
     localSeenSource,
   }), true);
+});
+
+test("Updates resolves current Logic Gate labels without rewriting historical notification text", () => {
+  const item = {
+    entity_type: "logic_gate" as const,
+    entity_id: "gate-entity",
+    logic_gate_id: "gate-current",
+    title: "Historical notification title",
+    body_preview: "Historical notification body",
+  };
+  const row = { item, logicGate: { id: "gate-grouped", label: "Grouped gate" } };
+
+  assert.equal(resolveUpdateLogicGateID(row), "gate-current");
+  assert.equal(resolveUpdateLogicGateID({
+    item: { entity_type: "node", entity_id: "node-1", logic_gate_id: "" },
+    logicGate: { id: "gate-grouped", label: "Grouped gate" },
+  }), "gate-grouped");
+  assert.equal(resolveUpdateLogicGateID({
+    item: { entity_type: "logic_gate", entity_id: "gate-entity", logic_gate_id: "" },
+  }), "gate-entity");
+
+  assert.equal(resolveCurrentUpdateLogicGateLabel({
+    currentDetails: { title: "Current renamed gate" },
+    groupedLabel: "Grouped gate",
+    historicalEntityLabel: "Historical gate",
+  }), "Current renamed gate");
+  assert.equal(resolveCurrentUpdateLogicGateLabel({ groupedLabel: "Grouped gate", historicalEntityLabel: "Historical gate" }), "Grouped gate");
+  assert.equal(resolveCurrentUpdateLogicGateLabel({ historicalEntityLabel: "Historical gate" }), "Historical gate");
+  assert.deepEqual(resolveCurrentUpdateLogicGateGroupValue({
+    row,
+    currentDetails: { title: "Zulu Current Gate" },
+    historicalEntityLabel: "Historical gate",
+  }), {
+    id: "gate-current",
+    label: "Zulu Current Gate",
+    sortValue: "zulu current gate",
+  });
 });

@@ -5,6 +5,8 @@ import {
   throwIfResourceMarkedMissing,
 } from "../api/missingResources.js";
 import { isHTTPNotFoundError, requestJSON } from "../api/requestJSON.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
+import { reconcileCommittedKanbanCardTitles } from "./kanbanRealtimeRefresh.js";
 import type {
   KanbanBoard,
   KanbanCard,
@@ -13,7 +15,7 @@ import type {
   LogicGateArenaPermissions,
   LogicGateArenaView,
 } from "./shared.js";
-import { logicGateIDFromKanbanBoardID } from "./shared.js";
+import { logicGateIDFromKanbanBoardID, logicGateKanbanBoardID } from "./shared.js";
 
 export type KanbanBoardContents = {
   logicGate?: LogicGateArenaLogicGate;
@@ -116,6 +118,53 @@ export function invalidateKanbanBoardContentsForCompany(apiBase: string, company
   }
 }
 
+export function reconcileKanbanBoardContentTitles(
+  apiBase: string,
+  companyID: string,
+  update: CommittedEntityTitleUpdate,
+): void {
+  const cleanResourceID = update.resourceID.trim();
+  const title = update.title.trim();
+  if (!companyID.trim() || !cleanResourceID || !title) return;
+  const prefix = `${apiBase}:${companyID}:`;
+  const logicGateCacheKey = update.entityType === "logic_gate"
+    ? key(apiBase, companyID, logicGateKanbanBoardID(cleanResourceID))
+    : "";
+  const matchingKeys = new Set([...contentCache.keys(), ...contentInflight.keys()]);
+  for (const cacheKey of matchingKeys) {
+    if (!cacheKey.startsWith(prefix)) continue;
+    if (logicGateCacheKey && cacheKey !== logicGateCacheKey) continue;
+    bumpContentVersion(cacheKey);
+    contentInflight.delete(cacheKey);
+    const cached = contentCache.get(cacheKey);
+    if (!cached) continue;
+    let contents = cached.contents;
+    if (update.entityType === "node") {
+      const cards = reconcileCommittedKanbanCardTitles(contents.cards, update);
+      if (cards !== contents.cards) contents = { ...contents, cards };
+    } else {
+      if (contents.logicGate?.logic_gate_id === cleanResourceID && contents.logicGate.header !== title) {
+        contents = {
+          ...contents,
+          logicGate: { ...contents.logicGate, header: title },
+        };
+      }
+      const boardLogicGateID = contents.board?.logic_gate_id?.trim()
+        || logicGateIDFromKanbanBoardID(contents.board?.board_id ?? "");
+      if (contents.board && boardLogicGateID === cleanResourceID && contents.board.title !== title) {
+        contents = {
+          ...contents,
+          board: { ...contents.board, title },
+        };
+      }
+    }
+    contentCache.set(cacheKey, {
+      contents,
+      stale: cached.stale,
+    });
+  }
+}
+
 export function clearKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): void {
   const cacheKey = key(apiBase, companyID, boardID);
   bumpContentVersion(cacheKey);
@@ -156,9 +205,7 @@ export async function getKanbanBoardContentsSingleFlight(
       return contents;
     }
     const newer = contentCache.get(cacheKey);
-    if (newer && !newer.stale) return newer.contents;
-    contentCache.set(cacheKey, { contents: cloneContents(contents), stale: true });
-    return contents;
+    return newer?.contents ?? contents;
   }).catch((cause) => {
     if (isHTTPNotFoundError(cause)) {
       markResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
