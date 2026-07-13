@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  AttachmentUploadError,
   attachmentUploadResumeStorageKey,
   uploadBrowserAttachment,
   type MangoAttachmentUploadPolicy,
@@ -128,6 +129,46 @@ test("zero-byte files use single PUT and complete with empty-payload metadata", 
   assert.equal(xhrCaptures[0]?.body, file);
   assert.equal((xhrCaptures[0]?.body as Blob).size, 0);
   assert.deepEqual(progress[progress.length - 1], { state: "complete", fraction: 1 });
+});
+
+test("browser policy accepts exactly 1 GiB and rejects one byte above before hashing", async () => {
+  const maxFileBytes = 1024 * 1024 * 1024;
+  let requestCalls = 0;
+  const request: AttachmentRequestJSON = async <T>(): Promise<T> => {
+    requestCalls += 1;
+    throw new Error("unexpected_request");
+  };
+
+  let hashCalls = 0;
+  const hashStarted = new Error("hash_started");
+  await assert.rejects(
+    uploadBrowserAttachment(request, baseInput(metadataOnlyTestFile(maxFileBytes)), {
+      policy: standardPolicy(),
+      hashFile: async (file) => {
+        hashCalls += 1;
+        assert.equal(file.size, maxFileBytes);
+        throw hashStarted;
+      },
+      storage: null,
+    }),
+    (cause: unknown) => cause === hashStarted,
+  );
+  assert.equal(hashCalls, 1, "exactly 1 GiB must reach bounded hashing preparation");
+
+  hashCalls = 0;
+  await assert.rejects(
+    uploadBrowserAttachment(request, baseInput(metadataOnlyTestFile(maxFileBytes + 1)), {
+      policy: standardPolicy(),
+      hashFile: async () => {
+        hashCalls += 1;
+        return RAW_SHA256;
+      },
+      storage: null,
+    }),
+    (cause: unknown) => cause instanceof AttachmentUploadError && cause.code === "attachment_file_too_large",
+  );
+  assert.equal(hashCalls, 0, "an over-limit file must be rejected before hashing");
+  assert.equal(requestCalls, 0, "an injected policy must not require a control-plane request at this boundary");
 });
 
 test("expired single PUT URL is refreshed through the idempotent intent before retry", async () => {
@@ -359,6 +400,16 @@ function baseInput(file: File): UploadMangoAttachmentInput {
 
 function testFile(size: number, name: string, type = "application/octet-stream", lastModified = 42): File {
   return Object.assign(new Blob([new Uint8Array(size)], { type }), { name, lastModified }) as unknown as File;
+}
+
+function metadataOnlyTestFile(size: number): File {
+  return {
+    name: "boundary.bin",
+    type: "application/octet-stream",
+    size,
+    lastModified: 42,
+    webkitRelativePath: "",
+  } as File;
 }
 
 function singleIntent(url: string): unknown {

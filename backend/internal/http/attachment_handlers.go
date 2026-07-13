@@ -80,7 +80,7 @@ func (s *Server) handleAttachmentMetadata(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 		return
 	}
-	if !s.canReadAttachmentThroughResourceLink(w, r, companyID, attachment.AttachmentID) {
+	if !s.canReadAttachmentThroughLinks(w, r, companyID, attachment.ResourceLinks) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"attachment": attachment})

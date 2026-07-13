@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"mime"
 	"miraeopus/backend/internal/domain"
@@ -924,24 +923,25 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		cleanCompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
 	}
 	sendReq := req.NylasSendMessageRequest
-	if rejectDurableInlineFileBytes(w, "communications_send_body", sendReq.Body) {
-		return
-	}
-	sendReq.Body, sendReq.Attachments = prepareCommunicationsInlineImageAttachments(sendReq.Body, sendReq.Attachments)
-	attachments, attachmentsOK := s.resolveCommunicationsSendAttachments(w, r, cleanCompanyID, sendReq.Attachments)
-	if !attachmentsOK {
-		return
-	}
-	sendReq.Attachments = attachments
-	sendReq.TrackingOptions = defaultCommunicationsTrackingOptions()
 	if len(sendReq.To) == 0 && len(sendReq.Cc) == 0 && len(sendReq.Bcc) == 0 {
 		writeError(w, http.StatusBadRequest, "email_recipients_required")
 		return
 	}
-	if sendReq.Subject == "" && sendReq.Body == "" && len(sendReq.Attachments) == 0 {
+	if sendReq.Subject == "" && sendReq.Body == "" && !communicationsSendHasAttachmentReference(sendReq.Attachments) {
 		writeError(w, http.StatusBadRequest, "email_content_required")
 		return
 	}
+	if rejectDurableInlineFileBytes(w, "communications_send_body", sendReq.Body) {
+		return
+	}
+	sendReq.Body, sendReq.Attachments = prepareCommunicationsInlineImageAttachments(sendReq.Body, sendReq.Attachments)
+	attachments, outboundAttachments, attachmentsOK := s.resolveCommunicationsSendAttachments(w, r, cleanCompanyID, sendReq.Attachments)
+	if !attachmentsOK {
+		return
+	}
+	sendReq.Attachments = attachments
+	sendReq.OutboundAttachments = outboundAttachments
+	sendReq.TrackingOptions = defaultCommunicationsTrackingOptions()
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
 		var err error
@@ -949,6 +949,10 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return err
 	})
 	if err != nil {
+		if isNylasOutboundAttachmentFailure(err) {
+			writeAttachmentStorageError(w, err)
+			return
+		}
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
@@ -2098,21 +2102,56 @@ func communicationsInlineImageContentID(attachmentID string) string {
 	return "mango" + hex.EncodeToString(digest[:12])
 }
 
-func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *http.Request, companyID string, items []NylasAttachment) ([]NylasAttachment, bool) {
+func communicationsSendHasAttachmentReference(items []NylasAttachment) bool {
+	for _, item := range items {
+		attachmentID := strings.TrimSpace(item.AttachmentID)
+		if attachmentID == "" {
+			attachmentID = strings.TrimSpace(item.ID)
+		}
+		if validAttachmentUUIDText(attachmentID) && strings.TrimSpace(item.Content) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+type communicationsAttachmentAccessResult struct {
+	allowed bool
+	err     error
+}
+
+func validCommunicationsSendAttachmentContent(content store.AttachmentContentRead, companyID, attachmentID string) bool {
+	return strings.EqualFold(strings.TrimSpace(content.CompanyID), companyID) &&
+		strings.EqualFold(strings.TrimSpace(content.AttachmentID), attachmentID) &&
+		store.NormalizeAttachmentVariantType(content.RequestedVariant) == store.AttachmentVariantOriginal &&
+		store.NormalizeAttachmentVariantType(content.ServedVariant) == store.AttachmentVariantOriginal &&
+		content.ByteSize >= 0 &&
+		content.OriginalByteSize >= 0 &&
+		content.ByteSize == content.OriginalByteSize &&
+		strings.TrimSpace(content.StorageKey) != ""
+}
+
+func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *http.Request, companyID string, items []NylasAttachment) ([]NylasAttachment, []NylasOutboundAttachment, bool) {
 	if len(items) == 0 {
-		return nil, true
+		return nil, nil, true
 	}
 	if s.attachmentStorage == nil {
 		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
-		return nil, false
+		return nil, nil, false
 	}
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
-		return nil, false
+		return nil, nil, false
 	}
+
 	cleaned := make([]NylasAttachment, 0, len(items))
-	var totalDecodedBytes int64
+	outbound := make([]NylasOutboundAttachment, 0, len(items))
+	contentByAttachmentID := make(map[string]store.AttachmentContentRead, len(items))
+	accessByResource := make(map[string]communicationsAttachmentAccessResult)
+	var totalDeclaredBytes int64
+	storage := s.attachmentStorage
+
 	for _, item := range items {
 		attachmentID := strings.TrimSpace(item.AttachmentID)
 		if attachmentID == "" {
@@ -2123,62 +2162,52 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 		}
 		if attachmentID == "" || strings.TrimSpace(item.Content) != "" {
 			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-			return nil, false
+			return nil, nil, false
 		}
-		if !s.canSendAttachmentThroughResourceLink(w, r, companyID, attachmentID) {
-			return nil, false
+
+		attachmentCacheKey := strings.ToLower(attachmentID)
+		content, exists := contentByAttachmentID[attachmentCacheKey]
+		if !exists {
+			var err error
+			content, err = s.repo.ReadAttachmentContent(r.Context(), companyID, attachmentID, store.AttachmentVariantOriginal)
+			if errors.Is(err, store.ErrInvalid) {
+				if item.IsInline {
+					writeAccessResourceNotFound(w)
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+				}
+				return nil, nil, false
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeAccessResourceNotFound(w)
+				return nil, nil, false
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
+				return nil, nil, false
+			}
+			if !validCommunicationsSendAttachmentContent(content, companyID, attachmentID) {
+				writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+				return nil, nil, false
+			}
+			if !s.canSendAttachmentThroughResourceLinks(w, r, companyID, content.ResourceLinks, accessByResource) {
+				return nil, nil, false
+			}
+			contentByAttachmentID[attachmentCacheKey] = content
 		}
-		attachment, err := s.repo.GetAttachment(companyID, attachmentID)
-		if errors.Is(err, store.ErrInvalid) {
+
+		if content.ByteSize > communicationsAttachmentMaxTotalBytes-totalDeclaredBytes {
 			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-			return nil, false
+			return nil, nil, false
 		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeAccessResourceNotFound(w)
-			return nil, false
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
-			return nil, false
-		}
-		variant, err := s.repo.GetAttachmentVariant(r.Context(), companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-			return nil, false
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "attachment_variant_not_found")
-			return nil, false
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_variant")
-			return nil, false
-		}
-		output, err := s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: variant.StorageKey})
-		if err != nil {
-			writeAttachmentStorageError(w, err)
-			return nil, false
-		}
-		content, readErr := io.ReadAll(output.Body)
-		_ = output.Body.Close()
-		if readErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_read_attachment")
-			return nil, false
-		}
-		totalDecodedBytes += int64(len(content))
-		if totalDecodedBytes > communicationsAttachmentMaxTotalBytes {
-			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-			return nil, false
-		}
+		totalDeclaredBytes += content.ByteSize
+
 		contentType := strings.TrimSpace(item.ContentType)
 		if contentType == "" {
-			contentType = strings.TrimSpace(output.ContentType)
+			contentType = strings.TrimSpace(content.MimeType)
 		}
 		if contentType == "" {
-			contentType = strings.TrimSpace(variant.MimeType)
-		}
-		if contentType == "" {
-			contentType = strings.TrimSpace(attachment.MimeType)
+			contentType = strings.TrimSpace(content.OriginalMimeType)
 		}
 		if contentType == "" {
 			contentType = "application/octet-stream"
@@ -2187,45 +2216,62 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 		if filename == "" {
 			filename = "attachment"
 		}
-		if filename == "attachment" && strings.TrimSpace(attachment.OriginalFilename) != "" {
-			filename = attachment.OriginalFilename
+		if filename == "attachment" && strings.TrimSpace(content.OriginalFilename) != "" {
+			filename = content.OriginalFilename
 		}
-		cleaned = append(cleaned, NylasAttachment{
-			ID:                 attachment.AttachmentID,
-			AttachmentID:       attachment.AttachmentID,
+
+		metadata := NylasAttachment{
+			ID:                 content.AttachmentID,
+			AttachmentID:       content.AttachmentID,
 			Filename:           filename,
 			ContentType:        contentType,
-			Content:            base64.StdEncoding.EncodeToString(content),
 			ContentID:          strings.TrimSpace(item.ContentID),
 			ContentDisposition: strings.TrimSpace(item.ContentDisposition),
 			IsInline:           item.IsInline,
-			Size:               int64(len(content)),
+			Size:               content.ByteSize,
+		}
+		cleaned = append(cleaned, metadata)
+
+		storageKey := strings.TrimSpace(content.StorageKey)
+		outbound = append(outbound, NylasOutboundAttachment{
+			ID:                 metadata.ID,
+			AttachmentID:       metadata.AttachmentID,
+			Filename:           metadata.Filename,
+			ContentType:        metadata.ContentType,
+			ContentID:          metadata.ContentID,
+			ContentDisposition: metadata.ContentDisposition,
+			IsInline:           metadata.IsInline,
+			Size:               metadata.Size,
+			Open: func(ctx context.Context) (NylasOutboundAttachmentContent, error) {
+				output, err := storage.GetObject(ctx, AttachmentGetObjectInput{Key: storageKey})
+				if err != nil {
+					return NylasOutboundAttachmentContent{}, err
+				}
+				return NylasOutboundAttachmentContent{
+					ContentLength: output.ContentLength,
+					Body:          output.Body,
+				}, nil
+			},
 		})
 	}
-	return cleaned, true
+	return cleaned, outbound, true
 }
 
-func (s *Server) canSendAttachmentThroughResourceLink(w http.ResponseWriter, r *http.Request, companyID, attachmentID string) bool {
-	links, err := s.repo.ListAttachmentResourceLinks(companyID, attachmentID)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-		return false
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeAccessResourceNotFound(w)
-		return false
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_links")
-		return false
-	}
+func (s *Server) canSendAttachmentThroughResourceLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment, accessByResource map[string]communicationsAttachmentAccessResult) bool {
 	for _, link := range links {
-		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
-		if err != nil {
+		resourceType := store.NormalizeAttachmentResourceType(link.ResourceType)
+		resourceID := strings.TrimSpace(link.ResourceID)
+		accessKey := resourceType + "\x00" + resourceID
+		access, exists := accessByResource[accessKey]
+		if !exists {
+			access.allowed, access.err = s.canViewAttachmentResource(r, companyID, resourceType, resourceID)
+			accessByResource[accessKey] = access
+		}
+		if access.err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
 			return false
 		}
-		if allowed {
+		if access.allowed {
 			return true
 		}
 	}

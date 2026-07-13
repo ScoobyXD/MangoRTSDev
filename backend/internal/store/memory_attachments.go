@@ -208,7 +208,8 @@ func (r *MemoryRepo) ListAttachmentResourceLinks(companyID, attachmentID string)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if _, ok := r.attachments[attachmentKey(companyID, attachmentID)]; !ok {
+	attachment, ok := r.attachments[attachmentKey(companyID, attachmentID)]
+	if !ok || attachment.DeletedTimestamp != nil {
 		return nil, ErrNotFound
 	}
 	return r.resourceAttachmentLinksLocked(companyID, attachmentID, false), nil

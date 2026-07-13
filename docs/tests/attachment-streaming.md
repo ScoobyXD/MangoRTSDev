@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 # Attachment Transfer And Streaming Tests
 
@@ -12,7 +12,7 @@ AST3 - Browser files through and including 64 MiB use one presigned PUT. Larger 
 
 AST4 - The configurable browser limit defaults to 1 GiB (1,073,741,824 bytes) per file. The old 12 MiB aggregate-per-text-box limit does not apply to direct browser upload. Each file succeeds or fails independently, and only completed attachments enter normal lists/counts.
 
-AST5 - Browser upload intents and multipart part state are durable and idempotent. Retry refreshes an expired URL for the same intent/part; resume reconciles accepted S3 parts; cancel aborts active requests and best-effort aborts the intent; expiry cleanup aborts multipart work or deletes an unfinalized single-PUT object. S3 AbortIncompleteMultipartUpload lifecycle is a backstop, not the primary cleanup path.
+AST5 - Browser upload intents and multipart part state are durable and idempotent. Retry refreshes an expired URL for the same intent/part; resume reconciles accepted S3 parts; cancel aborts active requests and best-effort aborts the intent; expiry cleanup aborts multipart work or deletes an unfinalized single-PUT object. Natural TTL expiry remains `expired`, while only an explicit abort/cancel records `aborted`. S3 AbortIncompleteMultipartUpload lifecycle is a backstop, not the primary cleanup path.
 
 AST6 - `attachments.sha256` always means raw file-content SHA-256. S3 checksum algorithm/value/type and SHA verification provenance are separate fields: single PUT may be `s3_full`, backend streaming is `server_stream`, and multipart raw SHA remains `client_reported` unless a trusted processor later verifies it. ETag and multipart composite checksums never replace raw SHA-256.
 
@@ -25,6 +25,10 @@ AST9 - The legacy inline-attachment migration may begin with already-decoded byt
 AST10 - Postgres stores durable metadata, checksum provenance, intent/part state, and resource links only. It never stores presigned URLs, S3 upload IDs exposed to clients, browser file bytes, base64, or data URLs.
 
 AST11 - Static JPEG/PNG display and thumbnail generation begins only after original upload finalization/linking commits. It is bounded and best-effort, uses exact-length seekable derivative uploads plus content-addressed immutable keys, records derivative SHA/version metadata idempotently, and processes/persists each derivative independently. It never turns derivative failure into original-upload failure. Unsupported/animated, non-default JPEG-orientation, or over-limit images remain on original fallback.
+
+AST12 - Outbound email attachment resolution is metadata-first. Recipient/content validation, tenant-scoped original metadata, active resource-link authorization, nonnegative sizes, and the overflow-safe 24,000,000-byte aggregate all pass before any S3 GetObject. The general 1 GiB browser limit is independent; zero-byte email attachments and an aggregate of exactly 24,000,000 bytes are valid.
+
+AST13 - Outbound S3 readers open only after the Nylas send gate admits the request. Their reported length must equal preflight metadata and their byte stream must be exactly that length. Multipart encoding supplies a deterministic Content-Length while streaming through bounded memory, without outbound base64 or a complete multipart buffer, and closes readers on every completion, error, cancellation, or provider-failure path. Incoming provider attachment and calendar raw-MIME behavior is unchanged.
 
 ## Scenarios
 
@@ -77,9 +81,22 @@ Given a supported still image, unsupported/animated image, and a completed-inten
 - First completion and completed replay may invoke the idempotent ensure service, so a prior best-effort failure can retry.
 - Timeout, decode, encode, storage, or upsert failure is logged with a bounded reason and the completed original response still succeeds; one derivative's failure cannot discard the successfully stored/upserted sibling.
 
+### Scenario AST-S6: Outbound Email Metadata Preflight And Exact Streaming
+
+Given an outbound message contains zero-byte, boundary-sized, unauthorized, oversized, mismatched, truncated, overlong, failing, or canceled Mango attachment streams:
+
+- Missing recipients or empty content without valid references fails before attachment work.
+- Every unique attachment uses one tenant/soft-delete-scoped original metadata-and-links read; repeated authorization targets may reuse the same permission result without weakening checks.
+- The complete declared aggregate is validated before S3, so a rejected final item cannot cause an earlier object read.
+- After admission, objects open in output order and stream directly to Nylas with deterministic multipart length.
+- Storage Content-Length disagreement fails before body reads; short, long, and failing streams terminate the multipart send and every opened body closes.
+- The HTTP consumer can receive multipart bytes before the source finishes, and a non-replayable stream is never retried accidentally.
+- Incoming Nylas attachment downloads, MIME recovery, and calendar RSVP parsing continue to use the shared inbound attachment content model.
+
 ## Required Automated Coverage
 
 - Backend direct-upload handler/storage tests must cover policy boundaries, intent/part state, exact signed headers, verification, retry/abort/idempotency, cleanup, and the retained server-streaming PutObject/GetObject behavior without live AWS.
+- Backend outbound-email tests must cover metadata-only rejection before S3, exact aggregate boundaries, authorization/query shape, deterministic multipart `Content-Length`, bounded exact stream reads, lazy open order, cancellation/provider failure, and source closure without live S3 or Nylas.
 - Frontend attachment tests must cover JSON-only Mango control requests, raw S3 File/Blob PUTs without Mango credentials, bounded-memory hashing, progress, retry/cancel/resume, and partial multi-file success.
 - `infra/tests/attachment_direct_upload.test.mjs` is the static contract for source-controlled CORS headers/origins, the multipart lifecycle backstop, prefix-scoped task-role actions, and ECS upload-policy settings.
 
