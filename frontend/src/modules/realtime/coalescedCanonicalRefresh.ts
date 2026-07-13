@@ -1,12 +1,7 @@
-export type CoalescedCanonicalRefresh = {
-  request: () => void;
-  dispose: () => void;
-};
-
 export function createCoalescedCanonicalRefresh(
   refresh: () => void | Promise<void>,
   onError?: (cause: unknown) => void,
-): CoalescedCanonicalRefresh {
+) {
   let disposed = false;
   let inFlight = false;
   let refreshQueued = false;

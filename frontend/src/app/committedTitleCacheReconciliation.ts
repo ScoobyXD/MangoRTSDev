@@ -1,5 +1,5 @@
 import { markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi.js";
-import type { CommittedEntityTitleUpdate } from "../modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gate-map/LogicGateRecordStore.js";
 import { reconcileLogicGateRelationshipGraphTitle } from "../modules/logic-gate-map/LogicGateRelationshipGraph.js";
 import { reconcileKanbanBoardContentTitles } from "../modules/kanban/KanbanBoardContentStore.js";
@@ -8,8 +8,9 @@ import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordS
 import { reconcileNodeRelationshipGraphTitle } from "../modules/node-map/NodeRelationshipGraph.js";
 import { invalidateProjectRelationshipsForResource } from "../modules/project-management/projectManagementApi.js";
 import { invalidateWorkspaceSnapshot } from "../modules/workspace/workspaceSnapshotCache.js";
+import { patchMyWorkMatrixCachesForCommittedTitle } from "../pages/home/myWorkMatrixLoader.js";
 
-export function invalidateCachesForCommittedEntityTitle(
+export function reconcileCachesForCommittedEntityTitle(
   apiBase: string,
   update: CommittedEntityTitleUpdate,
 ): void {
@@ -26,6 +27,7 @@ export function invalidateCachesForCommittedEntityTitle(
     resourceID,
   });
   reconcileKanbanBoardContentTitles(apiBase, companyID, update);
+  patchMyWorkMatrixCachesForCommittedTitle(update);
 
   if (update.entityType === "node") {
     invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);

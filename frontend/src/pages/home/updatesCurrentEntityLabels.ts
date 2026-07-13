@@ -1,6 +1,6 @@
 import type { NotificationItem } from "../../modules/notifications/notificationsApi.js";
 
-export type UpdateLogicGateResourceRef = {
+type UpdateLogicGateResourceRef = {
   item: Pick<NotificationItem, "entity_type" | "entity_id" | "logic_gate_id">;
   logicGate?: { id: string; label: string };
 };

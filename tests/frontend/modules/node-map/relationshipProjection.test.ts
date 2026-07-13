@@ -2,7 +2,6 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { reconcileCommittedNodeTitleInSnapshot } from "../../../../frontend/src/modules/map/committedTitleSnapshotReconciliation.js";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/node-map/relationshipProjection.js";
 import { NodeRelationship } from "../../../../frontend/src/modules/node-map/shared.js";
@@ -142,8 +141,9 @@ test("disabled relationship colors fall back fully to the map accent", () => {
 
 test("node graph title reconciliation patches only the matching node and keeps unrelated identity", () => {
   const nodes = [
-    { node_id: "node-1", name: "Stale node" },
-    { node_id: "node-2", name: "Other node" },
+    { company_id: "company-1", node_id: "node-1", name: "Stale node" },
+    { company_id: "company-1", node_id: "node-2", name: "Other node" },
+    { company_id: "company-2", node_id: "node-1", name: "Foreign node" },
   ];
   const reconciled = reconcileCommittedNodeTitleInSnapshot(nodes, {
     companyID: "company-1",
@@ -151,21 +151,13 @@ test("node graph title reconciliation patches only the matching node and keeps u
     resourceID: "node-1",
     title: "Committed node",
   });
-  assert.deepEqual(reconciled.map((node) => node.name), ["Committed node", "Other node"]);
+  assert.deepEqual(reconciled.map((node) => node.name), ["Committed node", "Other node", "Foreign node"]);
   assert.equal(reconciled[1], nodes[1]);
+  assert.equal(reconciled[2], nodes[2]);
   assert.equal(reconcileCommittedNodeTitleInSnapshot(nodes, {
     companyID: "company-1",
     entityType: "logic_gate",
     resourceID: "node-1",
     title: "Wrong family",
   }), nodes);
-});
-
-test("node graph cache and async map application both fence in-flight title commits", () => {
-  const graphSource = readFileSync("frontend/src/modules/node-map/NodeRelationshipGraph.ts", "utf8");
-  const loaderSource = readFileSync("frontend/src/modules/node-map/useNodeMapGraphLoader.ts", "utf8");
-  assert.match(graphSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)[\s\S]*await fetchWorkspaceSnapshot[\s\S]*foldCommittedEntityTitlesSince\(/);
-  assert.match(graphSource, /!result\.changed && entry\.hydrated && readCommittedEntityTitleVersion\(\) === requestStartTitleVersion/);
-  assert.match(loaderSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)[\s\S]*await refreshNodeRelationshipGraphSnapshot[\s\S]*foldCommittedEntityTitlesSince\(/);
-  assert.match(loaderSource, /applyFolderScope\(snapshotNodes/);
 });

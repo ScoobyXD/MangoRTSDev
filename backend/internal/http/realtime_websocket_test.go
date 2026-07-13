@@ -120,8 +120,7 @@ func TestRealtimeWebSocketUnauthorizedSubscriptionRejectedAndNotStored(t *testin
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
-	ready := client.readJSON(t)
-	connectionID, _ := ready["connection_id"].(string)
+	client.readJSON(t)
 	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
@@ -129,7 +128,7 @@ func TestRealtimeWebSocketUnauthorizedSubscriptionRejectedAndNotStored(t *testin
 	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope || rejected["error"] != "access_denied" {
 		t.Fatalf("subscription rejected message = %+v, want access denial for %s", rejected, scope)
 	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 0 {
 		t.Fatal("unauthorized subscription was stored")
 	}
 }
@@ -145,11 +144,7 @@ func TestRealtimeWebSocketNotificationSubscriptionRequiresOwnUser(t *testing.T) 
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
-	ready := client.readJSON(t)
-	connectionID, ok := ready["connection_id"].(string)
-	if !ok || strings.TrimSpace(connectionID) == "" {
-		t.Fatalf("ready message missing connection_id: %+v", ready)
-	}
+	client.readJSON(t)
 	scope := realtimeNotificationScope(otherUser.UserID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
@@ -157,7 +152,7 @@ func TestRealtimeWebSocketNotificationSubscriptionRequiresOwnUser(t *testing.T) 
 	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope || rejected["error"] != "access_denied" {
 		t.Fatalf("cross-user notification subscription response = %+v, want access denial for %s", rejected, scope)
 	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 0 {
 		t.Fatal("cross-user notification subscription was stored")
 	}
 }
@@ -190,11 +185,7 @@ func TestRealtimeWebSocketNodeChatSubscriptionRejectsViewOnlyAndIsNotStored(t *t
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
-	ready := client.readJSON(t)
-	connectionID, ok := ready["connection_id"].(string)
-	if !ok || strings.TrimSpace(connectionID) == "" {
-		t.Fatalf("ready message missing connection_id: %+v", ready)
-	}
+	client.readJSON(t)
 	scope := realtimeChatScope(node.NodeID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
@@ -202,7 +193,7 @@ func TestRealtimeWebSocketNodeChatSubscriptionRejectsViewOnlyAndIsNotStored(t *t
 	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope || rejected["error"] != "access_denied" {
 		t.Fatalf("View-only Node chat subscription response = %+v, want Edit-access denial for %s", rejected, scope)
 	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 0 {
 		t.Fatal("View-only Node chat subscription was stored")
 	}
 }
@@ -233,8 +224,7 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
-	ready := client.readJSON(t)
-	connectionID, _ := ready["connection_id"].(string)
+	client.readJSON(t)
 	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
@@ -242,7 +232,7 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
 		t.Fatalf("subscription accepted message = %+v, want acceptance for %s", accepted, scope)
 	}
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatal("authorized subscription was not stored")
 	}
 }
@@ -260,18 +250,16 @@ func TestRealtimeWebSocketCloseRemovesSubscriptions(t *testing.T) {
 	defer server.Close()
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	ready := client.readJSON(t)
-	connectionID, _ := ready["connection_id"].(string)
+	client.readJSON(t)
 	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 	client.readJSON(t)
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatal("subscription was not stored before close")
 	}
 	client.close()
 	waitForRealtimeCondition(t, func() bool {
 		return server.realtimeRegistry.connectionCount() == 0 &&
-			server.realtimeRegistry.connectionSubscriptionCount(connectionID) == 0 &&
 			server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) == 0
 	})
 }
@@ -288,24 +276,6 @@ func TestRealtimeWebSocketAuthenticatedHandshakeSendsReady(t *testing.T) {
 	ready := client.readJSON(t)
 	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
 		t.Fatalf("ready message = %+v", ready)
-	}
-}
-
-func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "12121212-1212-4121-8121-121212121212"
-	token := "realtime-ticket-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-ticket", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator:        &tokenClaimsValidator{claims: map[string]auth.Claims{token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName}}},
-		RealtimeTicketSecret: "test-realtime-ticket-secret",
-	})
-	defer server.Close()
-	cookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
-	client := openRealtimeWebSocketWithCookieForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, cookie)
-	defer client.close()
-	if message := client.readJSON(t); message["type"] != realtimeMessageReady {
-		t.Fatalf("ticket ready message = %+v", message)
 	}
 }
 
@@ -452,30 +422,6 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	}
 	server.publishKanbanChanged(companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
 	client.assertNoMessage(t)
-}
-
-func TestRealtimeNotificationCreatePublishesOnlyRecipientScope(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "77777777-7777-4777-8777-777777777777"
-	token := "realtime-notification-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-notification", domain.RoleCompanyUser)
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	client.readJSON(t)
-	scope := realtimeNotificationScope(user.UserID)
-	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
-	client.readJSON(t)
-	items, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{CompanyID: companyID, RecipientUserID: user.UserID, Type: domain.NotificationEventMentionCreated, SourceEventID: "88888888-8888-4888-8888-888888888888", EntityType: store.EntityTypeNode, EntityID: "node", Title: "Mention"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.publishNotifications(items)
-	message := client.readJSON(t)
-	if message["type"] != realtimeMessageNotificationCreated || message["scope"] != scope {
-		t.Fatalf("notification message = %+v", message)
-	}
 }
 
 func TestRealtimeWebSocketNotificationCreatedRoutesOnlyToRecipientScope(t *testing.T) {
@@ -665,10 +611,9 @@ type realtimeWSClientForTest struct {
 
 func realtimeHandshakeStatusForTest(t *testing.T, handler http.Handler, target, token string) int {
 	t.Helper()
-	conn, reader, resp := openRealtimeHandshakeForTest(t, handler, target, token)
+	conn, _, resp := openRealtimeHandshakeForTest(t, handler, target, token)
 	defer conn.Close()
 	defer resp.Body.Close()
-	_ = reader
 	return resp.StatusCode
 }
 

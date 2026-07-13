@@ -17,7 +17,7 @@ import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subs
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
-import { commitEntityTitleMutation, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { commitEntityTitleMutation, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import {
   assignNodeToLogicGateStatus,
@@ -541,18 +541,19 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const title = update.title.trim();
     if (!title) return;
     if (update.entityType === "node") {
-      applyCards((current) => current.map((card) => card.node_id === update.resourceID ? { ...card, node_title: title } : card));
+      applyCards((current) => reconcileCommittedKanbanCardTitles(current, update));
       setNodeEditorOverlay((current) => current?.nodeID === update.resourceID ? { ...current, nodeTitle: title } : current);
       setAccountAssignmentModal((current) => applyCommittedNodeTitleToKanbanAccountAssignment(current, update.resourceID, title));
       return;
     }
-    const nextBoards = boardsRef.current.map((board) => {
-      const logicGateID = board.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(board.board_id);
-      return logicGateID === update.resourceID ? { ...board, title } : board;
-    });
-    boardsRef.current = nextBoards;
-    setBoards(nextBoards);
-    if (logicGateIDFromKanbanBoardID(activeBoardIDRef.current) === update.resourceID) setActiveLogicGateLabel(title);
+    const nextBoards = reconcileCommittedKanbanBoardTitles(boardsRef.current, update);
+    if (nextBoards !== boardsRef.current) {
+      boardsRef.current = nextBoards;
+      setBoards(nextBoards);
+    }
+    setActiveLogicGateLabel((current) => reconcileCommittedKanbanLogicGateLabel(
+      current, logicGateIDFromKanbanBoardID(activeBoardIDRef.current), update,
+    ));
   }), [applyCards, companyID]);
 
   const beginLocalBoardMutation = useCallback((mutationBoardID = activeBoardIDRef.current, logicGateID = "") => {
@@ -1974,7 +1975,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: getNodeTitle(result) || cleanTitle }),
       );
       const updatedTitle = getNodeTitle(updated) || cleanTitle;
-      invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       applyCards((previous) => previous.map((card) => (card.node_id === nodeID ? { ...card, node_title: updatedTitle } : card)));
       setNodeEditorOverlay((current) => (current?.nodeID === nodeID ? { ...current, nodeTitle: updatedTitle } : current));

@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, canonical pins table audit, frontend DB-backed API/no-cache coverage, and frontend pin drop helper coverage exists; frontend menu and browser DOM drag behavior still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, canonical pins table audit, frontend DB-backed API/no-cache coverage, and frontend pin drop helper coverage exists; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; frontend menu and browser DOM drag behavior still needs mapped automation)
 
 ## Business Logic
 

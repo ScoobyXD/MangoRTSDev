@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and GVIC title reconcilers. Rule ID mapping is partial.
 
 ## Business Logic
 

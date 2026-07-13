@@ -1,14 +1,14 @@
-import type { CommittedEntityTitleUpdate } from "../modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
 import type { AppDockTab } from "./appDockTabs.js";
 import type { SidebarPin } from "./sidebarPins.js";
 import type { AppTimelineDay, AppTimelineItem, AppTimelineState } from "./timelineState.js";
 
-export type AppNodePopupTitleState = {
+type AppNodePopupTitleState = {
   nodeID: string;
   nodeTitle: string;
 };
 
-export type AppLogicGateTargetTitleState = {
+type AppLogicGateTargetTitleState = {
   logicGateID: string;
   label: string;
 };

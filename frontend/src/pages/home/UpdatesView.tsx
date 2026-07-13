@@ -62,7 +62,6 @@ type UpdatesViewProps = {
   apiBase: string;
   companyID: string;
   currentUserID: string;
-  liveRefreshToken?: number;
   onOpenNode: (nodeID: string, informationID?: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
@@ -172,7 +171,6 @@ export function UpdatesView({
   apiBase,
   companyID,
   currentUserID,
-  liveRefreshToken = 0,
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
@@ -202,7 +200,6 @@ export function UpdatesView({
   const [reloadToken, setReloadToken] = useState(0);
   const updatesListRef = useRef<HTMLDivElement | null>(null);
   const notificationRefreshTimerRef = useRef<number | null>(null);
-  const canonicalLoadGenerationRef = useRef(0);
   const canonicalLoadInFlightRef = useRef(false);
   const notificationReloadQueuedRef = useRef(false);
 
@@ -303,8 +300,6 @@ export function UpdatesView({
   }, [branchByRootID, branchLoadingIDs, companyID, filter]);
 
   useEffect(() => {
-    const loadGeneration = canonicalLoadGenerationRef.current + 1;
-    canonicalLoadGenerationRef.current = loadGeneration;
     if (!companyID.trim()) {
       canonicalLoadInFlightRef.current = false;
       notificationReloadQueuedRef.current = false;
@@ -356,8 +351,6 @@ export function UpdatesView({
         if (!cancelled) {
           setLoadingRoots(false);
           setBranchLoadingIDs(new Set());
-        }
-        if (!cancelled && canonicalLoadGenerationRef.current === loadGeneration) {
           canonicalLoadInFlightRef.current = false;
           if (notificationReloadQueuedRef.current) {
             notificationReloadQueuedRef.current = false;
@@ -367,12 +360,10 @@ export function UpdatesView({
       });
     return () => {
       cancelled = true;
-      if (canonicalLoadGenerationRef.current === loadGeneration) {
-        canonicalLoadInFlightRef.current = false;
-        notificationReloadQueuedRef.current = false;
-      }
+      canonicalLoadInFlightRef.current = false;
+      notificationReloadQueuedRef.current = false;
     };
-  }, [companyID, filter, liveRefreshToken, reloadToken]);
+  }, [companyID, filter, reloadToken]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;

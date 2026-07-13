@@ -53,6 +53,10 @@ import { buildReplyAllRecipients } from "../../modules/communications/emailRecip
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
+import {
+  reconcileCommittedLogicGateRecordTitles,
+  reconcileCommittedNodeTitleInSnapshot,
+} from "../../modules/map/committedTitleSnapshotReconciliation";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
@@ -71,8 +75,7 @@ import {
   foldCommittedEntityTitlesSince,
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
-  type CommittedEntityTitleUpdate,
-} from "../../modules/company-explorer/companyExplorerLocalEntityUpdates";
+} from "../../modules/realtime/committedEntityTitleUpdates";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
@@ -137,41 +140,6 @@ function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: Email
   return sortEmailConversationMessagesNewestFirst(Array.from(byID.values()));
 }
 
-function reconcileHomeNodeTitles(
-  nodes: NodeRecord[],
-  update: CommittedEntityTitleUpdate,
-  activeCompanyID: string,
-): NodeRecord[] {
-  const companyID = activeCompanyID.trim();
-  const resourceID = update.resourceID.trim();
-  const title = update.title.trim();
-  if (!companyID || update.companyID.trim() !== companyID || update.entityType !== "node" || !resourceID || !title) return nodes;
-  let changed = false;
-  const next = nodes.map((node) => {
-    if (node.company_id?.trim() !== companyID || node.node_id.trim() !== resourceID || node.name === title) return node;
-    changed = true;
-    return { ...node, name: title };
-  });
-  return changed ? next : nodes;
-}
-
-function reconcileHomeLogicGateTitles(
-  logicGates: LogicGateRecord[],
-  update: CommittedEntityTitleUpdate,
-  activeCompanyID: string,
-): LogicGateRecord[] {
-  const companyID = activeCompanyID.trim();
-  const resourceID = update.resourceID.trim();
-  const title = update.title.trim();
-  if (!companyID || update.companyID.trim() !== companyID || update.entityType !== "logic_gate" || !resourceID || !title) return logicGates;
-  let changed = false;
-  const next = logicGates.map((logicGate) => {
-    if (logicGate.company_id?.trim() !== companyID || logicGate.logic_gate_id.trim() !== resourceID || logicGate.header === title) return logicGate;
-    changed = true;
-    return { ...logicGate, header: title };
-  });
-  return changed ? next : logicGates;
-}
 
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
@@ -638,13 +606,11 @@ export function HomePage({
       return changed ? { ...current, targets } : current;
     });
     if (update.entityType === "node") {
-      setNodes((current) => current.map((node) => node.node_id === update.resourceID ? { ...node, name: title } : node));
+      setNodes((current) => reconcileCommittedNodeTitleInSnapshot(current, update));
       setNodeEditorOverlay((current) => current?.nodeID === update.resourceID ? { ...current, nodeTitle: title } : current);
       return;
     }
-    setLogicGates((current) => current.map((logicGate) => logicGate.logic_gate_id === update.resourceID
-      ? { ...logicGate, header: title }
-      : logicGate));
+    setLogicGates((current) => reconcileCommittedLogicGateRecordTitles(current, update));
   }), [companyID]);
   useEffect(() => {
     setOptimisticMyWorkDeletedNodeIDs(new Set());
@@ -1266,14 +1232,14 @@ export function HomePage({
       setLogicGateFolderItems(panel.logicGateFolderItems);
       setLogicGates(foldCommittedEntityTitlesSince(
         panel.logicGates, companyID, titleVersionAtStart,
-        (current, update) => reconcileHomeLogicGateTitles(current, update, companyID),
+        reconcileCommittedLogicGateRecordTitles,
       ));
       setMyLogicGateShortcuts(sortLogicGateShortcuts(panel.myLogicGateShortcuts));
       setNodeFolders(panel.nodeFolders);
       setNodeFolderItems(panel.nodeFolderItems);
       setNodes(foldCommittedEntityTitlesSince(
         panel.nodes, companyID, titleVersionAtStart,
-        (current, update) => reconcileHomeNodeTitles(current, update, companyID),
+        reconcileCommittedNodeTitleInSnapshot,
       ));
       setLogicGateExpandedIDs((previous) => {
         const next = new Set(previous);
@@ -2981,7 +2947,7 @@ export function HomePage({
       setLogicGates((previous) => {
         const reconciledFetched = foldCommittedEntityTitlesSince(
           fetched, companyID, titleVersionAtStart,
-          (current, update) => reconcileHomeLogicGateTitles(current, update, companyID),
+          reconcileCommittedLogicGateRecordTitles,
         );
         const byID = new Map(previous.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
         let changed = false;
@@ -3506,10 +3472,10 @@ export function HomePage({
       .filter((id) => logicGateByID.has(id));
     return selectedLogicGateIDs.length > 0 ? selectedLogicGateIDs : [cleanLogicGateID];
   }, [logicGateByID, selectedLogicGateRowIDs]);
-  const mergeUpdatedNode = useCallback((node: NodeRecord, titleVersionAtStart: number) => {
+  const mergeUpdatedNode = useCallback((node: NodeRecord, titleVersionAtStart: number, invalidateRecordCache = true) => {
     const reconciledNode = foldCommittedEntityTitlesSince(
       [node], companyID, titleVersionAtStart,
-      (current, update) => reconcileHomeNodeTitles(current, update, companyID),
+      reconcileCommittedNodeTitleInSnapshot,
     )[0] ?? node;
     setNodes((previous) => {
       let found = false;
@@ -3520,7 +3486,7 @@ export function HomePage({
       });
       return found ? next : [...next, reconciledNode];
     });
-    invalidateNodeRecordStoreCaches(apiBase, companyID, reconciledNode.node_id);
+    if (invalidateRecordCache) invalidateNodeRecordStoreCaches(apiBase, companyID, reconciledNode.node_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, reconciledNode);
   }, [apiBase, companyID]);
   const applyGVICMatrixProjectionRows = useCallback((rows: GVICMatrixProjectionRow[], options: {
@@ -3589,7 +3555,7 @@ export function HomePage({
       }
       return foldCommittedEntityTitlesSince(
         Array.from(byID.values()), companyID, options.titleVersionAtStart,
-        (current, update) => reconcileHomeNodeTitles(current, update, companyID),
+        reconcileCommittedNodeTitleInSnapshot,
       );
     });
 
@@ -3625,7 +3591,7 @@ export function HomePage({
       }
       const reconciledLogicGates = foldCommittedEntityTitlesSince(
         Array.from(byID.values()), companyID, options.titleVersionAtStart,
-        (current, update) => reconcileHomeLogicGateTitles(current, update, companyID),
+        reconcileCommittedLogicGateRecordTitles,
       );
       const reconciledByID = new Map(reconciledLogicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
       for (const logicGateID of nextProjectedLogicGateIDs) {
@@ -3692,7 +3658,7 @@ export function HomePage({
   const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, folderItems: CompanyExplorerFolderItem[], titleVersionAtStart: number) => {
     const reconciledLogicGate = foldCommittedEntityTitlesSince(
       [logicGate], companyID, titleVersionAtStart,
-      (current, update) => reconcileHomeLogicGateTitles(current, update, companyID),
+      reconcileCommittedLogicGateRecordTitles,
     )[0] ?? logicGate;
     setLogicGates((previous) => {
       const next = previous.filter((item) => item.logic_gate_id !== reconciledLogicGate.logic_gate_id);
@@ -4113,16 +4079,14 @@ export function HomePage({
         }),
         (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: nodeTitle(result) }),
       );
-      mergeUpdatedNode(updated, titleVersionAtStart);
-      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
-      scheduleMyWorkLiveRefresh();
+      mergeUpdatedNode(updated, titleVersionAtStart, false);
       setNotice("Node renamed.");
     } catch (renameError) {
       setError(formatError(renameError, "Failed to rename node"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID, scheduleMyWorkLiveRefresh]);
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
   const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[], confirmationDisplayName: string): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));

@@ -20,10 +20,11 @@ import {
   foldCommittedEntityTitlesSince,
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
-} from "../company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../realtime/committedEntityTitleUpdates.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
+import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore.js";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
@@ -112,11 +113,9 @@ import {
   type ProjectRelationshipProjection,
 } from "./projectManagementApi.js";
 import {
-  reconcileProjectCriticalPathTitles,
-  reconcileProjectRelationshipTitles,
+  reconcileProjectResourceDisplayTitles,
   reconcileRelationshipContextTitle,
   reconcileSelectedNodeTitle,
-  reconcileProjectNodePickerTitles,
 } from "./projectManagementCommittedTitles.js";
 import {
   buildProjectRelationshipGroupingModel,
@@ -321,8 +320,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
-    setRelationships((current) => reconcileProjectRelationshipTitles(current, update, companyID));
-    setCriticalPath((current) => reconcileProjectCriticalPathTitles(current, update, companyID));
+    setRelationships((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
+    setCriticalPath((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
     setSelectedCriticalPathNode((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setSelectedRelationshipNodePanel((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setRelationshipContextMenu((current) => {
@@ -392,11 +391,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setProjectTitleDraft(view.project.name || "");
       setRelationships(foldCommittedEntityTitlesSince(
         view.relationships ?? [], companyID, titleVersionAtStart,
-        (current, update) => reconcileProjectRelationshipTitles(current, update, companyID),
+        (current, update) => reconcileProjectResourceDisplayTitles(current, update, companyID),
       ));
       setCriticalPath(foldCommittedEntityTitlesSince(
         orderCriticalPathSteps(view.critical_path ?? []), companyID, titleVersionAtStart,
-        (current, update) => reconcileProjectCriticalPathTitles(current, update, companyID),
+        (current, update) => reconcileProjectResourceDisplayTitles(current, update, companyID),
       ));
       setCompanyUsers(users);
       setGroups(userGroups.groups);
@@ -2255,7 +2254,7 @@ function CriticalPathTable({
   ), [nodePickerResults]);
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
-    setNodePickerResults((current) => reconcileProjectNodePickerTitles(current, update, companyID));
+    setNodePickerResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
   }), [companyID]);
 
   useEffect(() => {
@@ -2276,7 +2275,7 @@ function CriticalPathTable({
         if (cancelled || nodePickerRequestRef.current !== requestID) return;
         setNodePickerResults(foldCommittedEntityTitlesSince(
           payload.results ?? [], companyID, titleVersionAtStart,
-          (current, update) => reconcileProjectNodePickerTitles(current, update, companyID),
+          reconcileCompanyExplorerSearchResultTitles,
         ));
       })
       .catch((searchError) => {

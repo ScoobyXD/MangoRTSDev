@@ -97,7 +97,7 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
-import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
@@ -1205,7 +1205,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         );
         setLinkedNodeTitle(updated.header);
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
-        invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
       } else {
         const updated = await commitEntityTitleMutation(
@@ -1216,10 +1215,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: getNodeTitle(result) }),
         );
         setLinkedNodeTitle(getNodeTitle(updated));
-        invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       }
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }

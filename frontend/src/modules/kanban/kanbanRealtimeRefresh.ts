@@ -1,4 +1,4 @@
-import type { CommittedEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 import { logicGateIDFromKanbanBoardID, type KanbanBoard, type KanbanCard } from "./shared.js";
 
 export const KANBAN_REALTIME_LOCAL_ECHO_COALESCE_MS = 750;
@@ -14,7 +14,7 @@ export function kanbanRealtimeCanonicalRefreshDelayMs(
   const elapsed = Math.max(0, now - lastLocalMutationAt);
   return Math.max(0, KANBAN_REALTIME_LOCAL_ECHO_COALESCE_MS - elapsed);
 }
-export type KanbanAccountAssignmentTitleState = {
+type KanbanAccountAssignmentTitleState = {
   nodeID: string;
   nodeTitle: string;
 };

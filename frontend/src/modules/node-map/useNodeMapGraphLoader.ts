@@ -1,9 +1,7 @@
 import { useEffect } from "react";
 import type React from "react";
-import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion } from "../company-explorer/companyExplorerLocalEntityUpdates";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { resolveMapSelectionAfterGraphLoad } from "../folders/companyExplorerFolders";
-import { reconcileCommittedNodeTitleInSnapshot } from "../map/committedTitleSnapshotReconciliation";
 import {
   getNodeRelationshipGraphSnapshot,
   hasNodeRelationshipGraphSnapshot,
@@ -67,18 +65,12 @@ export function useNodeMapGraphLoader({
     setLoading(true);
     setError("");
     try {
-      const requestStartTitleVersion = readCommittedEntityTitleVersion();
       const scope = { folderID: activeFolderIDRef.current };
       if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID, scope)) {
         await refreshNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
       }
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
-      const snapshotNodes = foldCommittedEntityTitlesSince(
-        snapshot.nodes ?? [],
-        companyID,
-        requestStartTitleVersion,
-        reconcileCommittedNodeTitleInSnapshot,
-      );
+      const snapshotNodes = snapshot.nodes ?? [];
       const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
       applyServerMapPositions(snapshot.node_map_positions ?? []);
 

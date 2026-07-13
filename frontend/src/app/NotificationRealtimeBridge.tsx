@@ -4,7 +4,7 @@ import { getActiveCompanyID } from "../auth/currentCompany";
 import { createNotificationRealtimeHandlers } from "../modules/notifications/notificationRealtimeCoordinator";
 import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 
-export function AppLiveFreshnessBridge() {
+export function NotificationRealtimeBridge() {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
 

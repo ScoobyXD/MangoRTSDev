@@ -4,7 +4,7 @@ import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
-import { createOneShotBlurSuppression } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gate-map/shared";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,

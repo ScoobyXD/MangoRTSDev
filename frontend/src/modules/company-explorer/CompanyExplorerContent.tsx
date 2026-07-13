@@ -70,7 +70,7 @@ import {
 } from "./CompanyExplorerContentModel";
 import {
   applyCompanyExplorerSnapshotTitleUpdate,
-  applyCompanyExplorerSearchTitleUpdate,
+  reconcileCompanyExplorerSearchResultTitles,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldLoadCompanyExplorerBranchChildren,
@@ -81,7 +81,7 @@ import {
   foldCommittedEntityTitlesSince,
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
-} from "./companyExplorerLocalEntityUpdates";
+} from "../realtime/committedEntityTitleUpdates";
 import {
   reconcileGVICProjectionLogicGateTitles,
   reconcileGVICProjectionRowTitles,
@@ -1359,7 +1359,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     if (update.companyID.trim() !== companyID.trim()) return;
     dispatchExplorerStore({ type: "applyEntityTitleUpdate", update });
-    setCompanyExplorerSearchResults((current) => applyCompanyExplorerSearchTitleUpdate(current, update));
+    setCompanyExplorerSearchResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
     setGVICProjectionRows((current) => reconcileGVICProjectionRowTitles(current, update, companyID));
     setGVICProjectionLogicGates((current) => reconcileGVICProjectionLogicGateTitles(current, update, companyID));
     setGVICProjectionByUserID((current) => reconcileGVICProjectionTitlesByUserID(current, update, companyID));
@@ -1927,7 +1927,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       .then((payload) => {
         if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
         setCompanyExplorerSearchResults(foldCommittedEntityTitlesSince(
-          payload.results ?? [], companyID, titleVersionAtStart, applyCompanyExplorerSearchTitleUpdate,
+          payload.results ?? [], companyID, titleVersionAtStart, reconcileCompanyExplorerSearchResultTitles,
         ));
       })
       .catch((err) => {

@@ -15,7 +15,7 @@ import {
   foldCommittedEntityTitlesSince,
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
-} from "../company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
@@ -53,7 +53,7 @@ import {
   type ProjectManagementTimelineRow,
 } from "./projectManagementApi.js";
 import {
-  reconcileProjectManagementTimelineTitles,
+  reconcileProjectResourceDisplayTitles,
   reconcileProjectManagementWorkspaceTitles,
 } from "./projectManagementCommittedTitles.js";
 import { ProjectSummaryContent } from "./ProjectSummaryContent.js";
@@ -688,7 +688,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setWorkspace((current) => reconcileProjectManagementWorkspaceTitles(current, update, companyID));
-    setTimelineRows((current) => reconcileProjectManagementTimelineTitles(current, update, companyID));
+    setTimelineRows((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
   }), [companyID]);
 
   const loadWorkspacePanel = useCallback(async () => {
@@ -844,7 +844,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       const orderedRows = orderTimelineRows(rows, current.length > 0 ? current : timelineRowsRef.current);
       return foldCommittedEntityTitlesSince(
         orderedRows, companyID, titleVersionAtStart,
-        (currentRows, update) => reconcileProjectManagementTimelineTitles(currentRows, update, companyID),
+        (currentRows, update) => reconcileProjectResourceDisplayTitles(currentRows, update, companyID),
       );
     });
     if (failureCount > 0 && rows.length === 0) {

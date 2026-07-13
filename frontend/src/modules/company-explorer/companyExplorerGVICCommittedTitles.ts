@@ -1,7 +1,7 @@
 import type { GVICMatrixProjectionRow } from "../kanban/kanbanApi.js";
-import type { CommittedEntityTitleUpdate } from "./companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 
-export type GVICProjectionLogicGateTitleRecord = {
+type GVICProjectionLogicGateTitleRecord = {
   company_id: string;
   logic_gate_id: string;
   header: string;

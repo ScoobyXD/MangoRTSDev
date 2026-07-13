@@ -6,7 +6,7 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import { readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../../modules/company-explorer/companyExplorerLocalEntityUpdates";
+import { readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../../modules/realtime/committedEntityTitleUpdates";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
@@ -268,12 +268,7 @@ export function MyWorkView({
     const title = update.title.trim();
     const resourceID = update.resourceID.trim();
     if (update.companyID !== companyID || !resourceID || !title) return;
-    setMatrixCells((current) => patchMyWorkMatrixCellsForCommittedTitle(current, {
-      companyID,
-      entityType: update.entityType,
-      resourceID,
-      title,
-    }));
+    setMatrixCells((current) => patchMyWorkMatrixCellsForCommittedTitle(current, update));
   }), [companyID]);
 
   useEffect(() => {

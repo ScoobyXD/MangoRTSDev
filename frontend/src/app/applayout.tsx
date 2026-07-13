@@ -38,7 +38,7 @@ import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadHo
 import { LazyAccountManagerPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
-import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
+import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeKeyViewID, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinRequestDetail } from "./sidebarPins";
@@ -55,8 +55,8 @@ import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
 import { removeNodeRelationshipGraphNode } from "../modules/node-map/NodeRelationshipGraph";
-import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/company-explorer/companyExplorerLocalEntityUpdates";
-import { invalidateCachesForCommittedEntityTitle } from "./committedTitleCacheInvalidation";
+import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
+import { reconcileCachesForCommittedEntityTitle } from "./committedTitleCacheReconciliation";
 import {
   isCommittedTitleUpdateForCompany,
   reconcileAppDockTabTitles,
@@ -65,7 +65,6 @@ import {
   reconcileAppSidebarPinTitles,
   reconcileAppTimelineTitles,
 } from "./appCommittedTitleState";
-import { recordMyWorkCommittedTitle } from "../pages/home/myWorkMatrixLoader";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -661,9 +660,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     saveAppTimelineState(taskbarData.scope, taskbarData.timelineState);
   }, [taskbarData.scope, taskbarData.timelineState, taskbarScope]);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
-    invalidateCachesForCommittedEntityTitle(apiBase, update);
+    reconcileCachesForCommittedEntityTitle(apiBase, update);
     if (!isCommittedTitleUpdateForCompany(update, activeCompanyID)) return;
-    recordMyWorkCommittedTitle(update);
     setDockTabs((current) => reconcileAppDockTabTitles(current, update));
     setTimelineState((current) => reconcileAppTimelineTitles(current, update));
     setSidebarPins((current) => reconcileAppSidebarPinTitles(current, update));
@@ -1707,7 +1705,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
-      <AppLiveFreshnessBridge />
+      <NotificationRealtimeBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
         accent={UI_THEME.panel}

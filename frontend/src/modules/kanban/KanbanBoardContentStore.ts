@@ -5,6 +5,8 @@ import {
   throwIfResourceMarkedMissing,
 } from "../api/missingResources.js";
 import { isHTTPNotFoundError, requestJSON } from "../api/requestJSON.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
+import { reconcileCommittedKanbanCardTitles } from "./kanbanRealtimeRefresh.js";
 import type {
   KanbanBoard,
   KanbanCard,
@@ -21,12 +23,6 @@ export type KanbanBoardContents = {
   board?: KanbanBoard;
   columns: KanbanColumn[];
   cards: KanbanCard[];
-};
-
-export type KanbanCommittedEntityTitle = {
-  entityType: "node" | "logic_gate";
-  resourceID: string;
-  title: string;
 };
 
 export type KanbanBoardContentsCacheSnapshot = {
@@ -125,7 +121,7 @@ export function invalidateKanbanBoardContentsForCompany(apiBase: string, company
 export function reconcileKanbanBoardContentTitles(
   apiBase: string,
   companyID: string,
-  update: KanbanCommittedEntityTitle,
+  update: CommittedEntityTitleUpdate,
 ): void {
   const cleanResourceID = update.resourceID.trim();
   const title = update.title.trim();
@@ -142,28 +138,28 @@ export function reconcileKanbanBoardContentTitles(
     contentInflight.delete(cacheKey);
     const cached = contentCache.get(cacheKey);
     if (!cached) continue;
-    const contents = cloneContents(cached.contents);
-    let changed = false;
+    let contents = cached.contents;
     if (update.entityType === "node") {
-      contents.cards = contents.cards.map((card) => {
-        if (card.node_id !== cleanResourceID || card.node_title === title) return card;
-        changed = true;
-        return { ...card, node_title: title };
-      });
+      const cards = reconcileCommittedKanbanCardTitles(contents.cards, update);
+      if (cards !== contents.cards) contents = { ...contents, cards };
     } else {
       if (contents.logicGate?.logic_gate_id === cleanResourceID && contents.logicGate.header !== title) {
-        contents.logicGate = { ...contents.logicGate, header: title };
-        changed = true;
+        contents = {
+          ...contents,
+          logicGate: { ...contents.logicGate, header: title },
+        };
       }
       const boardLogicGateID = contents.board?.logic_gate_id?.trim()
         || logicGateIDFromKanbanBoardID(contents.board?.board_id ?? "");
       if (contents.board && boardLogicGateID === cleanResourceID && contents.board.title !== title) {
-        contents.board = { ...contents.board, title };
-        changed = true;
+        contents = {
+          ...contents,
+          board: { ...contents.board, title },
+        };
       }
     }
     contentCache.set(cacheKey, {
-      contents: changed ? contents : cached.contents,
+      contents,
       stale: cached.stale,
     });
   }

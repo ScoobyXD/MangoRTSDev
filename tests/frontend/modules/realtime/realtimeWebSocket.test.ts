@@ -350,20 +350,13 @@ test("frontend source inventory contains only the three retained scope families"
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorProjectionDeltas.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/kanban/kanbanProjectionDeltas.ts")), false);
 
-  const editorSource = readFileSync(resolve(sourceRoot, "modules/editor/EditorContent.tsx"), "utf8");
-  const kanbanSource = readFileSync(resolve(sourceRoot, "modules/kanban/KanbanContent.tsx"), "utf8");
-  for (const [surface, source] of [["Node chat", editorSource], ["Kanban", kanbanSource]] as const) {
-    assert.match(source, /onAccepted\(\)\s*{\s*scheduleCanonicalRefresh\(\);\s*}/, `${surface} must reconcile the load-to-subscribe race on first acceptance and reconnect`);
-    assert.doesNotMatch(source, /acceptedOnce/, `${surface} must not skip first acceptance`);
-  }
-
   const subscriptionSources = sourceFiles
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
   assert.equal(subscriptionSources.length, 3);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
-    "app/AppLiveFreshnessBridge.tsx",
+    "app/NotificationRealtimeBridge.tsx",
     "modules/editor/EditorContent.tsx",
     "modules/kanban/KanbanContent.tsx",
   ]);

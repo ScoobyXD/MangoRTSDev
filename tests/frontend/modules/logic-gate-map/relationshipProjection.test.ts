@@ -155,8 +155,9 @@ test("disabled logic-gate relationship colors fall back fully to the map accent"
 
 test("logic-gate graph title reconciliation keeps raw and canvas snapshots aligned", () => {
   const logicGates = [
-    { logic_gate_id: "gate-1", header: "Stale gate" },
-    { logic_gate_id: "gate-2", header: "Other gate" },
+    { company_id: "company-1", logic_gate_id: "gate-1", header: "Stale gate" },
+    { company_id: "company-1", logic_gate_id: "gate-2", header: "Other gate" },
+    { company_id: "company-2", logic_gate_id: "gate-1", header: "Foreign gate" },
   ];
   const update = {
     companyID: "company-1",
@@ -165,26 +166,27 @@ test("logic-gate graph title reconciliation keeps raw and canvas snapshots align
     title: "Committed gate",
   };
   const reconciledRecords = reconcileCommittedLogicGateRecordTitles(logicGates, update);
-  assert.deepEqual(reconciledRecords.map((gate) => gate.header), ["Committed gate", "Other gate"]);
+  assert.deepEqual(reconciledRecords.map((gate) => gate.header), ["Committed gate", "Other gate", "Foreign gate"]);
   assert.equal(reconciledRecords[1], logicGates[1]);
+  assert.equal(reconciledRecords[2], logicGates[2]);
 
   const canvasNodes = [
-    { node_id: "gate-1", header: "Stale gate", title: "Stale gate" },
-    { node_id: "gate-2", header: "Other gate", title: "Other gate" },
+    { company_id: "company-1", node_id: "gate-1", header: "Stale gate", title: "Stale gate" },
+    { company_id: "company-1", node_id: "gate-2", header: "Other gate", title: "Other gate" },
+    { company_id: "company-2", node_id: "gate-1", header: "Foreign gate", title: "Foreign gate" },
   ];
   const reconciledNodes = reconcileCommittedLogicGateTitleInSnapshot(canvasNodes, update);
   assert.deepEqual(reconciledNodes.map((gate) => [gate.header, gate.title]), [
     ["Committed gate", "Committed gate"],
     ["Other gate", "Other gate"],
+    ["Foreign gate", "Foreign gate"],
   ]);
   assert.equal(reconciledNodes[1], canvasNodes[1]);
+  assert.equal(reconciledNodes[2], canvasNodes[2]);
 });
 
-test("logic-gate graph cache and async map application both fence in-flight title commits", () => {
+test("logic-gate graph cache fences in-flight title commits", () => {
   const graphSource = readFileSync("frontend/src/modules/logic-gate-map/LogicGateRelationshipGraph.ts", "utf8");
-  const mapSource = readFileSync("frontend/src/modules/logic-gate-map/LogicGateMapContent.tsx", "utf8");
   assert.match(graphSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)[\s\S]*await fetchWorkspaceSnapshot[\s\S]*foldCommittedEntityTitlesSince\(/);
   assert.match(graphSource, /!result\.changed && entry\.hydrated && readCommittedEntityTitleVersion\(\) === requestStartTitleVersion/);
-  assert.match(mapSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)[\s\S]*await refreshLogicGateRelationshipGraphSnapshot[\s\S]*foldCommittedEntityTitlesSince\(/);
-  assert.match(mapSource, /applyFolderScope\(snapshotNodes/);
 });

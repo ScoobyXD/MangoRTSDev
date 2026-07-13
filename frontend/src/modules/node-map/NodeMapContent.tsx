@@ -28,7 +28,8 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
-import { commitEntityTitleMutation, createCommittedTitleEditBuffer, preserveEditingEntityTitleInSnapshot, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { commitEntityTitleMutation, createCommittedTitleEditBuffer, preserveEditingEntityTitleInSnapshot, subscribeCommittedEntityTitleUpdates, type CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates";
+import { reconcileCommittedNodeTitleInSnapshot } from "../map/committedTitleSnapshotReconciliation";
 
 type NodeWorkspaceEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -239,10 +240,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     };
   }, [activeInlineCommentThread, nodePositions, nodeSizes, pan.x, pan.y, zoom]);
 
-  const applyCommittedNodeTitle = useCallback((update: { resourceID: string; title: string }) => {
+  const applyCommittedNodeTitle = useCallback((update: CommittedEntityTitleUpdate) => {
     const title = update.title.trim();
     if (!title) return;
-    const patchTitle = (items: NodeRecord[]) => items.map((item) => item.node_id === update.resourceID ? { ...item, name: title } : item);
+    const patchTitle = (items: NodeRecord[]) => reconcileCommittedNodeTitleInSnapshot(items, update);
     setAllNodes((current) => {
       const next = patchTitle(current);
       allNodesRef.current = next;

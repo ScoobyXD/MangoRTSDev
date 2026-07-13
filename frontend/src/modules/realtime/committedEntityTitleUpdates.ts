@@ -52,8 +52,7 @@ export function foldCommittedEntityTitlesSince<T>(
   return next;
 }
 
-export const EVENT_COMPANY_EXPLORER_ENTITY_TITLE_UPDATED = "mangorts:company-explorer-entity-title-updated";
-export const EVENT_COMMITTED_ENTITY_TITLE_UPDATED = EVENT_COMPANY_EXPLORER_ENTITY_TITLE_UPDATED;
+const EVENT_COMMITTED_ENTITY_TITLE_UPDATED = "mangorts:committed-entity-title-updated";
 
 export function publishCommittedEntityTitleUpdate(
   update: CommittedEntityTitleUpdate,
@@ -81,8 +80,6 @@ export async function commitEntityTitleMutation<T>(
   if (update) publishCommittedEntityTitleUpdate(update, target);
   return result;
 }
-
-export type CommittedTitleEditBuffer = ReturnType<typeof createCommittedTitleEditBuffer>;
 
 export function createCommittedTitleEditBuffer() {
   let activeKey = "";
@@ -165,7 +162,3 @@ export function subscribeCommittedEntityTitleUpdates(
   target.addEventListener(EVENT_COMMITTED_ENTITY_TITLE_UPDATED, handleUpdate);
   return () => target.removeEventListener(EVENT_COMMITTED_ENTITY_TITLE_UPDATED, handleUpdate);
 }
-
-export type CompanyExplorerEntityTitleUpdate = CommittedEntityTitleUpdate;
-export const publishCompanyExplorerEntityTitleUpdate = publishCommittedEntityTitleUpdate;
-export const subscribeCompanyExplorerEntityTitleUpdates = subscribeCommittedEntityTitleUpdates;

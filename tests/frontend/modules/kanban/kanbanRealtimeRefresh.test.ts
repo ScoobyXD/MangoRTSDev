@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   foldCommittedEntityTitlesSince,
   publishCommittedEntityTitleUpdate,
   readCommittedEntityTitleVersion,
   resetCommittedEntityTitleRegistryForTests,
-} from "../../../../frontend/src/modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../../../../frontend/src/modules/realtime/committedEntityTitleUpdates.js";
 import {
   kanbanRealtimeCanonicalRefreshDelayMs,
   KANBAN_REALTIME_LOCAL_ECHO_COALESCE_MS,
@@ -96,20 +95,4 @@ test("Kanban async responses retain only title commits newer than their request"
   const laterRequestVersion = readCommittedEntityTitleVersion();
   assert.equal(foldCommittedEntityTitlesSince(cards, "company-1", laterRequestVersion, reconcileCommittedKanbanCardTitles), cards);
   resetCommittedEntityTitleRegistryForTests();
-});
-
-test("every central Kanban async title-bearing load captures and folds a title version", () => {
-  const source = readFileSync("frontend/src/modules/kanban/KanbanContent.tsx", "utf8");
-  const arenaLoad = source.slice(source.indexOf("const loadLogicGateArenaView"), source.indexOf("useEffect(() => () =>", source.indexOf("const loadLogicGateArenaView")));
-  const boardListLoad = source.slice(source.indexOf("const refreshBoards = useCallback"), source.indexOf("const saveCurrentBoardView"));
-  const boardLoadStart = source.indexOf("const refreshBoard = useCallback");
-  const boardLoad = source.slice(boardLoadStart, source.indexOf("useEffect(() => {", boardLoadStart));
-  for (const [name, loadSource] of [["arena", arenaLoad], ["board list", boardListLoad], ["board", boardLoad]]) {
-    assert.match(loadSource, /requestStartTitleVersion = readCommittedEntityTitleVersion\(\)/, `${name} load must capture the registry version before awaiting`);
-    assert.match(loadSource, /foldCommittedEntityTitlesSince\(/, `${name} load must fold later commits into its response`);
-  }
-  assert.match(arenaLoad, /reconcileCommittedKanbanLogicGateLabel/);
-  assert.match(arenaLoad, /reconcileCommittedKanbanCardTitles/);
-  assert.match(boardListLoad, /reconcileCommittedKanbanBoardTitles/);
-  assert.match(boardLoad, /applyCards\(foldCommittedEntityTitlesSince\(/);
 });

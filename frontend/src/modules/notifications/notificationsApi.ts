@@ -80,11 +80,11 @@ export type NotificationClearInput = {
   nodeID?: string;
 };
 
-export type NotificationUpdateEventSource = {
+type NotificationUpdateEventSource = {
   source?: string;
 };
 
-export type LocalNotificationEcho = {
+type LocalNotificationEcho = {
   source: string;
   expiresAt: number;
   reconciled: boolean;
@@ -92,7 +92,7 @@ export type LocalNotificationEcho = {
   socketObserved: boolean;
 };
 
-export type LocalNotificationReconciliationClaim = {
+type LocalNotificationReconciliationClaim = {
   source: string;
   shouldReconcile: boolean;
 };
@@ -113,7 +113,7 @@ export function emptyNotificationSummary(companyID = ""): NotificationSummary {
 export async function deleteNotification(notificationID: string, companyID = "", options: NotificationUpdateEventSource = {}): Promise<number> {
   const cleanNotificationID = notificationID.trim();
   if (!cleanNotificationID) throw new Error("notification_id_required");
-  rememberLocalNotificationDeleteEcho(companyID, [cleanNotificationID], options.source);
+  rememberLocalNotificationDeleteEcho(companyID, cleanNotificationID, options.source);
   let result: { deleted_count?: number };
   try {
     result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}`, {
@@ -352,20 +352,17 @@ export function emitNotificationsUpdated(companyID?: string, source = ""): void 
   window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "", source: source.trim() } }));
 }
 
-export function rememberLocalNotificationDeleteEcho(companyID: string, notificationIDs: string[], source = ""): void {
-  const cleanCompanyID = companyID.trim();
-  const expiresAt = Date.now() + LOCAL_NOTIFICATION_ECHO_TTL_MS;
+function rememberLocalNotificationDeleteEcho(companyID: string, notificationID: string, source = ""): void {
   cleanupLocalNotificationEchoes();
-  for (const notificationID of notificationIDs) {
-    const key = localNotificationDeleteEchoKey(cleanCompanyID, notificationID);
-    if (key) localNotificationDeleteEchoes.set(key, {
-      source: source.trim(),
-      expiresAt,
-      reconciled: false,
-      httpObserved: false,
-      socketObserved: false,
-    });
-  }
+  const key = localNotificationDeleteEchoKey(companyID, notificationID);
+  if (!key) return;
+  localNotificationDeleteEchoes.set(key, {
+    source: source.trim(),
+    expiresAt: Date.now() + LOCAL_NOTIFICATION_ECHO_TTL_MS,
+    reconciled: false,
+    httpObserved: false,
+    socketObserved: false,
+  });
 }
 
 export function claimLocalNotificationDeleteReconciliation(companyID: string, notificationID: string, observer: "http" | "socket" = "socket"): LocalNotificationReconciliationClaim | undefined {
@@ -379,7 +376,7 @@ export function claimLocalNotificationDeleteReconciliation(companyID: string, no
   return claim;
 }
 
-export function rememberLocalNotificationClearEcho(companyID: string, source = ""): void {
+function rememberLocalNotificationClearEcho(companyID: string, source = ""): void {
   const cleanCompanyID = companyID.trim();
   const cleanSource = source.trim();
   if (!cleanCompanyID) return;

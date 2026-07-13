@@ -1,6 +1,11 @@
-import type { CommittedEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 
-export function reconcileCommittedNodeTitleInSnapshot<T extends { node_id: string; name?: string }>(
+function belongsToUpdateCompany(record: { company_id?: string }, update: CommittedEntityTitleUpdate): boolean {
+  const recordCompanyID = record.company_id?.trim() ?? "";
+  return !recordCompanyID || recordCompanyID === update.companyID.trim();
+}
+
+export function reconcileCommittedNodeTitleInSnapshot<T extends { company_id?: string; node_id: string; name?: string }>(
   nodes: T[],
   update: CommittedEntityTitleUpdate,
 ): T[] {
@@ -10,7 +15,7 @@ export function reconcileCommittedNodeTitleInSnapshot<T extends { node_id: strin
   if (!resourceID || !title) return nodes;
   let changed = false;
   const next = nodes.map((node) => {
-    if (node.node_id !== resourceID || node.name === title) return node;
+    if (!belongsToUpdateCompany(node, update) || node.node_id !== resourceID || node.name === title) return node;
     changed = true;
     return { ...node, name: title };
   });
@@ -19,6 +24,7 @@ export function reconcileCommittedNodeTitleInSnapshot<T extends { node_id: strin
 
 export function reconcileCommittedLogicGateTitleInSnapshot<T extends {
   node_id: string;
+  company_id?: string;
   header?: string;
   title?: string;
 }>(
@@ -31,14 +37,14 @@ export function reconcileCommittedLogicGateTitleInSnapshot<T extends {
   if (!resourceID || !title) return nodes;
   let changed = false;
   const next = nodes.map((node) => {
-    if (node.node_id !== resourceID || (node.header === title && node.title === title)) return node;
+    if (!belongsToUpdateCompany(node, update) || node.node_id !== resourceID || (node.header === title && node.title === title)) return node;
     changed = true;
     return { ...node, header: title, title };
   });
   return changed ? next : nodes;
 }
 
-export function reconcileCommittedLogicGateRecordTitles<T extends { logic_gate_id: string; header: string }>(
+export function reconcileCommittedLogicGateRecordTitles<T extends { company_id?: string; logic_gate_id: string; header: string }>(
   logicGates: T[],
   update: CommittedEntityTitleUpdate,
 ): T[] {
@@ -48,7 +54,7 @@ export function reconcileCommittedLogicGateRecordTitles<T extends { logic_gate_i
   if (!resourceID || !title) return logicGates;
   let changed = false;
   const next = logicGates.map((logicGate) => {
-    if (logicGate.logic_gate_id !== resourceID || logicGate.header === title) return logicGate;
+    if (!belongsToUpdateCompany(logicGate, update) || logicGate.logic_gate_id !== resourceID || logicGate.header === title) return logicGate;
     changed = true;
     return { ...logicGate, header: title };
   });

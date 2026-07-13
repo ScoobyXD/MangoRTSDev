@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   invalidateProjectRelationshipsForResource,
   listProjectRelationshipsForResource,
@@ -9,12 +8,10 @@ import {
   type ProjectManagementTimelineRow,
   type ProjectRelationshipProjection,
 } from "../../../../frontend/src/modules/project-management/projectManagementApi.js";
+import { reconcileCompanyExplorerSearchResultTitles } from "../../../../frontend/src/modules/company-explorer/companyExplorerStore.js";
 import {
-  reconcileProjectCriticalPathTitles,
-  reconcileProjectManagementTimelineTitles,
+  reconcileProjectResourceDisplayTitles,
   reconcileProjectManagementWorkspaceTitles,
-  reconcileProjectNodePickerTitles,
-  reconcileProjectRelationshipTitles,
   reconcileRelationshipContextTitle,
   reconcileSelectedNodeTitle,
 } from "../../../../frontend/src/modules/project-management/projectManagementCommittedTitles.js";
@@ -163,9 +160,9 @@ test("project management title caches converge for Node and Logic Gate commits w
   const gateUpdate = { companyID: "company-1", entityType: "logic_gate" as const, resourceID: "gate-1", title: "Renamed gate" };
   const initialTimeline = [timelineRow("node", "node-1", "Old node"), timelineRow("logic_gate", "gate-1", "Old gate")];
 
-  const nodeTimeline = reconcileProjectManagementTimelineTitles(initialTimeline, nodeUpdate, "company-1");
+  const nodeTimeline = reconcileProjectResourceDisplayTitles(initialTimeline, nodeUpdate, "company-1");
   assert.deepEqual(nodeTimeline.map((row) => row.display_title), ["Renamed node", "Old gate"]);
-  const bothTimeline = reconcileProjectManagementTimelineTitles(nodeTimeline, gateUpdate, "company-1");
+  const bothTimeline = reconcileProjectResourceDisplayTitles(nodeTimeline, gateUpdate, "company-1");
   assert.deepEqual(bothTimeline.map((row) => row.display_title), ["Renamed node", "Renamed gate"]);
 
   const workspace = {
@@ -181,14 +178,14 @@ test("project management title caches converge for Node and Logic Gate commits w
   assert.equal(bothWorkspace.logicGates[0]?.header, "Renamed gate");
 
   const relationships = [relationshipFor("node", "node-1", "Old node"), relationshipFor("logic_gate", "gate-1", "Old gate")];
-  const nodeRelationships = reconcileProjectRelationshipTitles(relationships, nodeUpdate, "company-1");
+  const nodeRelationships = reconcileProjectResourceDisplayTitles(relationships, nodeUpdate, "company-1");
   assert.deepEqual(nodeRelationships.map((row) => row.display_title), ["Renamed node", "Old gate"]);
-  const bothRelationships = reconcileProjectRelationshipTitles(nodeRelationships, gateUpdate, "company-1");
+  const bothRelationships = reconcileProjectResourceDisplayTitles(nodeRelationships, gateUpdate, "company-1");
   assert.deepEqual(bothRelationships.map((row) => row.display_title), ["Renamed node", "Renamed gate"]);
 
   const steps = [criticalStep("node", "node-1", "Old node"), criticalStep("logic_gate", "gate-1", "Old gate")];
-  const nodeSteps = reconcileProjectCriticalPathTitles(steps, nodeUpdate, "company-1");
-  const bothSteps = reconcileProjectCriticalPathTitles(nodeSteps, gateUpdate, "company-1");
+  const nodeSteps = reconcileProjectResourceDisplayTitles(steps, nodeUpdate, "company-1");
+  const bothSteps = reconcileProjectResourceDisplayTitles(nodeSteps, gateUpdate, "company-1");
   assert.deepEqual(bothSteps.map((step) => step.display_title), ["Renamed node", "Renamed gate"]);
 
   const selection = { nodeID: "node-1", title: "Old node", stepID: "step-node-1" };
@@ -197,10 +194,10 @@ test("project management title caches converge for Node and Logic Gate commits w
   assert.deepEqual(reconcileRelationshipContextTitle(context, gateUpdate, "company-1"), { ...context, displayTitle: "Renamed gate" });
 
   const foreignUpdate = { ...nodeUpdate, companyID: "company-2", title: "Wrong company" };
-  assert.equal(reconcileProjectManagementTimelineTitles(bothTimeline, foreignUpdate, "company-1"), bothTimeline);
+  assert.equal(reconcileProjectResourceDisplayTitles(bothTimeline, foreignUpdate, "company-1"), bothTimeline);
   assert.equal(reconcileProjectManagementWorkspaceTitles(bothWorkspace, foreignUpdate, "company-1"), bothWorkspace);
-  assert.equal(reconcileProjectRelationshipTitles(bothRelationships, foreignUpdate, "company-1"), bothRelationships);
-  assert.equal(reconcileProjectCriticalPathTitles(bothSteps, foreignUpdate, "company-1"), bothSteps);
+  assert.equal(reconcileProjectResourceDisplayTitles(bothRelationships, foreignUpdate, "company-1"), bothRelationships);
+  assert.equal(reconcileProjectResourceDisplayTitles(bothSteps, foreignUpdate, "company-1"), bothSteps);
 });
 
 test("open Critical Path node picker converges its matching search label without a reload", () => {
@@ -229,12 +226,9 @@ test("open Critical Path node picker converges its matching search label without
     },
   ];
   const update = { companyID: "company-1", entityType: "node" as const, resourceID: "node-1", title: "Renamed node" };
-  const next = reconcileProjectNodePickerTitles(results, update, "company-1");
+  const next = reconcileCompanyExplorerSearchResultTitles(results, update);
   assert.equal(next[0]?.display_name, "Renamed node");
   assert.equal(next[0]?.location_path[0]?.name, "Renamed node");
   assert.equal(next[1], results[1]);
-  assert.equal(reconcileProjectNodePickerTitles(next, { ...update, companyID: "company-2" }, "company-1"), next);
-
-  const source = readFileSync("frontend/src/modules/project-management/ProjectSummaryContent.tsx", "utf8");
-  assert.match(source, /setNodePickerResults\(\(current\) => reconcileProjectNodePickerTitles\(current, update, companyID\)\)/);
+  assert.equal(reconcileCompanyExplorerSearchResultTitles(next, { ...update, companyID: "company-2" }), next);
 });

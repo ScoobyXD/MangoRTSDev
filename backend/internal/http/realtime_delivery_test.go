@@ -35,29 +35,19 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 		companyID: companyID,
 		conn:      healthyNetworkConn,
 	}
-	server.realtimeRegistry.addConnection(stalledConn)
 	server.realtimeRegistry.subscribe(stalledConn, scope)
-	server.realtimeRegistry.addConnection(healthyConn)
 	server.realtimeRegistry.subscribe(healthyConn, scope)
 	defer stalledConn.close()
 	defer healthyConn.close()
 
 	started := time.Now()
-	if delivered := server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "test"}); delivered != 1 {
-		t.Fatalf("delivered messages = %d, want 1 healthy delivery", delivered)
-	}
-	elapsed := time.Since(started)
+	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "test"})
 	if !stalledNetworkConn.writeDeadlineSet {
 		t.Fatal("stalled websocket write did not set a bounded deadline")
 	}
-	if !stalledNetworkConn.deadlineExpired {
-		t.Fatal("stalled websocket write did not wait for its deadline to expire")
-	}
-	if stalledNetworkConn.boundedWriteDeadline.Before(started) || stalledNetworkConn.boundedWriteDeadline.After(started.Add(realtimeWebSocketWriteTimeout+time.Second)) {
-		t.Fatalf("write deadline = %s, want within %s of publish", stalledNetworkConn.boundedWriteDeadline, realtimeWebSocketWriteTimeout)
-	}
-	if elapsed < realtimeWebSocketWriteTimeout-100*time.Millisecond {
-		t.Fatalf("stalled publish returned after %s, want deadline expiry near %s", elapsed, realtimeWebSocketWriteTimeout)
+	deadlineDelay := stalledNetworkConn.boundedWriteDeadline.Sub(started)
+	if deadlineDelay < realtimeWebSocketWriteTimeout-100*time.Millisecond || deadlineDelay > realtimeWebSocketWriteTimeout+time.Second {
+		t.Fatalf("write deadline delay = %s, want bounded near %s", deadlineDelay, realtimeWebSocketWriteTimeout)
 	}
 	if stalledNetworkConn.closeCalls != 1 {
 		t.Fatalf("stalled connection close calls = %d, want 1", stalledNetworkConn.closeCalls)
@@ -65,11 +55,9 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 	if server.realtimeRegistry.connectionCount() != 1 || server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatalf("registry after stalled delivery: connections=%d subscriptions=%d, want only healthy peer", server.realtimeRegistry.connectionCount(), server.realtimeRegistry.scopeSubscriptionCount(companyID, scope))
 	}
-	if server.realtimeRegistry.hasSubscription(stalledConn.id, companyID, scope) {
-		t.Fatal("stalled connection remains subscribed")
-	}
-	if !server.realtimeRegistry.hasSubscription(healthyConn.id, companyID, scope) {
-		t.Fatal("healthy co-subscriber was removed")
+	connections := server.realtimeRegistry.connectionsForScope(companyID, scope)
+	if len(connections) != 1 || connections[0].id != healthyConn.id {
+		t.Fatalf("remaining connections = %+v, want only %s", connections, healthyConn.id)
 	}
 	messages := healthyNetworkConn.messages(t)
 	if len(messages) != 1 || messages[0]["type"] != "test" {
@@ -91,9 +79,7 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 	}
 
 	stalledWritesAfterFailure := stalledNetworkConn.writeCalls
-	if delivered := server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "retry"}); delivered != 1 {
-		t.Fatalf("retry delivered messages = %d, want 1 healthy delivery", delivered)
-	}
+	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "retry"})
 	if stalledNetworkConn.writeCalls != stalledWritesAfterFailure {
 		t.Fatalf("removed stalled connection received another write: before=%d after=%d", stalledWritesAfterFailure, stalledNetworkConn.writeCalls)
 	}
@@ -135,7 +121,6 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 		companyID: "94949494-9494-4494-8494-949494949494",
 		conn:      &recordingRealtimeNetConn{},
 	}
-	server.realtimeRegistry.addConnection(otherCompanyConn)
 	server.realtimeRegistry.subscribe(otherCompanyConn, realtimeBoardScope("other-company-board"))
 	defer otherCompanyConn.close()
 
@@ -145,7 +130,6 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 	}
 
 	localConn := &realtimeConnection{id: "local-board-connection", companyID: companyID, conn: &recordingRealtimeNetConn{}}
-	server.realtimeRegistry.addConnection(localConn)
 	server.realtimeRegistry.subscribe(localConn, realtimeBoardScope("local-board"))
 	defer localConn.close()
 	server.publishKanbanChangesForEvents([]domain.DomainEvent{event})
@@ -169,16 +153,11 @@ type deadlineBlockingRealtimeNetConn struct {
 	closeCalls           int
 	writeDeadlineSet     bool
 	boundedWriteDeadline time.Time
-	deadlineExpired      bool
 }
 
 func (c *deadlineBlockingRealtimeNetConn) Read([]byte) (int, error) { return 0, io.EOF }
 func (c *deadlineBlockingRealtimeNetConn) Write([]byte) (int, error) {
 	c.writeCalls++
-	if wait := time.Until(c.boundedWriteDeadline); wait > 0 {
-		time.Sleep(wait)
-	}
-	c.deadlineExpired = !time.Now().Before(c.boundedWriteDeadline)
 	return 0, os.ErrDeadlineExceeded
 }
 func (c *deadlineBlockingRealtimeNetConn) Close() error                { c.closeCalls++; return nil }

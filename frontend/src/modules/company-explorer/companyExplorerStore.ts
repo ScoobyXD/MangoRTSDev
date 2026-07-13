@@ -11,7 +11,7 @@ import type {
 import type { KanbanBoard, KanbanBoardsUpdatedDetail } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import type { CompanyExplorerSearchResult, CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
-import type { CompanyExplorerEntityTitleUpdate } from "./companyExplorerLocalEntityUpdates.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 
 export type CompanyExplorerSnapshotPayload = {
   nodes?: NodeRecord[];
@@ -22,7 +22,7 @@ export type CompanyExplorerSnapshotPayload = {
   rows?: CompanyExplorerV2Row[];
 };
 
-export type CompanyExplorerStoreState = {
+type CompanyExplorerStoreState = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
   projects: ProjectRecord[];
@@ -33,7 +33,7 @@ export type CompanyExplorerStoreState = {
   folderSnapshotLoaded: boolean;
 };
 
-export type CompanyExplorerStoreAction =
+type CompanyExplorerStoreAction =
   | { type: "resetSnapshot" }
   | { type: "applySnapshot"; snapshot: CompanyExplorerSnapshotPayload }
   | { type: "mergeSnapshot"; snapshot: CompanyExplorerSnapshotPayload }
@@ -46,7 +46,7 @@ export type CompanyExplorerStoreAction =
   | { type: "replaceLogicGate"; logicGate: LogicGateRecord }
   | { type: "upsertProject"; project: ProjectRecord }
   | { type: "replaceProject"; project: ProjectRecord }
-  | { type: "applyEntityTitleUpdate"; update: CompanyExplorerEntityTitleUpdate }
+  | { type: "applyEntityTitleUpdate"; update: CommittedEntityTitleUpdate }
   | { type: "upsertV2Rows"; rows: CompanyExplorerV2Row[] }
   | { type: "removeV2Edges"; edgeIDs: ReadonlySet<string> }
   | { type: "replaceV2Children"; parentEntityID: string; rows: CompanyExplorerV2Row[] }
@@ -131,7 +131,7 @@ export function reduceCompanyExplorerStore(
     case "replaceProject":
       return { ...state, projects: replaceByID(state.projects, action.project, (project) => project.project_id) };
     case "applyEntityTitleUpdate":
-      return applyCompanyExplorerEntityTitleUpdate(state, action.update);
+      return applyCommittedEntityTitleUpdate(state, action.update);
     case "upsertV2Rows":
       return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, action.rows) };
     case "removeV2Edges":
@@ -151,9 +151,9 @@ export function reduceCompanyExplorerStore(
   }
 }
 
-export function applyCompanyExplorerEntityTitleUpdate(
+function applyCommittedEntityTitleUpdate(
   state: CompanyExplorerStoreState,
-  update: CompanyExplorerEntityTitleUpdate,
+  update: CommittedEntityTitleUpdate,
 ): CompanyExplorerStoreState {
   if (!update.resourceID.trim() || !update.title.trim()) return state;
   const title = update.title.trim();
@@ -178,7 +178,7 @@ export function applyCompanyExplorerEntityTitleUpdate(
 
 export function applyCompanyExplorerSnapshotTitleUpdate(
   snapshot: CompanyExplorerSnapshotPayload,
-  update: CompanyExplorerEntityTitleUpdate,
+  update: CommittedEntityTitleUpdate,
 ): CompanyExplorerSnapshotPayload {
   const resourceID = update.resourceID.trim();
   const title = update.title.trim();
@@ -206,24 +206,37 @@ export function applyCompanyExplorerSnapshotTitleUpdate(
   };
 }
 
-export function applyCompanyExplorerSearchTitleUpdate(
+export function reconcileCompanyExplorerSearchResultTitles(
   results: CompanyExplorerSearchResult[],
-  update: CompanyExplorerEntityTitleUpdate,
+  update: CommittedEntityTitleUpdate,
 ): CompanyExplorerSearchResult[] {
+  const companyID = update.companyID.trim();
+  const resourceID = update.resourceID.trim();
   const title = update.title.trim();
-  if (!update.resourceID.trim() || !title) return results;
-  return results.map((result) => ({
-    ...result,
-    display_name: result.resource_type === update.entityType && result.resource_id === update.resourceID
+  if (!companyID || !resourceID || !title) return results;
+  let changed = false;
+  const next = results.map((result) => {
+    if (result.company_id.trim() !== companyID) return result;
+    const resultID = result.resource_id.trim() || result.entity_id.trim();
+    const displayName = result.resource_type === update.entityType && resultID === resourceID
       ? title
-      : result.display_name,
-    location_path: result.location_path.map((segment) => (
-      segment.entity_type === update.entityType
-      && (segment.resource_id || segment.entity_id) === update.resourceID
-        ? { ...segment, name: title }
-        : segment
-    )),
-  }));
+      : result.display_name;
+    let pathChanged = false;
+    const locationPath = result.location_path.map((segment) => {
+      const segmentID = segment.resource_id?.trim() || segment.entity_id.trim();
+      if (segment.entity_type !== update.entityType || segmentID !== resourceID || segment.name === title) return segment;
+      pathChanged = true;
+      return { ...segment, name: title };
+    });
+    if (displayName === result.display_name && !pathChanged) return result;
+    changed = true;
+    return {
+      ...result,
+      display_name: displayName,
+      location_path: pathChanged ? locationPath : result.location_path,
+    };
+  });
+  return changed ? next : results;
 }
 
 export function shouldRefreshKanbanBoardsAfterUpdate(detail: KanbanBoardsUpdatedDetail | undefined, companyID: string): boolean {

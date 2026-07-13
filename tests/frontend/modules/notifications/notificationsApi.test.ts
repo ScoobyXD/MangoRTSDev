@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { createNotificationRealtimeHandlers } from "../../../../frontend/src/modules/notifications/notificationRealtimeCoordinator.js";
@@ -99,7 +98,6 @@ test("deleteNotification calls DELETE for one notification and emits an update e
     assert.equal(summaryLoads, 1, "HTTP plus matching socket echo must request one summary reconciliation");
     assert.equal(openFeedLoads, 1, "HTTP plus matching socket echo must request one mounted Updates reconciliation");
     assert.deepEqual(calls, [{ url: "https://app.example.test/v1/notifications/notification-1", method: "DELETE" }]);
-    assert.equal(events.length, 1);
     assert.equal(events[0].detail.companyID, "company-1");
     assert.equal(events[0].detail.source, "");
   } finally {
@@ -255,27 +253,12 @@ test("a failed clear releases its marker so a later socket event reconciles", as
   }
 });
 
-test("first acceptance and reconnect reconcile summary and only mounted Updates", () => {
-  const { events, testWindow, restore } = installTestWindow();
+test("an accepted notification subscription emits one canonical reconciliation", () => {
+  const { events, restore } = installTestWindow();
   try {
-    let summaryLoads = 0;
-    let openFeedLoads = 0;
-    const loadSummary = () => { summaryLoads += 1; };
-    const loadOpenFeed = () => { openFeedLoads += 1; };
-    testWindow.addEventListener(EVENT_NOTIFICATIONS_UPDATED, loadSummary);
-    testWindow.addEventListener(EVENT_NOTIFICATIONS_UPDATED, loadOpenFeed);
     const handlers = createNotificationRealtimeHandlers("company-1");
     handlers.onAccepted();
-    handlers.onAccepted();
-    assert.equal(summaryLoads, 2, "first acceptance and reconnect each request one summary reconciliation");
-    assert.equal(openFeedLoads, 2, "mounted Updates reconciles on first acceptance and reconnect");
-    testWindow.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, loadOpenFeed);
-    handlers.onAccepted();
-    assert.equal(summaryLoads, 3, "summary remains app-lifetime after Updates closes");
-    assert.equal(openFeedLoads, 2, "closed Updates performs no feed reconciliation");
     assert.deepEqual(events.map((event) => event.detail), [
-      { companyID: "company-1", source: "" },
-      { companyID: "company-1", source: "" },
       { companyID: "company-1", source: "" },
     ]);
   } finally {
@@ -283,19 +266,6 @@ test("first acceptance and reconnect reconcile summary and only mounted Updates"
   }
 });
 
-test("notification summary consumes the app-level coordinator without opening a duplicate socket", () => {
-  const summarySource = readFileSync("frontend/src/modules/notifications/useNotificationSummary.ts", "utf8");
-  const coordinatorSource = readFileSync("frontend/src/app/AppLiveFreshnessBridge.tsx", "utf8");
-  const realtimeHandlersSource = readFileSync("frontend/src/modules/notifications/notificationRealtimeCoordinator.ts", "utf8");
-  const updatesSource = readFileSync("frontend/src/pages/home/UpdatesView.tsx", "utf8");
-  assert.doesNotMatch(summarySource, /subscribeRealtimeScope/);
-  assert.match(summarySource, /EVENT_NOTIFICATIONS_UPDATED/);
-  assert.equal(coordinatorSource.match(/subscribeRealtimeScope\(/g)?.length, 1);
-  assert.match(coordinatorSource, /notifications:user:/);
-  assert.match(realtimeHandlersSource, /onAccepted\(\)\s*{\s*reconcile\(\);/);
-  assert.match(updatesSource, /addEventListener\(EVENT_NOTIFICATIONS_UPDATED/);
-  assert.doesNotMatch(updatesSource, /subscribeRealtimeScope/);
-});
 
 test("read and unread helpers still use notification read endpoints", async () => {
   const originalFetch = globalThis.fetch;

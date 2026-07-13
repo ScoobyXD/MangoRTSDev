@@ -26,7 +26,7 @@ import {
   foldLatestCommittedEntityTitles,
   publishCommittedEntityTitleUpdate,
   resetCommittedEntityTitleRegistryForTests,
-} from "../../../frontend/src/modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../../../frontend/src/modules/realtime/committedEntityTitleUpdates.js";
 test("timeline ranges and item drops snap to 5 minute increments", () => {
   const ranged = setTimelineRange(createDefaultAppTimelineState(), 7 * 60 + 7, 16 * 60 + 52);
   assert.equal(ranged.startMinute, 7 * 60 + 5);

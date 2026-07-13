@@ -1,4 +1,4 @@
-import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, type CommittedEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates.js";
+import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, type CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
@@ -35,8 +35,6 @@ type CacheEntry = {
   subscribers: Set<Subscriber>;
   loading: boolean;
   hydrated: boolean;
-  generation: number;
-  folderID: string;
 };
 const EMPTY_SNAPSHOT: LogicGateRelationshipGraphSnapshot = { nodes: [], relationships: [] };
 const logicGateRelationshipGraphCache = new Map<string, CacheEntry>();
@@ -54,7 +52,7 @@ function getEntry(apiBase: string, companyID: string, options: LogicGateRelation
   const key = graphCacheKey(apiBase, companyID, { folderID });
   const existing = logicGateRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false, generation: 0, folderID };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
   logicGateRelationshipGraphCache.set(key, created);
   return created;
 }
@@ -75,21 +73,12 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
-export function invalidateLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
-  for (const entry of getCompanyEntries(apiBase, companyID)) {
-    entry.generation += 1;
-    entry.hydrated = false;
-    if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
-  }
-}
-
 export function reconcileLogicGateRelationshipGraphTitle(
   apiBase: string,
   companyID: string,
   update: CommittedEntityTitleUpdate,
 ): void {
   for (const entry of getCompanyEntries(apiBase, companyID)) {
-    entry.generation += 1;
     const currentLogicGates = entry.snapshot.logic_gates ?? [];
     const logicGates = reconcileCommittedLogicGateRecordTitles(currentLogicGates, update);
     if (logicGates === currentLogicGates) continue;
@@ -135,22 +124,6 @@ export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID:
       folders: entry.snapshot.folders ?? [],
       folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
       logic_gate_map_positions: (entry.snapshot.logic_gate_map_positions ?? []).filter((position) => (position.logic_gate_id || position.entity_id) !== logicGateID),
-      generated_at: generatedAt,
-    };
-    notify(entry);
-  }
-}
-
-export function removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase: string, companyID: string, logicGateID: string): void {
-  if (!logicGateID) return;
-  const generatedAt = new Date().toISOString();
-  for (const entry of getMutationEntries(apiBase, companyID)) {
-    const currentRelationships = entry.snapshot.relationships ?? [];
-    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
-    if (nextRelationships.length === currentRelationships.length) continue;
-    entry.snapshot = {
-      ...entry.snapshot,
-      relationships: nextRelationships,
       generated_at: generatedAt,
     };
     notify(entry);
@@ -224,7 +197,6 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
   const folderID = normalizeGraphFolderID(options);
   const entry = getEntry(apiBase, companyID, { folderID });
   if (entry.loading) return;
-  const refreshGeneration = entry.generation;
   const requestStartTitleVersion = readCommittedEntityTitleVersion();
   entry.loading = true;
   try {
@@ -232,7 +204,6 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
       scope: "logic_gate_map",
       folderID: folderID || undefined,
     });
-    if (entry.generation !== refreshGeneration) return;
     if (!result.payload) return;
     if (!result.changed && entry.hydrated && readCommittedEntityTitleVersion() === requestStartTitleVersion) {
       entry.hydrated = true;
@@ -259,7 +230,6 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
     notify(entry);
   } finally {
     entry.loading = false;
-    if (entry.generation !== refreshGeneration && entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID });
   }
 }
 

@@ -14,10 +14,10 @@ type NotificationDeletedHint = NotificationCreatedHint & {
 
 export function createNotificationRealtimeHandlers(activeCompanyID: string) {
   const cleanActiveCompanyID = activeCompanyID.trim();
-  const reconcile = (messageCompanyID = "", source = "") => {
+  const reconcile = (messageCompanyID = "") => {
     const cleanMessageCompanyID = messageCompanyID.trim();
     if (cleanMessageCompanyID && cleanMessageCompanyID !== cleanActiveCompanyID) return;
-    emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID, source);
+    emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID);
   };
 
   return {

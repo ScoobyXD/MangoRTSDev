@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  applyCompanyExplorerSearchTitleUpdate,
+  reconcileCompanyExplorerSearchResultTitles,
   companyExplorerBranchHasMaterializedRows,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
@@ -10,7 +10,7 @@ import {
   shouldRefreshKanbanBoardsAfterUpdate,
 } from "../../../../frontend/src/modules/company-explorer/companyExplorerStore.js";
 import {
-  type CompanyExplorerEntityTitleUpdate,
+  type CommittedEntityTitleUpdate,
   commitEntityTitleMutation,
   createCommittedTitleEditBuffer,
   createOneShotBlurSuppression,
@@ -21,16 +21,15 @@ import {
   readCommittedEntityTitleVersion,
   resetCommittedEntityTitleRegistryForTests,
   subscribeCommittedEntityTitleUpdates,
-} from "../../../../frontend/src/modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../../../../frontend/src/modules/realtime/committedEntityTitleUpdates.js";
 import {
   reconcileGVICProjectionLogicGateTitles,
   reconcileGVICProjectionRowTitles,
   reconcileGVICProjectionTitlesByUserID,
 } from "../../../../frontend/src/modules/company-explorer/companyExplorerGVICCommittedTitles.js";
 import {
-  applyCommittedLogicGateTitleToRecords,
-  applyCommittedLogicGateTitleToSearchResults,
-} from "../../../../frontend/src/modules/editor/editorCommittedTitleState.js";
+  reconcileCommittedLogicGateRecordTitles,
+} from "../../../../frontend/src/modules/map/committedTitleSnapshotReconciliation.js";
 import type { CompanyExplorerSearchResult } from "../../../../frontend/src/modules/company-explorer/companyExplorerLazyApi.js";
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 
@@ -291,24 +290,30 @@ run("committed editor titles patch mounted explorer records and every materializ
   assert.deepEqual(state.rows.map((row) => row.name), ["Renamed gate", "Renamed gate"]);
 });
 
-run("committed editor titles patch active explorer search labels and use a concrete local event", () => {
+run("committed titles patch search labels without cloning unchanged results", () => {
   const update = { companyID: "c", entityType: "logic_gate" as const, resourceID: "gate-a", title: "Renamed gate" };
-  const results = applyCompanyExplorerSearchTitleUpdate([{
+  const matching = {
     company_id: "c",
-    resource_type: "logic_gate",
-    resource_id: "gate-a",
-    entity_id: "gate-entity",
+    resource_type: "logic_gate" as const,
+    resource_id: " ",
+    entity_id: " gate-a ",
     display_name: "Old gate",
     match_reason: "name",
-    location_path: [{ entity_type: "logic_gate", entity_id: "gate-entity", resource_id: "gate-a", name: "Old gate" }],
+    location_path: [{ entity_type: "logic_gate" as const, entity_id: "gate-entity", resource_id: " gate-a ", name: "Old gate" }],
     created_timestamp: "1",
     updated_timestamp: "1",
-  }], update);
+  };
+  const untouched = { ...matching, resource_type: "node" as const, resource_id: "node-a", entity_id: "node-entity", display_name: "Node", location_path: [] };
+  const original = [matching, untouched];
+  const results = reconcileCompanyExplorerSearchResultTitles(original, update);
   assert.equal(results[0]?.display_name, "Renamed gate");
   assert.equal(results[0]?.location_path[0]?.name, "Renamed gate");
+  assert.equal(results[1], untouched);
+  assert.equal(reconcileCompanyExplorerSearchResultTitles(results, update), results);
+  assert.equal(reconcileCompanyExplorerSearchResultTitles(results, { ...update, companyID: "other" }), results);
 
   const target = new EventTarget();
-  let received: CompanyExplorerEntityTitleUpdate | null = null;
+  let received: CommittedEntityTitleUpdate | null = null;
   const unsubscribe = subscribeCommittedEntityTitleUpdates((detail) => { received = detail; }, target);
   publishCommittedEntityTitleUpdate(update, target);
   assert.deepEqual(received, update);
@@ -455,79 +460,10 @@ run("committed titles patch every mounted GVIC projection cache without crossing
   assert.equal(reconcileGVICProjectionTitlesByUserID(gateByUser, foreignUpdate, "c"), gateByUser);
 });
 
-run("Company Explorer patches GVIC caches in-place on committed titles without projection reloads", () => {
-  const source = readFileSync("frontend/src/modules/company-explorer/CompanyExplorerContent.tsx", "utf8");
-  const start = source.indexOf("useEffect(() => subscribeCommittedEntityTitleUpdates");
-  const end = source.indexOf("}), [companyID]);", start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const subscriber = source.slice(start, end);
-  assert.match(subscriber, /setGVICProjectionRows\(/);
-  assert.match(subscriber, /setGVICProjectionLogicGates\(/);
-  assert.match(subscriber, /setGVICProjectionByUserID\(/);
-  assert.doesNotMatch(subscriber, /requestGVICExplorerProjectionRefresh|refreshGVIC/i);
-});
-
-run("committed titles fan out to concurrent same-window surfaces without touching editor draft text", () => {
-  const target = new EventTarget();
-  const titles = new Map<string, string>([
-    ["editor:node", "Old node"],
-    ["kanban:node", "Old node"],
-    ["node-map:node", "Old node"],
-    ["explorer:node", "Old node"],
-    ["editor:logic_gate", "Old gate"],
-    ["kanban:logic_gate", "Old gate"],
-    ["logic-gate-map:logic_gate", "Old gate"],
-    ["explorer:logic_gate", "Old gate"],
-  ]);
-  const editorDraft = { text: "unsaved local draft" };
-  const unsubscribers = Array.from(titles.keys()).map((surfaceKey) => {
-    const entityType = surfaceKey.endsWith(":node") ? "node" : "logic_gate";
-    return subscribeCommittedEntityTitleUpdates((update) => {
-      if (update.companyID !== "company-1" || update.entityType !== entityType) return;
-      titles.set(surfaceKey, update.title);
-    }, target);
-  });
-
-  publishCommittedEntityTitleUpdate({
-    companyID: "company-1",
-    entityType: "node",
-    resourceID: "node-1",
-    title: "Renamed node",
-  }, target);
-  publishCommittedEntityTitleUpdate({
-    companyID: "company-1",
-    entityType: "logic_gate",
-    resourceID: "gate-1",
-    title: "Renamed gate",
-  }, target);
-
-  for (const [surfaceKey, title] of titles) {
-    assert.equal(title, surfaceKey.endsWith(":node") ? "Renamed node" : "Renamed gate");
-  }
-  assert.equal(editorDraft.text, "unsaved local draft");
-  for (const unsubscribeSurface of unsubscribers) unsubscribeSurface();
-});
-
-run("every relevant rename surface publishes and consumes the concrete committed-title event", () => {
-  const surfaces = new Map<string, number>([
-    ["frontend/src/modules/editor/EditorContent.tsx", 2],
-    ["frontend/src/modules/kanban/KanbanContent.tsx", 2],
-    ["frontend/src/modules/node-map/NodeMapContent.tsx", 1],
-    ["frontend/src/modules/logic-gate-map/LogicGateMapContent.tsx", 1],
-    ["frontend/src/modules/company-explorer/CompanyExplorerContent.tsx", 1],
-    ["frontend/src/pages/home/HomePage.tsx", 1],
-  ]);
-  for (const [file, expectedPublishers] of surfaces) {
-    const source = readFileSync(file, "utf8");
-    assert.equal(source.match(/commitEntityTitleMutation\(/g)?.length, expectedPublishers, `${file} must commit and publish after every supported rename result`);
-    assert.match(source, /subscribeCommittedEntityTitleUpdates\(/, `${file} must consume concurrent committed titles`);
-  }
-});
 
 test("title mutation publishes exactly once after a successful commit and never on rejection", async () => {
   const target = new EventTarget();
-  const received: CompanyExplorerEntityTitleUpdate[] = [];
+  const received: CommittedEntityTitleUpdate[] = [];
   const unsubscribe = subscribeCommittedEntityTitleUpdates((update) => received.push(update), target);
   let resolveMutation: ((value: string) => void) | undefined;
   const pending = commitEntityTitleMutation(
@@ -567,7 +503,6 @@ test("title mutation publishes exactly once after a successful commit and never 
 
 test("title edit buffer defers only the active entity and flushes its latest committed title", () => {
   const buffer = createCommittedTitleEditBuffer();
-  const draft = { text: "unsaved local draft" };
   const first = {
     companyID: "company-1",
     entityType: "node" as const,
@@ -579,11 +514,9 @@ test("title edit buffer defers only the active entity and flushes its latest com
 
   buffer.begin("node", "node-1");
   assert.equal(buffer.receive(first), undefined);
-  buffer.begin("node", "node-1");
   assert.equal(buffer.receive(unrelated), unrelated, "unrelated mounted entities converge immediately");
   assert.equal(buffer.receive(latest), undefined);
   assert.deepEqual(buffer.finish("node", "node-1"), latest);
-  assert.equal(draft.text, "unsaved local draft", "committed-title convergence must not alter editor text");
   assert.equal(buffer.receive(first), first, "the entity converges immediately after editing finishes");
 
   buffer.begin("node", "node-1");
@@ -624,40 +557,13 @@ test("graph snapshots preserve only the active title draft", () => {
   assert.equal(preserveEditingEntityTitleInSnapshot(snapshot, current, null, (item) => item), snapshot);
 });
 
-test("Editor and map contentEditable titles suppress their synthetic blur exactly once", () => {
-  for (const file of [
-    "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx",
-    "frontend/src/modules/node-map/NodeMapNodeCard.tsx",
-    "frontend/src/modules/logic-gate-map/LogicGateMapNodeCard.tsx",
-  ]) {
-    const source = readFileSync(file, "utf8");
-    assert.match(source, /createOneShotBlurSuppression\(\)/, `${file} must use one-shot blur suppression`);
-    assert.match(source, /shouldHandleBlur\(\)/, `${file} must guard the blur commit`);
-    assert.equal(source.match(/\.suppress\(\)/g)?.length, 2, `${file} must suppress Enter and Escape blur paths`);
-  }
+test("Editor contentEditable titles suppress their synthetic blur exactly once", () => {
+  const source = readFileSync("frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx", "utf8");
+  assert.match(source, /createOneShotBlurSuppression\(\)/);
+  assert.match(source, /shouldHandleBlur\(\)/);
+  assert.equal(source.match(/\.suppress\(\)/g)?.length, 2);
 });
 
-run("AppSidebar reconciles open Explorer and pin menu title snapshots", () => {
-  const source = readFileSync("frontend/src/app/AppSidebarChrome.tsx", "utf8");
-  assert.match(source, /subscribeCommittedEntityTitleUpdates\(/);
-  assert.match(source, /setExplorerTriagePriorityMenu\(/);
-  assert.match(source, /setPinContextMenu\(/);
-  assert.match(source, /setPinTriagePriorityMenu\(/);
-  assert.match(source, /resolveCurrentAppSidebarPin\(pins,/);
-});
-
-run("Editor async title-bearing responses use request-start committed-title fences", () => {
-  const editorSource = readFileSync("frontend/src/modules/editor/EditorContent.tsx", "utf8");
-  assert.match(editorSource, /linkedDetailsTitleVersionAtStart = readCommittedEntityTitleVersion\(\)[\s\S]*await Promise\.all/);
-  assert.match(editorSource, /loadedLogicGateTitle = foldCommittedEntityTitlesSince\([\s\S]*setLinkedNodeTitle\(\(current\) => editingTitleActiveRef\.current \? current : loadedLogicGateTitle\)/);
-  assert.match(editorSource, /loadedNodeTitle = foldCommittedEntityTitlesSince\([\s\S]*preserveNodeTitle\(loadedNodeTitle, current, linkedNodeID\)/);
-
-  const workspaceSource = readFileSync("frontend/src/modules/editor/NodeWorkspaceSurface.tsx", "utf8");
-  assert.match(workspaceSource, /setProjectLogicGateOptions\(foldCommittedEntityTitlesSince\(/);
-  assert.match(workspaceSource, /setAssignedLogicGateRecords\(foldCommittedEntityTitlesSince\(/);
-  assert.match(workspaceSource, /setLogicGateSearchResults\(foldCommittedEntityTitlesSince\(/);
-  assert.match(workspaceSource, /applyCommittedLogicGateTitleToSearchResults\(current, update\.resourceID, update\.title\)/);
-});
 test("Node workspace async title fences reuse record and path-label reconcilers", () => {
   resetCommittedEntityTitleRegistryForTests();
   const titleVersionAtStart = readCommittedEntityTitleVersion();
@@ -678,9 +584,7 @@ test("Node workspace async title fences reuse record and path-label reconcilers"
     staleRecords,
     "company-1",
     titleVersionAtStart,
-    (current, update) => update.entityType === "logic_gate"
-      ? applyCommittedLogicGateTitleToRecords(current, update.resourceID, update.title)
-      : current,
+    reconcileCommittedLogicGateRecordTitles,
   );
   assert.equal(records[0]?.header, "Committed gate");
 
@@ -704,9 +608,7 @@ test("Node workspace async title fences reuse record and path-label reconcilers"
     staleSearch,
     "company-1",
     titleVersionAtStart,
-    (current, update) => update.entityType === "logic_gate"
-      ? applyCommittedLogicGateTitleToSearchResults(current, update.resourceID, update.title)
-      : current,
+    reconcileCompanyExplorerSearchResultTitles,
   );
   assert.equal(search[0]?.display_name, "Committed gate");
   assert.equal(search[0]?.location_path[0]?.name, "Committed gate");

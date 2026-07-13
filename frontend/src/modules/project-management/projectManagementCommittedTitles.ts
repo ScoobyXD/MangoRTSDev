@@ -1,16 +1,23 @@
-import type { CommittedEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates.js";
-import type { CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
+import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
-import type {
-  ProjectCriticalPathStep,
-  ProjectManagementTimelineRow,
-  ProjectRelationshipProjection,
-} from "./projectManagementApi.js";
+import {
+  reconcileCommittedLogicGateRecordTitles,
+  reconcileCommittedNodeTitleInSnapshot,
+} from "../map/committedTitleSnapshotReconciliation.js";
 
-export type ProjectManagementWorkspaceTitleState = {
+type ProjectManagementWorkspaceTitleState = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
+};
+
+type ProjectResourceDisplayTitleRecord = {
+  company_id: string;
+  resource_type?: "node" | "logic_gate" | "";
+  resource_id?: string;
+  node_id?: string | null;
+  logic_gate_id?: string | null;
+  display_title?: string;
 };
 
 function cleanUpdate(update: CommittedEntityTitleUpdate, activeCompanyID: string): {
@@ -25,38 +32,28 @@ function cleanUpdate(update: CommittedEntityTitleUpdate, activeCompanyID: string
   return { companyID, resourceID, title };
 }
 
-function timelineRowMatches(row: ProjectManagementTimelineRow, update: CommittedEntityTitleUpdate, resourceID: string): boolean {
-  if (row.resource_type !== update.entityType) return false;
-  if (update.entityType === "node") return (row.node_id?.trim() || row.resource_id.trim()) === resourceID;
-  return (row.logic_gate_id?.trim() || row.resource_id.trim()) === resourceID;
-}
-
-function relationshipMatches(row: ProjectRelationshipProjection, update: CommittedEntityTitleUpdate, resourceID: string): boolean {
-  if (row.resource_type !== update.entityType) return false;
-  if (update.entityType === "node") return (row.node_id?.trim() || row.resource_id.trim()) === resourceID;
-  return (row.logic_gate_id?.trim() || row.resource_id.trim()) === resourceID;
-}
-
-function criticalPathStepMatches(step: ProjectCriticalPathStep, update: CommittedEntityTitleUpdate, resourceID: string): boolean {
-  if (step.resource_type !== update.entityType) return false;
-  if (update.entityType === "node") return (step.node_id?.trim() || step.resource_id?.trim() || "") === resourceID;
-  return (step.logic_gate_id?.trim() || step.resource_id?.trim() || "") === resourceID;
-}
-
-export function reconcileProjectManagementTimelineTitles(
-  rows: ProjectManagementTimelineRow[],
+export function reconcileProjectResourceDisplayTitles<T extends ProjectResourceDisplayTitleRecord>(
+  records: T[],
   update: CommittedEntityTitleUpdate,
   activeCompanyID: string,
-): ProjectManagementTimelineRow[] {
+): T[] {
   const clean = cleanUpdate(update, activeCompanyID);
-  if (!clean) return rows;
+  if (!clean) return records;
   let changed = false;
-  const next = rows.map((row) => {
-    if (row.company_id.trim() !== clean.companyID || !timelineRowMatches(row, update, clean.resourceID) || row.display_title === clean.title) return row;
+  const next = records.map((record) => {
+    const resourceID = update.entityType === "node"
+      ? record.node_id?.trim() || record.resource_id?.trim() || ""
+      : record.logic_gate_id?.trim() || record.resource_id?.trim() || "";
+    if (
+      record.company_id.trim() !== clean.companyID
+      || record.resource_type !== update.entityType
+      || resourceID !== clean.resourceID
+      || record.display_title === clean.title
+    ) return record;
     changed = true;
-    return { ...row, display_title: clean.title };
+    return { ...record, display_title: clean.title };
   });
-  return changed ? next : rows;
+  return changed ? next : records;
 }
 
 export function reconcileProjectManagementWorkspaceTitles<T extends ProjectManagementWorkspaceTitleState>(
@@ -66,60 +63,13 @@ export function reconcileProjectManagementWorkspaceTitles<T extends ProjectManag
 ): T {
   const clean = cleanUpdate(update, activeCompanyID);
   if (!clean) return workspace;
-  let nodesChanged = false;
-  let logicGatesChanged = false;
-  const nodes = update.entityType === "node" ? workspace.nodes.map((node) => {
-    if (node.company_id.trim() !== clean.companyID || node.node_id.trim() !== clean.resourceID || node.name === clean.title) return node;
-    nodesChanged = true;
-    return { ...node, name: clean.title };
-  }) : workspace.nodes;
-  const logicGates = update.entityType === "logic_gate" ? workspace.logicGates.map((gate) => {
-    if (gate.company_id.trim() !== clean.companyID || gate.logic_gate_id.trim() !== clean.resourceID || gate.header === clean.title) return gate;
-    logicGatesChanged = true;
-    return { ...gate, header: clean.title };
-  }) : workspace.logicGates;
-  return nodesChanged || logicGatesChanged ? { ...workspace, nodes, logicGates } : workspace;
+  const nodes = reconcileCommittedNodeTitleInSnapshot(workspace.nodes, update);
+  const logicGates = reconcileCommittedLogicGateRecordTitles(workspace.logicGates, update);
+  return nodes !== workspace.nodes || logicGates !== workspace.logicGates
+    ? { ...workspace, nodes, logicGates }
+    : workspace;
 }
 
-export function reconcileProjectRelationshipTitles(
-  relationships: ProjectRelationshipProjection[],
-  update: CommittedEntityTitleUpdate,
-  activeCompanyID: string,
-): ProjectRelationshipProjection[] {
-  const clean = cleanUpdate(update, activeCompanyID);
-  if (!clean) return relationships;
-  let changed = false;
-  const next = relationships.map((relationship) => {
-    if (
-      relationship.company_id.trim() !== clean.companyID
-      || !relationshipMatches(relationship, update, clean.resourceID)
-      || relationship.display_title === clean.title
-    ) return relationship;
-    changed = true;
-    return { ...relationship, display_title: clean.title };
-  });
-  return changed ? next : relationships;
-}
-
-export function reconcileProjectCriticalPathTitles(
-  steps: ProjectCriticalPathStep[],
-  update: CommittedEntityTitleUpdate,
-  activeCompanyID: string,
-): ProjectCriticalPathStep[] {
-  const clean = cleanUpdate(update, activeCompanyID);
-  if (!clean) return steps;
-  let changed = false;
-  const next = steps.map((step) => {
-    if (
-      step.company_id.trim() !== clean.companyID
-      || !criticalPathStepMatches(step, update, clean.resourceID)
-      || step.display_title === clean.title
-    ) return step;
-    changed = true;
-    return { ...step, display_title: clean.title };
-  });
-  return changed ? next : steps;
-}
 
 export function reconcileSelectedNodeTitle<T extends { nodeID: string; title: string }>(
   selection: T | null,
@@ -145,36 +95,4 @@ export function reconcileRelationshipContextTitle<T extends { resourceType: "nod
     || target.displayTitle === clean.title
   ) return target;
   return { ...target, displayTitle: clean.title };
-}
-
-export function reconcileProjectNodePickerTitles(
-  results: CompanyExplorerSearchResult[],
-  update: CommittedEntityTitleUpdate,
-  activeCompanyID: string,
-): CompanyExplorerSearchResult[] {
-  const clean = cleanUpdate(update, activeCompanyID);
-  if (!clean || update.entityType !== "node") return results;
-  let changed = false;
-  const next = results.map((result) => {
-    if (result.company_id.trim() !== clean.companyID) return result;
-    const matchesResult = result.resource_type === "node" && result.resource_id.trim() === clean.resourceID;
-    let pathChanged = false;
-    const locationPath = result.location_path.map((segment) => {
-      if (
-        segment.entity_type !== "node"
-        || (segment.resource_id?.trim() || segment.entity_id.trim()) !== clean.resourceID
-        || segment.name === clean.title
-      ) return segment;
-      pathChanged = true;
-      return { ...segment, name: clean.title };
-    });
-    if (!matchesResult && !pathChanged) return result;
-    if (matchesResult && result.display_name !== clean.title || pathChanged) changed = true;
-    return {
-      ...result,
-      display_name: matchesResult ? clean.title : result.display_name,
-      location_path: pathChanged ? locationPath : result.location_path,
-    };
-  });
-  return changed ? next : results;
 }

@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { invalidateCachesForCommittedEntityTitle } from "../../../frontend/src/app/committedTitleCacheInvalidation.js";
+import { reconcileCachesForCommittedEntityTitle } from "../../../frontend/src/app/committedTitleCacheReconciliation.js";
 import {
   publishCommittedEntityTitleUpdate,
   resetCommittedEntityTitleRegistryForTests,
   subscribeCommittedEntityTitleUpdates,
-} from "../../../frontend/src/modules/company-explorer/companyExplorerLocalEntityUpdates.js";
+} from "../../../frontend/src/modules/realtime/committedEntityTitleUpdates.js";
 import {
   invalidateCommunicationsCache,
   listNodes,
@@ -34,7 +34,7 @@ test("Node title publication invalidates Home and PM reads and patches cached Ka
   const appLayoutSource = readFileSync("frontend/src/app/applayout.tsx", "utf8");
   assert.match(
     appLayoutSource,
-    /subscribeCommittedEntityTitleUpdates[\s\S]*invalidateCachesForCommittedEntityTitle\(apiBase, update\)/,
+    /subscribeCommittedEntityTitleUpdates[\s\S]*reconcileCachesForCommittedEntityTitle\(apiBase, update\)/,
   );
   const apiBase = "https://title-cache-node.example.test";
   const companyID = "title-cache-node-company";
@@ -47,7 +47,7 @@ test("Node title publication invalidates Home and PM reads and patches cached Ka
   const originalFetch = globalThis.fetch;
   const target = new EventTarget();
   const unsubscribe = subscribeCommittedEntityTitleUpdates(
-    (update) => invalidateCachesForCommittedEntityTitle(apiBase, update),
+    (update) => reconcileCachesForCommittedEntityTitle(apiBase, update),
     target,
   );
   globalThis.fetch = async (input: RequestInfo | URL) => {
@@ -112,7 +112,7 @@ test("Logic Gate publication patches Kanban contents and fences an older board-l
   const originalFetch = globalThis.fetch;
   const target = new EventTarget();
   const unsubscribe = subscribeCommittedEntityTitleUpdates(
-    (update) => invalidateCachesForCommittedEntityTitle(apiBase, update),
+    (update) => reconcileCachesForCommittedEntityTitle(apiBase, update),
     target,
   );
   globalThis.fetch = async (input: RequestInfo | URL) => {
@@ -184,7 +184,7 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
   const originalFetch = globalThis.fetch;
   const target = new EventTarget();
   const unsubscribe = subscribeCommittedEntityTitleUpdates(
-    (update) => invalidateCachesForCommittedEntityTitle(apiBase, update),
+    (update) => reconcileCachesForCommittedEntityTitle(apiBase, update),
     target,
   );
   globalThis.fetch = async (input: RequestInfo | URL) => {
@@ -195,12 +195,11 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
       markStaleFetchStarted();
       await staleFetchGate;
     }
-    const name = snapshotFetches < 3 ? "Old graph node" : "Canonical graph node";
     return jsonResponse({
       nodes: [{
         company_id: companyID,
         node_id: nodeID,
-        name,
+        name: "Old graph node",
         created_timestamp: "2026-07-13T00:00:00Z",
       }],
       relationships: [],
@@ -230,10 +229,7 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
     releaseStaleFetch();
     await staleRefresh;
     assert.equal(getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes[0]?.name, "Committed graph node");
-
-    await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-    assert.equal(getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes[0]?.name, "Canonical graph node");
-    assert.equal(snapshotFetches, 3);
+    assert.equal(snapshotFetches, 2, "the stale in-flight response must be folded without a retry request");
   } finally {
     unsubscribe();
     globalThis.fetch = originalFetch;

@@ -50,7 +50,7 @@ LG36 - The board request owner is the Logic Gate's Generated user ID. The work p
 LG37 - Logic Gate text highlighting must use the shared `EditorTabBar` palette/custom/clear control and shared formatting controller. Highlight applies only to the restored non-collapsed selection, reports the active selection color, and round-trips through sanitized rich HTML; a collapsed caret does not create sticky highlight state.
 LG38 - Hydrating changed Logic Gate editor content while the editor or one of its shared toolbar controls owns focus must preserve the logical selection. The editor restores the last valid range, records text offsets before replacing the DOM, and restores those offsets afterward so toolbar focus does not move formatting to an unrelated location.
 LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settings isolation, its rich editor must also be hidden and formatting commands must be disabled. Editor navigation tabs remain usable so the user can return to the document.
-LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit. Matching mounted same-window consumers defined by RW15 converge as applicable, including Editor, Kanban/Arena, Logic Gate Map, Company Explorer, Home, My Work, Updates current-entity labels/actions and Logic Gate grouping labels, AppLayout dock/popup/sidebar pins, AppTimeline, and Project Management caches. An active Editor/Logic Gate Map title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage and no cross-user/generalized fan-out is created.
+LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor or Logic Gate Map title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
 
 ## Scenarios
 
@@ -252,7 +252,7 @@ Business logic covered:
 Given:
 - A Logic Gate with a Generated user is opened in Arena from forced props and the matching current selection.
 - A cached snapshot exists, the user quickly changes gates, and acceptance/hints arrive while one mounted-board read is slow; another local board handler may join the accepted scope.
-- The same Logic Gate is renamed successfully from each supported entry point while the applicable RW15 consumers are mounted, including Editor, Arena, Logic Gate Map, Company Explorer, Home, My Work, Updates, AppLayout, AppTimeline, and Project Management; one title `contentEditable` has a live draft/caret.
+- The same Logic Gate is renamed successfully from each supported entry point while multiple applicable RW15 consumers are mounted; one title `contentEditable` has a live draft/caret.
 
 Expected:
 - The cached board renders immediately and the duplicate selection paths share one request.

@@ -9,9 +9,11 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
-import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../company-explorer/companyExplorerLocalEntityUpdates";
+import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore";
+import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes";
+import { reconcileCommittedLogicGateRecordTitles } from "../map/committedTitleSnapshotReconciliation";
 import {
   fetchProjectView,
   listProjectRelationshipsForResource,
@@ -64,7 +66,6 @@ import {
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
-import { applyCommittedLogicGateTitleToRecords, applyCommittedLogicGateTitleToSearchResults, resolveCommittedLastAssignedLogicGateLabel } from "./editorCommittedTitleState";
 
 import {
   AttachedEmailOrganizerPane,
@@ -428,10 +429,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const resourceID = update.resourceID.trim();
     const title = update.title.trim();
     if (!resourceID || !title) return;
-    setAssignedLogicGateRecords((current) => applyCommittedLogicGateTitleToRecords(current, resourceID, title));
-    setLogicGateSearchResults((current) => applyCommittedLogicGateTitleToSearchResults(current, resourceID, title));
-    setLastAssignedLogicGateLabel((current) => resolveCommittedLastAssignedLogicGateLabel(lastAssignedLogicGateID, current, resourceID, title));
-    setProjectLogicGateOptions((current) => applyCommittedLogicGateTitleToRecords(current, resourceID, title));
+    setAssignedLogicGateRecords((current) => reconcileCommittedLogicGateRecordTitles(current, update));
+    setLogicGateSearchResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
+    setLastAssignedLogicGateLabel((current) => lastAssignedLogicGateID.trim() === resourceID ? title : current);
+    setProjectLogicGateOptions((current) => reconcileCommittedLogicGateRecordTitles(current, update));
   }), [companyID, lastAssignedLogicGateID]);
 
   useEffect(() => {
@@ -893,9 +894,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           sortLogicGateOptions(records.filter((record): record is LogicGateRecord => Boolean(record))),
           companyID,
           titleVersionAtStart,
-          (current, update) => update.entityType === "logic_gate"
-            ? applyCommittedLogicGateTitleToRecords(current, update.resourceID, update.title)
-            : current,
+          reconcileCommittedLogicGateRecordTitles,
         ));
       }
     })()
@@ -1041,9 +1040,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         records.filter((record): record is LogicGateRecord => Boolean(record)),
         companyID,
         titleVersionAtStart,
-        (current, update) => update.entityType === "logic_gate"
-          ? applyCommittedLogicGateTitleToRecords(current, update.resourceID, update.title)
-          : current,
+        reconcileCommittedLogicGateRecordTitles,
       ));
     });
     return () => { cancelled = true; };
@@ -1067,9 +1064,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             payload.results ?? [],
             companyID,
             titleVersionAtStart,
-            (current, update) => update.entityType === "logic_gate"
-              ? applyCommittedLogicGateTitleToSearchResults(current, update.resourceID, update.title)
-              : current,
+            reconcileCompanyExplorerSearchResultTitles,
           ));
         })
         .catch((cause) => {
