@@ -80,14 +80,17 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeContentChanges.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
+const componentTestSource = resolve(repoRoot, "tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx");
+const componentTestFile = resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js");
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
+const esbuildEntrypoint = resolve(frontendRoot, "node_modules/esbuild/bin/esbuild");
 
-function run(command) {
+function run(command, extraEnv = {}) {
   execSync(command, {
     cwd: repoRoot,
     stdio: "inherit",
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
   });
 }
 
@@ -124,11 +127,17 @@ for (const testFile of testFiles) {
 
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
+run(
+  `"${process.execPath}" "${esbuildEntrypoint}" "${componentTestSource}" --bundle --platform=node --format=esm --packages=external --define:import.meta.env={} --outfile="${componentTestFile}"`,
+);
 
-for (const testFile of testFiles) {
+for (const testFile of [...testFiles, componentTestFile]) {
   console.log(`\n=== Frontend feature tests: ${testFile} ===`);
   // Running the compiled test module directly avoids Node's worker-spawn path, which is
   // blocked in some Windows sandboxes. `node:test` still reports TAP and exits non-zero
   // on failures, so this keeps the same pass/fail contract.
-  run(`"${process.execPath}" "${testFile}"`);
+  run(
+    `"${process.execPath}" "${testFile}"`,
+    testFile === componentTestFile ? { NODE_ENV: "development" } : {},
+  );
 }

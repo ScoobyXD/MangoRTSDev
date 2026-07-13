@@ -1,0 +1,325 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import React, { act } from "react";
+import { JSDOM } from "jsdom";
+
+type Restore = () => void;
+
+function installGlobal(name: string, value: unknown, restores: Restore[]) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, {
+    configurable: true,
+    writable: true,
+    value,
+  });
+  restores.push(() => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+    else delete (globalThis as Record<string, unknown>)[name];
+  });
+}
+
+function attachmentDocument(attachmentID: string): string {
+  const source = "mango-attachment:" + encodeURIComponent(attachmentID);
+  return '<!-- mango-editor-html-v1 --><span data-mango-editor-image="true" data-mango-editor-attachment-id="' +
+    attachmentID + '"><img src="' + source + '" alt=""></span>';
+}
+
+async function flushAsyncWork() {
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  });
+}
+
+test("NodeTextBlockEditor restores its attachment hydrator after StrictMode replay", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  const restores: Restore[] = [];
+  const browserGlobals = [
+    "window",
+    "document",
+    "navigator",
+    "self",
+    "Node",
+    "NodeFilter",
+    "Element",
+    "HTMLElement",
+    "HTMLDivElement",
+    "HTMLSpanElement",
+    "HTMLImageElement",
+    "HTMLTemplateElement",
+    "HTMLLIElement",
+    "HTMLUListElement",
+    "HTMLAnchorElement",
+    "HTMLBRElement",
+    "HTMLTableElement",
+    "HTMLTableRowElement",
+    "HTMLTableCellElement",
+    "DocumentFragment",
+    "DOMParser",
+    "DOMException",
+    "Event",
+    "EventTarget",
+    "MouseEvent",
+    "KeyboardEvent",
+    "FocusEvent",
+    "MutationObserver",
+  ] as const;
+  for (const name of browserGlobals) {
+    const value = name === "window" || name === "self"
+      ? dom.window
+      : name === "document"
+        ? dom.window.document
+        : (dom.window as unknown as Record<string, unknown>)[name];
+    installGlobal(name, value, restores);
+  }
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+
+  let nextFrameID = 0;
+  const animationFrames = new Map<number, FrameRequestCallback>();
+  const requestFrame = (callback: FrameRequestCallback) => {
+    const frameID = nextFrameID += 1;
+    animationFrames.set(frameID, callback);
+    return frameID;
+  };
+  const cancelFrame = (frameID: number) => {
+    animationFrames.delete(frameID);
+  };
+  dom.window.requestAnimationFrame = requestFrame;
+  dom.window.cancelAnimationFrame = cancelFrame;
+  installGlobal("requestAnimationFrame", requestFrame, restores);
+  installGlobal("cancelAnimationFrame", cancelFrame, restores);
+
+  let activeObservers = 0;
+  let maximumActiveObservers = 0;
+  let observerCreations = 0;
+  let observerDisconnects = 0;
+  class TestIntersectionObserver {
+    private active = true;
+    private readonly observed = new Set<Element>();
+
+    constructor(
+      private readonly callback: IntersectionObserverCallback,
+      readonly options?: IntersectionObserverInit,
+    ) {
+      observerCreations += 1;
+      activeObservers += 1;
+      maximumActiveObservers = Math.max(maximumActiveObservers, activeObservers);
+    }
+
+    observe(target: Element) {
+      this.observed.add(target);
+      this.callback([{
+        target,
+        isIntersecting: true,
+        intersectionRatio: 1,
+      } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+    }
+
+    unobserve(target: Element) {
+      this.observed.delete(target);
+    }
+
+    disconnect() {
+      if (!this.active) return;
+      this.active = false;
+      this.observed.clear();
+      observerDisconnects += 1;
+      activeObservers -= 1;
+    }
+
+    takeRecords() {
+      return [];
+    }
+
+    readonly root = null;
+    readonly rootMargin = "800px 0px";
+    readonly thresholds = [0];
+  }
+  installGlobal("IntersectionObserver", TestIntersectionObserver, restores);
+  Object.defineProperty(dom.window, "IntersectionObserver", {
+    configurable: true,
+    writable: true,
+    value: TestIntersectionObserver,
+  });
+
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const createdObjectURLs: string[] = [];
+  const revokedObjectURLs: string[] = [];
+  URL.createObjectURL = () => {
+    const value = "blob:test-" + (createdObjectURLs.length + 1);
+    createdObjectURLs.push(value);
+    return value;
+  };
+  URL.revokeObjectURL = (value) => {
+    revokedObjectURLs.push(value);
+  };
+  Object.defineProperty(dom.window.URL, "createObjectURL", {
+    configurable: true,
+    writable: true,
+    value: URL.createObjectURL,
+  });
+  Object.defineProperty(dom.window.URL, "revokeObjectURL", {
+    configurable: true,
+    writable: true,
+    value: URL.revokeObjectURL,
+  });
+
+  const fetchedURLs: string[] = [];
+  const fetchSignals: AbortSignal[] = [];
+  let fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    fetchedURLs.push(String(input));
+    if (init?.signal) fetchSignals.push(init.signal);
+    return new Response(new Blob(["image"], { type: "image/png" }), { status: 200 });
+  };
+  installGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => fetchImplementation(input, init), restores);
+
+  let mountedRoot: { unmount(): void } | null = null;
+  let pendingMountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { NodeTextBlockEditor }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
+    ]);
+    const noop = () => undefined;
+    const emptyUsers: never[] = [];
+    const emptyChanges: never[] = [];
+    const emptyMessages: never[] = [];
+    const baseProps = {
+      blockID: "block-1",
+      editable: false,
+      nodeID: "node-1",
+      apiBase: "https://api.test",
+      companyID: "company-1",
+      currentUserID: "user-1",
+      companyUsers: emptyUsers,
+      contentChanges: emptyChanges,
+      chatMessages: emptyMessages,
+      activeChatAnchorMessageID: "",
+      chatNavigationRequest: null,
+      tableInsertRequestID: 0,
+      surfaceText: "#111827",
+      accent: "#7c3aed",
+      outlineStyle: "automatic-outline-numbering" as const,
+      indentGuideColor: "#94a3b8",
+      scrollbarTrack: "#e2e8f0",
+      onFocus: noop,
+      onBlur: noop,
+      onDocumentChange: noop,
+      onDocumentFlush: noop,
+      onChangeSeen: noop,
+      onSelectionChatRequest: noop,
+      onImageChatRequest: noop,
+      onImageNodeRequest: noop,
+    };
+    const renderEditor = (documentValue: string) => (
+      <React.StrictMode>
+        <NodeTextBlockEditor {...baseProps} documentValue={documentValue} />
+      </React.StrictMode>
+    );
+
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+    const firstDocument = attachmentDocument("attachment-1");
+
+    await act(async () => {
+      root.render(renderEditor(firstDocument));
+    });
+    await flushAsyncWork();
+
+    const editor = container.querySelector('[data-node-text-block-id="block-1"]');
+    const firstImage = editor?.querySelector("img");
+    assert.ok(editor);
+    assert.ok(firstImage);
+    assert.equal(firstImage.getAttribute("src"), "blob:test-1");
+    assert.equal(activeObservers, 1);
+    assert.equal(maximumActiveObservers, 1);
+    assert.equal(observerCreations, 2);
+    assert.equal(observerDisconnects, 1);
+    assert.equal(fetchedURLs.length, 1);
+    assert.equal(fetchSignals[0]?.aborted, false);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
+
+    await act(async () => {
+      root.render(renderEditor(firstDocument));
+    });
+    await flushAsyncWork();
+    assert.equal(activeObservers, 1);
+    assert.equal(observerCreations, 2);
+    assert.equal(fetchedURLs.length, 1);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
+
+    const secondDocument = attachmentDocument("attachment-2");
+    await act(async () => {
+      root.render(renderEditor(secondDocument));
+    });
+    await flushAsyncWork();
+
+    const secondImage = editor.querySelector("img");
+    assert.ok(secondImage);
+    assert.equal(firstImage.getAttribute("src"), "mango-attachment:attachment-1");
+    assert.equal(secondImage.getAttribute("src"), "blob:test-2");
+    assert.equal(activeObservers, 1);
+    assert.equal(maximumActiveObservers, 1);
+    assert.equal(fetchedURLs.length, 2);
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    mountedRoot = null;
+    assert.equal(activeObservers, 0);
+    assert.equal(secondImage.getAttribute("src"), "mango-attachment:attachment-2");
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.equal(animationFrames.size, 0);
+
+    const pendingContainer = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(pendingContainer);
+    let pendingFetchSignal: AbortSignal | null = null;
+    fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      fetchedURLs.push(String(input));
+      pendingFetchSignal = init?.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        pendingFetchSignal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        }, { once: true });
+      });
+    };
+    const pendingRoot = createRoot(pendingContainer);
+    pendingMountedRoot = pendingRoot;
+    await act(async () => {
+      pendingRoot.render(renderEditor(attachmentDocument("attachment-pending")));
+    });
+    await flushAsyncWork();
+    assert.equal(activeObservers, 1);
+    assert.equal(fetchedURLs.length, 3);
+    assert.equal(pendingFetchSignal?.aborted, false);
+
+    await act(async () => {
+      pendingRoot.unmount();
+    });
+    pendingMountedRoot = null;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await flushAsyncWork();
+    assert.equal(pendingFetchSignal?.aborted, true);
+    assert.equal(activeObservers, 0);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.equal(animationFrames.size, 0);
+  } finally {
+    if (pendingMountedRoot) {
+      await act(async () => pendingMountedRoot?.unmount());
+    }
+    if (mountedRoot) {
+      await act(async () => mountedRoot?.unmount());
+    }
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});

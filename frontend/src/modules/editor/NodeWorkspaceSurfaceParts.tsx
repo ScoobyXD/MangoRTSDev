@@ -837,6 +837,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onSelectionFontSizeChange?.(fontSize);
   }, [onSelectionFontSizeChange]);
 
+  const stopAttachmentHydration = useCallback(() => {
+    attachmentHydrationCleanupRef.current?.();
+    attachmentHydrationCleanupRef.current = null;
+  }, []);
+
   const scheduleNodeDocumentSave = useCallback((nextDocument: string, immediate = false) => {
     if (!editable) return;
     userEditedDocumentRef.current = true;
@@ -900,8 +905,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const applyExternalDocumentValue = useCallback((element: HTMLDivElement, value: string, preserveSelection: boolean) => {
     if (preserveSelection) restoreSelection(element);
     const selectionOffsets = preserveSelection ? getEditorSelectionOffsets(element) : null;
-    attachmentHydrationCleanupRef.current?.();
-    attachmentHydrationCleanupRef.current = null;
+    stopAttachmentHydration();
     element.innerHTML = deserializeEditorDocumentHTML(value);
     if (apiBase.trim() && companyID.trim()) {
       attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
@@ -916,13 +920,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     deferredExternalDocumentRef.current = null;
     scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(element));
     if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
-  }, [apiBase, companyID, documentTargetKey, restoreSelection, scheduleTextBlockIndentGuideUpdate]);
+  }, [apiBase, companyID, documentTargetKey, restoreSelection, scheduleTextBlockIndentGuideUpdate, stopAttachmentHydration]);
 
   useLayoutEffect(() => {
     const element = editorRef.current;
     if (!element) return;
     const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
-    const hydrationContextChanged = attachmentHydrationContextKeyRef.current !== `${apiBase.trim()}\u0000${companyID.trim()}`;
+    const hydrationOwnerMissing = Boolean(apiBase.trim() && companyID.trim()) && attachmentHydrationCleanupRef.current === null;
+    const hydrationContextChanged = attachmentHydrationContextKeyRef.current !== `${apiBase.trim()}\u0000${companyID.trim()}` || hydrationOwnerMissing;
     if (!targetChanged && !hydrationContextChanged && documentValue === lastAppliedDocumentRef.current) return;
     if (!targetChanged && !hydrationContextChanged) {
       const currentDocument = serializeEditorDocumentHTML(element);
@@ -940,9 +945,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [apiBase, applyExternalDocumentValue, companyID, documentTargetKey, documentValue]);
 
   useEffect(() => () => {
-    attachmentHydrationCleanupRef.current?.();
-    attachmentHydrationCleanupRef.current = null;
-  }, []);
+    stopAttachmentHydration();
+  }, [stopAttachmentHydration]);
 
   const formattingController = useEditorDocumentFormattingController({
     editorRef,
