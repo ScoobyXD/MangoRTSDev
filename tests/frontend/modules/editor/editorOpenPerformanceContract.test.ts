@@ -14,7 +14,7 @@ test("each editor DOM has one attachment hydration owner with explicit cleanup",
   assert.equal((textBlocks.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
   assert.equal((unified.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
   assert.equal((editor.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
-  assert.match(textBlocks, /attachmentHydrationCleanupRef\.current\?\.\(\)/);
+  assert.match(textBlocks, /const owner = attachmentHydrationOwnerRef\.current;\s+attachmentHydrationOwnerRef\.current = null;\s+owner\?\.cleanup\(\)/);
   assert.match(unified, /attachmentHydrationCleanupRef\.current\?\.\(\)/);
   assert.match(editor, /attachmentHydrationCleanupRef\.current\?\.\(\)/);
 });

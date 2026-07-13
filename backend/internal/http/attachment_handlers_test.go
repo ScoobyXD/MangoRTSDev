@@ -22,6 +22,16 @@ type fakeAttachmentObjectStorage struct {
 	getKeys []string
 }
 
+type attachmentMetadataCountingRepo struct {
+	store.Repository
+	listAttachmentResourceLinksCalls int
+}
+
+func (r *attachmentMetadataCountingRepo) ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error) {
+	r.listAttachmentResourceLinksCalls++
+	return r.Repository.ListAttachmentResourceLinks(companyID, attachmentID)
+}
+
 type fakeAttachmentObject struct {
 	contentType    string
 	body           []byte
@@ -200,8 +210,10 @@ func TestAttachmentContentMissingDerivativeObjectFallsBackToOriginal(t *testing.
 }
 
 func TestAttachmentMetadataDoesNotExposeStorageCoordinates(t *testing.T) {
-	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	repo, _, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
 	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	countingRepo := &attachmentMetadataCountingRepo{Repository: repo}
+	server := NewServerWithOptions(countingRepo, ServerOptions{AttachmentStorage: storage})
 	req := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet,
 		"/v1/attachments/"+attachmentID+"?company_id="+companyID, nil), allowed, companyID, domain.RoleCompanyUser)
 	recorder := httptest.NewRecorder()
@@ -212,6 +224,9 @@ func TestAttachmentMetadataDoesNotExposeStorageCoordinates(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), "storage_bucket") || strings.Contains(recorder.Body.String(), "storage_key") ||
 		strings.Contains(recorder.Body.String(), storage.bucket) {
 		t.Fatalf("metadata exposed storage coordinates: %s", recorder.Body.String())
+	}
+	if countingRepo.listAttachmentResourceLinksCalls != 0 {
+		t.Fatalf("metadata made %d extra ListAttachmentResourceLinks calls, want zero", countingRepo.listAttachmentResourceLinksCalls)
 	}
 }
 

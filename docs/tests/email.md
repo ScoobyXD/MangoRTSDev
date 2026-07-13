@@ -1,10 +1,11 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Email Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/modules/editor/richTextEditing.test.ts` covers rich email HTML serialization, spacing, indentation, lists, links, highlight sanitization, and safe sanitization; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers exact compose/signature flush submission, unified signature mounting, shared highlight controls, and signature hydration/save ordering; backend communications and attachment handler tests cover provider send boundaries, S3 attachment resolution, email draft attachment authorization, and rejection of embedded inline file bytes from durable draft/signature writes. Broader draft/signature persistence endpoint coverage remains partial.)
+- Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
 - Thread viewer parity and Reply All focus are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; recipient deduplication/mailbox exclusion by `tests/frontend/modules/communications/emailRecipients.test.ts`; semantic reply-draft identity by `tests/frontend/pages/home/homeMailDrafts.test.ts`; and calendar RSVP request construction by `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
 - Automatic signature insertion, rich-body deduplication, signature-only draft detection, mailbox scope keys, and personal/shared signature request scope are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
@@ -64,6 +65,8 @@ EMAIL38 - Selecting a row from a different thread replaces prior conversation st
 EMAIL39 - The selected message body hydrates first. Historical thread rows load preview metadata in bounded pages and fetch full bodies or attachment content only when the user expands that card; Expand all is an explicit request to hydrate every card.
 EMAIL40 - Received body text and HTML render before inline CID downloads finish. Each CID source resolves independently, a slow or failed image never hides readable body content, and collapsed cards issue no attachment-content reads.
 EMAIL41 - Normal detail reads use mailbox-scoped frontend/backend caches and same-key in-flight coalescing without `refresh=true`. Raw MIME is not part of an ordinary body-only detail critical path; calendar RSVP and concrete unresolved inline-content recovery remain authenticated raw-MIME uses.
+EMAIL42 - Missing recipients and empty subject/body without a valid attachment reference are rejected before attachment authorization, repository expansion, S3, or Nylas send work. Attachment-only email remains valid. Every referenced Mango attachment then completes tenant-scoped original metadata and active-link authorization preflight; nonnegative sizes are summed without overflow and an aggregate above exactly 24,000,000 bytes is rejected before any object opens.
+EMAIL43 - Provider-ready outbound attachments are metadata plus exact size and a lazy opener, separate from inbound `NylasAttachment.Content`. Once the Nylas gate admits the send, S3 bytes stream exactly once into a deterministic-Content-Length multipart request with preserved order, filenames, content types, CID/inline semantics, and exact bytes. Length mismatch, short/long/error readers, cancellation, and provider failure close every opened body; no outbound base64 round trip or complete multipart buffer is allowed.
 
 ## Scenarios
 
@@ -189,6 +192,8 @@ Business logic covered:
 - EMAIL19
 - EMAIL20
 - EMAIL27
+- EMAIL42
+- EMAIL43
 
 Given:
 - A draft has normal file attachments or pasted inline screenshots and is sent through personal or shared mailbox scope.
@@ -201,6 +206,10 @@ Expected:
 - Missing or unauthorized pasted-image references reject the send instead of delivering a broken placeholder.
 - Nylas handles user mailbox send/read operations; SES remains only for Mango system email.
 - Provider reauth errors surface as mailbox repair states while the Mango session remains valid.
+- Recipient/content validation and the complete 24,000,000-byte metadata/authorization preflight finish before the first S3 read or provider call; zero-byte and exact-boundary attachment sets remain valid.
+- A late oversized item, negative/overflowing metadata, or unauthorized reference causes zero S3 object opens for the complete set.
+- Accepted objects open lazily after the provider gate, validate returned Content-Length, stream exactly the declared bytes into known-length multipart framing, and close on every exit path.
+- The local sent response stays metadata-only, while inbound MIME and calendar attachment recovery continue to use provider content unchanged.
 
 ### Scenario EMAIL-S7: Thread Ordering, Collapse, And One Scroll Surface
 

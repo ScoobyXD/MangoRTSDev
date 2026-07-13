@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -21,38 +21,42 @@ import (
 )
 
 type fakeNylasClient struct {
-	mu                       sync.Mutex
-	grant                    NylasGrant
-	deletedGrants            []string
-	folders                  []NylasFolder
-	messages                 []NylasMessage
-	messagesByGrantID        map[string][]NylasMessage
-	messagesByID             map[string]NylasMessage
-	thread                   NylasThread
-	message                  NylasMessage
-	sent                     NylasSendMessageRequest
-	update                   NylasMessageUpdate
-	updateCalls              []fakeNylasUpdateCall
-	updateErrByID            map[string]error
-	downloadContent          []byte
-	downloadErr              error
-	rawMIME                  string
-	rawMIMEErr               error
-	lastQuery                NylasMessageQuery
-	lastMessageGrantID       string
-	lastDetailGrantID        string
-	lastRawMIMEGrantID       string
-	lastRawMIMEMessageID     string
-	lastDownloadGrantID      string
-	lastDownloadMessageID    string
-	lastDownloadAttachmentID string
-	lastFolderGrantID        string
-	lastSendGrantID          string
-	folderCalls              int
-	messageCalls             int
-	detailCalls              int
-	listErr                  error
-	exchangeErr              error
+	mu                          sync.Mutex
+	grant                       NylasGrant
+	deletedGrants               []string
+	folders                     []NylasFolder
+	messages                    []NylasMessage
+	messagesByGrantID           map[string][]NylasMessage
+	messagesByID                map[string]NylasMessage
+	thread                      NylasThread
+	message                     NylasMessage
+	sent                        NylasSendMessageRequest
+	sentAttachmentBodies        [][]byte
+	sendCalls                   int
+	skipOutboundAttachmentReads bool
+	onSend                      func(NylasSendMessageRequest)
+	update                      NylasMessageUpdate
+	updateCalls                 []fakeNylasUpdateCall
+	updateErrByID               map[string]error
+	downloadContent             []byte
+	downloadErr                 error
+	rawMIME                     string
+	rawMIMEErr                  error
+	lastQuery                   NylasMessageQuery
+	lastMessageGrantID          string
+	lastDetailGrantID           string
+	lastRawMIMEGrantID          string
+	lastRawMIMEMessageID        string
+	lastDownloadGrantID         string
+	lastDownloadMessageID       string
+	lastDownloadAttachmentID    string
+	lastFolderGrantID           string
+	lastSendGrantID             string
+	folderCalls                 int
+	messageCalls                int
+	detailCalls                 int
+	listErr                     error
+	exchangeErr                 error
 }
 
 type fakeNylasUpdateCall struct {
@@ -245,11 +249,39 @@ func (f *fakeNylasClient) DeleteMessage(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (f *fakeNylasClient) SendMessage(_ context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
+func (f *fakeNylasClient) SendMessage(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.sendCalls++
 	f.lastSendGrantID = grantID
 	f.sent = request
+	skipOutboundAttachmentReads := f.skipOutboundAttachmentReads
+	onSend := f.onSend
+	f.mu.Unlock()
+
+	if onSend != nil {
+		onSend(request)
+	}
+	bodies := make([][]byte, 0, len(request.OutboundAttachments))
+	if !skipOutboundAttachmentReads {
+		for index, attachment := range request.OutboundAttachments {
+			content, err := attachment.Open(ctx)
+			if err != nil {
+				return NylasMessage{}, fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err)
+			}
+			raw, readErr := io.ReadAll(content.Body)
+			closeErr := content.Body.Close()
+			if readErr != nil {
+				return NylasMessage{}, readErr
+			}
+			if closeErr != nil {
+				return NylasMessage{}, closeErr
+			}
+			bodies = append(bodies, raw)
+		}
+	}
+	f.mu.Lock()
+	f.sentAttachmentBodies = bodies
+	f.mu.Unlock()
 	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
 }
 
@@ -288,6 +320,386 @@ func personalEmailDraftResourceID(userID, draftID string) string {
 
 func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
 	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+}
+
+type countingCommunicationsAttachmentRepo struct {
+	store.Repository
+	mu                              sync.Mutex
+	readAttachmentContentCalls      int
+	getAttachmentCalls              int
+	getAttachmentVariantCalls       int
+	listAttachmentResourceLinkCalls int
+	sizeOverrides                   map[string]int64
+}
+
+func (r *countingCommunicationsAttachmentRepo) ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (store.AttachmentContentRead, error) {
+	r.mu.Lock()
+	r.readAttachmentContentCalls++
+	size, overrideSize := r.sizeOverrides[attachmentID]
+	r.mu.Unlock()
+	content, err := r.Repository.ReadAttachmentContent(ctx, companyID, attachmentID, variantType)
+	if err == nil && overrideSize {
+		content.ByteSize = size
+		content.OriginalByteSize = size
+	}
+	return content, err
+}
+
+func (r *countingCommunicationsAttachmentRepo) GetAttachment(companyID, attachmentID string) (domain.Attachment, error) {
+	r.mu.Lock()
+	r.getAttachmentCalls++
+	r.mu.Unlock()
+	return r.Repository.GetAttachment(companyID, attachmentID)
+}
+
+func (r *countingCommunicationsAttachmentRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
+	r.mu.Lock()
+	r.getAttachmentVariantCalls++
+	r.mu.Unlock()
+	return r.Repository.GetAttachmentVariant(ctx, companyID, attachmentID, variantType)
+}
+
+func (r *countingCommunicationsAttachmentRepo) ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error) {
+	r.mu.Lock()
+	r.listAttachmentResourceLinkCalls++
+	r.mu.Unlock()
+	return r.Repository.ListAttachmentResourceLinks(companyID, attachmentID)
+}
+
+func (r *countingCommunicationsAttachmentRepo) attachmentReadCounts() (readContent, getAttachment, getVariant, listLinks int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.readAttachmentContentCalls, r.getAttachmentCalls, r.getAttachmentVariantCalls, r.listAttachmentResourceLinkCalls
+}
+
+type communicationsSendTestFixture struct {
+	repo         *store.MemoryRepo
+	countingRepo *countingCommunicationsAttachmentRepo
+	server       *Server
+	handler      http.Handler
+	storage      *fakeAttachmentObjectStorage
+	nylas        *fakeNylasClient
+	token        string
+	companyID    string
+	userID       string
+}
+
+func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixture {
+	t.Helper()
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "communications-send-test-user"
+	const companyID = "22222222-2222-2222-2222-222222222222"
+	user, err := repo.UpsertAuthUser(subject, "sender@example.com", "Sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Communications Send Test Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-send-test",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	storage := newFakeAttachmentObjectStorage()
+	countingRepo := &countingCommunicationsAttachmentRepo{
+		Repository:    repo,
+		sizeOverrides: map[string]int64{},
+	}
+	nylas := &fakeNylasClient{}
+	server := NewServerWithOptions(countingRepo, ServerOptions{
+		AuthValidator:     testValidator(t, "kid", key),
+		NylasConfig:       testNylasConfig(),
+		NylasClient:       nylas,
+		AttachmentStorage: storage,
+	})
+	return &communicationsSendTestFixture{
+		repo:         repo,
+		countingRepo: countingRepo,
+		server:       server,
+		handler:      server.Routes(),
+		storage:      storage,
+		nylas:        nylas,
+		token:        "Bearer " + testJWT(t, key, "kid", subject, user.Email),
+		companyID:    companyID,
+		userID:       user.UserID,
+	}
+}
+
+func (f *communicationsSendTestFixture) seedAttachment(t *testing.T, resourceID, filename string, content []byte) string {
+	t.Helper()
+	return seedEmailAttachmentForCommunicationsTest(t, f.repo, f.storage, f.userID, f.companyID, resourceID, filename, "application/octet-stream", content)
+}
+
+func (f *communicationsSendTestFixture) send(t *testing.T, payload any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/send?company_id="+url.QueryEscape(f.companyID), strings.NewReader(string(raw)))
+	req.Header.Set("Authorization", f.token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func assertCommunicationsAttachmentReadShape(t *testing.T, repo *countingCommunicationsAttachmentRepo, wantReadContent int) {
+	t.Helper()
+	readContent, getAttachment, getVariant, listLinks := repo.attachmentReadCounts()
+	if readContent != wantReadContent || getAttachment != 0 || getVariant != 0 || listLinks != 0 {
+		t.Fatalf("attachment repository reads = content:%d get:%d variant:%d links:%d, want content:%d and no expanded/duplicate reads", readContent, getAttachment, getVariant, listLinks, wantReadContent)
+	}
+}
+
+func TestCommunicationsSendValidatesBeforeAttachmentWork(t *testing.T) {
+	t.Run("missing recipients", func(t *testing.T) {
+		fixture := newCommunicationsSendTestFixture(t)
+		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-no-recipients"), "note.txt", []byte("hello"))
+		rec := fixture.send(t, map[string]any{
+			"subject": "No recipients",
+			"body":    "Body",
+			"attachments": []map[string]any{{
+				"attachment_id": attachmentID,
+				"filename":      "note.txt",
+			}},
+		})
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "email_recipients_required") {
+			t.Fatalf("status=%d body=%s, want email_recipients_required", rec.Code, rec.Body.String())
+		}
+		assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 0)
+		if len(fixture.storage.getKeys) != 0 || fixture.nylas.sendCalls != 0 {
+			t.Fatalf("early rejection storage reads=%v send calls=%d, want zero", fixture.storage.getKeys, fixture.nylas.sendCalls)
+		}
+	})
+
+	for _, test := range []struct {
+		name        string
+		attachments []map[string]any
+	}{
+		{name: "empty attachment entries", attachments: []map[string]any{{}}},
+		{name: "invalid id is not an attachment reference", attachments: []map[string]any{{"attachment_id": "not-a-valid-reference", "filename": "invalid.txt"}}},
+		{name: "raw bytes are not an attachment reference", attachments: []map[string]any{{"attachment_id": "11111111-1111-1111-1111-111111111111", "filename": "raw.txt", "content": "QUJD"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newCommunicationsSendTestFixture(t)
+			fixture.server.attachmentStorage = nil
+			rec := fixture.send(t, map[string]any{
+				"to":          []map[string]string{{"email": "friend@example.com"}},
+				"subject":     " ",
+				"body":        " ",
+				"attachments": test.attachments,
+			})
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "email_content_required") {
+				t.Fatalf("status=%d body=%s, want email_content_required", rec.Code, rec.Body.String())
+			}
+			assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 0)
+			if fixture.nylas.sendCalls != 0 {
+				t.Fatalf("send calls = %d, want zero", fixture.nylas.sendCalls)
+			}
+		})
+	}
+}
+
+func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-lazy"), "note.txt", []byte("hello"))
+	s3ReadsAtSendStart := -1
+	fixture.nylas.onSend = func(NylasSendMessageRequest) {
+		s3ReadsAtSendStart = len(fixture.storage.getKeys)
+	}
+
+	rec := fixture.send(t, map[string]any{
+		"to":      []map[string]string{{"email": "friend@example.com"}},
+		"subject": "Lazy attachment",
+		"body":    "Body",
+		"attachments": []map[string]any{{
+			"attachment_id": strings.ToUpper(attachmentID),
+			"filename":      "note.txt",
+		}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s, want created", rec.Code, rec.Body.String())
+	}
+	assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
+	if s3ReadsAtSendStart != 0 || len(fixture.storage.getKeys) != 1 {
+		t.Fatalf("S3 reads at provider start=%d final=%v, want 0 then one lazy read", s3ReadsAtSendStart, fixture.storage.getKeys)
+	}
+	if fixture.nylas.sendCalls != 1 || len(fixture.nylas.sentAttachmentBodies) != 1 || string(fixture.nylas.sentAttachmentBodies[0]) != "hello" {
+		t.Fatalf("provider send calls=%d bodies=%q, want one consumed hello body", fixture.nylas.sendCalls, fixture.nylas.sentAttachmentBodies)
+	}
+	if len(fixture.nylas.sent.Attachments) != 1 || fixture.nylas.sent.Attachments[0].Content != "" ||
+		len(fixture.nylas.sent.OutboundAttachments) != 1 || fixture.nylas.sent.OutboundAttachments[0].Open == nil {
+		t.Fatalf("sent request metadata=%+v outbound=%+v, want metadata-only attachment and one lazy opener", fixture.nylas.sent.Attachments, fixture.nylas.sent.OutboundAttachments)
+	}
+	var response struct {
+		Message NylasMessage
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Message.Attachments) != 1 || response.Message.Attachments[0].Content != "" {
+		t.Fatalf("response attachments = %+v, want metadata only", response.Message.Attachments)
+	}
+}
+
+func TestCommunicationsSendUnauthorizedAttachmentDoesNotOpenStorage(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID("another-user", "draft-private"), "private.txt", []byte("private"))
+	rec := fixture.send(t, map[string]any{
+		"to":      []map[string]string{{"email": "friend@example.com"}},
+		"subject": "Unauthorized attachment",
+		"body":    "Body",
+		"attachments": []map[string]any{{
+			"attachment_id": attachmentID,
+			"filename":      "private.txt",
+		}},
+	})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s, want concealed not found", rec.Code, rec.Body.String())
+	}
+	assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
+	if len(fixture.storage.getKeys) != 0 || fixture.nylas.sendCalls != 0 {
+		t.Fatalf("unauthorized storage reads=%v send calls=%d, want zero", fixture.storage.getKeys, fixture.nylas.sendCalls)
+	}
+}
+
+func TestCommunicationsSendPreservesLazyStorageErrorResponse(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-missing-object"), "missing.txt", []byte("gone"))
+	delete(fixture.storage.objects, attachmentOriginalObjectKey(fixture.companyID, attachmentID))
+	rec := fixture.send(t, map[string]any{
+		"to":      []map[string]string{{"email": "friend@example.com"}},
+		"subject": "Missing attachment object",
+		"attachments": []map[string]any{{
+			"attachment_id": attachmentID,
+			"filename":      "missing.txt",
+		}},
+	})
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "attachment_content_not_found") {
+		t.Fatalf("status=%d body=%s, want attachment_content_not_found", rec.Code, rec.Body.String())
+	}
+	assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
+	if len(fixture.storage.getKeys) != 1 || fixture.nylas.sendCalls != 1 {
+		t.Fatalf("lazy storage reads=%v send calls=%d, want one of each", fixture.storage.getKeys, fixture.nylas.sendCalls)
+	}
+}
+
+func TestCommunicationsSendRejectsInvalidOrOversizedMetadataBeforeStorage(t *testing.T) {
+	tests := []struct {
+		name  string
+		sizes []int64
+	}{
+		{name: "one byte over", sizes: []int64{communicationsAttachmentMaxTotalBytes + 1}},
+		{name: "later item exceeds aggregate", sizes: []int64{12_000_000, 12_000_001}},
+		{name: "negative metadata", sizes: []int64{-1}},
+		{name: "overflow sized metadata", sizes: []int64{1, int64(1<<63 - 1)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newCommunicationsSendTestFixture(t)
+			attachments := make([]map[string]any, 0, len(test.sizes))
+			for index, size := range test.sizes {
+				attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fmt.Sprintf("draft-limit-%d", index)), fmt.Sprintf("file-%d.bin", index), []byte{byte(index + 1)})
+				fixture.countingRepo.sizeOverrides[attachmentID] = size
+				attachments = append(attachments, map[string]any{
+					"attachment_id": attachmentID,
+					"filename":      fmt.Sprintf("file-%d.bin", index),
+				})
+			}
+			rec := fixture.send(t, map[string]any{
+				"to":          []map[string]string{{"email": "friend@example.com"}},
+				"subject":     "Metadata limit",
+				"body":        "Body",
+				"attachments": attachments,
+			})
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_email_attachment") {
+				t.Fatalf("status=%d body=%s, want invalid_email_attachment", rec.Code, rec.Body.String())
+			}
+			assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, len(test.sizes))
+			if len(fixture.storage.getKeys) != 0 || fixture.nylas.sendCalls != 0 {
+				t.Fatalf("rejected metadata storage reads=%v send calls=%d, want zero", fixture.storage.getKeys, fixture.nylas.sendCalls)
+			}
+		})
+	}
+}
+
+func TestCommunicationsSendAcceptsExactAggregateAndDeduplicatesMetadataReads(t *testing.T) {
+	t.Run("exact 24 million bytes", func(t *testing.T) {
+		fixture := newCommunicationsSendTestFixture(t)
+		fixture.nylas.skipOutboundAttachmentReads = true
+		attachments := make([]map[string]any, 0, 2)
+		for index := 0; index < 2; index++ {
+			attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fmt.Sprintf("draft-exact-%d", index)), fmt.Sprintf("exact-%d.bin", index), []byte{byte(index + 1)})
+			fixture.countingRepo.sizeOverrides[attachmentID] = 12_000_000
+			attachments = append(attachments, map[string]any{"attachment_id": attachmentID, "filename": fmt.Sprintf("exact-%d.bin", index)})
+		}
+		rec := fixture.send(t, map[string]any{
+			"to":          []map[string]string{{"email": "friend@example.com"}},
+			"attachments": attachments,
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status=%d body=%s, want exact boundary accepted", rec.Code, rec.Body.String())
+		}
+		assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 2)
+		if len(fixture.storage.getKeys) != 0 || fixture.nylas.sendCalls != 1 || len(fixture.nylas.sent.OutboundAttachments) != 2 {
+			t.Fatalf("exact boundary storage reads=%v send calls=%d outbound=%d", fixture.storage.getKeys, fixture.nylas.sendCalls, len(fixture.nylas.sent.OutboundAttachments))
+		}
+		for _, attachment := range fixture.nylas.sent.OutboundAttachments {
+			if attachment.Size != 12_000_000 {
+				t.Fatalf("outbound size=%d, want 12000000", attachment.Size)
+			}
+		}
+	})
+
+	t.Run("duplicate id reuses metadata", func(t *testing.T) {
+		fixture := newCommunicationsSendTestFixture(t)
+		fixture.nylas.skipOutboundAttachmentReads = true
+		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-duplicate"), "duplicate.bin", []byte("x"))
+		rec := fixture.send(t, map[string]any{
+			"to": []map[string]string{{"email": "friend@example.com"}},
+			"attachments": []map[string]any{
+				{"attachment_id": attachmentID, "filename": "first.bin"},
+				{"attachment_id": strings.ToUpper(attachmentID), "filename": "second.bin"},
+			},
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status=%d body=%s, want duplicate metadata accepted", rec.Code, rec.Body.String())
+		}
+		assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
+		if len(fixture.nylas.sent.OutboundAttachments) != 2 {
+			t.Fatalf("outbound attachments=%d, want two ordered parts", len(fixture.nylas.sent.OutboundAttachments))
+		}
+	})
+}
+
+func TestCommunicationsSendAcceptsZeroByteAttachmentOnlyMessage(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, "draft-empty-file"), "empty.txt", nil)
+	rec := fixture.send(t, map[string]any{
+		"to": []map[string]string{{"email": "friend@example.com"}},
+		"attachments": []map[string]any{{
+			"attachment_id": attachmentID,
+			"filename":      "empty.txt",
+		}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s, want zero-byte attachment-only send accepted", rec.Code, rec.Body.String())
+	}
+	assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
+	if len(fixture.storage.getKeys) != 1 || fixture.nylas.sendCalls != 1 || len(fixture.nylas.sentAttachmentBodies) != 1 || len(fixture.nylas.sentAttachmentBodies[0]) != 0 {
+		t.Fatalf("zero-byte send storage=%v calls=%d bodies=%v", fixture.storage.getKeys, fixture.nylas.sendCalls, fixture.nylas.sentAttachmentBodies)
+	}
+	if len(fixture.nylas.sent.Attachments) != 1 || fixture.nylas.sent.Attachments[0].Size != 0 {
+		t.Fatalf("zero-byte metadata = %+v", fixture.nylas.sent.Attachments)
+	}
 }
 
 func TestNylasOAuthStateRoundTripAndExpiry(t *testing.T) {
@@ -1083,8 +1495,9 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.sent.TrackingOptions == nil || !nylas.sent.TrackingOptions.Opens {
 		t.Fatalf("tracking options = %+v, want opens enabled", nylas.sent.TrackingOptions)
 	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
-		t.Fatalf("attachments = %+v, want attachment resolved from Mango storage", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "" ||
+		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "hello" {
+		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want metadata-only attachment and streamed hello", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
 	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
 	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
@@ -1113,8 +1526,9 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 		t.Fatalf("inline attachments = %+v, want one resolved attachment", nylas.sent.Attachments)
 	}
 	inlineAttachment := nylas.sent.Attachments[0]
-	if inlineAttachment.AttachmentID != inlineAttachmentID || inlineAttachment.ContentID != inlineContentID || !inlineAttachment.IsInline || inlineAttachment.ContentDisposition != "inline" || inlineAttachment.Content != "cG5nLWJ5dGVz" {
-		t.Fatalf("inline attachment = %+v, want CID-linked Mango screenshot bytes", inlineAttachment)
+	if inlineAttachment.AttachmentID != inlineAttachmentID || inlineAttachment.ContentID != inlineContentID || !inlineAttachment.IsInline || inlineAttachment.ContentDisposition != "inline" || inlineAttachment.Content != "" ||
+		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "png-bytes" {
+		t.Fatalf("inline metadata=%+v outbound=%+v bodies=%q, want CID-linked streamed screenshot", inlineAttachment, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
 	var inlineSendResponse struct {
 		Message NylasMessage `json:"message"`
@@ -1500,8 +1914,9 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(largeContent) {
-		t.Fatalf("attachments = %+v, want large Mango attachment resolved at send boundary", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" || nylas.sent.Attachments[0].Content != "" ||
+		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != string(largeContent) {
+		t.Fatalf("metadata=%+v outbound=%+v body count=%d, want streamed large Mango attachment", nylas.sent.Attachments, nylas.sent.OutboundAttachments, len(nylas.sentAttachmentBodies))
 	}
 }
 
@@ -1927,8 +2342,9 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	if nylas.sent.To[0].Email != "customer@example.com" || nylas.sent.Subject != "Shared hello" {
 		t.Fatalf("sent = %+v, want shared inbox send payload", nylas.sent)
 	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "shared-large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(sharedContent) {
-		t.Fatalf("attachments = %+v, want shared inbox attachment resolved from Mango storage", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "shared-large.txt" || nylas.sent.Attachments[0].Content != "" ||
+		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != string(sharedContent) {
+		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want streamed shared inbox attachment", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
 	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-inline"), "shared-screenshot.png", "image/png", []byte("shared-png"))
 	inlinePayload, err := json.Marshal(map[string]any{
@@ -1944,8 +2360,9 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	if nylas.lastSendGrantID != "grant-support" || !strings.Contains(nylas.sent.Body, `src="cid:`+inlineContentID+`"`) {
 		t.Fatalf("shared inline send grant=%q body=%q", nylas.lastSendGrantID, nylas.sent.Body)
 	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != inlineAttachmentID || nylas.sent.Attachments[0].ContentID != inlineContentID || !nylas.sent.Attachments[0].IsInline || nylas.sent.Attachments[0].Content != "c2hhcmVkLXBuZw==" {
-		t.Fatalf("shared inline attachments = %+v, want one CID-linked screenshot", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != inlineAttachmentID || nylas.sent.Attachments[0].ContentID != inlineContentID || !nylas.sent.Attachments[0].IsInline || nylas.sent.Attachments[0].Content != "" ||
+		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "shared-png" {
+		t.Fatalf("shared inline metadata=%+v outbound=%+v bodies=%q, want one CID-linked streamed screenshot", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
 }
 

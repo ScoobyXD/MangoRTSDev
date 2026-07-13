@@ -3,10 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"miraeopus/backend/internal/domain"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -234,27 +236,27 @@ func (f *NylasFolder) UnmarshalJSON(raw []byte) error {
 }
 
 type NylasMessage struct {
-	ID              string                                  `json:"id"`
-	ThreadID        string                                  `json:"thread_id,omitempty"`
-	Subject         string                                  `json:"subject"`
-	Snippet         string                                  `json:"snippet,omitempty"`
-	Body            string                                  `json:"body,omitempty"`
-	Date            int64                                   `json:"date,omitempty"`
-	Unread          bool                                    `json:"unread"`
-	Starred         bool                                    `json:"starred"`
-	From            []NylasEmailAddress                     `json:"from,omitempty"`
-	To              []NylasEmailAddress                     `json:"to,omitempty"`
-	Cc              []NylasEmailAddress                     `json:"cc,omitempty"`
-	Bcc             []NylasEmailAddress                     `json:"bcc,omitempty"`
-	ReplyTo         []NylasEmailAddress                     `json:"reply_to,omitempty"`
-	Attachments     []NylasAttachment                       `json:"attachments,omitempty"`
-	Folders         []string                                `json:"folders,omitempty"`
-	FolderIDs       []string                                `json:"folder_ids,omitempty"`
-	LogicGateIDs    []string                                `json:"logic_gate_ids,omitempty"`
-	LogicGateCount  int                                     `json:"logic_gate_count,omitempty"`
-	TrackingOptions *NylasTrackingOptions                   `json:"tracking_options,omitempty"`
-	ReadStatus      *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
-	RawMIMEAttachmentsRecovered bool                         `json:"-"`
+	ID                          string                                  `json:"id"`
+	ThreadID                    string                                  `json:"thread_id,omitempty"`
+	Subject                     string                                  `json:"subject"`
+	Snippet                     string                                  `json:"snippet,omitempty"`
+	Body                        string                                  `json:"body,omitempty"`
+	Date                        int64                                   `json:"date,omitempty"`
+	Unread                      bool                                    `json:"unread"`
+	Starred                     bool                                    `json:"starred"`
+	From                        []NylasEmailAddress                     `json:"from,omitempty"`
+	To                          []NylasEmailAddress                     `json:"to,omitempty"`
+	Cc                          []NylasEmailAddress                     `json:"cc,omitempty"`
+	Bcc                         []NylasEmailAddress                     `json:"bcc,omitempty"`
+	ReplyTo                     []NylasEmailAddress                     `json:"reply_to,omitempty"`
+	Attachments                 []NylasAttachment                       `json:"attachments,omitempty"`
+	Folders                     []string                                `json:"folders,omitempty"`
+	FolderIDs                   []string                                `json:"folder_ids,omitempty"`
+	LogicGateIDs                []string                                `json:"logic_gate_ids,omitempty"`
+	LogicGateCount              int                                     `json:"logic_gate_count,omitempty"`
+	TrackingOptions             *NylasTrackingOptions                   `json:"tracking_options,omitempty"`
+	ReadStatus                  *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
+	RawMIMEAttachmentsRecovered bool                                    `json:"-"`
 }
 
 type NylasThread struct {
@@ -314,14 +316,15 @@ func (u NylasMessageUpdate) MarshalJSON() ([]byte, error) {
 }
 
 type NylasSendMessageRequest struct {
-	To               []NylasEmailAddress   `json:"to"`
-	Cc               []NylasEmailAddress   `json:"cc,omitempty"`
-	Bcc              []NylasEmailAddress   `json:"bcc,omitempty"`
-	Subject          string                `json:"subject"`
-	Body             string                `json:"body"`
-	Attachments      []NylasAttachment     `json:"attachments,omitempty"`
-	ReplyToMessageID string                `json:"reply_to_message_id,omitempty"`
-	TrackingOptions  *NylasTrackingOptions `json:"tracking_options,omitempty"`
+	To                  []NylasEmailAddress       `json:"to"`
+	Cc                  []NylasEmailAddress       `json:"cc,omitempty"`
+	Bcc                 []NylasEmailAddress       `json:"bcc,omitempty"`
+	Subject             string                    `json:"subject"`
+	Body                string                    `json:"body"`
+	Attachments         []NylasAttachment         `json:"attachments,omitempty"`
+	OutboundAttachments []NylasOutboundAttachment `json:"-"`
+	ReplyToMessageID    string                    `json:"reply_to_message_id,omitempty"`
+	TrackingOptions     *NylasTrackingOptions     `json:"tracking_options,omitempty"`
 }
 
 type NylasTrackingOptions struct {
@@ -342,6 +345,37 @@ type NylasAttachment struct {
 	IsInline           bool   `json:"is_inline,omitempty"`
 	Size               int64  `json:"size,omitempty"`
 }
+
+// NylasOutboundAttachment is deliberately separate from NylasAttachment.
+// NylasAttachment is also the provider/inbound response model, where Content
+// contains bounded base64 recovered from raw MIME. Outbound sends instead use
+// an exact-size, one-shot opener so stored objects can flow directly into the
+// provider request without raw bytes or readers escaping into response JSON.
+type NylasOutboundAttachment struct {
+	Filename    string
+	ContentType string
+	ContentID   string
+	Size        int64
+	Open        NylasOutboundAttachmentOpener
+}
+
+type NylasOutboundAttachmentOpener func(context.Context) (NylasOutboundAttachmentContent, error)
+
+type NylasOutboundAttachmentContent struct {
+	ContentLength int64
+	Body          io.ReadCloser
+}
+
+var (
+	errNylasOutboundAttachmentInvalid               = errors.New("invalid Nylas outbound attachment")
+	errNylasOutboundAttachmentMissingStream         = errors.New("Nylas outbound attachment stream required")
+	errNylasOutboundAttachmentCountMismatch         = errors.New("Nylas outbound attachment count mismatch")
+	errNylasOutboundAttachmentOpen                  = errors.New("failed to open Nylas outbound attachment")
+	errNylasOutboundAttachmentContentLengthMismatch = errors.New("Nylas outbound attachment content length mismatch")
+	errNylasOutboundAttachmentShort                 = errors.New("Nylas outbound attachment stream shorter than declared size")
+	errNylasOutboundAttachmentLong                  = errors.New("Nylas outbound attachment stream longer than declared size")
+	errNylasOutboundAttachmentRead                  = errors.New("failed to read Nylas outbound attachment")
+)
 
 type NylasEvent struct {
 	ID         string `json:"id"`
@@ -498,7 +532,13 @@ func (c *NylasRESTClient) DeleteMessage(ctx context.Context, grantID, messageID 
 }
 
 func (c *NylasRESTClient) SendMessage(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
-	if len(request.Attachments) > 0 {
+	if len(request.Attachments) > 0 && len(request.OutboundAttachments) == 0 {
+		return NylasMessage{}, errNylasOutboundAttachmentMissingStream
+	}
+	if len(request.Attachments) != len(request.OutboundAttachments) {
+		return NylasMessage{}, errNylasOutboundAttachmentCountMismatch
+	}
+	if len(request.OutboundAttachments) > 0 {
 		return c.sendMessageMultipart(ctx, grantID, request)
 	}
 	var response struct {
@@ -538,74 +578,384 @@ func (c *NylasRESTClient) SendEventRSVP(ctx context.Context, grantID, eventID, c
 }
 
 func (c *NylasRESTClient) sendMessageMultipart(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	messageRequest := request
-	messageRequest.Attachments = nil
-	messageRaw, err := json.Marshal(messageRequest)
+	plan, err := buildNylasMultipartPlan(request)
 	if err != nil {
-		return NylasMessage{}, err
-	}
-	if err := writer.WriteField("message", string(messageRaw)); err != nil {
-		return NylasMessage{}, err
-	}
-	for index, attachment := range request.Attachments {
-		content, err := base64.StdEncoding.DecodeString(strings.TrimSpace(attachment.Content))
-		if err != nil {
-			return NylasMessage{}, err
-		}
-		filename := strings.TrimSpace(attachment.Filename)
-		if filename == "" {
-			filename = "attachment"
-		}
-		fieldName := strings.TrimSpace(attachment.ContentID)
-		if fieldName == "" {
-			fieldName = fmt.Sprintf("attachment_%d", index+1)
-		}
-		contentType := strings.TrimSpace(attachment.ContentType)
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-		header := textproto.MIMEHeader{}
-		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeMultipartQuote(fieldName), escapeMultipartQuote(filename)))
-		header.Set("Content-Type", contentType)
-		part, err := writer.CreatePart(header)
-		if err != nil {
-			return NylasMessage{}, err
-		}
-		if _, err := part.Write(content); err != nil {
-			return NylasMessage{}, err
-		}
-	}
-	if err := writer.Close(); err != nil {
 		return NylasMessage{}, err
 	}
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
-	if err := c.doMultipart(ctx, grantPath(grantID, "messages", "send"), writer.FormDataContentType(), &body, &response); err != nil {
+	if err := c.doMultipart(ctx, grantPath(grantID, "messages", "send"), plan, &response); err != nil {
 		return NylasMessage{}, err
 	}
 	return response.Data, nil
+}
+
+type nylasMultipartPlan struct {
+	boundary      string
+	contentType   string
+	contentLength int64
+	messageRaw    []byte
+	attachments   []NylasOutboundAttachment
+}
+
+type nylasMultipartCountingWriter struct {
+	count int64
+}
+
+func (w *nylasMultipartCountingWriter) Write(p []byte) (int, error) {
+	if err := w.add(int64(len(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *nylasMultipartCountingWriter) add(count int64) error {
+	if count < 0 || count > math.MaxInt64-w.count {
+		return fmt.Errorf("%w: multipart content length overflow", errNylasOutboundAttachmentInvalid)
+	}
+	w.count += count
+	return nil
+}
+
+func buildNylasMultipartPlan(request NylasSendMessageRequest) (nylasMultipartPlan, error) {
+	if len(request.OutboundAttachments) == 0 {
+		return nylasMultipartPlan{}, errNylasOutboundAttachmentMissingStream
+	}
+	messageRequest := request
+	messageRequest.Attachments = nil
+	messageRaw, err := json.Marshal(messageRequest)
+	if err != nil {
+		return nylasMultipartPlan{}, err
+	}
+
+	counter := &nylasMultipartCountingWriter{}
+	writer := multipart.NewWriter(counter)
+	if err := writer.WriteField("message", string(messageRaw)); err != nil {
+		return nylasMultipartPlan{}, err
+	}
+	for index, attachment := range request.OutboundAttachments {
+		if attachment.Size < 0 || attachment.Open == nil {
+			return nylasMultipartPlan{}, fmt.Errorf("%w: attachment %d", errNylasOutboundAttachmentInvalid, index+1)
+		}
+		if _, err := writer.CreatePart(nylasMultipartAttachmentHeader(index, attachment)); err != nil {
+			return nylasMultipartPlan{}, err
+		}
+		if err := counter.add(attachment.Size); err != nil {
+			return nylasMultipartPlan{}, err
+		}
+	}
+	contentType := writer.FormDataContentType()
+	boundary := writer.Boundary()
+	if err := writer.Close(); err != nil {
+		return nylasMultipartPlan{}, err
+	}
+	return nylasMultipartPlan{
+		boundary:      boundary,
+		contentType:   contentType,
+		contentLength: counter.count,
+		messageRaw:    messageRaw,
+		attachments:   append([]NylasOutboundAttachment(nil), request.OutboundAttachments...),
+	}, nil
+}
+
+func nylasMultipartAttachmentHeader(index int, attachment NylasOutboundAttachment) textproto.MIMEHeader {
+	filename := strings.TrimSpace(attachment.Filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	fieldName := strings.TrimSpace(attachment.ContentID)
+	if fieldName == "" {
+		fieldName = fmt.Sprintf("attachment_%d", index+1)
+	}
+	contentType := strings.TrimSpace(attachment.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeMultipartQuote(fieldName), escapeMultipartQuote(filename)))
+	header.Set("Content-Type", contentType)
+	return header
 }
 
 func escapeMultipartQuote(value string) string {
 	return strings.NewReplacer("\\", "\\\\", `"`, `\"`).Replace(value)
 }
 
-func (c *NylasRESTClient) doMultipart(ctx context.Context, path, contentType string, body *bytes.Buffer, out any) error {
+type nylasMultipartStream struct {
+	reader    *io.PipeReader
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+	done      chan struct{}
+
+	mu        sync.Mutex
+	active    io.ReadCloser
+	closed    bool
+	encodeErr error
+}
+
+func newNylasMultipartStream(ctx context.Context, plan nylasMultipartPlan) *nylasMultipartStream {
+	streamCtx, cancel := context.WithCancel(ctx)
+	reader, writer := io.Pipe()
+	stream := &nylasMultipartStream{
+		reader: reader,
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+	go func() {
+		err := stream.write(streamCtx, writer, plan)
+		if err != nil {
+			_ = writer.CloseWithError(err)
+		} else {
+			_ = writer.Close()
+		}
+		stream.encodeErr = err
+		close(stream.done)
+	}()
+	go func() {
+		select {
+		case <-streamCtx.Done():
+			stream.shutdown(streamCtx.Err())
+		case <-stream.done:
+		}
+	}()
+	return stream
+}
+
+func (s *nylasMultipartStream) Read(p []byte) (int, error) {
+	return s.reader.Read(p)
+}
+
+func (s *nylasMultipartStream) Close() error {
+	select {
+	case <-s.done:
+	default:
+		s.shutdown(context.Canceled)
+	}
+	<-s.done
+	_ = s.reader.Close()
+	return nil
+}
+
+func (s *nylasMultipartStream) Err() error {
+	<-s.done
+	return s.encodeErr
+}
+
+func (s *nylasMultipartStream) shutdown(cause error) {
+	if cause == nil {
+		cause = context.Canceled
+	}
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		active := s.active
+		s.active = nil
+		s.mu.Unlock()
+		s.cancel()
+		_ = s.reader.CloseWithError(cause)
+		if active != nil {
+			_ = active.Close()
+		}
+	})
+}
+
+func (s *nylasMultipartStream) setActive(body io.ReadCloser) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = body.Close()
+		return context.Canceled
+	}
+	if s.active != nil {
+		s.mu.Unlock()
+		_ = body.Close()
+		return fmt.Errorf("%w: multiple active streams", errNylasOutboundAttachmentInvalid)
+	}
+	s.active = body
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *nylasMultipartStream) closeActive(body io.ReadCloser) error {
+	s.mu.Lock()
+	if s.active != body {
+		s.mu.Unlock()
+		return nil
+	}
+	s.active = nil
+	s.mu.Unlock()
+	return body.Close()
+}
+
+func (s *nylasMultipartStream) write(ctx context.Context, pipeWriter *io.PipeWriter, plan nylasMultipartPlan) error {
+	writer := multipart.NewWriter(pipeWriter)
+	if err := writer.SetBoundary(plan.boundary); err != nil {
+		return err
+	}
+	if err := writer.WriteField("message", string(plan.messageRaw)); err != nil {
+		return err
+	}
+	buffer := make([]byte, 32<<10)
+	for index, attachment := range plan.attachments {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		content, err := attachment.Open(ctx)
+		if err != nil {
+			if content.Body != nil {
+				_ = content.Body.Close()
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err)
+		}
+		if content.Body == nil {
+			return fmt.Errorf("%w: attachment %d has no body", errNylasOutboundAttachmentInvalid, index+1)
+		}
+		if content.ContentLength != attachment.Size {
+			_ = content.Body.Close()
+			return fmt.Errorf("%w: attachment %d reported %d bytes, expected %d", errNylasOutboundAttachmentContentLengthMismatch, index+1, content.ContentLength, attachment.Size)
+		}
+		if err := s.setActive(content.Body); err != nil {
+			return err
+		}
+		part, partErr := writer.CreatePart(nylasMultipartAttachmentHeader(index, attachment))
+		if partErr == nil {
+			partErr = copyNylasOutboundAttachmentExact(ctx, part, content.Body, attachment.Size, buffer)
+		}
+		closeErr := s.closeActive(content.Body)
+		if partErr != nil {
+			return partErr
+		}
+		if closeErr != nil {
+			return fmt.Errorf("%w: attachment %d close: %w", errNylasOutboundAttachmentRead, index+1, closeErr)
+		}
+	}
+	return writer.Close()
+}
+
+func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io.Reader, size int64, buffer []byte) error {
+	remaining := size
+	emptyReads := 0
+	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		readSize := int64(len(buffer))
+		if remaining < readSize {
+			readSize = remaining
+		}
+		n, readErr := src.Read(buffer[:int(readSize)])
+		if n < 0 || n > int(readSize) {
+			return fmt.Errorf("%w: invalid reader count %d", errNylasOutboundAttachmentRead, n)
+		}
+		if n > 0 {
+			if err := writeNylasMultipartBytes(ctx, dst, buffer[:n]); err != nil {
+				return err
+			}
+			remaining -= int64(n)
+			emptyReads = 0
+		} else if readErr == nil {
+			emptyReads++
+			if emptyReads >= 100 {
+				return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, io.ErrNoProgress)
+			}
+		}
+		if readErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if errors.Is(readErr, io.EOF) {
+				if remaining == 0 {
+					return nil
+				}
+				return fmt.Errorf("%w: missing %d bytes", errNylasOutboundAttachmentShort, remaining)
+			}
+			return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, readErr)
+		}
+	}
+
+	var extra [1]byte
+	emptyReads = 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := src.Read(extra[:])
+		if n < 0 || n > len(extra) {
+			return fmt.Errorf("%w: invalid reader count %d", errNylasOutboundAttachmentRead, n)
+		}
+		if n > 0 {
+			return errNylasOutboundAttachmentLong
+		}
+		if readErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, readErr)
+		}
+		emptyReads++
+		if emptyReads >= 100 {
+			return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, io.ErrNoProgress)
+		}
+	}
+}
+
+func writeNylasMultipartBytes(ctx context.Context, dst io.Writer, content []byte) error {
+	for len(content) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, err := dst.Write(content)
+		if n < 0 || n > len(content) {
+			return fmt.Errorf("invalid multipart writer count %d", n)
+		}
+		content = content[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
+func isNylasOutboundAttachmentFailure(err error) bool {
+	return errors.Is(err, errNylasOutboundAttachmentInvalid) ||
+		errors.Is(err, errNylasOutboundAttachmentOpen) ||
+		errors.Is(err, errNylasOutboundAttachmentContentLengthMismatch) ||
+		errors.Is(err, errNylasOutboundAttachmentShort) ||
+		errors.Is(err, errNylasOutboundAttachmentLong) ||
+		errors.Is(err, errNylasOutboundAttachmentRead)
+}
+
+func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nylasMultipartPlan, out any) error {
 	if c == nil || c.apiBase == "" {
 		return NylasAPIError{StatusCode: http.StatusServiceUnavailable, Code: "nylas_not_configured"}
 	}
+	body := newNylasMultipartStream(ctx, plan)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBase+path, body)
 	if err != nil {
+		_ = body.Close()
 		return err
 	}
+	req.ContentLength = plan.contentLength
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", contentType)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
+	req.Header.Set("Content-Type", plan.contentType)
+	resp, requestErr := c.client.Do(req)
+	_ = body.Close()
+	streamErr := body.Err()
+	if requestErr != nil {
+		if isNylasOutboundAttachmentFailure(streamErr) {
+			return streamErr
+		}
+		return requestErr
 	}
 	defer resp.Body.Close()
 
@@ -615,6 +965,9 @@ func (c *NylasRESTClient) doMultipart(ctx context.Context, path, contentType str
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseNylasAPIError(resp.StatusCode, resp.Header, raw)
+	}
+	if streamErr != nil {
+		return streamErr
 	}
 	if out == nil || len(strings.TrimSpace(string(raw))) == 0 {
 		return nil

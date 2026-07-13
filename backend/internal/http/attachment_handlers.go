@@ -80,7 +80,7 @@ func (s *Server) handleAttachmentMetadata(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 		return
 	}
-	if !s.canReadAttachmentThroughResourceLink(w, r, companyID, attachment.AttachmentID) {
+	if !s.canReadAttachmentThroughLinks(w, r, companyID, attachment.ResourceLinks) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"attachment": attachment})
@@ -393,18 +393,7 @@ func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_links")
 		return false
 	}
-	for _, link := range links {
-		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
-			return false
-		}
-		if allowed {
-			return true
-		}
-	}
-	writeAccessResourceNotFound(w)
-	return false
+	return s.canReadAttachmentThroughLinks(w, r, companyID, links)
 }
 
 func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {

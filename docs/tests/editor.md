@@ -1,11 +1,11 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Unified Editor Tests
 
 Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the declared surface inventory, the one rich `contentEditable` host, the shared behavior and formatting-controller sources, the shared toolbar inventory, mailbox-scoped signature mounting, highlight-control/sanitizer wiring, font-selection restoration, and the EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the declared surface inventory, the one rich `contentEditable` host, the shared behavior and formatting-controller sources, the shared toolbar inventory, mailbox-scoped signature mounting, highlight-control/sanitizer wiring, font-selection restoration, and the EmailPickerModal attach-only source guard; `tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx` mounts the node text-block editor under React StrictMode and covers hydration-owner replay, unchanged rerenders, document replacement, request deduplication, observer teardown, abort, and Blob URL cleanup; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
 
 ## Business Logic
 

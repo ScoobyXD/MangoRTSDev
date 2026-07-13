@@ -1,10 +1,11 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Attachments Tests
 
 Coverage Status:
 - Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
 - Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`; existing-attachment destination linking and mailbox-complete signature resource IDs are covered by `tests/frontend/modules/attachments/attachmentApi.test.ts`.
+- Outbound email metadata preflight, exact 24,000,000-byte and zero-byte boundaries, authorization, lazy storage opening, deterministic multipart framing, exact stream lengths, cancellation, provider rejection, and cleanup are covered by `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go`; bounded query shape is covered by the attachment handler/store contract tests.
 - Direct-upload coverage must additionally prove bounded hashing, JSON-only Mango control requests, raw credential-free S3 PUTs, exact signed headers, progress/cancel/retry/resume, completed-part reconciliation, node-scoped deletion survival, and completed-only list/count refresh.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, draft/signature durable-inline guards, destination resource linking, and migration behavior are covered. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
@@ -58,7 +59,7 @@ ATT25 - Selecting an inline image in a unified rich editor preserves its visual 
 ATT26 - Browser-selected file bytes go directly to private S3 through short-lived presigned requests. Mango API remains the authoritative control plane for authentication, authorization, upload intents, IDs, object keys, limits, signing, completion/abort, S3 verification, metadata, and durable resource linking; browser bytes never traverse Mango API.
 ATT27 - The configurable browser limit defaults to 1 GiB per file. Single PUT applies through and including 64 MiB; larger files use 16 MiB multipart parts with at most three parts in flight per file and four S3 PUTs across the page. There is no 12 MiB aggregate-per-text-box limit on this path.
 ATT28 - Browser raw file SHA-256 is computed incrementally with bounded memory before intent creation. `attachments.sha256` remains the raw content hash; S3 checksum algorithm/value/type and SHA verification method are recorded separately, and multipart ETags/composite checksums never replace the raw hash.
-ATT29 - Upload intents and multipart part state are durable and idempotent. Creation uses actor/company/client-request identity; signing the same part/checksum may refresh its URL; completion and abort replay safely; resume reconciles authoritative accepted parts; expired intents cannot sign/complete and are cleaned up by the application with S3 lifecycle as a backstop.
+ATT29 - Upload intents and multipart part state are durable and idempotent. Creation uses actor/company/client-request identity; signing the same part/checksum may refresh its URL; completion and abort replay safely; resume reconciles authoritative accepted parts; naturally expired intents remain `expired`, only explicit abort/cancel records `aborted`, and expired work is cleaned up by the application with S3 lifecycle as a backstop.
 ATT30 - Only completed intents create/list permanent attachments. Node-level progress preserves filename/extension/size, byte progress, cancel/retry, and the states preparing, uploading, retrying, completing, complete, canceled, and failed. Each selected file is independent and one failure cannot discard completed siblings.
 ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
 ATT32 - Pasting an existing attachment-backed editor image into another unified rich editor target must create the destination resource's authorized `inline_image` link before inserting the image reference. An asynchronous upload or existing-attachment link may commit only while its originating editor root, document target, attachment resource context, and saved range are still current; switching targets or unmounting must not insert it into the next document.
@@ -71,6 +72,8 @@ ATT38 - Existing supported images are repaired through the human-only `mango-att
 ATT39 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
 ATT40 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
 ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
+ATT42 - Outbound email has a separate aggregate limit of exactly 24,000,000 attachment bytes; it does not change the general direct-browser limit of 1 GiB per file. Recipient and nonempty-content-or-valid-reference checks run first, then every unique Mango attachment is resolved through one original-content metadata/link read and authorized before any S3 body is opened. Declared original sizes are nonnegative and summed without overflow; zero bytes and exactly 24,000,000 bytes are valid, while any larger aggregate fails before S3.
+ATT43 - After outbound preflight succeeds, S3 bodies open lazily inside the admitted provider send and stream directly into a deterministic-length Nylas multipart request. Each returned object length must match the authorized metadata before reading; the stream is bounded to that exact size, detects short, long, and failing readers, and closes on success, failure, provider rejection, or cancellation. Outbound send creates neither base64 attachment copies nor a complete multipart buffer, while incoming Nylas MIME recovery and calendar attachment content remain unchanged.
 
 ## Scenarios
 
@@ -171,6 +174,8 @@ Business logic covered:
 - ATT4
 - ATT10
 - ATT15
+- ATT42
+- ATT43
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
@@ -187,6 +192,10 @@ Expected:
 - Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.
 - Normal durable email payloads do not carry raw base64 `content`.
 - Communications draft and signature upserts reject durable inline data URLs/base64 file bytes.
+- Missing recipients and empty content without a valid attachment reference fail before attachment repository, S3, or provider work. Attachment-only messages remain valid.
+- All attachment metadata and resource authorization pass before the first S3 read, so an unauthorized file, an invalid size, or a later item that pushes the aggregate above 24,000,000 bytes opens no earlier object.
+- Exactly sized S3 bodies stream once into a known-length provider multipart body in attachment order; length disagreement, truncation, extra bytes, reader failure, cancellation, and provider failure close the active body and fail the send.
+- Browser uploads remain direct browser-to-private-S3 and retain the independent 1 GiB per-file policy.
 
 ### Scenario ATT-S6: Incoming And Attached Email Attachments
 

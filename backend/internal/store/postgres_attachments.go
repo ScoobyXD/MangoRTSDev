@@ -416,34 +416,54 @@ func (r *PostgresRepo) ListAttachmentResourceLinks(companyID, attachmentID strin
 	if companyID == "" || attachmentID == "" {
 		return nil, ErrInvalid
 	}
-	var exists bool
-	if err := r.db.QueryRowContext(context.Background(), `
-select exists(
-  select 1
-  from attachments
-  where company_id=$1::uuid
-    and attachment_id=$2::uuid
-    and deleted_timestamp is null
-)`, companyID, attachmentID).Scan(&exists); err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, ErrNotFound
-	}
 	rows, err := r.db.QueryContext(context.Background(), `
-select `+resourceAttachmentSelectColumns+`
-from resource_attachments ra
-where ra.company_id=$1::uuid
-  and ra.attachment_id=$2::uuid
-  and ra.deleted_timestamp is null
-order by ra.created_timestamp desc, ra.resource_attachment_id desc`,
+select
+  coalesce(ra.resource_attachment_id::text, ''),
+  a.company_id::text,
+  coalesce(ra.resource_type, ''),
+  coalesce(ra.resource_id, ''),
+  a.attachment_id::text,
+  coalesce(ra.information_id::text, ''),
+  coalesce(ra.message_id, ''),
+  coalesce(ra.editor_surface, ''),
+  coalesce(ra.relationship_kind, ''),
+  coalesce(ra.created_by_user_id::text, ''),
+  coalesce(ra.created_timestamp, a.created_timestamp),
+  ra.deleted_timestamp
+from attachments a
+left join resource_attachments ra
+  on ra.company_id=a.company_id
+ and ra.attachment_id=a.attachment_id
+ and ra.deleted_timestamp is null
+where a.company_id=$1::uuid
+  and a.attachment_id=$2::uuid
+  and a.deleted_timestamp is null
+order by ra.created_timestamp desc nulls last, ra.resource_attachment_id desc nulls last`,
 		companyID, attachmentID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanResourceAttachments(rows)
+	items := make([]domain.ResourceAttachment, 0)
+	foundAttachment := false
+	for rows.Next() {
+		foundAttachment = true
+		item, scanErr := scanResourceAttachment(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if item.ResourceAttachmentID != "" {
+			items = append(items, item)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !foundAttachment {
+		return nil, ErrNotFound
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error) {
