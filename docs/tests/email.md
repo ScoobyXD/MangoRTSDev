@@ -44,7 +44,7 @@ EMAIL19 - SES remains for auth/invitation/system email and must not be confused 
 EMAIL20 - Provider reauthorization problems must be recoverable mailbox errors, not Mango logout/session failures.
 EMAIL21 - A thread action targets the exact message card on which Reply, Reply All, or Forward was chosen; its provider message ID, recipients, original context, and stable draft identity must not be substituted with the latest thread message.
 EMAIL22 - Conversation details are newest first with a deterministic message-ID tie-breaker. New inbound or locally sent messages appear expanded at the top and collapse previously expanded cards while preserving the single grouped mailbox row.
-EMAIL23 - A thread detail pane owns the only vertical scrollbar. Expanded message documents auto-size to their complete rendered content and never expose per-message body scrollbars; collapsed cards remain header summaries until expanded.
+EMAIL23 - A thread detail pane owns the only vertical scrollbar. A selected single-message reader uses all remaining detail-pane height as its flexible minimum, so a short body never leaves a shallow fixed-height reader box; every expanded message document grows to its complete rendered content, including content sized from the document root, without clipping or exposing a per-message body scrollbar. Collapsed cards remain header summaries until expanded.
 EMAIL24 - Reply body editors have a nontrivial minimum/default height, support vertical resizing, and automatically persist a clamped per-user mailbox-scope height preference.
 EMAIL25 - Selecting a mailbox row while compose/reply is open quietly saves eligible draft content, exits compose, and shows the selected message on the first click without reloading the list.
 EMAIL26 - Shared font-size minus/value/plus, Bold, Underline, and highlight-color controls preserve the editor range when toolbar focus changes. Font size applies to a selected range or pending caret, Bold and Underline toggle both on and off, highlight applies to the restored non-collapsed selection and supports clear/no-highlight, and serialized outbound HTML preserves every applied format. Enter commits the numeric font-size value once; Escape cancels the draft value without a later blur commit.
@@ -218,6 +218,7 @@ Expected:
 - Cards render newest first, with the newest message expanded and older messages collapsed to headers.
 - The new message appears at the top immediately and becomes the sole automatically expanded card.
 - Users can expand older cards and see their complete bodies without an internal message scrollbar; the thread pane remains the only vertical scroll surface.
+- A short selected message fills the remaining right-hand detail area, while a long HTML message expands to its complete document height and remains fully reachable through that one detail-pane scrollbar.
 - A resized reply body restores its saved mailbox-scope height and cannot be squeezed below the minimum.
 - Pointer-up inside or outside the resize handle, pointer-cancel, lost capture, and window blur all end resizing; later pointer movement does not change the height.
 

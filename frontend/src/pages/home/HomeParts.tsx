@@ -5601,9 +5601,23 @@ const emailBodyLoadingStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
+function emailBodyDocumentHeight(frameDocument: Document): number {
+  const root = frameDocument.documentElement;
+  const body = frameDocument.body;
+  return Math.max(
+    root.scrollHeight,
+    root.offsetHeight,
+    root.getBoundingClientRect().height,
+    body.scrollHeight,
+    body.offsetHeight,
+    body.getBoundingClientRect().height,
+  );
+}
+
+function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = false, style }: {
   srcDoc: string;
   minHeight: number;
+  fillAvailableHeight?: boolean;
   style?: React.CSSProperties;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
@@ -5626,10 +5640,11 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
     frameDocument.documentElement.style.overflow = "hidden";
     frameDocument.body.style.overflow = "hidden";
     const resize = () => {
-      const documentHeight = Math.max(
-        frameDocument.body.scrollHeight,
-        frameDocument.body.getBoundingClientRect().height,
-      );
+      const frameMinHeight = frame.style.minHeight;
+      frame.style.minHeight = "0px";
+      frame.style.height = "0px";
+      const documentHeight = emailBodyDocumentHeight(frameDocument);
+      frame.style.minHeight = frameMinHeight;
       frame.style.height = `${Math.max(minHeight, Math.ceil(documentHeight) + 2)}px`;
     };
     const images = Array.from(frameDocument.images);
@@ -5659,6 +5674,7 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
     });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
     if (observer) {
+      observer.observe(frameDocument.documentElement);
       observer.observe(frameDocument.body);
     }
     resize();
@@ -5672,9 +5688,14 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
     };
   };
 
+  const availableHeightStyle: React.CSSProperties = fillAvailableHeight
+    ? { minHeight: "100%", alignSelf: "stretch" }
+    : {};
+  const frameInitialHeight: React.CSSProperties["height"] = fillAvailableHeight ? "100%" : minHeight;
+
   return (
     <>
-      <div style={{ position: "relative", minWidth: 0 }}>
+      <div style={{ position: "relative", minWidth: 0, display: "grid", ...availableHeightStyle }}>
         {selectedImage && (
           <button
             type="button"
@@ -5691,7 +5712,7 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
           srcDoc={srcDoc}
           scrolling="no"
           onLoad={handleLoad}
-          style={{ ...iframeStyle, ...style, minHeight, height: minHeight, overflow: "hidden" }}
+          style={{ ...iframeStyle, ...style, ...availableHeightStyle, height: frameInitialHeight, overflow: "hidden" }}
         />
       </div>
       {previewImage && typeof document !== "undefined" && createPortal(
@@ -5832,17 +5853,18 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded);
   const showMessageMeta = !fill;
-  const frameMinHeight = fill ? (hasAttachments ? 300 : 360) : 120;
+  const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
   const itemStyle: React.CSSProperties = {
-    minHeight: fill ? 0 : undefined,
+    minHeight: fill ? "100%" : undefined,
+    height: fill ? "100%" : undefined,
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: "auto",
+    gridTemplateRows: fill ? "minmax(auto, 1fr)" : "auto",
     gap: 8,
     paddingTop: fill ? 0 : 10,
     borderTop: fill ? "none" : "1px solid rgba(148, 163, 184, 0.28)",
-    alignContent: "start",
+    alignContent: fill ? "stretch" : "start",
   };
   return (
     <article style={itemStyle}>
@@ -5883,7 +5905,12 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
           {!loadingBody && <button type="button" style={mailPanelSmallButtonStyle} onClick={onLoadBody}>Retry</button>}
         </div>
       ) : (
-        <AutoHeightEmailBodyFrame srcDoc={bodyDocument.srcDoc} minHeight={frameMinHeight} style={frameStyle} />
+        <AutoHeightEmailBodyFrame
+          srcDoc={bodyDocument.srcDoc}
+          minHeight={frameMinHeight}
+          fillAvailableHeight={fill}
+          style={frameStyle}
+        />
       ))}
       {expanded && hasAttachments && (
         <div style={mailAttachmentSectionStyle}>
