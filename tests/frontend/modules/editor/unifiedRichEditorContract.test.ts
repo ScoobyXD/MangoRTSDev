@@ -445,6 +445,15 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /AutoHeightEmailBodyFrame/);
   assert.match(homeParts, /scrolling="no"/);
   assert.match(homeParts, /new ResizeObserver\(resize\)/);
+  assert.match(homeParts, /observer\.observe\(frameDocument\.documentElement\)/);
+  assert.match(homeParts, /root\.scrollHeight/);
+  assert.match(homeParts, /body\.scrollHeight/);
+  assert.match(homeParts, /fillAvailableHeight=\{fill\}/);
+  assert.match(homeParts, /frame\.style\.minHeight = "0px"/);
+  assert.match(homeParts, /frame\.style\.height = "0px"/);
+  assert.match(homeParts, /fillAvailableHeight \? "100%" : minHeight/);
+  assert.match(homeParts, /gridTemplateRows: fill \? "minmax\(auto, 1fr\)" : "auto"/);
+  assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
   assert.match(homeParts, /saveMailReplyEditorHeight/);
   assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
