@@ -56,7 +56,11 @@ Only when Jonat explicitly asks to merge or integrate a completed worker into lo
 3. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
 4. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
 5. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
-6. Do not push the worker branch or `main` unless Jonat explicitly asks for a push.
+6. Every merge completion report must prominently and unambiguously include all of the following, based on inspection of the merged diff:
+   - `Backend changes: yes` or `Backend changes: no`. When yes, identify the backend files or subsystems changed and summarize the behavioral effect.
+   - `Database/schema changes: yes` or `Database/schema changes: no`. When yes, identify every migration, canonical schema, seed, or database-contract change and state any required human-run migration or rollout action.
+   - `Merge conflicts: none` when there were no conflicts. When conflicts occurred, identify every conflicted file, explain the competing changes or exact problem, describe precisely how each conflict was resolved and why that resolution preserves both current `main` behavior and the worker's intent, and report the verification run after resolution.
+7. Do not push the worker branch or `main` unless Jonat explicitly asks for a push.
 
 ## Local development commands
 
