@@ -1811,22 +1811,16 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 		return query, nil
 	}
 
+	query.Mailbox = normalizeCommunicationsMailbox(query.Mailbox)
 	switch query.Mailbox {
-	case "", "all":
+	case "all":
 		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailAllSearch(query.Query, query.Unread)
-			query.Query = ""
-			query.Unread = nil
-			query.FolderID = ""
+			query = applyGmailNativeSearch(query, gmailAllSearch(query.Query, query.Unread))
 		}
 		return query, nil
 	case "primary":
 		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailPrimarySearch(query.Query, query.Unread)
-			query.Query = ""
-			query.Unread = nil
-			query.FolderID = ""
-			return query, nil
+			return applyGmailNativeSearch(query, gmailPrimarySearch(query.Query, query.Unread)), nil
 		}
 		return s.applySystemFolderMailbox(ctx, connection, query, "inbox")
 	case "sent":
@@ -1839,32 +1833,20 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 		}
 		return s.applySystemFolderMailbox(ctx, connection, query, "sent")
 	case "starred":
+		if connection.Provider == "google" {
+			return applyGmailNativeSearch(query, gmailStarredSearch(query.Query, query.Unread)), nil
+		}
 		starred := true
 		query.Starred = &starred
-		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailStarredSearch(query.Query, query.Unread)
-			query.Query = ""
-			query.Unread = nil
-			query.Starred = nil
-			query.FolderID = ""
-		}
 		return query, nil
 	case "archive":
 		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailArchiveSearch(query.Query, query.Unread)
-			query.Query = ""
-			query.Unread = nil
-			query.FolderID = ""
-			return query, nil
+			return applyGmailNativeSearch(query, gmailArchiveSearch(query.Query, query.Unread)), nil
 		}
 		return s.applyRequiredSystemFolderMailbox(ctx, connection, query, "archive")
 	case "spam":
 		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailSpamSearch(query.Query, query.Unread)
-			query.Query = ""
-			query.Unread = nil
-			query.FolderID = ""
-			return query, nil
+			return applyGmailNativeSearch(query, gmailSpamSearch(query.Query, query.Unread)), nil
 		}
 		return s.applySpamFolderMailbox(ctx, connection, query)
 	default:
@@ -1930,8 +1912,13 @@ func gmailAllSearch(userQuery string, unread *bool) string {
 	return gmailSearch([]string{"in:anywhere"}, userQuery, unread)
 }
 
-func gmailUserSearch(userQuery string, unread *bool) string {
-	return gmailSearch(nil, userQuery, unread)
+func applyGmailNativeSearch(query NylasMessageQuery, search string) NylasMessageQuery {
+	query.SearchQueryNative = search
+	query.FolderID = ""
+	query.Query = ""
+	query.Unread = nil
+	query.Starred = nil
+	return query
 }
 
 func gmailStarredSearch(userQuery string, unread *bool) string {
@@ -1962,15 +1949,14 @@ func gmailSearch(base []string, userQuery string, unread *bool) string {
 }
 
 func filterGooglePrimaryMessagePage(connection domain.UserEmailConnection, query NylasMessageQuery, page NylasMessagePage) NylasMessagePage {
-	if strings.TrimSpace(strings.ToLower(connection.Provider)) != "google" ||
+	if !strings.EqualFold(strings.TrimSpace(connection.Provider), "google") ||
 		strings.TrimSpace(query.ThreadID) != "" ||
 		normalizeCommunicationsMailbox(query.Mailbox) != "primary" {
 		return page
 	}
-	primaryQuery := NylasMessageQuery{Mailbox: "primary"}
 	messages := make([]NylasMessage, 0, len(page.Messages))
 	for _, message := range page.Messages {
-		if nylasMessageMatchesCachedPageQuery(message, primaryQuery) {
+		if nylasMessageMatchesPrimaryMailbox(message) {
 			messages = append(messages, message)
 		}
 	}

@@ -17,19 +17,22 @@ import (
 	"time"
 )
 
+func assertURLQueryEqual(t *testing.T, got, want url.Values) {
+	t.Helper()
+	if got.Encode() != want.Encode() {
+		t.Fatalf("query = %v, want %v", got, want)
+	}
+}
+
 func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 	t.Parallel()
 
-	var gotSelect string
-	var gotLimit string
-	var gotStarred string
+	var gotQuery url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v3/grants/grant-1/messages" {
 			t.Fatalf("path = %q, want /v3/grants/grant-1/messages", r.URL.Path)
 		}
-		gotSelect = r.URL.Query().Get("select")
-		gotLimit = r.URL.Query().Get("limit")
-		gotStarred = r.URL.Query().Get("starred")
+		gotQuery = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"message-1","subject":"Hello","unread":true,"starred":false}],"next_cursor":"next-page"}`))
 	}))
@@ -41,15 +44,11 @@ func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotSelect != nylasMessageListSelect {
-		t.Fatalf("select = %q, want %q", gotSelect, nylasMessageListSelect)
-	}
-	if gotLimit != "12" {
-		t.Fatalf("limit = %q, want 12", gotLimit)
-	}
-	if gotStarred != "true" {
-		t.Fatalf("starred = %q, want true", gotStarred)
-	}
+	assertURLQueryEqual(t, gotQuery, url.Values{
+		"limit":   {"12"},
+		"select":  {nylasMessageListSelect},
+		"starred": {"true"},
+	})
 	if page.NextPageToken != "next-page" {
 		t.Fatalf("next page token = %q, want next-page", page.NextPageToken)
 	}
@@ -81,15 +80,11 @@ func TestNylasRESTClientListMessagesNativeSearchUsesOnlyAllowedParameters(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gotQuery) != 3 || gotQuery.Get("limit") != "12" || gotQuery.Get("page_token") != "page-1" ||
-		gotQuery.Get("search_query_native") != "in:inbox -category:social -category:promotions invoice is:unread" {
-		t.Fatalf("native query = %v, want only limit, page_token, and search_query_native", gotQuery)
-	}
-	for _, forbidden := range []string{"select", "in", "thread_id", "q", "unread", "starred"} {
-		if gotQuery.Has(forbidden) {
-			t.Fatalf("native query unexpectedly contains %q: %v", forbidden, gotQuery)
-		}
-	}
+	assertURLQueryEqual(t, gotQuery, url.Values{
+		"limit":               {"12"},
+		"page_token":          {"page-1"},
+		"search_query_native": {"in:inbox -category:social -category:promotions invoice is:unread"},
+	})
 	if page.NextPageToken != "next-page" {
 		t.Fatalf("next page token = %q, want next-page", page.NextPageToken)
 	}
@@ -126,15 +121,12 @@ func TestNylasRESTClientListMessagesThreadIDTakesPrecedenceOverNativeSearch(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gotQuery) != 4 || gotQuery.Get("limit") != "12" || gotQuery.Get("page_token") != "thread-page" ||
-		gotQuery.Get("thread_id") != "thread-1" || gotQuery.Get("select") != nylasMessageListSelect {
-		t.Fatalf("thread query = %v, want only structured thread preview parameters", gotQuery)
-	}
-	for _, forbidden := range []string{"search_query_native", "in", "q", "unread", "starred"} {
-		if gotQuery.Has(forbidden) {
-			t.Fatalf("thread query unexpectedly contains %q: %v", forbidden, gotQuery)
-		}
-	}
+	assertURLQueryEqual(t, gotQuery, url.Values{
+		"limit":      {"12"},
+		"page_token": {"thread-page"},
+		"select":     {nylasMessageListSelect},
+		"thread_id":  {"thread-1"},
+	})
 }
 
 func TestParseNylasAPIErrorParsesNestedErrorObject(t *testing.T) {

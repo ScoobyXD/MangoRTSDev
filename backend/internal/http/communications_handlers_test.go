@@ -2682,36 +2682,38 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
-	path := "/v1/communications/messages?mailbox=primary&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
-	assertPrimaryPage := func(requestPath string) {
+	requestPage := func(requestPath string) NylasMessagePage {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, requestPath, nil)
 		req.Header.Set("Authorization", token)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("Primary status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+			t.Fatalf("GET %s status = %d, want 200 body=%s", requestPath, rec.Code, rec.Body.String())
 		}
 		var page NylasMessagePage
 		if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
 			t.Fatal(err)
 		}
+		return page
+	}
+	assertPrimaryOnly := func(label string, page NylasMessagePage) {
+		t.Helper()
 		if len(page.Messages) != 1 || page.Messages[0].ID != "primary-message" {
-			t.Fatalf("Primary messages = %+v, want only primary-message", page.Messages)
+			t.Fatalf("%s Primary messages = %+v, want only primary-message", label, page.Messages)
 		}
 		if page.NextPageToken != "next-token" {
-			t.Fatalf("Primary next page token = %q, want next-token", page.NextPageToken)
+			t.Fatalf("%s Primary next page token = %q, want next-token", label, page.NextPageToken)
 		}
 	}
-	assertPrimaryPage(path)
+
+	path := "/v1/communications/messages?mailbox=primary&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
+	assertPrimaryOnly("fresh", requestPage(path))
 	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions (from:ops@example.com OR category:social) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
 		t.Fatalf("query = %+v, want Gmail-native inbox search only", nylas.lastQuery)
-	}
-	if nylas.messageCalls != 1 {
-		t.Fatalf("message calls after fresh Primary read = %d, want 1", nylas.messageCalls)
 	}
 	if cached, ok := server.commCache.getMessagePage(
 		user.UserID,
@@ -2722,26 +2724,17 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	); !ok || len(cached.Messages) != 1 || cached.Messages[0].ID != "primary-message" {
 		t.Fatalf("cached Primary page = %+v present=%v, want only primary-message", cached.Messages, ok)
 	}
-	assertPrimaryPage(path)
+	assertPrimaryOnly("cached", requestPage(path))
 	if nylas.messageCalls != 1 {
 		t.Fatalf("message calls after cached Primary read = %d, want 1", nylas.messageCalls)
 	}
-	assertPrimaryPage(path + "&refresh=true")
+	assertPrimaryOnly("refreshed", requestPage(path+"&refresh=true"))
 	if nylas.messageCalls != 2 {
 		t.Fatalf("message calls after refreshed Primary read = %d, want 2", nylas.messageCalls)
 	}
+
 	allPath := "/v1/communications/messages?mailbox=all&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
-	req := httptest.NewRequest(http.MethodGet, allPath, nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("All status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var allPage NylasMessagePage
-	if err := json.NewDecoder(rec.Body).Decode(&allPage); err != nil {
-		t.Fatal(err)
-	}
+	allPage := requestPage(allPath)
 	if len(allPage.Messages) != 4 {
 		t.Fatalf("All messages = %+v, want Primary, Social, Promotions, and Sent", allPage.Messages)
 	}
@@ -2750,13 +2743,13 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	}
 }
 
-func TestCommunicationsPrimaryMailboxOrdinaryLoadAlwaysExcludesSocialAndPromotions(t *testing.T) {
+func TestCommunicationsDefaultMailboxOrdinaryLoadAlwaysExcludesSocialAndPromotions(t *testing.T) {
 	t.Parallel()
 
 	query, err := new(Server).applyCommunicationsMailboxQuery(
 		context.Background(),
 		domain.UserEmailConnection{Provider: "google"},
-		NylasMessageQuery{Mailbox: "primary"},
+		NylasMessageQuery{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2764,7 +2757,7 @@ func TestCommunicationsPrimaryMailboxOrdinaryLoadAlwaysExcludesSocialAndPromotio
 	if query.SearchQueryNative != "in:inbox -category:social -category:promotions" {
 		t.Fatalf("ordinary Primary search_query_native = %q", query.SearchQueryNative)
 	}
-	if query.Query != "" || query.Unread != nil || query.FolderID != "" || query.ThreadID != "" || query.Starred != nil {
+	if query.Mailbox != "primary" || query.Query != "" || query.Unread != nil || query.FolderID != "" || query.ThreadID != "" || query.Starred != nil {
 		t.Fatalf("ordinary Primary query = %+v, want one Gmail-native bucket expression", query)
 	}
 }
