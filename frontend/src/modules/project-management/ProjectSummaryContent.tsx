@@ -313,7 +313,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
   const [selectedRelationshipNodePanel, setSelectedRelationshipNodePanel] = useState<ProjectRelationshipNodePanelSelection | null>(null);
   const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
-  const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [projectTextAlignment, setProjectTextAlignment] = useState<EditorTextAlignment>("left");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
@@ -341,7 +341,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const state = projectFormattingControllerRef.current?.readFormatState();
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
-    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic, strikethrough: state.strikethrough });
     setProjectHighlightColor(state.highlightColor);
     setProjectTextAlignment(state.textAlignment);
   }, []);
@@ -353,7 +353,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const state = controller.readFormatState();
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
-    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic, strikethrough: state.strikethrough });
     setProjectHighlightColor(state.highlightColor);
     setProjectTextAlignment(state.textAlignment);
   }, []);
@@ -1749,11 +1749,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 boldActive={projectInlineFormat.bold}
                 underlineActive={projectInlineFormat.underline}
                 italicActive={projectInlineFormat.italic}
+                strikethroughActive={projectInlineFormat.strikethrough}
                 highlightColor={projectHighlightColor}
                 textAlignment={projectTextAlignment}
                 onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
                 onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
                 onToggleItalic={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("italic"))}
+                onToggleStrikethrough={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("strikethrough"))}
                 onSetSelectionHighlightColor={(color) => runProjectFormatCommand((controller) => controller.applyHighlightColor(color))}
                 onSetTextAlignment={(alignment) => runProjectFormatCommand((controller) => controller.applyTextAlignment(alignment))}
                 onOutlineStyleFocus={refreshProjectSelectionFormat}

@@ -91,6 +91,12 @@ test("editor sanitizer collapses nested font-size wrappers to the final size", (
   assert.equal(html, '<span style="font-size: 16px;">nice</span>');
 });
 
+test("editor sanitizer preserves strikethrough and canonicalizes legacy strike tags", () => {
+  const html = sanitizeEditorDocumentHTML("<s>current</s><strike>legacy</strike><del>deleted</del>");
+
+  assert.equal(html, "<s>current</s><s>legacy</s><s>deleted</s>");
+});
+
 test("editor highlight colors normalize to opaque canonical hex only", () => {
   assert.equal(normalizeEditorHighlightColor("#Fe0"), "#ffee00");
   assert.equal(normalizeEditorHighlightColor("rgb(254, 240, 138)"), "#fef08a");
@@ -156,6 +162,16 @@ test("editor table width normalization keeps columns bounded and proportional", 
   assert.deepEqual(exact.map((value) => Math.round(value)), [20, 30, 50]);
   assert.equal(Math.round(squeezed.reduce((sum, value) => sum + value, 0)), 100);
   assert.ok(squeezed.every((value) => value >= 4));
+});
+
+test("editor tables strip retired cell alignment overlays while retaining table content", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
+  const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+
+  assert.match(source, /ensureEditorTableAlignmentControls[\s\S]*querySelectorAll[\s\S]*control\.remove\(\)/);
+  assert.doesNotMatch(source, /button\.setAttribute\(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE/);
+  assert.doesNotMatch(handlers, /getEditorTableAlignmentAction|applyEditorTableAlignmentAction/);
+  assert.match(source, /Array\.from\(table\.querySelectorAll\("td,th"\)\)[\s\S]*cell\.style\.textAlign = align \?\? ""/);
 });
 
 test("editor image source sanitizer only accepts raster data images", () => {

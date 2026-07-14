@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # GVIC Tests
 
@@ -45,7 +45,7 @@ GVIC34 - Projects have their own GVIC for project visibility and updates, but lo
 GVIC35 - My Work membership is based on node effective GVIC only; project and logic gate data decorate and group visible node rows but do not hide or reveal node rows.
 GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
 GVIC37 - Group membership, group parent moves, and group deletion update effective GVIC for any resource that directly references the affected group, including Logic Gate templates and node snapshots.
-GVIC38 - Logic Gate GVIC apply-to-descendants is an explicit one-shot bulk action, not a persistent toggle on regular GVIC edits. The action applies the Logic Gate's current GVIC template to nodes currently assigned to that Logic Gate by replacing each assigned node snapshot and refreshing affected node effective/projection rows.
+GVIC38 - Logic Gate GVIC apply-to-descendants is an explicit one-shot bulk action available only from the shared **More editor actions** menu, not a persistent toggle, header-body control, or fifth GVIC card. The action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no change, while only Yes applies the Logic Gate's current GVIC template to nodes currently assigned to that Logic Gate by replacing each assigned node snapshot and refreshing affected node effective/projection rows.
 GVIC39 - GVIC inheritance, overrides, transfers, and apply-to-descendants follow the same business semantics as permissions for every supported parent-child GVIC relationship.
 GVIC40 - A parent GVIC policy is a template captured at create time or transfer time; existing children do not live-inherit future parent GVIC edits unless apply-to-descendants is set.
 GVIC41 - Creating or transferring a GVIC-managed resource copies the direct target parent's current GVIC policy, not the root ancestor's policy.
@@ -62,6 +62,7 @@ GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic G
 GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
 GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
 GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_view`, `can_edit`, or `can_admin`.
+GVIC55 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
 
 ## Scenarios
 
@@ -275,3 +276,22 @@ Expected:
 - The assignment/policy change invalidates the gate work version and reconciles the shared cached snapshot.
 - The stale response cannot overwrite the newer request owner.
 - Request-owner metadata does not grant any resource permission flag.
+
+### Scenario GVIC-S9: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
+
+Business logic covered:
+- GVIC38
+- GVIC55
+
+Given:
+- A Node or Logic Gate editor shows the four shared GVIC role cards.
+- An adjacent pane narrows the available editor width.
+- A Logic Gate user can access the apply-to-assigned-nodes action.
+
+Expected:
+- Generated, Verified, Consulted, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
+- No apply/current-GVIC card appears in the header body.
+- The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
+- Selecting that action opens an explicit Yes/No confirmation.
+- Choosing No, canceling, or dismissing performs no write.
+- Only choosing Yes applies the current Logic Gate GVIC assignment snapshot to all currently assigned nodes.

@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
-- Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`; existing-attachment destination linking and mailbox-complete signature resource IDs are covered by `tests/frontend/modules/attachments/attachmentApi.test.ts`.
+- Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`; attachment-frame hydration ownership, refresh-after-DOM-replacement, object-URL revocation, and restored-frame cleanup are covered by `tests/frontend/modules/editor/editorImageHydration.test.ts`; existing-attachment destination linking and mailbox-complete signature resource IDs are covered by `tests/frontend/modules/attachments/attachmentApi.test.ts`.
 - Outbound email metadata preflight, exact 24,000,000-byte and zero-byte boundaries, authorization, lazy storage opening, deterministic multipart framing, exact stream lengths, cancellation, provider rejection, and cleanup are covered by `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go`; bounded query shape is covered by the attachment handler/store contract tests.
 - Direct-upload coverage must additionally prove bounded hashing, JSON-only Mango control requests, raw credential-free S3 PUTs, exact signed headers, progress/cancel/retry/resume, completed-part reconciliation, node-scoped deletion survival, and completed-only list/count refresh.
 - Business Logic Covered By Scenarios: 100%
@@ -36,7 +36,7 @@ ATT2 - Postgres stores attachment metadata, S3 object keys, variants, ownership/
 ATT3 - Durable Mango payloads must not store `data:image/...;base64`, `data:application/...;base64`, durable `dataURL` fields, or normal app email attachment payloads carrying raw base64 content.
 ATT4 - Temporary browser previews may use object URLs or data URLs only before upload completes; those values must be replaced by attachment references before durable save, send, snapshot, history, or projection writes.
 ATT5 - Rich-editor pasted or dropped inline images must be handled through the shared unified rich-editor image path behind `useEditorDocumentSurfaceHandlers` and `editorImages`, then saved as attachment references across node, Logic Gate, project, My Triage, Shared Triage, attached-email reply body, and personal/shared email-signature surfaces.
-ATT6 - Inline editor images must render as high-quality images on first open, not low-quality thumbnails, and double-click/fullscreen preview must load the original or highest-quality available variant.
+ATT6 - Inline editor images must render as high-quality images on first open, not low-quality thumbnails, and double-click/fullscreen preview must load the original or highest-quality available variant directly into its stable final dark overlay. Opening must not flash a transient extra panel, outline, unmeasured window, or geometry jump while the source loads. The overlay exposes a conspicuous bright-red top-right close X with accessible button semantics; activating it closes the preview while supported Escape/backdrop or existing double-click dismissal remains intact.
 ATT7 - Node attachment-button uploads and attachment lists use the same Mango attachment API, private S3 storage, metadata records, and `resource_attachments` links as pasted inline images. The node loads attachment metadata separately from file bytes; image bytes are requested only when a row is visible or near-visible, and original bytes are requested only by an explicit download.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
@@ -64,7 +64,7 @@ ATT30 - Only completed intents create/list permanent attachments. Node-level pro
 ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
 ATT32 - Pasting an existing attachment-backed editor image into another unified rich editor target must create the destination resource's authorized `inline_image` link before inserting the image reference. An asynchronous upload or existing-attachment link may commit only while its originating editor root, document target, attachment resource context, and saved range are still current; switching targets or unmounting must not insert it into the next document.
 ATT33 - During one browser page/app session, authenticated attachment content uses one shared Blob singleflight/cache across mounted editor windows, keyed by API base, company, auth-session generation, attachment ID, and requested variant. Failures evict immediately; auth generation is checked again before delivery so stale in-flight prior-user data is rejected; completed cache entries obey expiry/LRU byte bounds and large originals are not retained. Object URLs are never shared cache values: every consumer creates and revokes its own URL. One consumer abort only detaches that consumer, and the last-consumer upstream abort is deferred through the StrictMode cleanup/setup turn so a replay owner can attach without starting a duplicate GET.
-ATT34 - Each mounted rich-editor DOM has exactly one attachment-image hydration owner for each document update. Hydration observes image frames relative to the editor's nested scrollport with a near-viewport margin, schedules visible display-image reads through one bounded priority queue, marks queued/in-flight frames so duplicate owners cannot race, and returns cleanup that detaches observers/tasks and revokes every URL created for that DOM before replacement, context change, or unmount. A failed frame is unscheduled and re-observed with bounded retry/backoff instead of remaining permanently unhydrated.
+ATT34 - Each mounted rich-editor DOM has exactly one attachment-image hydration owner for each document update. Hydration observes image frames relative to the editor's nested scrollport with a near-viewport margin, schedules visible display-image reads through one bounded priority queue, marks queued/in-flight frames so duplicate owners cannot race, and returns stable cleanup that detaches observers/tasks and revokes every URL created for that DOM before replacement, context change, or unmount. Delete followed by editor undo/redo refreshes the current hydration generation so a restored attachment-backed frame renders immediately with the correct source without a page refresh; superseded URLs are revoked, and the original owner cleanup still disposes the newest generation. A failed frame is unscheduled and re-observed with bounded retry/backoff instead of remaining permanently unhydrated.
 ATT35 - A node uses one StrictMode-safe resource-attachment metadata singleflight/cache for its node-wide and per-text-box attachment lists. The canonical node-scope response is reused by every list, is loaded without one variant query per attachment, and is explicitly invalidated before upload completion, link, unlink, or another local attachment refresh signal can reload it.
 ATT36 - Successful supported still-image uploads create repository-backed high-quality `display` and small `thumbnail` variants after the original attachment and resource link have committed. Generation is bounded, best-effort, idempotent, and retryable on completed-intent replay; it currently server-sniffs static JPEG/PNG only, never upscales, and safely leaves GIF/WebP/APNG/SVG/AVIF/HEIC or over-limit inputs on authorized original fallback. Derivative failure must never change a completed original into a failed upload.
 ATT37 - Each attachment variant row owns nullable content SHA-256, generation version, and update time while `attachments.sha256` remains the original-file hash. Derivative object keys include the generated digest and are immutable for that content. The content route performs one minimal repository read for attachment, requested-or-original variant, and active authorization links; authorizes those links; emits strong validators only for verified current rows plus `Cache-Control: private, max-age=0, no-cache, must-revalidate` and `X-Content-Type-Options: nosniff`; validates object length against repository metadata; and returns a matching `304` before object storage. A legacy/stale or missing derivative falls back once to the authorized original without exposing a bucket or key.
@@ -106,17 +106,20 @@ Business logic covered:
 - ATT15
 - ATT17
 - ATT32
+- ATT34
 
 Given:
 - A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, attached-email reply body, or personal/shared email signature.
 - A user copies an existing attachment-backed image into a different unified editor resource, or changes editor targets while an image upload/link is pending.
+- The user double-clicks an inline image, closes the preview, deletes the hydrated image, and invokes editor undo/redo without refreshing the page.
 
 Expected:
 - The shared rich-editor image path uploads the file through the Mango attachment API.
 - The saved editor/email body stores an attachment reference, not a data URL or base64 blob.
 - The first rendered inline image is high quality.
 - Inline image hydration has one DOM owner, starts only when a frame is visible or near-visible, coalesces repeated display reads by attachment/variant/auth generation, and revokes each consumer-owned URL during document cleanup.
-- Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant.
+- Undo/redo refreshes that owner's current hydration generation, revokes superseded object URLs, and restores the deleted image fully rendered with the correct source immediately; the owner's original cleanup still disposes the refreshed generation.
+- Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant directly in the stable dark overlay, with no transient panel/outline or geometry jump and with a bright-red top-right accessible close X.
 - In editable content, image selection establishes a usable caret immediately before the image, and the same drag and resize behavior works in node, Logic Gate, project, compose, and reply editors.
 - Copying an attachment-backed image creates the destination resource link before the reference is inserted; a stale asynchronous completion does not mutate a different or unmounted editor target.
 - Backend guards reject attempts to persist durable inline image bytes, including communications draft and signature bodies.
@@ -292,6 +295,7 @@ Business logic covered:
 - ATT24
 - ATT25
 - ATT32
+- ATT34
 - ATT39
 - ATT40
 - ATT41
@@ -299,16 +303,17 @@ Business logic covered:
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
 - A user selects or copies an inline image in any unified rich editor surface, including a personal/shared email signature.
+- In editable content, the user deletes a hydrated attachment-backed image and undoes the deletion.
 
 Expected:
 - Mango renders the sanitized incoming body before CID attachment bytes finish loading, then resolves each inline image independently through the authorized attachment boundary.
 - Collapsed historical cards make no body-detail or attachment-content reads. Expanding a card activates its lazy body read and abortable CID downloads; replacing or collapsing the card aborts work that no longer has a visible consumer.
 - Ordinary message detail does not fetch raw MIME merely because attachment metadata is empty or no calendar part is present; MIME recovery remains limited to a concrete missing inline-CID body reference, while calendar RSVP may still use authenticated raw MIME parsing.
-- A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens fullscreen preview.
+- A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens the original/highest-quality source directly in the stable dark fullscreen overlay with its bright-red accessible close button and no intermediate panel or geometry jump.
 - Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
 - Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.
 - Copying an attachment-backed image to a different resource authorizes and links it to that destination before insertion, and a target switch prevents a stale asynchronous insertion.
-- Closing or replacing previews releases transient browser object URLs.
+- Undo restores a deleted editable image fully rendered immediately; refreshing/replacing the hydration generation and closing/replacing previews revoke superseded transient object URLs without leaking them.
 - The DOM and download action do not expose provider credentials, private S3 keys, or a public object URL.
 
 ### Scenario ATT-S11: Browser Direct Upload Reliability And Cleanup

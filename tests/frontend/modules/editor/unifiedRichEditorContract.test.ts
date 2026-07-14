@@ -25,7 +25,10 @@ const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Bold",
   "Underline",
   "Italic",
+  "Strikethrough",
   "Text highlight",
+  "Apply text highlight",
+  "Choose highlight color",
   "Insert table",
   "Outline styles",
 ] as const;
@@ -41,7 +44,7 @@ function assertSharedToolbarControls(editorTabBarSource: string, preferencesSour
   assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar-tabs=/);
   assert.match(editorTabBarSource, /hoveredFormatControl/);
   assert.match(editorTabBarSource, /formatControlDivider/);
-  for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline", "italic", "highlight", "table"]) {
+  for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline", "italic", "strikethrough", "highlight", "highlight-menu", "table"]) {
     assert.match(editorTabBarSource, new RegExp(`data-mango-editor-format-control="${controlID}"`));
   }
   assert.match(editorTabBarSource, /\(\["left", "center", "right"\] as const\)\.map\(\(alignment\) =>/);
@@ -114,6 +117,7 @@ test("unified rich editor contract lists every declared target surface", () => {
     "bold",
     "underline",
     "italic",
+    "strikethrough",
     "highlight",
     "align-left",
     "align-center",
@@ -543,14 +547,16 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(formattingHook, /applyHighlightColor: \(color\) => \{\s*const editor = restoreFormattingSelection\(\)/);
   assert.match(formattingHook, /insertLink: \(href\) => \{\s*const editor = restoreFormattingSelection\(\)/);
   assert.match(formattingHook, /insertList: \(kind\) => \{\s*const editor = restoreFormattingSelection\(\)/);
-  assert.match(formattingHook, /pendingEditorFontSizeRef\.current[\s\S]*fontSize: pendingEditorFontSizeRef\.current/);
-  assert.match(fontSizeCommand, /if \(!range \|\| range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize/);
+  assert.match(formattingHook, /fontSize: pendingEditorFontSizeRef\.current \?\? state\.fontSize/);
+  assert.match(formattingHook, /pendingEditorInlineFormatRef\.current \?\? \{\}/);
+  assert.match(formattingHook, /pendingEditorTypingCaretRef/);
+  assert.match(fontSizeCommand, /if \(!range\) return false;\s*if \(range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize;\s*options\.pendingEditorTypingCaretRef\.current = getEditorTypingCaretBookmark\(root\)/);
   assert.match(editorSurfaceHandlers, /function editorSelectedTextRuns\(root: HTMLElement, range: Range\)[\s\S]*getEditorRangeOffsets\(root, range\)/);
   assert.match(editorSurfaceHandlers, /const spans = wrapEditorSelectedTextRuns\([\s\S]*span\.style\.fontSize/);
   assert.match(editorSurfaceHandlers, /function normalizeEditorFontSizeSpans\(root: HTMLElement, spans: readonly HTMLSpanElement\[\]\)/);
   assert.match(fontSizeCommand, /normalizeEditorFontSizeSpans\(root, spans\)/);
   assert.doesNotMatch(fontSizeCommand, /span\.appendChild\(fragment\);\s*range\.insertNode\(span\)/);
-  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*const pendingFontSize = pendingEditorFontSizeRef\.current[\s\S]*const pendingHighlightColor = pendingEditorHighlightColorRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)/);
+  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*const pendingFontSize = pendingEditorFontSizeRef\.current[\s\S]*const pendingHighlightColor = pendingEditorHighlightColorRef\.current[\s\S]*const pendingInlineFormat = pendingEditorInlineFormatRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)/);
   assert.match(editorSurfaceHandlers, /onCompositionStart\(event\) \{[\s\S]*pendingCompositionUndoSnapshotRef\.current[\s\S]*snapshotEditorDocumentRoot\(event\.currentTarget\)/);
   assert.match(editorSurfaceHandlers, /const mutationUndoBefore = undoBefore \?\? snapshotEditorDocumentRoot\(root\)/);
   assert.match(editorSurfaceHandlers, /setEditorSelectionByOffsets\(root, endOffset, endOffset\)/);
@@ -565,11 +571,20 @@ test("shared toolbar hover and focus styling is scoped to each clickable control
     ">",
     "format control group opening tag",
   );
+  const formatControlStyle = sourceSliceBetween(
+    editorTabBar,
+    "const formatControlStyle =",
+    "const formatControlHoverHandlers =",
+    "shared format-control style",
+  );
 
   assert.doesNotMatch(formatGroupOpening, /onMouseEnter|onMouseLeave|hoveredFormatControl/);
+  assert.doesNotMatch(formatGroupOpening, /outlineMenuAccent|active/);
   assert.match(editorTabBar, /const hovered = hoveredFormatControl === id && !formatControlsDisabled/);
   assert.match(editorTabBar, /const formatControlHoverHandlers = \(id: EditorFormatControlID\) => \(\{/);
-  for (const controlID of ["decrease-font", "increase-font", "bold", "underline", "italic", "highlight", "table"]) {
+  assert.match(formatControlStyle, /background: active\s*\? `linear-gradient\(135deg, \$\{colorWithAlpha\(outlineMenuAccent, 0\.36\)\}, rgba\(94,234,212,0\.28\) 52%, rgba\(168,85,247,0\.24\)\)`/);
+  assert.match(formatControlStyle, /boxShadow: active\s*\? `inset 0 0 0 1px \$\{colorWithAlpha\(outlineMenuAccent, 0\.52\)\}, 0 0 8px \$\{colorWithAlpha\(outlineMenuAccent, 0\.18\)\}`/);
+  for (const controlID of ["decrease-font", "increase-font", "bold", "underline", "italic", "strikethrough", "highlight", "highlight-menu", "table"]) {
     const controlIndex = editorTabBar.indexOf(`data-mango-editor-format-control="${controlID}"`);
     const hoverIndex = editorTabBar.indexOf(`formatControlHoverHandlers("${controlID}")`, controlIndex);
     assert.ok(controlIndex >= 0, controlID + " control marker must exist");
@@ -580,7 +595,7 @@ test("shared toolbar hover and focus styling is scoped to each clickable control
   assert.match(indexCSS, /\[data-mango-editor-format-control\]:focus-visible/);
 });
 
-test("collapsed-caret font size and highlight are retained as pending typing styles", () => {
+test("collapsed-caret font size, highlight, italic, and strikethrough retain pending typing state at the saved caret", () => {
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const fontSizeCommand = sourceSliceBetween(
     editorSurfaceHandlers,
@@ -602,34 +617,37 @@ test("collapsed-caret font size and highlight are retained as pending typing sty
     "shared formatting-controller hook",
   );
 
-  assert.match(fontSizeCommand, /if \(!range \|\| range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize;\s*return true/);
-  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*return true/);
+  assert.match(fontSizeCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorFontSizeRef\.current = nextFontSize;\s*options\.pendingEditorTypingCaretRef\.current = getEditorTypingCaretBookmark\(root\)[\s\S]*return true/);
+  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*options\.pendingEditorTypingCaretRef\.current = getEditorTypingCaretBookmark\(root\);\s*return true/);
   assert.match(highlightCommand, /options\.pendingEditorHighlightColorRef\.current = undefined/);
   assert.match(formattingHook, /fontSize: pendingEditorFontSizeRef\.current \?\? state\.fontSize/);
   assert.match(formattingHook, /pendingEditorHighlightColorRef\.current === undefined \? state\.highlightColor : pendingEditorHighlightColorRef\.current/);
-  assert.match(beforeInput, /pendingFontSize !== null \|\| pendingHighlightColor !== undefined/);
+  assert.match(formattingHook, /toggleInlineFormat: \(command\) => \{\s*const editor = restoreFormattingSelection\(\)[\s\S]*pendingEditorInlineFormatRef,[\s\S]*pendingEditorTypingCaretRef/);
+  assert.match(beforeInput, /pendingFontSize !== null \|\| pendingHighlightColor !== undefined \|\| pendingInlineFormat !== null/);
   assert.match(beforeInput, /if \(pendingStyle && pendingFontSize !== null\) pendingStyle\.fontSize = pendingFontSize/);
   assert.match(beforeInput, /if \(pendingStyle && pendingHighlightColor !== undefined\) pendingStyle\.highlightColor = pendingHighlightColor/);
-  assert.match(editorSurfaceHandlers, /const clearPendingTypingStyle = useCallback\(\(\) => \{\s*pendingEditorFontSizeRef\.current = null;\s*pendingEditorHighlightColorRef\.current = undefined/);
+  assert.match(beforeInput, /if \(pendingStyle && pendingInlineFormat !== null\) pendingStyle\.inlineFormat = pendingInlineFormat/);
+  assert.match(editorSurfaceHandlers, /const clearPendingTypingStyle = useCallback\(\(\) => \{\s*pendingEditorFontSizeRef\.current = null;\s*pendingEditorHighlightColorRef\.current = undefined;\s*pendingEditorInlineFormatRef\.current = null;\s*pendingEditorTypingCaretRef\.current = null/);
   assert.match(beforeInput, /const selectionFormat = readEditorSelectionFormatState\(root\)/);
   assert.ok(beforeInput.indexOf("const selectionFormat = readEditorSelectionFormatState(root)") < beforeInput.indexOf("const activeTableCell"));
-  assert.match(beforeInput, /if \(includeInlineFormat && selectionFormat\) \{\s*scriptedTypingStyle\.inlineFormat = \{\s*bold: selectionFormat\.bold,\s*underline: selectionFormat\.underline,\s*italic: selectionFormat\.italic/);
+  assert.match(beforeInput, /if \(includeInlineFormat && !scriptedTypingStyle\.inlineFormat && selectionFormat\) \{\s*scriptedTypingStyle\.inlineFormat = \{\s*bold: selectionFormat\.bold,\s*underline: selectionFormat\.underline,\s*italic: selectionFormat\.italic,\s*strikethrough: selectionFormat\.strikethrough/);
   assert.ok(beforeInput.indexOf("startEditorListFromBlankLine") < beforeInput.indexOf("pendingNativeStyledInsertionRef.current = { text"));
   assert.match(editorSurfaceHandlers, /onInput\(event\) \{[\s\S]*pendingNativeStyledInsertionRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, pendingStyledInsertion\.text, pendingStyledInsertion\.style\)/);
   assert.match(editorSurfaceHandlers, /function wrapEditorSelectedTextRunsWithInlineFormat[\s\S]*editorTextNodeHasInlineFormatDefinition\(root, run\.node, command\)/);
-  assert.match(editorSurfaceHandlers, /if \(format\[command\]\) continue;[\s\S]*liftEditorInlineTargetOutOfAncestor\(target, ancestor\)/);
+  assert.match(editorSurfaceHandlers, /for \(const command of EDITOR_INLINE_STYLE_COMMANDS\) \{[\s\S]*if \(!format\[command\]\) continue;[\s\S]*const tagName = command === "bold" \? "strong" : command === "underline" \? "u" : command === "italic" \? "em" : "s"/);
   assert.match(editorSurfaceHandlers, /if \(style\.inlineFormat\) \{\s*const range = selectInsertedText\(\)/);
-  assert.doesNotMatch(editorSurfaceHandlers, /style\.inlineFormat && \(style\.inlineFormat\.bold \|\| style\.inlineFormat\.underline \|\| style\.inlineFormat\.italic\)/);
-  assert.match(editorSurfaceHandlers, /const tagName = command === "bold" \? "strong" : command === "underline" \? "u" : "em"/);
+  assert.doesNotMatch(editorSurfaceHandlers, /style\.inlineFormat && \(style\.inlineFormat\.bold \|\| style\.inlineFormat\.underline \|\| style\.inlineFormat\.italic \|\| style\.inlineFormat\.strikethrough\)/);
   assert.match(beforeInput, /const anchor = getCollapsedAnchorAtSelectionEnd\(root\)[\s\S]*applyScriptedTypingStyle\(\)/);
   assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)[\s\S]*recordEditorDocumentMutation\([^\n]*"typing"\)/);
   assert.match(editorSurfaceHandlers, /onKeyUp\(event\) \{\s*rememberEditorSelectionRange\(event\.currentTarget\);\s*refreshMentionDraft\(event\.currentTarget\)/);
   assert.match(editorSurfaceHandlers, /const alreadyStyled = editorSelectedTextRuns\(root, range\)\.every\(\(run\) => readEditorTextNodeEffectiveFontSize\(root, run\.node\) === nextFontSize\);\s*if \(!alreadyStyled\)/);
   assert.match(editorSurfaceHandlers, /readSelectionHighlightColor\(root, run\.node\.parentElement \?\? root\) === color\);\s*if \(!alreadyStyled\)/);
-  assert.match(editorSurfaceHandlers, /restoreEditorSelectionRange\(root\);\s*root\.focus\(\{ preventScroll: true \}\);\s*clearPendingTypingStyle\(\);/);
+  assert.match(editorSurfaceHandlers, /function editorTypingCaretMatches\([\s\S]*range\.compareBoundaryPoints\(0, bookmark\.range\) === 0[\s\S]*range\.compareBoundaryPoints\(2, bookmark\.range\) === 0/);
+  assert.match(editorSurfaceHandlers, /const retainsPendingTypingStyle = pendingCaret \? editorTypingCaretMatches\(root, pendingCaret\) : false;[\s\S]*if \(!retainsPendingTypingStyle\) clearPendingTypingStyle\(\)/);
+  assert.match(editorSurfaceHandlers, /onInput\(event\) \{[\s\S]*pendingEditorTypingCaretRef\.current = getEditorTypingCaretBookmark\(event\.currentTarget\)/);
 });
 
-test("italic, alignment, and table insertion route through the shared toolbar and controller", () => {
+test("italic, strikethrough, alignment, and table insertion route through the shared toolbar and controller", () => {
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
@@ -643,6 +661,7 @@ test("italic, alignment, and table insertion route through the shared toolbar an
     'data-mango-editor-format-control="bold"',
     'data-mango-editor-format-control="underline"',
     'data-mango-editor-format-control="italic"',
+    'data-mango-editor-format-control="strikethrough"',
     'data-mango-editor-format-control="highlight"',
     '(["left", "center", "right"] as const).map',
     "{onInsertTable && (",
@@ -654,19 +673,23 @@ test("italic, alignment, and table insertion route through the shared toolbar an
     previousIndex = markerIndex;
   }
 
-  assert.match(editorSurfaceHandlers, /export type EditorInlineStyleCommand = "bold" \| "underline" \| "italic"/);
+  assert.match(editorSurfaceHandlers, /export type EditorInlineStyleCommand = "bold" \| "underline" \| "italic" \| "strikethrough"/);
   assert.match(editorSurfaceHandlers, /const italicCommandState = readDocumentCommandState\(root, "italic"\)/);
+  assert.match(editorSurfaceHandlers, /const strikethroughCommandState = readDocumentCommandState\(root, "strikethrough"\)/);
+  assert.match(editorSurfaceHandlers, /command === "strikethrough" \? "strikeThrough" : command/);
   assert.match(editorSurfaceHandlers, /applyEditorInlineFormatToRoot\(editor, command/);
   assert.match(editorSurfaceHandlers, /export function applyEditorTextAlignmentToRoot/);
   assert.match(editorSurfaceHandlers, /applyEditorTableTextAlign\(table, alignment\)/);
   assert.match(editorSurfaceHandlers, /alignment === "center" \? "justifyCenter" : alignment === "right" \? "justifyRight" : "justifyLeft"/);
   assert.match(editorSurfaceHandlers, /applyTextAlignment: \(alignment\) => \{[\s\S]*applyEditorTextAlignmentToRoot\(editor, alignment/);
   assert.match(editorTabBar, /aria-label="Italic"[\s\S]*aria-pressed=\{italicActive\}/);
+  assert.match(editorTabBar, /aria-label="Strikethrough"[\s\S]*aria-pressed=\{strikethroughActive\}[\s\S]*onToggleStrikethrough\(\)/);
   assert.match(editorTabBar, /const label = `Align \$\{alignment\}`[\s\S]*aria-pressed=\{active\}/);
   assert.match(editorTabBar, /aria-label="Insert table"[\s\S]*if \(!formatControlsDisabled\) onInsertTable\(\)/);
 
   for (const source of [editorContent, nodeWorkspaceParts, projectSummary, homeParts]) {
     assert.match(source, /onToggleItalic=/);
+    assert.match(source, /onToggleStrikethrough=/);
     assert.match(source, /onSetTextAlignment=/);
     assert.match(source, /onInsertTable=/);
   }
@@ -678,6 +701,7 @@ test("italic, alignment, and table insertion route through the shared toolbar an
 test("editor header keeps primary controls visible and preserves all secondary overflow actions", () => {
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
 
   assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
@@ -689,11 +713,17 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /secondaryActions\.map\(\(action\) =>/);
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{action\.id\}/);
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action="save-version"/);
+  assert.match(editorTabBar, /flexWrap: singleLine \? "nowrap" : "wrap"[\s\S]*minWidth: singleLine \? "max-content" : undefined/);
+  assert.match(editorTabBar, /\}\)\}\s*\{hasOverflowActions && \([\s\S]*data-mango-editor-header-overflow="true"[\s\S]*marginLeft: singleLine \? 0 : "auto"/);
   assert.match(editorTabBar, /const toggleHeaderMenu = \(menu: "outline" \| "highlight" \| "overflow"\)[\s\S]*setOutlineMenuOpen\(menu === "outline" && opening\)[\s\S]*setHighlightMenuOpen\(menu === "highlight" && opening\)[\s\S]*setOverflowMenuOpen\(menu === "overflow" && opening\)/);
   assert.match(editorTabBar, /toggleHeaderMenu\("highlight"\)[\s\S]*toggleHeaderMenu\("outline"\)[\s\S]*toggleHeaderMenu\("overflow"\)/);
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
   assert.match(editorContent, /onCreateRelatedNode=/);
   assert.match(editorContent, /onSaveCurrentVersion=/);
+  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "apply-gvic-to-assigned-nodes"[\s\S]*disabled: !linkedEntityCanEdit \|\| logicGateGVICApplyToAssignedNodesBusy[\s\S]*onSelect: \(\) => setLogicGateGVICApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
+  assert.match(editorContent, /logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Apply GVIC to assigned nodes\?"[\s\S]*confirmLabel="Yes"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateGVICApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateGVICToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateGVICApplyConfirmationOpen\(false\)\}/);
+  assert.match(linkedDocumentPanels, /const GVIC_ROLES:[\s\S]*role: "generated"[\s\S]*role: "verified"[\s\S]*role: "consulted"[\s\S]*role: "informed"[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{GVIC_ROLES\.map/);
+  assert.doesNotMatch(linkedDocumentPanels, /Apply GVIC to assigned nodes|Current GVIC|Apply GVIC to all descendants/);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
     assert.match(projectSummary, new RegExp(`id: "${projectAction}"`));
@@ -767,18 +797,39 @@ test("highlight control, active selection state, mutation, and sanitization shar
     "export function useEditorDocumentSurfaceHandlers(",
     "shared formatting-controller hook",
   );
+  const highlightMain = sourceSliceBetween(
+    editorTabBar,
+    'aria-label="Apply text highlight"',
+    'aria-label="Choose highlight color"',
+    "highlight split-button main action",
+  );
+  const highlightArrow = sourceSliceBetween(
+    editorTabBar,
+    'aria-label="Choose highlight color"',
+    "{highlightMenuOpen && (",
+    "highlight split-button menu action",
+  );
 
   assert.match(editorTabBar, /highlightColor: EditorHighlightColor \| null/);
   assert.match(editorTabBar, /onSetSelectionHighlightColor: \(color: EditorHighlightColor \| null\) => void/);
-  assert.match(editorTabBar, /data-mango-editor-format-control="highlight"/);
+  assert.match(editorTabBar, /role="group" aria-label="Text highlight"/);
+  assert.match(highlightMain, /data-mango-editor-format-control="highlight"/);
+  assert.match(highlightMain, /onSetSelectionHighlightColor\(highlightColor === customHighlightColor \? null : customHighlightColor\)/);
+  assert.doesNotMatch(highlightMain, /toggleHeaderMenu\("highlight"\)/);
+  assert.doesNotMatch(editorTabBar, /if \(highlightColor\) setCustomHighlightColor\(highlightColor\)/);
+  assert.match(highlightArrow, /data-mango-editor-format-control="highlight-menu"/);
+  assert.match(highlightArrow, /aria-haspopup="menu"[\s\S]*aria-expanded=\{highlightMenuOpen\}/);
+  assert.match(highlightArrow, /toggleHeaderMenu\("highlight"\)/);
+  assert.doesNotMatch(highlightArrow, /onSetSelectionHighlightColor/);
   assert.match(editorTabBar, /aria-label="Text highlight colors"/);
+  assert.match(editorTabBar, /onSetSelectionHighlightColor\(item\.color\);\s*setCustomHighlightColor\(item\.color\)/);
   assert.match(editorTabBar, /aria-label="No highlight"[\s\S]*onSetSelectionHighlightColor\(null\)[\s\S]*No highlight/);
   assert.match(editorTabBar, /Custom highlight color/);
 
   assert.match(editorSurfaceHandlers, /export function applyEditorHighlightColorToRoot/);
   assert.match(editorSurfaceHandlers, /applyHighlightColor: \(color: EditorHighlightColor \| null\) => boolean/);
   assert.match(editorSurfaceHandlers, /highlightColor: EditorHighlightColor \| null/);
-  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*return true/);
+  assert.match(highlightCommand, /if \(range\.collapsed\) \{\s*options\.pendingEditorHighlightColorRef\.current = color;\s*options\.pendingEditorTypingCaretRef\.current = getEditorTypingCaretBookmark\(root\);\s*return true/);
   assert.match(formattingHook, /applyHighlightColor: \(color\) => \{\s*const editor = restoreFormattingSelection\(\)[\s\S]*applyEditorHighlightColorToRoot\(editor, color[\s\S]*pendingEditorHighlightColorRef/);
   assert.match(editorSurfaceHandlers, /pendingEditorHighlightColorRef: React\.MutableRefObject<EditorHighlightColor \| null \| undefined>/);
 
@@ -792,6 +843,69 @@ test("highlight control, active selection state, mutation, and sanitization shar
     assert.match(source, /onSelectionHighlightColorChange/);
     assert.match(source, /pendingEditorHighlightColorRef/);
   }
+});
+
+test("mentions, image preview and undo hydration, and retired table-cell controls retain shared editor semantics", () => {
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+  const richTextEditing = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
+  const mentionCaretNormalization = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "function breakEditorMentionsForInput(",
+    "function mentionAtTextBoundary(",
+    "atomic mention caret normalization",
+  );
+  const atomicMentionHelpers = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "function mentionAtTextBoundary(",
+    "function replaceSelectionWithHTML(",
+    "atomic mention navigation and editing helpers",
+  );
+  const imagePreview = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "const imagePreviewModal = activeImagePreview",
+    "const tableContextMenuButtonStyle =",
+    "stable inline-image preview",
+  );
+  const undoRestore = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "function restoreEditorDocumentUndoSnapshot(",
+    "function applyEditorUndoCommand(",
+    "editor undo restore",
+  );
+  const attachmentRefresh = sourceSliceBetween(
+    editorImages,
+    "export function refreshEditorAttachmentImageFrames(",
+    "export function clearEditorImageSelection(",
+    "attachment image hydration refresh",
+  );
+  const retiredTableAlignmentControls = sourceSliceBetween(
+    richTextEditing,
+    "export function ensureEditorTableAlignmentControls(",
+    "function readEditorGridTableColumns(",
+    "retired table-cell alignment controls",
+  );
+
+  assert.match(mentionCaretNormalization, /normalized\.setStartBefore\(startMention\)[\s\S]*normalized\.setEndAfter\(endMention\)[\s\S]*setEditorSelectionRange\(root, normalized\)/);
+  assert.match(mentionCaretNormalization, /never dissolve the[\s\S]*entity into ordinary text[\s\S]*return null/);
+  assert.doesNotMatch(mentionCaretNormalization, /replaceWith|createTextNode|\.textContent\s*=/);
+  assert.match(atomicMentionHelpers, /function setSelectionBesideMention[\s\S]*range\.setStartBefore\(mention\)[\s\S]*range\.setStartAfter\(mention\)/);
+  assert.match(atomicMentionHelpers, /function moveEditorSelectionAcrossMention[\s\S]*selectionRange\.selectNode\(mention\)/);
+  assert.match(atomicMentionHelpers, /function applyAtomicMentionKeyboardEdit[\s\S]*mention\.remove\(\)[\s\S]*recordEditorDocumentMutation\(documentUndoHistory, root, undoBefore, "delete"\)/);
+  assert.match(editorSurfaceHandlers, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowRight"[\s\S]*moveEditorSelectionAcrossMention\(root,[\s\S]*event\.shiftKey/);
+  assert.match(editorSurfaceHandlers, /event\.key === "Backspace"[\s\S]*event\.key === "Delete"[\s\S]*applyAtomicMentionKeyboardEdit\(/);
+
+  assert.match(imagePreview, /role: "dialog"[\s\S]*"aria-modal": true[\s\S]*position: "fixed"[\s\S]*inset: 0/);
+  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*top: 18[\s\S]*right: 18[\s\S]*background: "#ef4444"/);
+  assert.match(imagePreview, /width: "auto"[\s\S]*height: "auto"[\s\S]*maxWidth: "calc\(100vw - 32px\)"[\s\S]*maxHeight: "calc\(100vh - 32px\)"/);
+  assert.doesNotMatch(imagePreview, /setTimeout|requestAnimationFrame|animation:|transition:|outline:/);
+
+  assert.ok(undoRestore.indexOf("root.innerHTML = deserializeEditorDocumentHTML(snapshot.html)") < undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)"));
+  assert.ok(undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)") < undoRestore.indexOf("setEditorSelectionByOffsets(root"));
+  assert.match(attachmentRefresh, /const owner = editorAttachmentHydrationOwnerByRoot\.get\(root\)[\s\S]*owner\.disposeGeneration\?\.\(\);[\s\S]*owner\.disposeGeneration = startEditorAttachmentImageHydrationGeneration\(root, owner\.loadObjectURL\)/);
+
+  assert.match(retiredTableAlignmentControls, /querySelectorAll\(`\[\$\{EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE\}="true"\]`\)\.forEach\(\(control\) => control\.remove\(\)\)/);
+  assert.doesNotMatch(retiredTableAlignmentControls, /createElement|appendChild|<button|aria-label/);
 });
 
 test("mail signatures are mailbox scoped unified rich editors and late hydration only backfills the pending new draft", () => {

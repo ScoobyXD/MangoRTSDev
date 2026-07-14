@@ -50,6 +50,12 @@ export type EditorAttachmentImageObjectURLLoader = (
   options?: { signal?: AbortSignal },
 ) => Promise<string>;
 
+type EditorAttachmentHydrationOwner = {
+  loadObjectURL: EditorAttachmentImageObjectURLLoader;
+  disposeGeneration: (() => void) | null;
+  cleanup: () => void;
+};
+
 type EditorAttachmentHydrationTask = {
   cancelled: boolean;
   order: number;
@@ -61,7 +67,7 @@ const EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN = "800px 0px";
 const EDITOR_ATTACHMENT_HYDRATION_MAX_CONCURRENCY = 4;
 const EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS = [100, 500] as const;
 const editorAttachmentHydrationQueue: EditorAttachmentHydrationTask[] = [];
-const editorAttachmentHydrationCleanupByRoot = new WeakMap<HTMLElement, () => void>();
+const editorAttachmentHydrationOwnerByRoot = new WeakMap<HTMLElement, EditorAttachmentHydrationOwner>();
 let editorAttachmentHydrationActive = 0;
 let editorAttachmentHydrationOrder = 0;
 
@@ -347,8 +353,7 @@ export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string
   return true;
 }
 
-export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
-  editorAttachmentHydrationCleanupByRoot.get(root)?.();
+function startEditorAttachmentImageHydrationGeneration(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
   const frames = Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"], span[${EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE}]`))
     .filter((node): node is HTMLSpanElement => node instanceof HTMLSpanElement);
   const framesByAttachmentID = new Map<string, HTMLSpanElement[]>();
@@ -455,12 +460,46 @@ export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObject
     });
     hydratedFramesByObjectURL.clear();
     objectURLs.clear();
-    if (editorAttachmentHydrationCleanupByRoot.get(root) === cleanup) {
-      editorAttachmentHydrationCleanupByRoot.delete(root);
-    }
   };
-  editorAttachmentHydrationCleanupByRoot.set(root, cleanup);
   return cleanup;
+}
+
+function disposeEditorAttachmentHydrationOwner(root: HTMLElement, owner: EditorAttachmentHydrationOwner): void {
+  if (editorAttachmentHydrationOwnerByRoot.get(root) !== owner) return;
+  owner.disposeGeneration?.();
+  owner.disposeGeneration = null;
+  editorAttachmentHydrationOwnerByRoot.delete(root);
+}
+
+export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
+  editorAttachmentHydrationOwnerByRoot.get(root)?.cleanup();
+  const owner: EditorAttachmentHydrationOwner = {
+    loadObjectURL,
+    disposeGeneration: null,
+    cleanup: () => disposeEditorAttachmentHydrationOwner(root, owner),
+  };
+  editorAttachmentHydrationOwnerByRoot.set(root, owner);
+  try {
+    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, loadObjectURL);
+  } catch (cause) {
+    disposeEditorAttachmentHydrationOwner(root, owner);
+    throw cause;
+  }
+  return owner.cleanup;
+}
+
+export function refreshEditorAttachmentImageFrames(root: HTMLElement): boolean {
+  const owner = editorAttachmentHydrationOwnerByRoot.get(root);
+  if (!owner) return false;
+  owner.disposeGeneration?.();
+  owner.disposeGeneration = null;
+  try {
+    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, owner.loadObjectURL);
+  } catch (cause) {
+    disposeEditorAttachmentHydrationOwner(root, owner);
+    throw cause;
+  }
+  return true;
 }
 
 export function clearEditorImageSelection(root: HTMLElement) {

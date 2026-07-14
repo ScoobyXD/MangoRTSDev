@@ -35,6 +35,7 @@ import {
   type EditorInlineStyleCommand,
   type EditorSelectionInlineFormatState,
   type EditorTextAlignment,
+  type EditorTypingCaretBookmark,
 } from "./useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
@@ -712,6 +713,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
   const pendingHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
+  const pendingInlineFormatRef = useRef<EditorSelectionInlineFormatState | null>(null);
+  const pendingTypingCaretRef = useRef<EditorTypingCaretBookmark | null>(null);
   const publishedFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const formattingControllerWasActivatedRef = useRef(false);
   const indentGuideFrameRef = useRef<number | null>(null);
@@ -887,6 +890,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
     pendingEditorHighlightColorRef: pendingHighlightColorRef,
+    pendingEditorInlineFormatRef: pendingInlineFormatRef,
+    pendingEditorTypingCaretRef: pendingTypingCaretRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: scheduleNodeDocumentSave,
@@ -919,6 +924,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       };
     }
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
+    pendingFontSizeRef.current = null;
+    pendingHighlightColorRef.current = undefined;
+    pendingInlineFormatRef.current = null;
+    pendingTypingCaretRef.current = null;
     lastAppliedDocumentRef.current = value;
     userEditedDocumentRef.current = false;
     loadedDocumentTargetKeyRef.current = documentTargetKey;
@@ -963,6 +972,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
     pendingEditorHighlightColorRef: pendingHighlightColorRef,
+    pendingEditorInlineFormatRef: pendingInlineFormatRef,
+    pendingEditorTypingCaretRef: pendingTypingCaretRef,
     restoreSelection,
     insertTable,
     scheduleDocumentSave: scheduleNodeDocumentSave,
@@ -5178,7 +5189,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [replyOutlineStyle, setReplyOutlineStyle] = useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [replyToolbarTab, setReplyToolbarTab] = useState<EditorTabID>("format");
   const [replySelectionFontSize, setReplySelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [replyTextAlignment, setReplyTextAlignment] = useState<EditorTextAlignment>("left");
   const [replyHighlightColor, setReplyHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -5206,7 +5217,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyAllMode(false);
     setReplyToolbarTab("format");
     setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setReplySelectionInlineFormat({ bold: false, underline: false, italic: false });
+    setReplySelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
     setReplyTextAlignment("left");
     setReplyHighlightColor(null);
     setDraftAttachments([]);
@@ -5565,7 +5576,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const state = replyEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setReplySelectionFontSize(state.fontSize);
-    setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
+    setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic, strikethrough: state.strikethrough });
     setReplyHighlightColor(state.highlightColor);
     setReplyTextAlignment(state.textAlignment);
   }, []);
@@ -5932,11 +5943,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   boldActive={replySelectionInlineFormat.bold}
                   underlineActive={replySelectionInlineFormat.underline}
                   italicActive={replySelectionInlineFormat.italic}
+                  strikethroughActive={replySelectionInlineFormat.strikethrough}
                   highlightColor={replyHighlightColor}
                   textAlignment={replyTextAlignment}
                   onToggleBold={() => toggleReplyInlineFormat("bold")}
                   onToggleUnderline={() => toggleReplyInlineFormat("underline")}
                   onToggleItalic={() => toggleReplyInlineFormat("italic")}
+                  onToggleStrikethrough={() => toggleReplyInlineFormat("strikethrough")}
                   onSetSelectionHighlightColor={setReplySelectionHighlightColor}
                   onSetTextAlignment={setReplySelectionTextAlignment}
                   onInsertTable={() => replyEditorControllerRef.current?.insertTable()}

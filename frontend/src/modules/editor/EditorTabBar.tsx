@@ -127,11 +127,13 @@ type EditorTabBarProps = {
   boldActive: boolean;
   underlineActive: boolean;
   italicActive: boolean;
+  strikethroughActive: boolean;
   highlightColor: EditorHighlightColor | null;
   textAlignment: EditorTextAlignment;
   onToggleBold: () => void;
   onToggleUnderline: () => void;
   onToggleItalic: () => void;
+  onToggleStrikethrough: () => void;
   onSetSelectionHighlightColor: (color: EditorHighlightColor | null) => void;
   onSetTextAlignment: (alignment: EditorTextAlignment) => void;
   onOutlineStyleFocus: () => void;
@@ -147,6 +149,7 @@ type EditorTabBarProps = {
   visibleTabIDs?: readonly EditorTabID[];
   disabled?: boolean;
   formattingDisabled?: boolean;
+  singleLine?: boolean;
 };
 
 type EditorFormatControlID =
@@ -156,7 +159,9 @@ type EditorFormatControlID =
   | "bold"
   | "underline"
   | "italic"
+  | "strikethrough"
   | "highlight"
+  | "highlight-menu"
   | `align-${EditorTextAlignment}`
   | "table";
 
@@ -176,11 +181,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   boldActive,
   underlineActive,
   italicActive,
+  strikethroughActive,
   highlightColor,
   textAlignment,
   onToggleBold,
   onToggleUnderline,
   onToggleItalic,
+  onToggleStrikethrough,
   onSetSelectionHighlightColor,
   onSetTextAlignment,
   onOutlineStyleFocus,
@@ -196,6 +203,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   visibleTabIDs,
   disabled = false,
   formattingDisabled = false,
+  singleLine = false,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
@@ -227,10 +235,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   useEffect(() => {
     setFontSizeDraft(String(documentFontSize));
   }, [documentFontSize]);
-
-  useEffect(() => {
-    if (highlightColor) setCustomHighlightColor(highlightColor);
-  }, [highlightColor]);
 
   useEffect(() => {
     if (formatControlsDisabled) setHighlightMenuOpen(false);
@@ -305,7 +309,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       height: 24,
       border: 0,
       borderRight: options.withRightBorder === false ? 0 : formatControlDivider,
-      background: active ? colorWithAlpha(outlineMenuAccent, 0.16) : hovered ? formatControlHoverBackground : "transparent",
+      background: active
+        ? `linear-gradient(135deg, ${colorWithAlpha(outlineMenuAccent, 0.36)}, rgba(94,234,212,0.28) 52%, rgba(168,85,247,0.24))`
+        : hovered ? formatControlHoverBackground : "transparent",
       color: active ? outlineMenuAccent : surfaceText,
       display: "grid",
       placeItems: "center",
@@ -314,7 +320,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       fontSize: options.fontSize ?? 12,
       fontWeight: 900,
       lineHeight: 1,
-      boxShadow: active ? "inset 1px 1px 3px rgba(15,23,42,0.08)" : hovered ? "inset 2px 2px 5px rgba(15,23,42,0.08), inset -2px -2px 5px rgba(255,255,255,0.78)" : undefined,
+      boxShadow: active
+        ? `inset 0 0 0 1px ${colorWithAlpha(outlineMenuAccent, 0.52)}, 0 0 8px ${colorWithAlpha(outlineMenuAccent, 0.18)}`
+        : hovered ? "inset 2px 2px 5px rgba(15,23,42,0.08), inset -2px -2px 5px rgba(255,255,255,0.78)" : undefined,
       transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease",
     };
   };
@@ -349,7 +357,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       data-mango-editor-header-primary={primaryTabs.map((tab) => tab.id).join(" ")}
       data-mango-unified-editor-toolbar="true"
       data-mango-unified-editor-toolbar-tabs={visibleTabs.map((tab) => tab.id).join(" ")}
-      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
+      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", flexWrap: singleLine ? "nowrap" : "wrap", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto", minWidth: singleLine ? "max-content" : undefined }}
     >
       {primaryTabs.map((tab) => {
         const selected = activeTab === tab.id;
@@ -498,31 +506,67 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               </button>
               <button
                 type="button"
-                aria-label="Text highlight"
-                title="Text highlight"
-                aria-haspopup="menu"
-                aria-expanded={highlightMenuOpen}
-                aria-pressed={Boolean(highlightColor)}
+                aria-label="Strikethrough"
+                title="Strikethrough"
+                aria-pressed={strikethroughActive}
                 disabled={formatControlsDisabled}
-                data-mango-editor-format-control="highlight"
-                {...formatControlHoverHandlers("highlight")}
+                data-mango-editor-format-control="strikethrough"
+                {...formatControlHoverHandlers("strikethrough")}
                 onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (!formatControlsDisabled) toggleHeaderMenu("highlight");
+                  if (formatControlsDisabled) return;
+                  onToggleStrikethrough();
                 }}
-                style={{
-                  ...formatControlStyle("highlight", { active: Boolean(highlightColor), width: 40 }),
-                  display: "inline-flex",
-                  gridAutoFlow: undefined,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 3,
-                }}
+                style={inlineFormatButtonStyle("strikethrough", strikethroughActive)}
               >
-                <span aria-hidden="true" style={{ width: 13, height: 13, display: "grid", placeItems: "center", borderBottom: `4px solid ${highlightColor ?? "#fef08a"}`, fontSize: 10, lineHeight: 1 }}>A</span>
-                <EditorDisclosureIcon color={surfaceText} />
+                <span style={{ textDecoration: "line-through", textDecorationThickness: 2 }}>S</span>
               </button>
+              <span role="group" aria-label="Text highlight" style={{ display: "inline-flex", alignItems: "stretch" }}>
+                <button
+                  type="button"
+                  aria-label="Apply text highlight"
+                  title="Apply text highlight"
+                  aria-pressed={highlightColor === customHighlightColor}
+                  disabled={formatControlsDisabled}
+                  data-mango-editor-format-control="highlight"
+                  {...formatControlHoverHandlers("highlight")}
+                  onPointerDown={preserveEditorSelection}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!formatControlsDisabled) {
+                      onSetSelectionHighlightColor(highlightColor === customHighlightColor ? null : customHighlightColor);
+                    }
+                  }}
+                  style={{
+                    ...formatControlStyle("highlight", { active: highlightColor === customHighlightColor, width: 29 }),
+                    borderRight: 0,
+                  }}
+                >
+                  <span aria-hidden="true" style={{ width: 13, height: 13, display: "grid", placeItems: "center", borderBottom: `4px solid ${customHighlightColor}`, fontSize: 10, lineHeight: 1 }}>A</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Choose highlight color"
+                  title="Choose highlight color"
+                  aria-haspopup="menu"
+                  aria-expanded={highlightMenuOpen}
+                  disabled={formatControlsDisabled}
+                  data-mango-editor-format-control="highlight-menu"
+                  {...formatControlHoverHandlers("highlight-menu")}
+                  onPointerDown={preserveEditorSelection}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!formatControlsDisabled) toggleHeaderMenu("highlight");
+                  }}
+                  style={{
+                    ...formatControlStyle("highlight-menu", { active: highlightMenuOpen, width: 18 }),
+                    borderLeft: `1px solid ${colorWithAlpha(strokeColor, 0.72)}`,
+                  }}
+                >
+                  <EditorDisclosureIcon color={surfaceText} />
+                </button>
+              </span>
               {highlightMenuOpen && (
                 <div
                   role="menu"
@@ -788,7 +832,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         );
       })}
       {hasOverflowActions && (
-        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: "auto" }}>
+        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: singleLine ? 0 : "auto" }}>
           <button
             ref={(element) => {
               overflowTriggerRef.current = element;

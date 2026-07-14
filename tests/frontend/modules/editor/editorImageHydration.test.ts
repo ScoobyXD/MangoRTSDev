@@ -5,6 +5,7 @@ import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   editorAttachmentImageSource,
   hydrateEditorAttachmentImageFrames,
+  refreshEditorAttachmentImageFrames,
 } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 class FakeImage {
@@ -66,6 +67,44 @@ test("one hydration owner loads each unique display attachment once and revokes 
     assert.equal(first.image.src, editorAttachmentImageSource("attachment-1"));
     assert.equal(duplicate.image.src, editorAttachmentImageSource("attachment-1"));
     assert.equal(second.image.src, editorAttachmentImageSource("attachment-2"));
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+    URL.revokeObjectURL = originalRevoke;
+  }
+});
+
+test("refresh replaces the hydration generation while the original cleanup retains root ownership", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  const originalRevoke = URL.revokeObjectURL;
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: undefined });
+  const revoked: string[] = [];
+  URL.revokeObjectURL = (value) => { revoked.push(value); };
+  try {
+    const originalFrame = new FakeSpan("attachment-refresh");
+    const root = new FakeRoot([originalFrame]);
+    let loadCount = 0;
+    const cleanup = hydrateEditorAttachmentImageFrames(root as unknown as HTMLElement, async (attachmentID, variant) => {
+      loadCount += 1;
+      assert.equal(variant, "display");
+      return "blob:" + attachmentID + ":" + loadCount;
+    });
+    await flushPromises();
+    assert.equal(originalFrame.image.src, "blob:attachment-refresh:1");
+
+    const restoredFrame = new FakeSpan("attachment-refresh");
+    root.frames.splice(0, root.frames.length, restoredFrame);
+    assert.equal(refreshEditorAttachmentImageFrames(root as unknown as HTMLElement), true);
+    await flushPromises();
+
+    assert.equal(loadCount, 2);
+    assert.deepEqual(revoked, ["blob:attachment-refresh:1"]);
+    assert.equal(restoredFrame.image.src, "blob:attachment-refresh:2");
+
+    cleanup();
+    assert.deepEqual(revoked, ["blob:attachment-refresh:1", "blob:attachment-refresh:2"]);
+    assert.equal(restoredFrame.image.src, editorAttachmentImageSource("attachment-refresh"));
+    assert.equal(refreshEditorAttachmentImageFrames(root as unknown as HTMLElement), false);
   } finally {
     Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
     URL.revokeObjectURL = originalRevoke;
