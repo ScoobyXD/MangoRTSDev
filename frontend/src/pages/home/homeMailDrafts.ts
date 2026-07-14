@@ -1,5 +1,6 @@
 import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
 import { deleteEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
+import { applyEmailSignature, emailBodyHasSignature, emailBodyWithoutSignature } from "../../modules/editor/emailSignatureBody.js";
 import { EDITOR_RICH_TEXT_PREFIX, editorBodyHasEmailContent, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeTypes.js";
 
@@ -248,64 +249,16 @@ function plainTextToEditorHTML(value: string): string {
     .join("<br>");
 }
 
-function storedSignatureEditorHTML(signature: string): string {
-  const cleanSignature = signature.trim();
-  if (!cleanSignature) return "";
-  if (cleanSignature.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
-    return sanitizeEditorDocumentHTML(cleanSignature.slice(EDITOR_RICH_TEXT_PREFIX.length));
-  }
-  return sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(cleanSignature)}</div>`);
-}
-
-function normalizedEditorText(value: string): string {
-  return composeBodyDraftText(value).replace(/\s+/g, " ").trim();
-}
-
 function homeMailBodyWithoutSignature(body: string, signature: string): string {
-  const cleanBody = body.trimEnd();
-  const cleanSignature = signature.trim();
-  if (!cleanBody || !cleanSignature) return cleanBody;
-  if (!cleanBody.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
-    return cleanBody.endsWith(cleanSignature)
-      ? cleanBody.slice(0, -cleanSignature.length).trimEnd()
-      : cleanBody;
-  }
-
-  const bodyHTML = sanitizeEditorDocumentHTML(cleanBody.slice(EDITOR_RICH_TEXT_PREFIX.length)).trimEnd();
-  const signatureHTML = storedSignatureEditorHTML(cleanSignature).trim();
-  if (signatureHTML && bodyHTML.endsWith(signatureHTML)) {
-    return EDITOR_RICH_TEXT_PREFIX + bodyHTML.slice(0, -signatureHTML.length).trimEnd();
-  }
-  return normalizedEditorText(cleanBody) === normalizedEditorText(cleanSignature) ? "" : cleanBody;
+  return emailBodyWithoutSignature(body, signature);
 }
 
 export function homeMailBodyHasSignature(body: string, signature: string): boolean {
-  const cleanBody = body.trimEnd();
-  const cleanSignature = signature.trim();
-  if (!cleanBody || !cleanSignature) return false;
-  if (!cleanBody.startsWith(EDITOR_RICH_TEXT_PREFIX)) return cleanBody.endsWith(cleanSignature);
-
-  const bodyHTML = sanitizeEditorDocumentHTML(cleanBody.slice(EDITOR_RICH_TEXT_PREFIX.length)).trimEnd();
-  const signatureHTML = storedSignatureEditorHTML(cleanSignature).trim();
-  if (signatureHTML && bodyHTML.endsWith(signatureHTML)) return true;
-
-  const bodyText = normalizedEditorText(cleanBody);
-  const signatureText = normalizedEditorText(cleanSignature);
-  return !!signatureText && (bodyText === signatureText || bodyText.endsWith(` ${signatureText}`));
+  return emailBodyHasSignature(body, signature);
 }
 
 export function applyHomeMailSignature(body: string, signature: string): string {
-  const cleanSignature = signature.trim();
-  if (!cleanSignature || homeMailBodyHasSignature(body, cleanSignature)) return body;
-
-  const currentHTML = body.startsWith(EDITOR_RICH_TEXT_PREFIX)
-    ? sanitizeEditorDocumentHTML(body.slice(EDITOR_RICH_TEXT_PREFIX.length))
-    : body.trim()
-      ? sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(body.trimEnd())}</div>`)
-      : "";
-  const signatureHTML = storedSignatureEditorHTML(cleanSignature);
-  const spacerHTML = "<div><br></div><div><br></div>";
-  return `${EDITOR_RICH_TEXT_PREFIX}${sanitizeEditorDocumentHTML(`${currentHTML}${spacerHTML}${signatureHTML}`)}`;
+  return applyEmailSignature(body, signature);
 }
 
 export function appendHomeMailPlainText(body: string, content: string): string {

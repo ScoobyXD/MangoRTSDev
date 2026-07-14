@@ -224,12 +224,25 @@ test("email body inline cid attachments are treated as body images", () => {
     is_inline: false,
     size: 197,
   };
+  const providerFileWithContentID = {
+    id: "provider-file-2",
+    filename: "contract.pdf",
+    content_type: "application/pdf",
+    content_id: "<provider-file-2@local>",
+    content_disposition: "attachment",
+    is_inline: false,
+    size: 2048,
+  };
 
   assert.equal(emailAttachmentIsReferencedInline(body, inlineImage), true);
   assert.equal(emailAttachmentIsReferencedInline(body, dashboard), false);
+  assert.equal(emailAttachmentIsReferencedInline(body, providerFileWithContentID), false);
   assert.equal(emailAttachmentIsInlineContent(inlineImage), true);
   assert.equal(emailAttachmentIsInlineContent(dashboard), false);
-  assert.deepEqual(visibleEmailAttachmentsForBody(body, [inlineImage, dashboard]).map((attachment) => attachment.filename), ["dashboard.png"]);
+  assert.deepEqual(
+    visibleEmailAttachmentsForBody(body, [inlineImage, dashboard, providerFileWithContentID]).map((attachment) => attachment.filename),
+    ["dashboard.png", "contract.pdf"],
+  );
 });
 
 test("email cid image sources are rewritten to resolved sources", () => {

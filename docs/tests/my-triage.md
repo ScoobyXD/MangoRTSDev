@@ -163,6 +163,7 @@ MT135 - Personal draft loads use exact-scope generations plus local revisions. A
 MT136 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
 MT137 - An open My Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Provider recipients and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
 MT138 - A My Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
+MT139 - The exact personal-account signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that account. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, or reply-mode switches neither duplicate the signature nor replace deliberate edits.
 
 ## Scenarios
 
@@ -681,3 +682,20 @@ Expected:
 - My Drafts keeps exact-account private drafts isolated while also showing the one active participant-authorized collaboration draft with explicit source/shared context.
 - The shared draft cannot be scheduled; its current revision is sent immediately through the collaboration source while ordinary private drafts retain the existing browser-driven scheduling path.
 - A nonparticipant cannot list the row or draft by guessing IDs.
+
+### Scenario MT-S15: Personal Signature Image And Start-Action Reliability
+
+Business logic covered:
+- MT95
+- MT107
+- MT111
+- MT139
+
+Given:
+- Personal Account A has a saved signature containing a Mango image, while Account B has a different signature.
+- The user opens signature settings, starts New compose, Reply, and Reply All, and a signature load overlaps typing or draft restoration.
+
+Expected:
+- Settings immediately show the image through the authenticated exact-account attachment context, and Save persists the flushed sanitized signature.
+- Each Account A start action receives A's signature exactly once; Account B never leaks into it.
+- Late completion appends without replacing typed/restored content, and autosave, rerender, or switching reply modes cannot duplicate the signature.

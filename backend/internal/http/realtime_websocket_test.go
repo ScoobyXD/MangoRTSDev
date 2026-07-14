@@ -771,6 +771,84 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	client.assertNoMessage(t)
 }
 
+func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationBoardsOnce(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "67676767-6767-4767-8767-676767676767"
+	token := "realtime-cross-board-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-cross-board", domain.RoleCompanyUser)
+	sourceGate, err := repo.CreateLogicGate(companyID, "Realtime source gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetGate, err := repo.CreateLogicGate(companyID, "Realtime target gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Realtime moved node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, logicGateID := range []string{sourceGate.LogicGateID, targetGate.LogicGateID} {
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:  companyID,
+			EntityType: store.EntityTypeLogicGate,
+			EntityID:   logicGateID,
+			Permissions: []store.EntityPermissionInput{{
+				SubjectType: store.EntityPermissionSubjectUser,
+				SubjectID:   user.UserID,
+				AccessLevel: store.EntityPermissionView,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+
+	sourceBoardID := store.LogicGateKanbanBoardID(sourceGate.LogicGateID)
+	targetBoardID := store.LogicGateKanbanBoardID(targetGate.LogicGateID)
+	for _, boardID := range []string{sourceBoardID, targetBoardID} {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": realtimeBoardScope(boardID)})
+		client.readJSON(t)
+	}
+	priority := 2
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: sourceGate.LogicGateID, NodeID: node.NodeID,
+		Status: "pending", Priority: &priority, PrioritySet: true, ActorUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.publishCommittedWorkspaceEvents(assigned.Events)
+	client.readJSON(t)
+
+	moved, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
+		CompanyID: companyID, LogicGateID: targetGate.LogicGateID, FromLogicGateID: sourceGate.LogicGateID,
+		NodeID: node.NodeID, Status: "requested", ActorUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.publishCommittedWorkspaceEvents(moved.Events)
+
+	seenBoards := map[string]int{}
+	for range 2 {
+		message := client.readJSON(t)
+		if message["type"] != realtimeMessageKanbanChanged || message["change_type"] != "kanban_card_moved" {
+			t.Fatalf("cross-gate move message = %+v", message)
+		}
+		boardID, _ := message["board_id"].(string)
+		seenBoards[boardID]++
+	}
+	if seenBoards[sourceBoardID] != 1 || seenBoards[targetBoardID] != 1 || len(seenBoards) != 2 {
+		t.Fatalf("cross-gate move board publications = %+v, want one source and one destination", seenBoards)
+	}
+	client.assertNoMessage(t)
+}
+
 func TestRealtimeWebSocketNotificationCreatedRoutesOnlyToRecipientScope(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888013"

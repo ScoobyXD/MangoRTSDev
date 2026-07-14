@@ -5644,6 +5644,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               onSelectionHighlightColorChange={setSignatureHighlightColor}
               onSelectionTextAlignmentChange={setSignatureTextAlignment}
               editorImageAttachmentContext={signatureEditorImageAttachmentContext}
+              eagerEditorImageHydration
               onEditorImageAttachmentError={setAttachmentError}
               onChange={onEmailSignatureChange}
             />

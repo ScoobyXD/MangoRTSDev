@@ -65,6 +65,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanBoardContentStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanRealtimeRefresh.test.js"),
@@ -74,6 +75,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/unifiedRichEditorContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorImageHydration.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/emailSignatureBody.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorOpenPerformanceContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/emailViewerContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/richTextEditing.test.js"),
@@ -96,6 +98,10 @@ const componentTests = [
   {
     source: resolve(repoRoot, "tests/frontend/modules/editor/editorToolbarInteractions.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorToolbarInteractions.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatNavigation.test.js"),
   },
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");

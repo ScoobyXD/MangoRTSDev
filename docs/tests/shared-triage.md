@@ -190,6 +190,7 @@ ST161 - Shared draft loads use exact-inbox generations plus local revisions. An 
 ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
 ST163 - An open Shared Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Shared-inbox viewers, provider recipients, and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
 ST164 - A Shared Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the source email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
+ST165 - The exact shared-inbox signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that inbox. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, reply-mode switches, or another shared inbox never duplicate or replace it.
 
 ## Scenarios
 
@@ -842,3 +843,20 @@ Expected:
 - Create Shared Draft uses the exact Reply All source message and every permanent participant sees one revisioned draft with its source shared inbox labeled.
 - The collaboration shared draft cannot be scheduled and sends only after the server claims its current revision; ordinary shared-inbox drafts retain their existing scheduling behavior.
 - Private personal drafts and ordinary drafts from another shared inbox remain absent; guessed collaboration or draft IDs remain denied.
+
+### Scenario ST-S20: Shared Signature Image And Start-Action Reliability
+
+Business logic covered:
+- ST121
+- ST133
+- ST137
+- ST165
+
+Given:
+- Shared Inbox A has a saved signature containing a Mango image, while Shared Inbox B and the user's personal account have different signatures.
+- An authorized editor opens settings and starts New compose, Reply, and Reply All while signature hydration overlaps typing or draft restoration.
+
+Expected:
+- Settings immediately show the image through A's authenticated `email_signature` attachment context, and Save durably persists the exact flushed sanitized HTML.
+- Every A start action receives A's signature exactly once; B and personal scopes never leak into it.
+- Late completion preserves typed/restored content, and autosave, rerender, or reply-mode changes cannot duplicate or replace the signature.

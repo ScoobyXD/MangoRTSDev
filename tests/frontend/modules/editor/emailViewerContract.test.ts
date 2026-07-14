@@ -30,6 +30,9 @@ test("node-attached email viewer retains triage thread, recipient, attachment, a
   assert.match(nodeParts, /Download image/);
   assert.match(nodeParts, /setPreviewImage/);
   assert.match(nodeParts, /<EmailMessageAttachments/);
+  assert.match(nodeParts, /visibleEmailAttachmentsForBody\(message\.body \|\| message\.snippet \|\| "", allAttachments\)/);
+  assert.doesNotMatch(nodeParts, /filter\(\(attachment\) => !attachment\.is_inline && !attachment\.content_id\?\.trim\(\)\)/);
+  assert.match(nodeParts, /\{contentType\} · \{sizeLabel\}/);
   assert.match(nodeParts, /respondToCalendarInvite/);
   assert.match(nodeParts, /sharedInboxID=\{email\.sharedInboxID\}/);
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
@@ -44,6 +47,21 @@ test("node-attached email viewer retains triage thread, recipient, attachment, a
   assert.ok((nodeParts.match(/listEmailMessages\(\{\s*accountEmail,/g) ?? []).length >= 3);
   assert.match(nodeParts, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
+});
+
+test("both node email attachment entry paths retain exact provider mailbox identity", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
+
+  assert.match(nodeSurface, /const attachEmail = useCallback/);
+  assert.match(nodeSurface, /sharedInboxID: email\.sharedInboxID/);
+  assert.match(nodeSurface, /accountEmail: email\.accountEmail/);
+  assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(\{ \.\.\.email, blockID: cleanBlockID \}\)/);
+  assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
+  assert.match(nodeSurface, /messageAttachmentPayload\(message, scope\.sharedInboxID, scope\.accountEmail\)/);
+  assert.match(editorProjection, /shared_inbox_id: input\.sharedInboxID\?\.trim\(\) \?\? ""/);
+  assert.match(editorProjection, /account_email: input\.accountEmail\?\.trim\(\) \?\? ""/);
+  assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
 test("triage thread controls and reply resize pointer lifecycle are explicit", () => {

@@ -57,6 +57,7 @@ RW46 - Email-collaboration ensure/create, participant expansion, chat writes, sh
 RW47 - Shared-draft optimistic concurrency is not CRDT/OT collaboration. Every update/send/discard supplies the expected revision, stale HTTP commands return conflict plus canonical metadata, and another participant observes the newer body through an authorized canonical draft read rather than WebSocket document deltas.
 RW48 - A never-opened My Triage or Shared Triage chat rail mounts no email-collaboration surface, performs no collaboration resolve or Node projection/chat read, and installs no `chat:node:{node_id}` subscription. The explicit Chat control may resolve an existing collaboration through authenticated HTTP; a pre-collaboration open rail has no Node chat scope until a successful ensure returns its Node. After a same-message rail has been opened, closing it may retain only an inert hidden component so an unsent composer survives reopening; the closed rail reserves no layout width, initiates no read merely because it is closed, and retains no Node chat subscription. Closing the rail or changing the exact message, mailbox, or view logically invalidates obsolete resolve/projection generations so their eventual results cannot update the current rail, and removes that rail's subscription; transport-level abort is not required. Reopening an existing collaboration follows RW45's canonical acceptance/reconnect behavior.
 RW49 - Every unexpected PostgreSQL failure during email-collaboration ensure/create is tagged with one fixed creation stage. A failure before a successful commit rolls back when a transaction exists; `begin_transaction` has no transaction to roll back, and a commit-stage error retains the database driver's commit outcome rather than claiming a rollback. Recognized missing/drifted table, column, type/function, privilege, datatype, unique/check-constraint states map to HTTP `503 email_collaboration_storage_not_ready`; invalid enum input maps there only at the two attached-email projection insertion stages. Existing domain validation/not-found/principal errors retain their 4xx mappings and all other store errors retain the generic 500 path. The failure log contains only request ID, company ID, actor user ID, personal/shared scope, fixed stage, SQLSTATE, and fixed category; it must never include the raw database message/detail/hint, SQL parameters, mailbox address, provider message/thread ID, subject, or serialized email body.
+RW50 - A committed cross-Logic-Gate Node assignment event carries canonical source and destination board/Logic Gate IDs. Realtime deduplicates those board IDs and publishes one compact `kanban.changed` hint to each currently authorized mounted board audience; same-window success invalidates/announces the same exact boards. Clients reconcile through canonical conditional work reads, while command failure publishes no success hint and transport payloads contain no projection delta.
 
 ## Scenarios
 
@@ -432,3 +433,20 @@ Expected:
 - Ensure/create, mentions, source reads, chat writes, shared-draft commands, and attachment checks remain authenticated HTTP operations.
 - Chat commit publishes only the existing Node chat hint plus applicable notification hints; WebSocket carries no durable message/draft body or attachment bytes.
 - A stale shared-draft command conflicts by expected revision and the participant reloads canonical HTTP state; no CRDT/OT or draft-body socket path is implied.
+
+### Scenario RW-S18: Cross-Gate Assignment Publishes Both Board Hints
+
+Business logic covered:
+- RW20
+- RW27
+- RW41
+- RW50
+
+Given:
+- A Node moves from Logic Gate A to Logic Gate B while A, B, neither, or both boards have retained subscriptions.
+- A same-window completion and its socket echo may arrive in either order, or the command may fail.
+
+Expected:
+- The committed event identifies both board IDs once; the server reauthorizes each mounted audience and sends one compact hint per affected subscribed board.
+- No-subscriber boards cause no unnecessary projection fan-out, and local/socket duplicates coalesce through the existing canonical single-flight read path.
+- Failure emits no success hint, and realtime never carries card deltas or false optimistic membership.

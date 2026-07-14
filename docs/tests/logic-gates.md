@@ -54,6 +54,7 @@ LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes 
 LG41 - The Logic Gate editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and any supported secondary actions remain available in the keyboard-operable **More editor actions** menu with their existing permission and disabled states.
 LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount through the shared body-level modal portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts, trap focus while topmost, and restore prior focus when closed.
 LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.
+LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
 
 ## Scenarios
 
@@ -272,3 +273,17 @@ Expected:
 - Failed renames publish no event, and title draft/caret plus dirty or in-flight editor text remain untouched.
 - The response carries `request_owner_user_id` and actor permission flags but no full GVIC, node, assignment, or status collections.
 - Authorization runs before conditional-response handling, and changes that affect the representation advance its version or contract fingerprint.
+
+### Scenario LG-S11: Cross-Gate Reassignment Converges Both Boards
+
+Business logic covered:
+- LG44
+
+Given:
+- Logic Gate A's Kanban is mounted and a Node popup reassigns that Node to Logic Gate B.
+- The same successful mutation is observed locally and through realtime, or the mutation fails.
+
+Expected:
+- Success identifies A and B, removes the Node from A without refresh, and reconciles each mounted/relevant destination through the canonical board loader.
+- Local and socket hints coalesce and cannot apply a duplicate projection.
+- Failure emits no success invalidation and leaves A's existing Node visible.

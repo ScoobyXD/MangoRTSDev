@@ -579,6 +579,7 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	sourceAssignment := assignment
 	if _, err := scanLogicGateKanbanSource(tx.QueryRowContext(ctx, `
 select company_id::text, logic_gate_id::text, header, created_timestamp
 from logic_gates
@@ -686,7 +687,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
-	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, sourceAssignment, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

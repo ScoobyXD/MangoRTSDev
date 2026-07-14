@@ -71,6 +71,17 @@ function bumpContentVersion(cacheKey: string): number {
   return next;
 }
 
+function retireContentInflight(cacheKey: string): void {
+  const inflight = contentInflight.get(cacheKey);
+  if (!inflight) return;
+  contentInflight.delete(cacheKey);
+  if (!inflight.settled) inflight.controller.abort();
+}
+
+function supersededContentRequestError(): DOMException {
+  return new DOMException("The Kanban board contents request was superseded.", "AbortError");
+}
+
 export function hasKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): boolean {
   return contentCache.has(key(apiBase, companyID, boardID));
 }
@@ -103,6 +114,7 @@ export function reconcileKanbanBoardContentsCache(
 export function invalidateKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): void {
   const cacheKey = key(apiBase, companyID, boardID);
   bumpContentVersion(cacheKey);
+  retireContentInflight(cacheKey);
   const cached = contentCache.get(cacheKey);
   if (cached) contentCache.set(cacheKey, { contents: cached.contents, stale: true });
 }
@@ -113,6 +125,7 @@ export function invalidateKanbanBoardContentsForCompany(apiBase: string, company
   for (const cacheKey of matchingKeys) {
     if (!cacheKey.startsWith(prefix)) continue;
     bumpContentVersion(cacheKey);
+    retireContentInflight(cacheKey);
     const cached = contentCache.get(cacheKey);
     if (cached) contentCache.set(cacheKey, { contents: cached.contents, stale: true });
   }
@@ -135,7 +148,7 @@ export function reconcileKanbanBoardContentTitles(
     if (!cacheKey.startsWith(prefix)) continue;
     if (logicGateCacheKey && cacheKey !== logicGateCacheKey) continue;
     bumpContentVersion(cacheKey);
-    contentInflight.delete(cacheKey);
+    retireContentInflight(cacheKey);
     const cached = contentCache.get(cacheKey);
     if (!cached) continue;
     let contents = cached.contents;
@@ -168,6 +181,7 @@ export function reconcileKanbanBoardContentTitles(
 export function clearKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): void {
   const cacheKey = key(apiBase, companyID, boardID);
   bumpContentVersion(cacheKey);
+  retireContentInflight(cacheKey);
   contentCache.delete(cacheKey);
 }
 
@@ -198,15 +212,13 @@ export async function getKanbanBoardContentsSingleFlight(
       .then((view) => normalizeLogicGateWorkView(view, companyID, boardID, logicGateID))
     : Promise.resolve({ columns: [], cards: [] })
   ).then((contents) => {
+    if (contentVersion(cacheKey) !== version) throw supersededContentRequestError();
     clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
     if (logicGateID) clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
-    if (contentVersion(cacheKey) === version) {
-      contentCache.set(cacheKey, { contents: cloneContents(contents), stale: false });
-      return contents;
-    }
-    const newer = contentCache.get(cacheKey);
-    return newer?.contents ?? contents;
+    contentCache.set(cacheKey, { contents: cloneContents(contents), stale: false });
+    return contents;
   }).catch((cause) => {
+    if (contentVersion(cacheKey) !== version) throw supersededContentRequestError();
     if (isHTTPNotFoundError(cause)) {
       markResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
       if (logicGateID) markResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });

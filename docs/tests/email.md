@@ -103,6 +103,8 @@ EMAIL75 - Every email conversion and local mail mutation retains one exact sourc
 EMAIL76 - Email collaboration chat is progressive disclosure in My Triage and Shared Triage. Selecting or opening an email keeps the email detail at its full available width and leaves the chat rail unmounted and closed by default; reading or highlighting text must not open it. Only the explicit, keyboard-operable **Chat** control opens the right-hand rail, exposes its expanded state accessibly, and reserves rail width. Closing the rail or selecting a different exact message, mailbox, or view removes that rail without creating, deleting, or otherwise mutating a collaboration, Node, chat, or shared draft.
 EMAIL77 - An open email-collaboration chat header shows the collaboration's current durable participant roster. `collaboration.participants` is the only membership authority and each `user_id` contributes at most once: creator/direct-user rows render accessible person avatars from current same-company display data with a safe identity fallback, while rows whose immutable `added_via_type` is `group` may be represented together by one deduplicated group-provenance avatar/pill per `added_via_id`. A group pill's count comes only from those snapshotted participant rows and its current group record supplies only a display label. Current group membership/hierarchy never recalculates the roster or access, and a renamed, missing, or deleted group label never removes the represented users. Before a collaboration exists, the open header may label only the current actor as the prospective creator without performing a durable write. A committed mention refreshes the canonical collaboration so the newly added durable participants appear in the open email-chat header without relying on mention text or provider recipients. This roster header is an email-surface adapter; EMAIL56 still shares the durable ChatPane data and semantics without requiring an unchanged standalone-Node caller to fetch or display collaboration participants.
 EMAIL78 - Collaboration ensure/create and the first chat write have explicit retry-safe failure behavior. A failed ensure transaction leaves no partial Node, attached-email projection, permission, participant, or collaboration; a failed subsequent chat write leaves any already committed empty collaboration reusable under EMAIL52 but removes the failed optimistic chat row. The open composer preserves the user's typed text, selected mention principals, reply target, and email-selection anchor, re-enables submission, and permits a deliberate retry against the same exact source. My Triage and Shared Triage translate `failed_to_create_email_collaboration` and `email_collaboration_storage_not_ready` into concise actionable text; either identifier may support diagnostics but must not be the sole user-facing error, while other provider/authorization failures retain their established error handling.
+EMAIL79 - An email viewed inside a Node uses the canonical provider/Mango message-detail attachment metadata from its retained message, thread, and mailbox identity. Only attachments whose normalized Content-ID is actually referenced by the rendered body are omitted from the separate attachment list; a normal file carrying an unreferenced Content-ID remains discoverable with filename, MIME type, size, authenticated download, and safe image preview. Conversion and direct attach persist references and provenance, never a second attachment model or provider bytes.
+EMAIL80 - The exact saved personal-account or shared-inbox signature is applied once whenever a user starts New compose, Reply, or Reply All in My Triage, Shared Triage, or an attached-email Node viewer. Send waits for an outstanding exact-scope signature read and applies it to the flushed submitted body before provider submission. Late signature hydration appends to the live draft without replacing user edits; rerender, reply-mode changes, autosave, and draft restoration do not duplicate it. Signature images remain Mango attachment references and the settings editor hydrates their authenticated preview without public storage URLs.
 
 ## Scenarios
 
@@ -505,3 +507,22 @@ Expected:
 - Active personal draft access requires the exact owner/account; active shared access requires the exact inbox and current permission; legacy accountless personal IDs are read-only compatibility for a still-live owner draft.
 - Once the draft is deleted, list/content/send/mutation through its draft link returns not found for every actor, including administrative bypass attempts.
 - A legitimate independently linked sent-message attachment remains readable under its own authorization after draft deletion.
+
+### Scenario EMAIL-S18: Attached-Email Files And Mailbox Signature Parity
+
+Business logic covered:
+- EMAIL28
+- EMAIL30
+- EMAIL79
+- EMAIL80
+
+Given:
+- A personal or shared message has an ordinary PDF with a provider Content-ID, a body-referenced CID image, and exact message/thread/mailbox provenance.
+- The user converts that message into a new Node or attaches it to an existing Node, then starts Reply or Reply All from the Node.
+- The saved exact-mailbox signature contains an authenticated Mango image and may finish loading after the user begins typing.
+
+Expected:
+- Both Node entry paths reopen canonical message detail under the originating mailbox grant; the PDF appears with name, type, size, preview when safe, and authenticated download, while the body-referenced CID image is not duplicated in the separate list.
+- No provider bytes or duplicate attachment metadata are stored in the Node projection.
+- New compose and Reply/Reply All across My Triage, Shared Triage, and the Node viewer receive the exact mailbox signature once.
+- Late hydration preserves typed text, draft restore and mode switches do not duplicate the signature, and the settings image preview uses the authenticated Mango attachment path.

@@ -78,8 +78,10 @@ ATT44 - Personal `email_draft` attachment reads and account-scoped link/unlink o
 ATT45 - The view/edit rules in ATT44 describe ordinary personal and shared-inbox drafts. An email-collaboration shared draft is the explicit exception: its new attachment resource identity includes the collaboration plus draft, and every read/link/upload/unlink/content request requires permanent collaboration participation and current draft revision rather than ownership of or navigation access to the source mailbox. The immutable collaboration still supplies the mailbox scope at send time. Once its revision is claimed with `send_state="sending"`, every attachment mutation gate (including direct-upload finalization, link, and unlink) returns `email_draft_send_in_progress` until a definitive rejection safely releases the claim or the draft is completed/discarded; participant attachment list/content reads remain allowed so a same-key recovery cannot change its provider payload.
 ATT46 - Email-collaboration chat attachments are ordinary Node `chat_attachment` references on the one collaboration Node and use the same upload, authorization, preview, deletion-ownership, and no-inline-bytes behavior from ATT8 and ATT15. The email surface must not clone attachment rows or provider/S3 bytes when it mounts the shared ChatPane.
 ATT47 - Provider-backed files and CID images in an email collaboration are downloaded with company plus collaboration identity. Permanent participation is checked before source-mailbox resolution, the fetched provider message must belong to the collaboration's immutable exact thread, and the same authorized path is used by Triage and Node attached-email viewers; source-mailbox navigation permission is neither granted nor required.
-ATT48 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
-ATT49 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
+ATT48 - Separate email attachment lists hide only attachments whose normalized Content-ID is actually referenced by the message body. `is_inline`, `content_disposition=inline`, or a Content-ID alone is not sufficient to hide a file; every unreferenced provider/Mango attachment remains visible with its metadata and existing authorized preview/download action in My Triage, Shared Triage, and attached-email Node viewers.
+ATT49 - Email-signature images remain private Mango attachment references. Signature settings eagerly hydrate the compact authenticated preview through the exact mailbox-scoped `email_signature` resource, while save/send continue to persist references and provider-safe HTML rather than secrets, storage keys, public URLs, or inline file bytes.
+ATT50 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
+ATT51 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
 
 ## Scenarios
 
@@ -185,8 +187,8 @@ Business logic covered:
 - ATT15
 - ATT42
 - ATT43
-- ATT48
-- ATT49
+- ATT50
+- ATT51
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
@@ -399,3 +401,22 @@ Expected:
 - Incoming provider files and CID images authorize company plus permanent collaboration participation before resolving the immutable source mailbox, accept only a provider message in the collaboration's exact thread, reject cross-thread and nonparticipant requests, and use the same path from Triage and Node attached-email viewers.
 - Durable chat/draft payloads contain Mango references only.
 - Send reauthorizes references, applies the existing aggregate preflight and exact-length streaming rules, and uses the collaboration's immutable source mailbox without exposing credentials or object-storage identifiers.
+
+### Scenario ATT-S14: Node Email Attachment Discovery And Signature Preview
+
+Business logic covered:
+- ATT11
+- ATT12
+- ATT24
+- ATT48
+- ATT49
+
+Given:
+- One incoming message contains a body-referenced CID image plus an ordinary PDF that also carries provider Content-ID metadata.
+- The message is converted to a new Node and separately attached to an existing Node.
+- A mailbox signature contains a Mango-owned image.
+
+Expected:
+- The CID image renders in the body and is not duplicated below it, while the unreferenced PDF remains listed with filename, type, size, and authenticated download in both Node paths.
+- The viewer reads canonical message metadata under the retained mailbox scope and never persists provider bytes or invents another attachment owner.
+- Opening signature settings loads the image preview immediately through authorized Mango content reads; saving remains durable and exposes no private object URL or credential.

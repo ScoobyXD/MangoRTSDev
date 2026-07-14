@@ -128,6 +128,9 @@ N99 - An email-selection chat persists `selection_source=email`, the exact provi
 N100 - The collaboration creator and snapshotted mention participants have permanent direct edit access to the Node while its default remains `no_access`. A permissions surface may explain those system-managed participants read-only, but it must not expose generic controls that add, remove, downgrade, or replace collaboration grants or change the default; new participant grants come only from accepted mentions under EMAIL59.
 N101 - Only email-collaboration Nodes receive the protected Unfiled/Nodes Company Explorer placement. Ordinary standalone Nodes, project-only Nodes, and Logic Gate/Kanban email conversions retain their existing non-Explorer behavior.
 N102 - Future provider messages do not create additional Nodes or attached-email projections for the same collaboration identity. They are read as newer members of the existing source thread and become visible from both the attached-email and triage surfaces.
+N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
+N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
+N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
 
 ## Scenarios
 
@@ -611,3 +614,23 @@ Expected:
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
 - The future thread member appears inside the existing attached-email conversation and does not create a second collaboration Node or projection.
+
+### Scenario N-S20: Annotation Navigation, Attached Files, And Reply Signature
+
+Business logic covered:
+- N72
+- N75
+- N103
+- N104
+- N105
+
+Given:
+- One Node text block has multiple highlighted annotations mapped to different stable chat comment IDs, including a comment inside a collapsed thread.
+- The Node has one converted email and one directly attached email with body CID images and ordinary files.
+- The exact personal/shared signature may load after the user starts a reply.
+
+Expected:
+- Clicking each highlight without selecting text reveals the chat panel, expands only the needed thread, scrolls to the exact comment, and exposes a visible accessible focus target without the composer stealing focus.
+- Drag-selection and normal editor input do not trigger chat navigation, and existing chat-to-highlight behavior still works.
+- Both email paths display unreferenced files with metadata and authorized actions under the originating mailbox identity.
+- Reply and Reply All append the exact saved signature once, including after late hydration, without overwriting typed text.

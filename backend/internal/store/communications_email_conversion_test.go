@@ -185,10 +185,11 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 
 	priority := 2
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:      user.UserID,
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      node.NodeID,
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: "owner@example.test",
+		LogicGateID:  logicGate.LogicGateID,
+		NodeID:       node.NodeID,
 		Target: CommunicationsTriageConversionTarget{
 			Mode:        CommunicationsEmailConversionTargetExistingNode,
 			LogicGateID: logicGate.LogicGateID,
@@ -223,6 +224,13 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
 	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
 		t.Fatalf("email projections = %+v err=%v", projections, err)
+	}
+	var projectionPayload map[string]any
+	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
+		t.Fatalf("projection payload json: %v", err)
+	}
+	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["account_email"] != "owner@example.test" {
+		t.Fatalf("projection payload = %+v, want message/thread/personal mailbox provenance", projectionPayload)
 	}
 	nodes, err := repo.ListNodes(companyID)
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != node.NodeID {

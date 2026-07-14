@@ -929,7 +929,7 @@ test("mentions, image preview and undo hydration, and retired table-cell control
 
   assert.ok(undoRestore.indexOf("root.innerHTML = deserializeEditorDocumentHTML(snapshot.html)") < undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)"));
   assert.ok(undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)") < undoRestore.indexOf("setEditorSelectionByOffsets(root"));
-  assert.match(attachmentRefresh, /const owner = editorAttachmentHydrationOwnerByRoot\.get\(root\)[\s\S]*owner\.disposeGeneration\?\.\(\);[\s\S]*owner\.disposeGeneration = startEditorAttachmentImageHydrationGeneration\(root, owner\.loadObjectURL\)/);
+  assert.match(attachmentRefresh, /const owner = editorAttachmentHydrationOwnerByRoot\.get\(root\)[\s\S]*owner\.disposeGeneration\?\.\(\);[\s\S]*owner\.disposeGeneration = startEditorAttachmentImageHydrationGeneration\(root, owner\.loadObjectURL, owner\.options\)/);
 
   assert.match(retiredTableAlignmentControls, /querySelectorAll\(`\[\$\{EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE\}="true"\]`\)\.forEach\(\(control\) => control\.remove\(\)\)/);
   assert.doesNotMatch(retiredTableAlignmentControls, /createElement|appendChild|<button|aria-label/);
@@ -959,11 +959,32 @@ test("mail signatures are mailbox scoped unified rich editors and late hydration
   assert.match(signatureToolbar, /onSetSelectionHighlightColor=\{setSignatureSelectionHighlightColor\}/);
   assert.match(signatureSurface, /surfaceID="email-signature"/);
   assert.match(signatureSurface, /formattingControllerRef=\{signatureEditorControllerRef\}/);
+  assert.match(signatureSurface, /eagerEditorImageHydration/);
   assert.match(homeParts, /signatureEditorImageAttachmentContext/);
   assert.match(homeParts, /resourceType: "email_signature"/);
   assert.match(signaturePanel, /signatureEditorControllerRef\.current\?\.flush\(\)/);
   assert.doesNotMatch(signaturePanel, /<textarea\b/);
   assert.match(homeMailDrafts, /body_editor_html/);
+});
+
+test("node-attached replies load the exact mailbox signature and append it idempotently", () => {
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const signatureBody = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/emailSignatureBody.ts"), "utf8");
+
+  assert.match(
+    nodeWorkspaceParts,
+    /getEmailSignature\(cleanCompanyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/,
+  );
+  assert.match(nodeWorkspaceParts, /const mailboxSignatureStateRef = useRef<ScopedEmailSignatureState>/);
+  assert.match(nodeWorkspaceParts, /loadedEmailSignatureForScope\(mailboxSignatureStateRef\.current, mailboxSignatureScopeKey\)/);
+  assert.match(nodeWorkspaceParts, /replySignatureSessionRef\.current = beginEmailSignatureApplicationSession/);
+  assert.ok((nodeWorkspaceParts.match(/ensureReplySignature\(target\.id\)/g) ?? []).length >= 2);
+  assert.match(nodeWorkspaceParts, /const signature = await loadMailboxSignature\(\)/);
+  assert.ok(nodeWorkspaceParts.indexOf("const signature = await loadMailboxSignature()") < nodeWorkspaceParts.indexOf("const sent = await sendEmail("));
+  assert.match(nodeWorkspaceParts, /replySubmissionIdentityRef\.current/);
+  assert.match(nodeWorkspaceParts, /applyEmailSignatureOnceForSession/);
+  assert.doesNotMatch(nodeWorkspaceParts, /setBodyDraft\(mailboxSignature/);
+  assert.match(signatureBody, /if \(!cleanSignature \|\| emailBodyHasSignature\(body, cleanSignature\)\) return body/);
 });
 
 test("signature hydration, empty remote rows, and attachment scope preserve the mailbox owner", () => {
