@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import {
   getNodeTitle,
   MINI_GRID,
@@ -88,6 +89,7 @@ import {
   type EditorInlineStyleCommand,
   type EditorSelectionInlineFormatState,
   type EditorTextAlignment,
+  type EditorTypingCaretBookmark,
 } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -602,6 +604,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [logicGateGVICAssignments, setLogicGateGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [logicGateGVICApplyToAssignedNodesBusy, setLogicGateGVICApplyToAssignedNodesBusy] = useState(false);
+  const [logicGateGVICApplyConfirmationOpen, setLogicGateGVICApplyConfirmationOpen] = useState(false);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
@@ -620,7 +623,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [selectionHighlightColor, setSelectionHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [selectionTextAlignment, setSelectionTextAlignment] = useState<EditorTextAlignment>("left");
   const [nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable] = useState(false);
@@ -658,6 +661,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const pendingEditorFontSizeRef = useRef<number | null>(null);
   const restoreDocumentSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
   const pendingEditorHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
+  const pendingEditorInlineFormatRef = useRef<EditorSelectionInlineFormatState | null>(null);
+  const pendingEditorTypingCaretRef = useRef<EditorTypingCaretBookmark | null>(null);
   const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const logicFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
@@ -974,10 +979,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setSelectionInlineFormat({ bold: false, underline: false, italic: false });
+    setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
     setSelectionHighlightColor(null);
     pendingEditorFontSizeRef.current = null;
     pendingEditorHighlightColorRef.current = undefined;
+    pendingEditorInlineFormatRef.current = null;
+    pendingEditorTypingCaretRef.current = null;
     setSelectionTextAlignment("left");
     restoringScrollRef.current = true;
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
@@ -1122,9 +1129,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setDocumentInformationID("");
     pendingEditorFontSizeRef.current = null;
     pendingEditorHighlightColorRef.current = undefined;
+    pendingEditorInlineFormatRef.current = null;
+    pendingEditorTypingCaretRef.current = null;
     setSelectionTextAlignment("left");
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setSelectionInlineFormat({ bold: false, underline: false, italic: false });
+    setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
     setSelectionHighlightColor(null);
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
@@ -1621,9 +1630,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const applyLogicGateGVICToAssignedNodes = useCallback(() => {
     const logicGateID = linkedNodeID.trim();
-    if (!logicGateID || linkedEntityKind !== "logic_gate" || logicGateGVICApplyToAssignedNodesBusy) return;
-    const confirmed = typeof window === "undefined" || window.confirm("Are you sure you want to apply this Logic Gate GVIC to all nodes currently assigned to this Logic Gate?");
-    if (!confirmed) return;
+    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy) return;
     const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
     const applyRequestID = ++logicGateGVICApplyToAssignedNodesRequestRef.current;
     editorSnapshotRefreshTokenRef.current += 1;
@@ -1643,7 +1650,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setLogicGateGVICApplyToAssignedNodesBusy(false);
       }
     });
-  }, [apiBase, applyLogicGateGVICAssignments, companyID, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
+  }, [apiBase, applyLogicGateGVICAssignments, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
 
   const addNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     if (nodeGVICIsInherited) return;
@@ -1820,6 +1827,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     editingTitleDraftRef.current = "";
     logicGateGVICApplyToAssignedNodesRequestRef.current += 1;
     setLogicGateGVICApplyToAssignedNodesBusy(false);
+    setLogicGateGVICApplyConfirmationOpen(false);
   }, [linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
@@ -1827,6 +1835,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     updateIsEditingTitle(false);
     pendingEditorFontSizeRef.current = null;
     pendingEditorHighlightColorRef.current = undefined;
+    pendingEditorInlineFormatRef.current = null;
+    pendingEditorTypingCaretRef.current = null;
     editorDocumentRef.current?.blur();
     window.getSelection()?.removeAllRanges();
   }, [linkedEntityCanEdit, linkedNodeID, updateIsEditingTitle]);
@@ -2286,9 +2296,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setDocumentInformationID("");
       pendingEditorFontSizeRef.current = null;
       pendingEditorHighlightColorRef.current = undefined;
+      pendingEditorInlineFormatRef.current = null;
+      pendingEditorTypingCaretRef.current = null;
       setSelectionTextAlignment("left");
       setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-      setSelectionInlineFormat({ bold: false, underline: false, italic: false });
+      setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
       setSelectionHighlightColor(null);
       if (editorDocumentRef.current) {
         attachmentHydrationCleanupRef.current?.();
@@ -2484,6 +2496,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     documentUndoHistoryRef,
     pendingEditorFontSizeRef,
     pendingEditorHighlightColorRef,
+    pendingEditorInlineFormatRef,
+    pendingEditorTypingCaretRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: scheduleDocumentSave,
@@ -2514,6 +2528,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     documentUndoHistoryRef,
     pendingEditorFontSizeRef,
     pendingEditorHighlightColorRef,
+    pendingEditorInlineFormatRef,
+    pendingEditorTypingCaretRef,
     restoreSelection: restoreDocumentSelection,
     insertTable: insertDocumentTable,
     scheduleDocumentSave: scheduleDocumentSave,
@@ -2617,11 +2633,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             boldActive={selectionInlineFormat.bold}
             underlineActive={selectionInlineFormat.underline}
             italicActive={selectionInlineFormat.italic}
+            strikethroughActive={selectionInlineFormat.strikethrough}
             highlightColor={selectionHighlightColor}
             textAlignment={selectionTextAlignment}
             onToggleBold={() => toggleEditorInlineFormat("bold")}
             onToggleUnderline={() => toggleEditorInlineFormat("underline")}
             onToggleItalic={() => toggleEditorInlineFormat("italic")}
+            onToggleStrikethrough={() => toggleEditorInlineFormat("strikethrough")}
             onSetSelectionHighlightColor={applyEditorSelectionHighlightColor}
             onSetTextAlignment={(alignment) => currentFormattingController()?.applyTextAlignment(alignment)}
             formattingDisabled={documentIsolation.pointerEvents !== "auto" || !linkedEntityCanEdit || (linkedEntityKind === "node" && !nodeFormattingControllerAvailable)}
@@ -2635,8 +2653,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
+            secondaryActions={linkedEntityKind === "logic_gate" ? [{
+              id: "apply-gvic-to-assigned-nodes",
+              label: logicGateGVICApplyToAssignedNodesBusy ? "Applying GVIC to assigned nodes" : "Apply GVIC to assigned nodes",
+              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
+              onSelect: () => setLogicGateGVICApplyConfirmationOpen(true),
+            }] : []}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
+            singleLine
           />
           
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
@@ -2665,7 +2690,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateGVICAssignments,
             } : null}
-            logicGateGVICApplyToAssignedNodesBusy={logicGateGVICApplyToAssignedNodesBusy}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
             companyUserGroupMembers={companyUserGroupMembers}
@@ -2684,12 +2708,28 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeAccountIDs={commitNodeAccountIDs}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
-            onApplyLogicGateGVICToAssignedNodes={applyLogicGateGVICToAssignedNodes}
             onAddGVICPrincipal={linkedEntityKind === "node" ? addNodeGVICPrincipal : addLogicGateGVICPrincipal}
             onRemoveGVICPrincipal={linkedEntityKind === "node" ? removeNodeGVICPrincipal : removeLogicGateGVICPrincipal}
           />
 
           </div>
+        )}
+
+        {logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate" && (
+          <ConfirmActionMenu
+            title="Apply GVIC to assigned nodes?"
+            detail="This replaces the GVIC assignments on every node currently assigned to this Logic Gate."
+            confirmLabel="Yes"
+            cancelLabel="No"
+            confirmDisabled={!linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy}
+            requireDisplayNameConfirmation={false}
+            isDarkTheme={isDarkTheme}
+            onConfirm={() => {
+              setLogicGateGVICApplyConfirmationOpen(false);
+              applyLogicGateGVICToAssignedNodes();
+            }}
+            onCancel={() => setLogicGateGVICApplyConfirmationOpen(false)}
+          />
         )}
 
 

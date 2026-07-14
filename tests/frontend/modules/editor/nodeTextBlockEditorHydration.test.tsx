@@ -190,7 +190,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const emptyMessages: never[] = [];
     const baseProps = {
       blockID: "block-1",
-      editable: false,
+      editable: true,
       nodeID: "node-1",
       apiBase: "https://api.test",
       companyID: "company-1",
@@ -245,14 +245,36 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     assert.equal(fetchSignals[0]?.aborted, false);
     assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
 
+    const firstFrame = firstImage.closest('[data-mango-editor-image="true"]');
+    assert.ok(firstFrame);
+    firstFrame.setAttribute("data-mango-editor-image-selected", "true");
+    await act(async () => {
+      editor.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    });
+    assert.equal(editor.querySelector("img"), null);
+
+    await act(async () => {
+      editor.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    await flushAsyncWork();
+    const undoRestoredImage = editor.querySelector("img");
+    assert.ok(undoRestoredImage);
+    assert.equal(undoRestoredImage.getAttribute("src"), "blob:test-2");
+    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
+    assert.equal(activeObservers, 1);
+    assert.equal(observerCreations, 3);
+    assert.equal(observerDisconnects, 2);
+    assert.equal(fetchedURLs.length, 1);
+
     await act(async () => {
       root.render(renderEditor(firstDocument));
     });
     await flushAsyncWork();
     assert.equal(activeObservers, 1);
-    assert.equal(observerCreations, 2);
+    assert.equal(observerCreations, 3);
     assert.equal(fetchedURLs.length, 1);
-    assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
 
     const secondDocument = attachmentDocument("attachment-2");
     await act(async () => {
@@ -262,12 +284,12 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
     const secondImage = editor.querySelector("img");
     assert.ok(secondImage);
-    assert.equal(firstImage.getAttribute("src"), "mango-attachment:attachment-1");
-    assert.equal(secondImage.getAttribute("src"), "blob:test-2");
+    assert.equal(undoRestoredImage.getAttribute("src"), "mango-attachment:attachment-1");
+    assert.equal(secondImage.getAttribute("src"), "blob:test-3");
     assert.equal(activeObservers, 1);
     assert.equal(maximumActiveObservers, 1);
     assert.equal(fetchedURLs.length, 2);
-    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2"]);
 
     await act(async () => {
       root.unmount();
@@ -275,7 +297,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     mountedRoot = null;
     assert.equal(activeObservers, 0);
     assert.equal(secondImage.getAttribute("src"), "mango-attachment:attachment-2");
-    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
     assert.equal(animationFrames.size, 0);
 
     const pendingContainer = dom.window.document.createElement("div");
@@ -313,7 +335,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     await flushAsyncWork();
     assert.equal(pendingFetchSignal?.aborted, true);
     assert.equal(activeObservers, 0);
-    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
     assert.equal(animationFrames.size, 0);
   } finally {
     if (pendingMountedRoot) {

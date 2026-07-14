@@ -42,6 +42,7 @@ export type UnifiedRichEditorControlID =
   | "bold"
   | "underline"
   | "italic"
+  | "strikethrough"
   | "highlight"
   | "align-left"
   | "align-center"
@@ -64,6 +65,7 @@ export const UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS: readonly UnifiedRichEditorCon
   "bold",
   "underline",
   "italic",
+  "strikethrough",
   "highlight",
   "align-left",
   "align-center",

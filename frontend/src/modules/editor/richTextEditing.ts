@@ -434,52 +434,19 @@ export function applyEditorTableTextAlign(table: HTMLTableElement, align: Editor
   }
   Array.from(table.querySelectorAll("td,th")).forEach((cell) => {
     if (!(cell instanceof HTMLElement)) return;
-    if (cell.getAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE) === "corner") {
-      cell.style.textAlign = "left";
-      return;
-    }
     cell.style.textAlign = align ?? "";
   });
-}
-
-function appendEditorTableAlignmentIcon(button: HTMLButtonElement, align: EditorTextAlignment) {
-  const icon = button.ownerDocument.createElement("span");
-  icon.setAttribute(EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE, align);
-  icon.setAttribute("aria-hidden", "true");
-  for (let index = 0; index < 4; index += 1) {
-    const line = button.ownerDocument.createElement("span");
-    icon.appendChild(line);
-  }
-  button.appendChild(icon);
 }
 
 function isEditorTableAlignmentControlNode(node: Node): boolean {
   return node instanceof HTMLElement && node.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true";
 }
 
-export function ensureEditorTableAlignmentControls(cell: HTMLTableCellElement, rowIndex: number, columnIndex: number) {
-  Array.from(cell.querySelectorAll(`[${EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE}="true"]`)).forEach((control) => {
-    if (rowIndex !== 0 || columnIndex !== 0 || control.parentElement !== cell) control.remove();
-  });
-  if (rowIndex !== 0 || columnIndex !== 0) return;
-  const existing = Array.from(cell.children).find((child): child is HTMLElement => (
-    child instanceof HTMLElement && child.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true"
-  ));
-  if (existing) return;
-  const controls = cell.ownerDocument.createElement("span");
-  controls.setAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE, "true");
-  controls.setAttribute("contenteditable", "false");
-  controls.setAttribute("aria-label", "Table alignment");
-  (["left", "center", "right"] as EditorTextAlignment[]).forEach((align) => {
-    const button = cell.ownerDocument.createElement("button");
-    button.type = "button";
-    button.setAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE, align);
-    button.setAttribute("aria-label", `Align table ${align}`);
-    button.title = `Align table ${align}`;
-    appendEditorTableAlignmentIcon(button, align);
-    controls.appendChild(button);
-  });
-  cell.insertBefore(controls, cell.firstChild);
+export function ensureEditorTableAlignmentControls(cell: HTMLTableCellElement, _rowIndex: number, _columnIndex: number) {
+  // Legacy documents can still contain the retired cell-corner overlay. Strip
+  // it during every create/normalize/sanitize pass; alignment now lives only in
+  // the shared editor header.
+  cell.querySelectorAll(`[${EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE}="true"]`).forEach((control) => control.remove());
 }
 
 function readEditorGridTableColumns(element: HTMLElement, fallback = 3): number {
@@ -869,8 +836,8 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     return;
   }
 
-  if (tagName === "b" || tagName === "strong" || tagName === "u" || tagName === "i" || tagName === "em") {
-    const inline = ownerDocument.createElement(tagName);
+  if (tagName === "b" || tagName === "strong" || tagName === "u" || tagName === "i" || tagName === "em" || tagName === "s" || tagName === "strike" || tagName === "del") {
+    const inline = ownerDocument.createElement(tagName === "strike" || tagName === "del" ? "s" : tagName);
     appendSanitizedChildren(element, inline, ownerDocument);
     target.appendChild(inline);
     return;
@@ -999,8 +966,14 @@ function collapseRedundantFontSizeSpanHTML(html: string): string {
   return next;
 }
 
+function canonicalizeEditorStrikethroughHTML(html: string): string {
+  return html.replace(/<(\/?)\s*(?:s|strike|del)\b[^>]*>/gi, (_match, closing: string) => (
+    closing ? "</s>" : "<s>"
+  ));
+}
+
 export function sanitizeEditorDocumentHTML(html: string): string {
-  if (typeof document === "undefined") return collapseRedundantFontSizeSpanHTML(html);
+  if (typeof document === "undefined") return collapseRedundantFontSizeSpanHTML(canonicalizeEditorStrikethroughHTML(html));
   const template = document.createElement("template");
   template.innerHTML = html;
   wrapRootEditorListItems(template.content, document);
@@ -1010,7 +983,7 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   collapseRedundantFontSizeSpans(clean);
   normalizeEditorHighlightSpans(clean);
   applyEditorListMarkerStyles(clean);
-  return collapseRedundantFontSizeSpanHTML(clean.innerHTML);
+  return collapseRedundantFontSizeSpanHTML(canonicalizeEditorStrikethroughHTML(clean.innerHTML));
 }
 
 export function deserializeEditorDocumentHTML(storedDocument: string): string {

@@ -19,6 +19,7 @@ import {
   type EditorImageAttachmentContext,
   type EditorSelectionInlineFormatState,
   type EditorTextAlignment,
+  type EditorTypingCaretBookmark,
 } from "./useEditorDocumentSurfaceHandlers";
 import { hydrateEditorAttachmentImageFrames } from "./editorImages";
 import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
@@ -90,6 +91,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
   const pendingHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
+  const pendingInlineFormatRef = useRef<EditorSelectionInlineFormatState | null>(null);
+  const pendingTypingCaretRef = useRef<EditorTypingCaretBookmark | null>(null);
   const restoreSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
   const indentGuideFrameRef = useRef<number | null>(null);
   const targetKeyRef = useRef(`unified-rich-editor:${surfaceID}`);
@@ -158,6 +161,10 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     }
     attachmentHydrationContextKeyRef.current = hydrationContextKey;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
+    pendingFontSizeRef.current = null;
+    pendingHighlightColorRef.current = undefined;
+    pendingInlineFormatRef.current = null;
+    pendingTypingCaretRef.current = null;
     lastAppliedValueRef.current = value;
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
@@ -202,6 +209,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
     pendingEditorHighlightColorRef: pendingHighlightColorRef,
+    pendingEditorInlineFormatRef: pendingInlineFormatRef,
+    pendingEditorTypingCaretRef: pendingTypingCaretRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave,
@@ -237,6 +246,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
     pendingEditorHighlightColorRef: pendingHighlightColorRef,
+    pendingEditorInlineFormatRef: pendingInlineFormatRef,
+    pendingEditorTypingCaretRef: pendingTypingCaretRef,
     restoreSelection,
     insertTable,
     scheduleDocumentSave,

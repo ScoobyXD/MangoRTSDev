@@ -84,8 +84,16 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeContentChanges.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
-const componentTestSource = resolve(repoRoot, "tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx");
-const componentTestFile = resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js");
+const componentTests = [
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/editorToolbarInteractions.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorToolbarInteractions.test.js"),
+  },
+];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
 const frontendRequire = createRequire(resolve(frontendRoot, "package.json"));
@@ -132,24 +140,27 @@ for (const testFile of testFiles) {
 
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
-buildSync({
-  absWorkingDir: repoRoot,
-  entryPoints: [componentTestSource],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  packages: "external",
-  define: { "import.meta.env": "{}" },
-  outfile: componentTestFile,
-});
+for (const componentTest of componentTests) {
+  buildSync({
+    absWorkingDir: repoRoot,
+    entryPoints: [componentTest.source],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    packages: "external",
+    define: { "import.meta.env": "{}" },
+    outfile: componentTest.file,
+  });
+}
 
-for (const testFile of [...testFiles, componentTestFile]) {
+const componentTestFiles = new Set(componentTests.map((componentTest) => componentTest.file));
+for (const testFile of [...testFiles, ...componentTestFiles]) {
   console.log(`\n=== Frontend feature tests: ${testFile} ===`);
   // Running the compiled test module directly avoids Node's worker-spawn path, which is
   // blocked in some Windows sandboxes. `node:test` still reports TAP and exits non-zero
   // on failures, so this keeps the same pass/fail contract.
   run(
     `"${process.execPath}" "${testFile}"`,
-    testFile === componentTestFile ? { NODE_ENV: "development" } : {},
+    componentTestFiles.has(testFile) ? { NODE_ENV: "development" } : {},
   );
 }

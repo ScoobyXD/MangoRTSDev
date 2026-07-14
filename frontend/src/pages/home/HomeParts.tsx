@@ -5025,13 +5025,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const [bodyOutlineStyle, setBodyOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
   const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [bodyHighlightColor, setBodyHighlightColor] = React.useState<EditorHighlightColor | null>(null);
   const [bodyTextAlignment, setBodyTextAlignment] = React.useState<EditorTextAlignment>("left");
   const [signatureOutlineStyle, setSignatureOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [signatureToolbarTab, setSignatureToolbarTab] = React.useState<EditorTabID>("format");
   const [signatureSelectionFontSize, setSignatureSelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [signatureSelectionInlineFormat, setSignatureSelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
+  const [signatureSelectionInlineFormat, setSignatureSelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [signatureHighlightColor, setSignatureHighlightColor] = React.useState<EditorHighlightColor | null>(null);
   const [signatureTextAlignment, setSignatureTextAlignment] = React.useState<EditorTextAlignment>("left");
   const apiBase = readAuthConfig().apiBase;
@@ -5267,7 +5267,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const state = bodyEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setBodySelectionFontSize(state.fontSize);
-    setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
+    setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic, strikethrough: state.strikethrough });
     setBodyHighlightColor(state.highlightColor);
     setBodyTextAlignment(state.textAlignment);
   };
@@ -5295,7 +5295,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const state = signatureEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setSignatureSelectionFontSize(state.fontSize);
-    setSignatureSelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
+    setSignatureSelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic, strikethrough: state.strikethrough });
     setSignatureHighlightColor(state.highlightColor);
     setSignatureTextAlignment(state.textAlignment);
   };
@@ -5500,11 +5500,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
             boldActive={bodySelectionInlineFormat.bold}
             underlineActive={bodySelectionInlineFormat.underline}
             italicActive={bodySelectionInlineFormat.italic}
+            strikethroughActive={bodySelectionInlineFormat.strikethrough}
             highlightColor={bodyHighlightColor}
             textAlignment={bodyTextAlignment}
             onToggleBold={() => toggleBodyInlineFormat("bold")}
             onToggleUnderline={() => toggleBodyInlineFormat("underline")}
             onToggleItalic={() => toggleBodyInlineFormat("italic")}
+            onToggleStrikethrough={() => toggleBodyInlineFormat("strikethrough")}
             onSetSelectionHighlightColor={setBodySelectionHighlightColor}
             onSetTextAlignment={setBodySelectionTextAlignment}
             onInsertTable={() => bodyEditorControllerRef.current?.insertTable()}
@@ -5590,11 +5592,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               boldActive={signatureSelectionInlineFormat.bold}
               underlineActive={signatureSelectionInlineFormat.underline}
               italicActive={signatureSelectionInlineFormat.italic}
+              strikethroughActive={signatureSelectionInlineFormat.strikethrough}
               highlightColor={signatureHighlightColor}
               textAlignment={signatureTextAlignment}
               onToggleBold={() => toggleSignatureInlineFormat("bold")}
               onToggleUnderline={() => toggleSignatureInlineFormat("underline")}
               onToggleItalic={() => toggleSignatureInlineFormat("italic")}
+              onToggleStrikethrough={() => toggleSignatureInlineFormat("strikethrough")}
               onSetSelectionHighlightColor={setSignatureSelectionHighlightColor}
               onSetTextAlignment={setSignatureSelectionTextAlignment}
               onInsertTable={() => signatureEditorControllerRef.current?.insertTable()}
