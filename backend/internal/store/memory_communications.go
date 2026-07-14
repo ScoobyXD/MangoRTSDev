@@ -350,10 +350,10 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 	now := time.Now().UTC()
 	key := communicationsMessageReadStatusKey(scope.ScopeType, scope.ScopeID, messageID)
 	next := r.messageReadStatuses[key]
+	previousLastSignalTimestamp := next.LastSignalTimestamp
 	if next.CreatedTimestamp.IsZero() {
 		next.CreatedTimestamp = now
 		next.FirstSignalTimestamp = signalAt
-		next.SignalCount = 1
 	}
 	if next.FirstSignalTimestamp.IsZero() || signalAt.Before(next.FirstSignalTimestamp) {
 		next.FirstSignalTimestamp = signalAt
@@ -365,7 +365,7 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 		if signalCount > next.SignalCount {
 			next.SignalCount = signalCount
 		}
-	} else {
+	} else if previousLastSignalTimestamp.IsZero() || !signalAt.Equal(previousLastSignalTimestamp) {
 		next.SignalCount++
 	}
 	if next.SignalCount <= 0 {

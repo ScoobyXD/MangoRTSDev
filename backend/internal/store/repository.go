@@ -541,6 +541,7 @@ type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
+	ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error)
 }
 
 type ConsolidatedViewRepository interface {

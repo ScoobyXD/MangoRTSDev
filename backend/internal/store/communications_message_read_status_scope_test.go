@@ -83,3 +83,45 @@ func TestMemoryRepoCommunicationsMessageReadStatusesSeparatePersonalAccounts(t *
 		t.Fatalf("broad user-only receipt write error = %v, want ErrInvalid", err)
 	}
 }
+
+func TestMemoryRepoCommunicationsMessageReadStatusSameSignalIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("receipt-signal-idempotency", "owner@example.com", "Receipt Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signalAt := time.Date(2026, time.July, 13, 13, 0, 0, 0, time.UTC)
+	input := CommunicationsMessageReadStatusInput{
+		UserID:               user.UserID,
+		PersonalAccountEmail: "owner@example.com",
+		MessageID:            "message-idempotent",
+		Status:               "likely_read",
+		SignalTimestamp:      signalAt,
+	}
+
+	first, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SignalCount != 1 {
+		t.Fatalf("first implicit signal count = %d, want 1", first.SignalCount)
+	}
+	retry, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.SignalCount != 1 {
+		t.Fatalf("same-timestamp retry signal count = %d, want 1", retry.SignalCount)
+	}
+
+	input.SignalTimestamp = signalAt.Add(time.Second)
+	later, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.SignalCount != 2 {
+		t.Fatalf("later distinct signal count = %d, want 2", later.SignalCount)
+	}
+}

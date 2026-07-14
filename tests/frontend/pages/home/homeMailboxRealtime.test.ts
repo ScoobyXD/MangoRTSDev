@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
   applyHomeMailboxCountDelta,
+  cancelHomeMailboxListRequestTimers,
   createHomeMailboxFolderLoadCoordinator,
   createHomeMailboxRealtimeCoordinator,
   homeMailboxComposeSubmissionIsCurrent,
   homeMailboxCountKey,
+  homeMailboxFolderOwnerIsCurrent,
   homeMailboxPendingMessageIDs,
   homeMailboxPendingMessageKey,
   homeMailboxRealtimeTargetKey,
@@ -14,10 +16,12 @@ import {
   homeMailboxRealtimeRefreshPlan,
   selectHomeMailboxRealtimeTarget,
   type HomeMailboxRealtimeRefreshPlan,
+  type HomeMailboxFolderOwner,
   type HomeMailboxRealtimeTarget,
 } from "../../../../frontend/src/pages/home/homeMailboxRealtime.js";
 
 type MailboxOwner = Parameters<typeof homeMailboxRequestOwnerIsCurrent>[0];
+type FolderOwner = HomeMailboxFolderOwner;
 
 function fakeTimers() {
   let nextID = 1;
@@ -343,29 +347,29 @@ test("bursts coalesce and one final refresh queues behind an in-flight reconcili
   coordinator.dispose();
 });
 
-test("a pending refresh is bound to the request key and discarded on navigation", () => {
+test("presentation navigation drops stale list work but preserves exact-scope folder reconciliation", () => {
   const timers = fakeTimers();
-  let requestKey = "mailbox-A";
-  let reads = 0;
+  let requestKey = "account-A:primary";
+  const plans: HomeMailboxRealtimeRefreshPlan[] = [];
   const coordinator = createHomeMailboxRealtimeCoordinator({
     target: personalTarget(),
     getRequestKey: () => requestKey,
     getSelection: () => ({}),
     isRequestCurrent: (key) => key === requestKey,
     invalidate: () => undefined,
-    reconcile: () => { reads += 1; },
+    reconcile: (plan) => { plans.push(plan); },
     setTimer: timers.setTimer,
     clearTimer: timers.clearTimer,
   });
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-1" });
-  requestKey = "mailbox-B";
-  timers.runNext();
-  assert.equal(reads, 0, "mailbox A cannot schedule a provider GET for mailbox B");
+  requestKey = "account-A:starred:q=urgent";
+  assert.equal(timers.runNext(), true);
+  assert.deepEqual(plans, [{ folders: true, messageList: false, selectedDetail: false }]);
 
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-2" });
   coordinator.dispose();
   assert.equal(timers.size, 0);
-  assert.equal(reads, 0, "navigation/unmount cancels pending work");
+  assert.equal(plans.length, 1, "scope disposal cancels pending work");
 });
 
 test("mailbox-owned timers and async completions cannot mutate a newly selected mailbox", async () => {
@@ -405,6 +409,20 @@ test("mailbox-owned timers and async completions cannot mutate a newly selected 
   assert.deepEqual(applied, ["timer-B", "completion-B"], "the current mailbox still applies its own work");
 });
 
+test("list request cleanup preserves captured exact-scope mark-read timers", () => {
+  const timerIDs = new Set([11, 12, 13]);
+  const markReadTimers = new Map([["account-A:message-1", 12]]);
+  const cleared: number[] = [];
+  cancelHomeMailboxListRequestTimers(
+    timerIDs,
+    markReadTimers,
+    (timerID) => { cleared.push(timerID); },
+  );
+  assert.deepEqual(cleared, [11, 13]);
+  assert.deepEqual([...timerIDs], [12]);
+  assert.equal(markReadTimers.get("account-A:message-1"), 12);
+});
+
 test("request ownership requires both the exact list key and exact account or shared-inbox scope", () => {
   const current: MailboxOwner = {
     requestKey: "company-1:primary:query=urgent",
@@ -417,9 +435,35 @@ test("request ownership requires both the exact list key and exact account or sh
   assert.equal(homeMailboxRequestOwnerIsCurrent({ requestKey: "", mailboxScopeKey: current.mailboxScopeKey }, current), false);
 });
 
+test("folder ownership is the exact company-scoped mailbox key, independent of presentation filters", () => {
+  const current: FolderOwner = { mailboxScopeKey: "company-1:user-1:account-a@example.com" };
+  assert.equal(homeMailboxFolderOwnerIsCurrent(current, current), true);
+  assert.equal(homeMailboxFolderOwnerIsCurrent({ mailboxScopeKey: "company-2:user-1:account-a@example.com" }, current), false);
+  assert.equal(homeMailboxFolderOwnerIsCurrent({ mailboxScopeKey: "company-1:shared:inbox-1" }, current), false);
+});
+
+test("a pending folder load is rejected after the exact mailbox scope changes", async () => {
+  const owner: FolderOwner = {
+    mailboxScopeKey: "company-1:user-1:account-a@example.com",
+  };
+  let currentOwner = owner;
+  let finish!: () => void;
+  const coordinator = createHomeMailboxFolderLoadCoordinator({
+    isOwnerCurrent: (candidate) => homeMailboxFolderOwnerIsCurrent(candidate, currentOwner),
+    load: (candidate) => new Promise<boolean>((resolve) => {
+      finish = () => resolve(homeMailboxFolderOwnerIsCurrent(candidate, currentOwner));
+    }),
+  });
+  const loading = coordinator.request(owner);
+  currentOwner = { mailboxScopeKey: "company-1:user-1:account-b@example.com" };
+  coordinator.cancelObsolete(currentOwner);
+  finish();
+  assert.equal(await loading, false);
+  coordinator.dispose();
+});
+
 test("first acceptance queues one canonical folder refresh behind the initial folder load", async () => {
-  const owner: MailboxOwner = {
-    requestKey: "company-1:primary:account-a",
+  const owner: FolderOwner = {
     mailboxScopeKey: "company-1:user-1:account-a@example.com",
   };
   let currentOwner = owner;
@@ -427,7 +471,7 @@ test("first acceptance queues one canonical folder refresh behind the initial fo
   let maxActiveLoads = 0;
   const loads: Array<{ refresh: boolean; resolve: (loaded: boolean) => void }> = [];
   const coordinator = createHomeMailboxFolderLoadCoordinator({
-    isOwnerCurrent: (candidate) => homeMailboxRequestOwnerIsCurrent(candidate, currentOwner),
+    isOwnerCurrent: (candidate) => homeMailboxFolderOwnerIsCurrent(candidate, currentOwner),
     load: (_candidate, refresh) => new Promise<boolean>((resolve) => {
       activeLoads += 1;
       maxActiveLoads = Math.max(maxActiveLoads, activeLoads);
@@ -457,7 +501,7 @@ test("first acceptance queues one canonical folder refresh behind the initial fo
   assert.equal(await duplicateAccepted, true);
   assert.equal(loads.length, 2, "duplicate acceptance signals coalesce into the same final refresh");
 
-  currentOwner = { requestKey: "disposed", mailboxScopeKey: "other" };
+  currentOwner = { mailboxScopeKey: "other" };
   coordinator.dispose();
 });
 

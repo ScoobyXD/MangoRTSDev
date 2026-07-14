@@ -1,9 +1,10 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Email Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
+- Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
 - Mailbox query-mode tests in `backend/internal/http/communications_handlers_test.go`, `backend/internal/http/nylas_client_test.go`, and `tests/frontend/modules/communications/communicationsApi.test.ts` cover exact Google Primary bucketing, native/structured parameter exclusivity, thread precedence, preview-only response normalization, and Primary cache-overlay exclusions.
@@ -105,6 +106,12 @@ EMAIL77 - An open email-collaboration chat header shows the collaboration's curr
 EMAIL78 - Collaboration ensure/create and the first chat write have explicit retry-safe failure behavior. A failed ensure transaction leaves no partial Node, attached-email projection, permission, participant, or collaboration; a failed subsequent chat write leaves any already committed empty collaboration reusable under EMAIL52 but removes the failed optimistic chat row. The open composer preserves the user's typed text, selected mention principals, reply target, and email-selection anchor, re-enables submission, and permits a deliberate retry against the same exact source. My Triage and Shared Triage translate `failed_to_create_email_collaboration` and `email_collaboration_storage_not_ready` into concise actionable text; either identifier may support diagnostics but must not be the sole user-facing error, while other provider/authorization failures retain their established error handling.
 EMAIL79 - An email viewed inside a Node uses the canonical provider/Mango message-detail attachment metadata from its retained message, thread, and mailbox identity. Only attachments whose normalized Content-ID is actually referenced by the rendered body are omitted from the separate attachment list; a normal file carrying an unreferenced Content-ID remains discoverable with filename, MIME type, size, authenticated download, and safe image preview. Conversion and direct attach persist references and provenance, never a second attachment model or provider bytes.
 EMAIL80 - The exact saved personal-account or shared-inbox signature is applied once whenever a user starts New compose, Reply, or Reply All in My Triage, Shared Triage, or an attached-email Node viewer. Send waits for an outstanding exact-scope signature read and applies it to the flushed submitted body before provider submission. Late signature hydration appends to the live draft without replacing user edits; rerender, reply-mode changes, autosave, and draft restoration do not duplicate it. Signature images remain Mango attachment references and the settings editor hydrates their authenticated preview without public storage URLs.
+EMAIL81 - Once opening an unread message has queued its exact-scope provider mark-read command, changing mailbox tabs, search, unread-only state, Home view, or active mailbox may detach that command from visible UI state but must not silently cancel the captured provider mutation. The completion may update only its captured company/user/account-or-shared-inbox, list filter, and selection generation. If a terminal user/session transition suppresses the command, its ownership token and optimistic overlay must be released rather than left as false read state.
+EMAIL82 - Folder metadata belongs to the exact company plus personal-account/shared-inbox scope, not to message-list presentation filters. Changing Primary/Starred/Sent, search, or unread-only state neither invalidates an in-flight folder response nor requires a replacement folder request. Changing the exact mailbox scope invalidates old folder ownership, and acceptance/webhook refresh still permits one active load plus one queued final load for the destination scope.
+EMAIL83 - A canceled caller waiting on a same-key backend folder/page/detail provider read returns promptly without canceling the shared leader needed by other callers. The canceled caller releases its generation admission while the shared leader retains admission until the provider operation finishes, and only the still-current exact generation may populate cache state.
+EMAIL84 - The exact-account read-receipt cutover handles legacy personal summaries explicitly. A legacy `receipt_scope_id = user_id` row is merged into `user_id:normalized_account_email` only when that user has exactly one stored personal email connection; existing exact rows retain the strongest status, complete signal history, and timestamp bounds. Zero-account or multi-account legacy rows are deleted as an intentional ambiguous-history reset rather than retained as unreachable shadow data. The repair is a new idempotent forward migration that sorts before the separately committed legacy drop on fresh installs and still runs when that drop is already ledgered.
+EMAIL85 - A signed shared-mailbox webhook is acknowledged only after exact cache invalidation and either successful current-audience publication or a legitimate no-subscriber/no-authorized-recipient result. Resource-existence or audience lookup failure is retryable: webhook deduplication is released and the handler returns failure so the provider may redeliver. A retried `message.opened` payload retains its first receipt timestamp, and an identical signal timestamp cannot increment the stored receipt twice. Publication-time authorization is deadline-bound, limited to locally subscribed users, and remains fail-closed.
+EMAIL86 - Draft attachment preparation and the subsequent upload/link form one per-draft mutation lease. Empty-draft cleanup may run after concurrent work only when the last lease ends and every mutation in that group failed; one failed inline image must never delete a durable draft another upload/link still uses, and a successful mutation prevents later failure cleanup from deleting its resource.
 
 ## Scenarios
 
@@ -526,3 +533,29 @@ Expected:
 - No provider bytes or duplicate attachment metadata are stored in the Node projection.
 - New compose and Reply/Reply All across My Triage, Shared Triage, and the Node viewer receive the exact mailbox signature once.
 - Late hydration preserves typed text, draft restore and mode switches do not duplicate the signature, and the settings image preview uses the authenticated Mango attachment path.
+
+### Scenario EMAIL-S19: Exact Mailbox Ownership, Retry, And Concurrent Mutation Settlement
+
+Business logic covered:
+- EMAIL81
+- EMAIL82
+- EMAIL83
+- EMAIL84
+- EMAIL85
+- EMAIL86
+
+Given:
+- Provider mark-read is queued for an unread message, then the user changes tab/search/unread state, leaves Home, or selects another exact mailbox before the delay expires.
+- A folder request and realtime folder reconciliation overlap a list-filter change; a separate run changes the exact account/shared inbox.
+- Two callers join one slow same-generation provider folder/page/detail request and one joined caller is canceled.
+- Legacy personal receipt summaries contain one singleton-account user, one multi-account user, one user with no connection, and an already-populated exact target row.
+- A signed shared-mailbox webhook encounters no local subscribers, no authorized local subscriber, and then a transient audience repository failure.
+- Two attachment mutations share one newly prepared empty draft; one fails while the other remains active, with both all-failed and one-success orderings.
+
+Expected:
+- Ordinary navigation never silently drops captured provider mark-read intent. Its stale completion cannot overwrite the destination UI, and terminal suppression releases both mutation ownership and optimistic overlay.
+- Filter changes accept exact-scope folder work without duplication while rejecting old list/detail work; an exact scope change rejects the old folder result and loads the destination.
+- The canceled joined caller returns promptly, the one provider leader continues for remaining callers, and only a current generation may populate cache.
+- Singleton history merges into the normalized exact account with strongest status and complete timestamp/signal bounds. Ambiguous or orphan broad rows are deleted, and rerunning the migration is safe.
+- Legitimate zero-recipient publication is acknowledged. Audience timeout/error releases webhook deduplication and returns failure so the same delivery can retry without double-counting an already-stored `message.opened` signal.
+- Empty-draft cleanup runs once only after the last all-failed lease. Any successful upload/link prevents a sibling failure from deleting that durable draft.

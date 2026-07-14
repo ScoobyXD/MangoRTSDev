@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # My Triage Tests
 
@@ -164,6 +164,9 @@ MT136 - Personal compose creates the live exact-account draft before attachment 
 MT137 - An open My Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Provider recipients and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
 MT138 - A My Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
 MT139 - The exact personal-account signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that account. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, or reply-mode switches neither duplicate the signature nor replace deliberate edits.
+MT140 - A personal read-on-open provider command survives ordinary mailbox-tab, search, unread-only, Home-view, and account navigation under its captured exact account. Navigation may prevent its completion from mutating the new visible list or selection, but it cannot cancel the command while retaining a local read overlay. Identical provider message IDs in another account remain independent.
+MT141 - Personal folder loads are owned by company/user/account only. Changing list presentation filters while the request is active accepts the valid folder response and starts no duplicate replacement; changing the exact personal account rejects the old response and loads the destination account.
+MT142 - Legacy personal `Seen` summaries are assigned to an exact account only for users with one stored personal connection. Ambiguous multi-account or orphan/no-stored-account broad rows are intentionally removed during cutover, never guessed into one account and never left as unreachable user-wide shadow rows.
 
 ## Scenarios
 
@@ -699,3 +702,19 @@ Expected:
 - Settings immediately show the image through the authenticated exact-account attachment context, and Save persists the flushed sanitized signature.
 - Each Account A start action receives A's signature exactly once; Account B never leaks into it.
 - Late completion appends without replacing typed/restored content, and autosave, rerender, or switching reply modes cannot duplicate the signature.
+
+### Scenario MT-S16: Personal Navigation Ownership And Exact Receipt Cutover
+
+Business logic covered:
+- MT140
+- MT141
+- MT142
+
+Given:
+- Account A queues provider mark-read and starts a folder request, then list filters change and the user later selects Account B.
+- Legacy personal receipt summaries exist for singleton-account, multi-account, and orphan users with no stored account connection.
+
+Expected:
+- Account A's provider command still executes under its captured scope but cannot patch Account B's visible state.
+- A list-filter change accepts Account A's valid folder result without another request; the account change rejects it and loads Account B.
+- Only singleton history is copied to `user_id:normalized_account_email`; ambiguous and orphan broad history is explicitly removed.

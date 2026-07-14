@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Shared Triage Tests
 
@@ -191,6 +191,9 @@ ST162 - Shared compose persists the live exact-inbox draft before attachment upl
 ST163 - An open Shared Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Shared-inbox viewers, provider recipients, and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
 ST164 - A Shared Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the source email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
 ST165 - The exact shared-inbox signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that inbox. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, reply-mode switches, or another shared inbox never duplicate or replace it.
+ST166 - A shared read-on-open provider command survives ordinary mailbox-tab, search, unread-only, and Home-view navigation under its captured exact shared inbox. Its response is barred from a newly selected inbox/list/selection, but navigation cannot cancel the provider mutation while retaining a false optimistic overlay.
+ST167 - Shared folder metadata is owned by company plus exact shared inbox, independent of Primary/Starred/Sent, search, and unread-only filters. A filter transition accepts an in-flight exact-inbox folder response; an inbox transition rejects it and performs destination reconciliation.
+ST168 - Signed shared message/folder webhooks distinguish legitimate zero-delivery from authorization infrastructure failure. No subscriber or no currently authorized viewer is acknowledged as a no-op. Existence/audience timeout or repository error releases deduplication and returns a retryable failure so a transient authorization outage does not permanently lose the exact-inbox hint. Retrying the same `message.opened` payload reuses its first receipt timestamp and does not inflate the signal count.
 
 ## Scenarios
 
@@ -860,3 +863,19 @@ Expected:
 - Settings immediately show the image through A's authenticated `email_signature` attachment context, and Save durably persists the exact flushed sanitized HTML.
 - Every A start action receives A's signature exactly once; B and personal scopes never leak into it.
 - Late completion preserves typed/restored content, and autosave, rerender, or reply-mode changes cannot duplicate or replace the signature.
+
+### Scenario ST-S21: Shared Navigation Ownership And Webhook Retry
+
+Business logic covered:
+- ST166
+- ST167
+- ST168
+
+Given:
+- Shared Inbox A queues provider mark-read and folder work, list filters change, and the user later selects Shared Inbox B.
+- A signed Shared Inbox A webhook runs with no subscribers, no authorized local viewer, and a transient audience lookup failure before redelivery.
+
+Expected:
+- Captured mark-read for A is not canceled by navigation and cannot patch B's visible state.
+- Filter changes preserve A's valid folder work; the exact-inbox change rejects it and loads B.
+- Empty audiences are acknowledged as legitimate no-ops. Lookup failure is returned as retryable failure, deduplication is released, and redelivery may publish after authorization recovers without counting an identical open signal twice.

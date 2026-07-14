@@ -725,6 +725,7 @@ on conflict (receipt_scope_type, receipt_scope_id, message_id) do update set
   end,
   signal_count = case
     when $12::integer > 0 then greatest(communications_message_read_receipt_summaries.signal_count, excluded.signal_count)
+    when communications_message_read_receipt_summaries.last_signal_timestamp = excluded.last_signal_timestamp then communications_message_read_receipt_summaries.signal_count
     else communications_message_read_receipt_summaries.signal_count + 1
   end,
   first_signal_timestamp = least(communications_message_read_receipt_summaries.first_signal_timestamp, excluded.first_signal_timestamp),
@@ -818,8 +819,18 @@ create table if not exists communications_message_read_receipt_summaries (
   constraint communications_message_read_receipt_summaries_status_chk check (status in ('likely_read', 'read')),
   constraint communications_message_read_receipt_summaries_signal_count_chk check (signal_count >= 0),
   constraint communications_message_read_receipt_summaries_personal_chk check (
-    (receipt_scope_type = 'personal' and user_id is not null and company_email_connection_id is null)
-    or (receipt_scope_type = 'shared' and company_id is not null and company_email_connection_id is not null)
+    (
+      receipt_scope_type = 'personal'
+      and user_id is not null
+      and company_email_connection_id is null
+      and receipt_scope_id like user_id::text || ':%'
+      and length(receipt_scope_id) > length(user_id::text) + 1
+    )
+    or (
+      receipt_scope_type = 'shared'
+      and company_id is not null
+      and company_email_connection_id is not null
+    )
   )
 );
 

@@ -1,9 +1,10 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Kanban Board Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
+- KB126 is covered by `backend/internal/http/realtime_audience_hardening_test.go`, including the Logic Gate tombstone exception and post-delete current-audience reauthorization for a surviving board after Node deletion.
 - Business Logic Covered By Automated Tests: Partial (frontend Kanban command/helper coverage and saved-view backend coverage exist; unified node popup fullscreen inset/search-hide source contracts are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 ## Scope
@@ -159,6 +160,7 @@ KB122 - Logic Gate boards and columns remain synthesized contract data rather th
 KB123 - Ordinary `node_updated` processing performs no Kanban projection-row lookup when that company has no relevant local board subscriber. With a mounted board subscriber, it resolves affected boards and preserves exact board-scoped publication correctness.
 KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
 KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announces the exact source and destination board IDs only after commit. Mounted boards route both local command events and authorized `kanban.changed` hints through the same debounced single-flight canonical work loader, so the source card disappears immediately, destination/current projections converge, duplicate hints coalesce, and a failed command cannot leave false optimistic board state.
+KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked View access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
 
 ## Scenarios
 
@@ -524,3 +526,18 @@ Expected:
 - Only after mutation success, exact caches for A and B are invalidated and announced; A canonically reloads and removes the card without a browser refresh.
 - Any mounted B projection converges through the same loader, local and socket hints deduplicate/coalesce, and stale loads cannot reinsert the card into A.
 - A rejected/failed reassignment emits no success event and preserves A's current snapshot.
+
+### Scenario KB-S12: Logic Gate Deletion Closes A Mounted Board
+
+Business logic covered:
+- KB126
+
+Given:
+- A Logic Gate board is mounted by one currently authorized local viewer and one local connection without View access.
+- The delete command captures publication state, commits the Logic Gate deletion, and publishes afterward.
+
+Expected:
+- Audience capture occurs while the Logic Gate still exists and uses current exact View authorization.
+- The authorized mounted viewer receives one compact `resource_deleted` hint and closes/reconciles the board.
+- The unauthorized connection receives nothing.
+- Publication does not re-query the deleted resource, and ordinary non-tombstone board events continue to reauthorize at send time.

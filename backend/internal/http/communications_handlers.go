@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"golang.org/x/sync/singleflight"
 	"log"
 	"mime"
 	"miraeopus/backend/internal/domain"
@@ -1529,6 +1530,23 @@ func findNylasAttachmentByID(attachments []NylasAttachment, attachmentID string)
 	return NylasAttachment{}, false
 }
 
+func awaitCommunicationsFlight[T any](ctx context.Context, results <-chan singleflight.Result, invalidResult string) (T, error) {
+	var zero T
+	select {
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case completed := <-results:
+		if completed.Err != nil {
+			return zero, completed.Err
+		}
+		result, ok := completed.Val.(T)
+		if !ok {
+			return zero, errors.New(invalidResult)
+		}
+		return result, nil
+	}
+}
+
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection, refresh bool) ([]NylasFolder, error) {
 	cacheScope := communicationsConnectionCacheScope(connection)
 	if !refresh {
@@ -1539,7 +1557,7 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 	flightGeneration, releaseAdmission := s.commCache.beginFolderGeneration(connection.UserID, cacheScope)
 	defer releaseAdmission()
 	flightKey := communicationsAccountScopedCacheKey(connection.UserID, cacheScope) + communicationsCacheKeySeparator + strconv.FormatBool(refresh) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsFolderFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsFolderFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if !refresh {
 			if cached, ok := s.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL, flightNow); ok {
@@ -1573,12 +1591,9 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 		}
 		return folders, nil
 	})
-	if flightErr != nil {
-		return nil, flightErr
-	}
-	folders, ok := result.([]NylasFolder)
-	if !ok {
-		return nil, errors.New("invalid communications folder result")
+	folders, err := awaitCommunicationsFlight[[]NylasFolder](ctx, flightResult, "invalid communications folder result")
+	if err != nil {
+		return nil, err
 	}
 	return cloneNylasFolders(folders), nil
 }
@@ -1596,7 +1611,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	flightGeneration, releaseAdmission := s.commCache.beginMessagePageGeneration(connection.UserID, cacheScope)
 	defer releaseAdmission()
 	flightKey := communicationsMessagePageCacheKey(connection.UserID, cacheScope, cacheQuery) + communicationsCacheKeySeparator + strconv.FormatBool(query.Refresh) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsMessagePageFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsMessagePageFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if !query.Refresh {
 			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, flightNow); ok {
@@ -1621,12 +1636,9 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 		s.commCache.setMessagePageIfGeneration(connection.UserID, cacheScope, cacheQuery, page, time.Now().UTC(), flightGeneration)
 		return page, nil
 	})
-	if flightErr != nil {
-		return NylasMessagePage{}, flightErr
-	}
-	page, ok := result.(NylasMessagePage)
-	if !ok {
-		return NylasMessagePage{}, errors.New("invalid communications message page flight result")
+	page, err := awaitCommunicationsFlight[NylasMessagePage](ctx, flightResult, "invalid communications message page flight result")
+	if err != nil {
+		return NylasMessagePage{}, err
 	}
 	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 }
@@ -1642,7 +1654,7 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	flightGeneration, releaseAdmission := s.commCache.beginMessageGeneration(connection.UserID, cacheScope, messageID)
 	defer releaseAdmission()
 	flightKey := communicationsMessageCacheKey(connection.UserID, cacheScope, messageID) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsMessageFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsMessageFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, flightNow); ok {
 			if messageNeedsRawMIMEAttachmentRecovery(cached) {
@@ -1674,12 +1686,9 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 		s.commCache.setMessageIfGeneration(connection.UserID, cacheScope, message, time.Now().UTC(), flightGeneration)
 		return message, nil
 	})
-	if flightErr != nil {
-		return NylasMessage{}, flightErr
-	}
-	message, ok := result.(NylasMessage)
-	if !ok {
-		return NylasMessage{}, errors.New("invalid communications message flight result")
+	message, err := awaitCommunicationsFlight[NylasMessage](ctx, flightResult, "invalid communications message flight result")
+	if err != nil {
+		return NylasMessage{}, err
 	}
 	return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 }

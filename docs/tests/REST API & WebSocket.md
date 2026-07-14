@@ -1,8 +1,9 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # REST API & WebSocket Tests
 
 Coverage Status:
+- RW51-RW54 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, exact-scope authorization, resource existence/shape/limit admission, publication-time revocation, bounded concurrent stalled-client delivery, routing, and the Kanban lookup guard for RW23 and RW37-RW43. Frontend behavior tests exercise shared-socket acceptance/reconnect/late-handler semantics, mailbox first-acceptance/reconnect/event coalescing and navigation ownership, notification HTTP/socket ordering, coalescing, local-title and edit-buffer helpers, and RW15 publication-time cache convergence. A central source inventory rejects forbidden broad scopes while allowing the four approved surfaces, and one AppLayout guard proves installation of the committed-title cache reconciliation coordinator. These are not a full mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
 
@@ -58,6 +59,10 @@ RW47 - Shared-draft optimistic concurrency is not CRDT/OT collaboration. Every u
 RW48 - A never-opened My Triage or Shared Triage chat rail mounts no email-collaboration surface, performs no collaboration resolve or Node projection/chat read, and installs no `chat:node:{node_id}` subscription. The explicit Chat control may resolve an existing collaboration through authenticated HTTP; a pre-collaboration open rail has no Node chat scope until a successful ensure returns its Node. After a same-message rail has been opened, closing it may retain only an inert hidden component so an unsent composer survives reopening; the closed rail reserves no layout width, initiates no read merely because it is closed, and retains no Node chat subscription. Closing the rail or changing the exact message, mailbox, or view logically invalidates obsolete resolve/projection generations so their eventual results cannot update the current rail, and removes that rail's subscription; transport-level abort is not required. Reopening an existing collaboration follows RW45's canonical acceptance/reconnect behavior.
 RW49 - Every unexpected PostgreSQL failure during email-collaboration ensure/create is tagged with one fixed creation stage. A failure before a successful commit rolls back when a transaction exists; `begin_transaction` has no transaction to roll back, and a commit-stage error retains the database driver's commit outcome rather than claiming a rollback. Recognized missing/drifted table, column, type/function, privilege, datatype, unique/check-constraint states map to HTTP `503 email_collaboration_storage_not_ready`; invalid enum input maps there only at the two attached-email projection insertion stages. Existing domain validation/not-found/principal errors retain their 4xx mappings and all other store errors retain the generic 500 path. The failure log contains only request ID, company ID, actor user ID, personal/shared scope, fixed stage, SQLSTATE, and fixed category; it must never include the raw database message/detail/hint, SQL parameters, mailbox address, provider message/thread ID, subject, or serialized email body.
 RW50 - A committed cross-Logic-Gate Node assignment event carries canonical source and destination board/Logic Gate IDs. Realtime deduplicates those board IDs and publishes one compact `kanban.changed` hint to each currently authorized mounted board audience; same-window success invalidates/announces the same exact boards. Clients reconcile through canonical conditional work reads, while command failure publishes no success hint and transport payloads contain no projection delta.
+RW51 - A committed Logic Gate deletion publishes one `resource_deleted` hint to the exact mounted-board audience captured while the Logic Gate still existed and access was authoritative. Ordinary board events continue to reauthorize at publication time. The tombstone path must not perform a post-delete existence check that necessarily empties the audience, and it must not broaden delivery beyond pre-delete authorized local subscribers.
+RW52 - Publication-time entity existence and audience resolution are deadline-bound, limited to distinct users currently subscribed to the exact local scope, and fail closed. No-subscriber and no-current-authorized-recipient outcomes are successful no-ops; repository timeout or lookup failure is a distinct error. A shared provider webhook propagates that error, releases its deduplication receipt, and returns a retryable failure instead of acknowledging a lost hint. Retrying an identical `message.opened` delivery reuses the receipt's first timestamp so read-signal aggregation remains idempotent.
+RW53 - Backend folder, message-page, and message-detail singleflight keeps one shared provider leader per exact generation while every joined waiter observes its own context. Canceling a joined waiter returns promptly without canceling or duplicating the leader; the waiter releases its generation admission, the leader retains its own admission until completion, and only the still-current generation may cache the result.
+RW54 - Mailbox work uses separate ownership domains. Message-list/detail work may include mailbox tab, search, unread-only state, and selection generation; folder metadata uses only company plus exact mailbox scope; a queued provider mark-read is captured mutation intent rather than disposable list-refresh work. Navigation may detach stale UI results but cannot silently drop the mark-read command or let a prior scope overwrite the destination.
 
 ## Scenarios
 
@@ -450,3 +455,25 @@ Expected:
 - The committed event identifies both board IDs once; the server reauthorizes each mounted audience and sends one compact hint per affected subscribed board.
 - No-subscriber boards cause no unnecessary projection fan-out, and local/socket duplicates coalesce through the existing canonical single-flight read path.
 - Failure emits no success hint, and realtime never carries card deltas or false optimistic membership.
+
+### Scenario RW-S19: Bounded Audience Resolution And Independent Mail Waiters
+
+Business logic covered:
+- RW51
+- RW52
+- RW53
+- RW54
+
+Given:
+- An authorized user has a mounted Logic Gate board while another local connection lacks View access, and the Logic Gate is deleted.
+- A retained entity publisher has local subscribers plus unrelated company users, then its repository lookup stalls or fails.
+- A signed shared-mailbox delivery repeats after that transient lookup failure.
+- Two HTTP callers join one provider folder/page/detail read; the joined caller cancels while the leader remains active.
+- A mailbox filter transition occurs while folder work and provider mark-read intent are pending, followed separately by an exact scope transition.
+
+Expected:
+- The committed deletion sends one `resource_deleted` tombstone only to the pre-delete authorized mounted-board audience; ordinary events still resolve current existence/access.
+- Audience lookup receives only distinct exact-scope local subscriber IDs, obeys its deadline, and fails closed without scanning every company user.
+- No-subscriber/no-authorized results succeed, but shared lookup failure returns retryable failure and releases deduplication before the repeated delivery succeeds without duplicating its open-signal count.
+- The canceled waiter returns immediately without canceling or duplicating the leader and releases only its own cache-generation admission.
+- Filter transitions preserve exact-scope folder work and captured mark-read intent while invalidating stale list/detail presentation work; scope transitions reject every old-scope result.

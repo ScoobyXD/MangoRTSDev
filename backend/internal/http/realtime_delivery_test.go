@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -466,7 +467,7 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 	}
 }
 
-func TestRealtimePublicationRejectsMissingResourceBeforePermissiveAudienceLookup(t *testing.T) {
+func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &missingRealtimeEntityPermissiveAudienceRepo{Repository: base}
 	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
@@ -496,8 +497,8 @@ func TestRealtimePublicationRejectsMissingResourceBeforePermissiveAudienceLookup
 	if delivered != 0 {
 		t.Fatalf("missing-resource delivery count = %d, want 0", delivered)
 	}
-	if repo.audienceLookups != 0 {
-		t.Fatalf("audience lookups = %d, want 0 before missing resource is rejected", repo.audienceLookups)
+	if repo.audienceLookups != 1 {
+		t.Fatalf("audience resolutions = %d, want 1", repo.audienceLookups)
 	}
 	if messages := networkConn.messages(t); len(messages) != 0 {
 		t.Fatalf("missing-resource subscriber received messages: %+v", messages)
@@ -519,21 +520,21 @@ type recordingRealtimeAudienceRepo struct {
 	lookups chan<- struct{}
 }
 
-func (r *recordingRealtimeAudienceRepo) ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error) {
+func (r *recordingRealtimeAudienceRepo) ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error) {
 	select {
 	case r.lookups <- struct{}{}:
 	default:
 	}
-	return r.Repository.ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel)
+	return r.Repository.ResolveEffectiveUsersForResource(ctx, companyID, resourceType, resourceID, accessLevel, candidateUserIDs)
+}
+
+func (r *missingRealtimeEntityPermissiveAudienceRepo) ResolveEffectiveUsersForResource(context.Context, string, string, string, string, []string) (bool, []string, error) {
+	r.audienceLookups++
+	return false, []string{"83838383-8383-4383-8383-838383838383"}, nil
 }
 
 func (r *missingRealtimeEntityPermissiveAudienceRepo) GetNode(string, string) (domain.Node, error) {
 	return domain.Node{}, store.ErrNotFound
-}
-
-func (r *missingRealtimeEntityPermissiveAudienceRepo) ListEffectiveUsersForResource(string, string, string, string) ([]string, error) {
-	r.audienceLookups++
-	return []string{"83838383-8383-4383-8383-838383838383"}, nil
 }
 
 func (r *recordingKanbanProjectionLookupRepo) ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]store.KanbanBoardProjectionRow, error) {

@@ -8,7 +8,7 @@ import {
   type AttachmentRequestJSON,
   type MangoAttachmentResourceType,
 } from "../attachments/attachmentApi";
-import { withPreparedEditorAttachmentResource } from "./editorAttachmentPreparation";
+import { withPreparedEditorAttachmentResource, type EditorAttachmentMutationLifecycle } from "./editorAttachmentPreparation";
 import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
 import {
@@ -194,6 +194,7 @@ export type EditorImageAttachmentContext = {
   editorSurface?: string;
   prepareResource?: () => Promise<void>;
   onError?: (message: string) => void;
+  mutationLifecycle?: EditorAttachmentMutationLifecycle;
 };
 
 export type EditorInlineStyleCommand = "bold" | "underline" | "italic" | "strikethrough";
@@ -1200,7 +1201,7 @@ async function attachUploadedEditorImageData(
     relationshipKind: "inline_image",
     informationID: context.informationID,
     editorSurface: context.editorSurface,
-  }));
+  }), context.mutationLifecycle);
   const attachment = uploaded.attachment;
   let displaySrc = imageData.src;
   try {
@@ -1277,7 +1278,7 @@ async function insertEditorClipboardImageData(
       relationshipKind: "inline_image",
       informationID: editorImageAttachmentContext.informationID,
       editorSurface: editorImageAttachmentContext.editorSurface,
-    }));
+    }), editorImageAttachmentContext.mutationLifecycle);
     let displaySrc = clipboardData.src;
     try {
       displaySrc = await loadMangoAttachmentObjectURL(
