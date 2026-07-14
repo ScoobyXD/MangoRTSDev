@@ -2,6 +2,7 @@ import {
   claimLocalNotificationClearReconciliation,
   claimLocalNotificationDeleteReconciliation,
   emitNotificationsUpdated,
+  NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
 } from "./notificationsApi.js";
 
 type NotificationCreatedHint = {
@@ -22,7 +23,7 @@ export function createNotificationRealtimeHandlers(activeCompanyID: string) {
 
   return {
     onAccepted() {
-      reconcile();
+      emitNotificationsUpdated(cleanActiveCompanyID, NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED);
     },
     onNotificationCreated(message: NotificationCreatedHint) {
       reconcile(message.company_id);

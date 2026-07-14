@@ -551,6 +551,8 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
 
   assert.match(homeParts, /sortEmailConversationMessagesNewestFirst/);
+  assert.match(homeParts, /aria-label="Email conversation order"/);
+  assert.match(homeParts, /setConversationOrder\("newest"\)[\s\S]*\[conversationIdentity\]/);
   assert.match(homeParts, /onReply\(message\)/);
   assert.match(homeParts, /onReplyAll\(message\)/);
   assert.match(homeParts, /AutoHeightEmailBodyFrame/);
@@ -1030,6 +1032,12 @@ test("mail signatures are mailbox scoped unified rich editors and late hydration
   assert.match(signatureSurface, /surfaceID="email-signature"/);
   assert.match(signatureSurface, /formattingControllerRef=\{signatureEditorControllerRef\}/);
   assert.match(signatureSurface, /eagerEditorImageHydration/);
+  assert.match(homeParts, /editorImageAttachmentContext={composeEditorImageAttachmentContext}[\s\S]*eagerEditorImageHydration/);
+  assert.match(signaturePanel, /aria-pressed={signatureEditorMode === "edit"}/);
+  assert.match(signaturePanel, /aria-pressed={signatureEditorMode === "preview"}/);
+  assert.match(signatureSurface, /editable={signatureEditorMode === "edit"}/);
+  const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
+  assert.match(homeStyles, /mailComposeSignatureTextareaStyle[\s\S]*height: 240[\s\S]*minHeight: 180/);
   assert.match(homeParts, /signatureEditorImageAttachmentContext/);
   assert.match(homeParts, /resourceType: "email_signature"/);
   assert.match(signaturePanel, /signatureEditorControllerRef\.current\?\.flush\(\)/);

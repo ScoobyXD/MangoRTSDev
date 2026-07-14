@@ -75,18 +75,28 @@ test("local Seen events do not reload Updates, while external same-company event
     eventCompanyID: "company-a",
     source: localSeenSource,
     localSeenSource,
+    summaryOnlySource: "realtime-accepted-summary",
   }), false);
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-b",
     source: "",
     localSeenSource,
+    summaryOnlySource: "realtime-accepted-summary",
+  }), false);
+  assert.equal(updatesNotificationEventRequiresReload({
+    activeCompanyID: "company-a",
+    eventCompanyID: "company-a",
+    source: "realtime-accepted-summary",
+    localSeenSource,
+    summaryOnlySource: "realtime-accepted-summary",
   }), false);
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-a",
     source: "realtime",
     localSeenSource,
+    summaryOnlySource: "realtime-accepted-summary",
   }), true);
 });
 

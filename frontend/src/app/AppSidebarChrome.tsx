@@ -45,7 +45,7 @@ import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
-import { HomeSavedViewsSidebarSection } from "../pages/home/HomeSavedViewsSidebar";
+import { HomeSavedViewsSidebarSection, selectBuiltInHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -1247,7 +1247,10 @@ export function AppSidebar({
             { key: "updates-other", label: "*", count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} other updates`, showZero: true },
           ]} />}
           elevated
-          onClick={() => onHomeViewSelect("updates")}
+          onClick={() => {
+            selectBuiltInHomeSavedView("updates", companyID, currentUserID);
+            onHomeViewSelect("updates");
+          }}
         />
         <HomeSavedViewsSidebarSection
           apiBase={apiBase}

@@ -19,6 +19,7 @@ import {
   fetchUpdateBranch,
   fetchUpdateRootGroups,
   EVENT_NOTIFICATIONS_UPDATED,
+  NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
   NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
   NOTIFICATION_TYPE_MENTION,
   NOTIFICATION_TYPE_URGENT_MENTION,
@@ -33,6 +34,14 @@ import { getUniversalStatusGroupValue } from "../../modules/grouping/universalSt
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import {
+  DEFAULT_UPDATE_GROUPINGS,
+  normalizeUpdateGroupingStack,
+  withBuiltInUpdateGroupingSetting,
+  type UpdateGroupingDirection,
+  type UpdateGroupingField,
+  type UpdateGroupingSetting,
+} from "./updatesGrouping";
 import {
   resolveCurrentUpdateLogicGateGroupValue,
   resolveCurrentUpdateLogicGateLabel,
@@ -70,14 +79,7 @@ type UpdatesViewProps = {
   resolveUserLabel?: (userID: string) => string;
 };
 
-type UpdateGroupingField = "type" | "date" | "gvic" | "project" | "logic_gate" | "status";
 type UpdateDisplayGroupingField = UpdateGroupingField;
-type UpdateGroupingDirection = "asc" | "desc";
-
-type UpdateGroupingSetting = {
-  field: UpdateGroupingField;
-  direction: UpdateGroupingDirection;
-};
 
 type UpdateDisplayGroupingSetting = {
   field: UpdateDisplayGroupingField;
@@ -144,21 +146,6 @@ const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; ti
   { value: "all", label: "All", title: "All updates" },
 ];
 
-const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label: string }> = [
-  { value: "type", label: "Update Type" },
-  { value: "date", label: "Date" },
-  { value: "gvic", label: "GVIC" },
-  { value: "project", label: "Project" },
-  { value: "logic_gate", label: "Logic Gate" },
-  { value: "status", label: "Status" },
-];
-
-const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
-  { field: "project", direction: "asc" },
-  { field: "logic_gate", direction: "asc" },
-];
-
-const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
@@ -202,6 +189,8 @@ export function UpdatesView({
   const notificationRefreshTimerRef = useRef<number | null>(null);
   const canonicalLoadInFlightRef = useRef(false);
   const notificationReloadQueuedRef = useRef(false);
+  const canonicalLoadScopeRef = useRef("");
+  const displayGroupingSignatureRef = useRef("");
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -209,12 +198,17 @@ export function UpdatesView({
       const detail = (event as CustomEvent<{ surface?: string; settingID?: string }>).detail;
       if (detail?.surface !== "updates") return;
       const settingID = detail.settingID?.trim() ?? "";
-      if (settingID) setSelectedSettingID(settingID);
+      if (settingID) {
+        setSelectedSettingID(settingID);
+      } else {
+        setSelectedSettingID(fallbackSetting.setting_id);
+        clearUpdatesSelectedViewID(companyID, currentUserID);
+      }
       setSavedViewsReloadToken((value) => value + 1);
     };
     window.addEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
     return () => window.removeEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
-  }, []);
+  }, [companyID, currentUserID, fallbackSetting.setting_id]);
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
@@ -227,14 +221,14 @@ export function UpdatesView({
     void fetchSavedViews({ apiBase, companyID, surface: "updates" }).then((savedViews) => {
       if (cancelled) return;
       const next = savedViewsToUpdateSettings(savedViews, fallbackSetting, currentUserID);
-      const settingsForState = next.length > 0 ? next : [fallbackSetting];
+      const settingsForState = withBuiltInUpdateGroupingSetting(fallbackSetting, next);
       const preferredSettingID = readUpdatesSelectedViewID(companyID, currentUserID);
       const nextSelectedSettingID = settingsForState.find((setting) => setting.setting_id === preferredSettingID)?.setting_id
-        ?? settingsForState[0]?.setting_id
-        ?? "";
+        ?? fallbackSetting.setting_id;
       setSettings(settingsForState);
       setSelectedSettingID(nextSelectedSettingID);
-      if (nextSelectedSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSelectedSettingID);
+      if (nextSelectedSettingID === fallbackSetting.setting_id) clearUpdatesSelectedViewID(companyID, currentUserID);
+      else storeUpdatesSelectedViewID(companyID, currentUserID, nextSelectedSettingID);
     }).catch((nextError) => {
       if (cancelled) return;
       setSettings([fallbackSetting]);
@@ -248,8 +242,9 @@ export function UpdatesView({
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
     const nextSettingID = settings[0]?.setting_id ?? "";
     setSelectedSettingID(nextSettingID);
-    if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
-  }, [companyID, currentUserID, selectedSettingID, settings]);
+    if (nextSettingID === fallbackSetting.setting_id) clearUpdatesSelectedViewID(companyID, currentUserID);
+    else if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
+  }, [companyID, currentUserID, fallbackSetting.setting_id, selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
 
@@ -303,26 +298,38 @@ export function UpdatesView({
     if (!companyID.trim()) {
       canonicalLoadInFlightRef.current = false;
       notificationReloadQueuedRef.current = false;
+      canonicalLoadScopeRef.current = "";
       setRootGroups([]);
       setBranchByRootID({});
       setExpandedGroupIDs(new Set());
       return;
     }
     let cancelled = false;
-    setLoadingRoots(true);
+    const scopeKey = `${companyID.trim()}\u0000${filter}`;
+    const preserveVisibleState = canonicalLoadScopeRef.current === scopeKey;
+    canonicalLoadScopeRef.current = scopeKey;
+    setLoadingRoots(!preserveVisibleState);
     canonicalLoadInFlightRef.current = true;
     setError("");
-    setBranchByRootID({});
-    setBranchLoadingIDs(new Set());
-    setExpandedGroupIDs(new Set());
+    if (!preserveVisibleState) {
+      setBranchByRootID({});
+      setBranchLoadingIDs(new Set());
+      setExpandedGroupIDs(new Set());
+    }
     void fetchUpdateRootGroups({ companyID, filter })
       .then(async (roots) => {
         if (cancelled) return;
-        setRootGroups(roots);
-        if (roots.length === 0) return;
+        if (roots.length === 0) {
+          setRootGroups([]);
+          setBranchByRootID({});
+          if (!preserveVisibleState) setExpandedGroupIDs(new Set());
+          return;
+        }
         const rootIDs = roots.map((root) => root.id);
-        setExpandedGroupIDs(new Set(rootIDs));
-        setBranchLoadingIDs(new Set(rootIDs));
+        if (!preserveVisibleState) {
+          setExpandedGroupIDs(new Set(rootIDs));
+          setBranchLoadingIDs(new Set(rootIDs));
+        }
         const branchResults = await Promise.allSettled(roots.map(async (root) => ({
           rootID: root.id,
           branch: await fetchUpdateBranch({ companyID, filter, rootID: root.id }),
@@ -334,17 +341,28 @@ export function UpdatesView({
           if (result.status === "fulfilled") nextBranches[result.value.rootID] = result.value.branch;
           else failed = true;
         }
-        setBranchByRootID(nextBranches);
-        const nextExpanded = new Set<string>();
-        for (const branch of Object.values(nextBranches)) {
-          for (const groupID of collectUpdateGroupIDs(branch)) nextExpanded.add(groupID);
+        setRootGroups(roots);
+        setBranchByRootID((current) => {
+          if (!preserveVisibleState || !failed) return nextBranches;
+          const mergedBranches: Record<string, UpdateGroup> = {};
+          for (const root of roots) {
+            const branch = nextBranches[root.id] ?? current[root.id];
+            if (branch) mergedBranches[root.id] = branch;
+          }
+          return mergedBranches;
+        });
+        if (!preserveVisibleState) {
+          const nextExpanded = new Set<string>();
+          for (const branch of Object.values(nextBranches)) {
+            for (const groupID of collectUpdateGroupIDs(branch)) nextExpanded.add(groupID);
+          }
+          setExpandedGroupIDs(nextExpanded.size > 0 ? nextExpanded : new Set(rootIDs));
         }
-        setExpandedGroupIDs(nextExpanded.size > 0 ? nextExpanded : new Set(rootIDs));
         if (failed) setError("Failed to load some Updates");
       })
       .catch((nextError) => {
         if (cancelled) return;
-        setRootGroups([]);
+        if (!preserveVisibleState) setRootGroups([]);
         setError(nextError instanceof Error ? nextError.message : "Failed to load Updates");
       })
       .finally(() => {
@@ -374,6 +392,7 @@ export function UpdatesView({
         eventCompanyID: detail?.companyID,
         source: detail?.source,
         localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
+        summaryOnlySource: NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
       })) return;
       if (notificationRefreshTimerRef.current !== null) window.clearTimeout(notificationRefreshTimerRef.current);
       notificationRefreshTimerRef.current = window.setTimeout(() => {
@@ -407,12 +426,15 @@ export function UpdatesView({
   );
   const visibleNotifications = useMemo(() => visibleUpdateRows.map((row) => row.item), [visibleUpdateRows]);
   const groupingSignature = useMemo(() => JSON.stringify({
+    companyID,
+    filter,
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
-    rows: updateRows.map((row) => row.rowKey).sort(),
-  }), [selectedSetting.groupings, selectedSetting.setting_id, updateRows]);
+  }), [companyID, filter, selectedSetting.groupings, selectedSetting.setting_id]);
 
   useEffect(() => {
+    if (displayGroups.length === 0 || displayGroupingSignatureRef.current === groupingSignature) return;
+    displayGroupingSignatureRef.current = groupingSignature;
     const nextExpanded = new Set<string>();
     for (const group of displayGroups) {
       for (const groupID of collectUpdateGroupIDs(group)) nextExpanded.add(groupID);
@@ -1558,6 +1580,14 @@ function getUpdateGroupValues(
   }
   if (field === "type") return [updateTypeGroupValue(row.item)];
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
+  if (field === "priority") {
+    const nodeID = row.node?.id.trim() ?? "";
+    const priority = updatePriorityValue(nodeID ? resolveNodeDetails?.(nodeID)?.priority : null);
+    const option = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((item) => item.value === String(priority));
+    return option
+      ? [{ key: `priority:${option.value}`, label: option.label.replace(/\u00a0/g, " "), sortValue: Number(option.value) }]
+      : [{ key: "priority:none", label: "No priority", sortValue: 99, sortLast: true }];
+  }
   if (field === "status") {
     const nodeID = row.node?.id.trim() ?? "";
     const status = updateRowStatusLabel(row, nodeID ? resolveNodeDetails?.(nodeID) : null);
@@ -1628,20 +1658,10 @@ function storeUpdatesSelectedViewID(companyID: string, userID: string, settingID
   } catch {}
 }
 
-function normalizeUpdateGroupingStack(value: unknown): UpdateGroupingSetting[] {
-  if (!Array.isArray(value)) return [...DEFAULT_UPDATE_GROUPINGS];
-  const out: UpdateGroupingSetting[] = [];
-  const seen = new Set<UpdateGroupingField>();
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const candidate = item as { field?: unknown; direction?: unknown };
-    if (typeof candidate.field !== "string" || !UPDATE_GROUPING_FIELD_SET.has(candidate.field as UpdateGroupingField)) continue;
-    const field = candidate.field as UpdateGroupingField;
-    if (seen.has(field)) continue;
-    seen.add(field);
-    out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
-  }
-  return out;
+function clearUpdatesSelectedViewID(companyID: string, userID: string): void {
+  try {
+    localStorage.removeItem(updatesSelectedViewStorageKey(companyID, userID));
+  } catch {}
 }
 
 function updateGVICRoleLabel(role: string): string {
@@ -1672,7 +1692,7 @@ function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: st
     principal: "user",
     principal_id: currentUserID.trim(),
     name: "Updates",
-    groupings: [...DEFAULT_UPDATE_GROUPINGS],
+    groupings: DEFAULT_UPDATE_GROUPINGS.map((grouping) => ({ ...grouping })),
     panel_collapsed: true,
     position: 1000,
     created_timestamp: now,

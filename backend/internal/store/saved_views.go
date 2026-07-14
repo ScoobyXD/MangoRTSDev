@@ -20,6 +20,7 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		"type":       true,
 		"date":       true,
 		"gvic":       true,
+		"priority":   true,
 		"project":    true,
 		"logic_gate": true,
 		"status":     true,

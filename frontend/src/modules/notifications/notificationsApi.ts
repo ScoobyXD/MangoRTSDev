@@ -4,6 +4,7 @@ export type NotificationGVICRole = "generated" | "verified" | "consulted" | "inf
 export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
 
 export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
+export const NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED = "realtime-accepted-summary";
 export const NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN = "updates-local-seen";
 const LOCAL_NOTIFICATION_ECHO_TTL_MS = 10_000;
 

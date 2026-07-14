@@ -345,27 +345,28 @@ function editorHasFocus(element: HTMLElement): boolean {
 
 function locateTextRangeBoundary(root: HTMLElement, targetOffset: number): TextRangeBoundary {
   const target = Math.max(0, Math.trunc(targetOffset));
-  let currentOffset = 0;
 
   const walk = (parent: Node): TextRangeBoundary | null => {
     for (let index = 0; index < parent.childNodes.length; index += 1) {
       const child = parent.childNodes[index];
       if (child.nodeType === Node.TEXT_NODE) {
         const length = child.textContent?.length ?? 0;
-        if (target <= currentOffset + length) {
+        const startOffset = getSelectionPointDocumentOffset(root, child, 0);
+        const endOffset = getSelectionPointDocumentOffset(root, child, length);
+        if (startOffset !== null && endOffset !== null && target >= startOffset && target <= endOffset) {
           return {
             container: child,
-            offset: Math.max(0, Math.min(length, target - currentOffset)),
+            offset: Math.max(0, Math.min(length, target - startOffset)),
           };
         }
-        currentOffset += length;
         continue;
       }
       if (child instanceof HTMLElement && child.tagName === "BR") {
-        if (target <= currentOffset + 1) {
-          return { container: parent, offset: index + (target > currentOffset ? 1 : 0) };
+        const startOffset = getSelectionPointDocumentOffset(root, parent, index);
+        const endOffset = getSelectionPointDocumentOffset(root, parent, index + 1);
+        if (startOffset !== null && endOffset !== null && target >= startOffset && target <= endOffset) {
+          return { container: parent, offset: index + (target > startOffset ? 1 : 0) };
         }
-        currentOffset += 1;
         continue;
       }
       const nested = walk(child);
@@ -405,7 +406,9 @@ function getSelectionPointDocumentOffset(root: HTMLElement, container: Node | nu
   try {
     range.selectNodeContents(root);
     range.setEnd(container, offset);
-    return range.toString().length;
+    const fragmentRoot = root.ownerDocument.createElement("div");
+    fragmentRoot.appendChild(range.cloneContents());
+    return readEditorDocumentText(fragmentRoot).length;
   } catch {
     return null;
   }
@@ -1060,16 +1063,17 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       : range.commonAncestorContainer.parentElement;
     if (commonElement?.closest('[data-floating-selection-actions="disabled"]')) return null;
     if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
-    const rawSelectedText = range.toString();
+    const rawStartOffset = getSelectionPointDocumentOffset(editor, range.startContainer, range.startOffset);
+    const rawEndOffset = getSelectionPointDocumentOffset(editor, range.endContainer, range.endOffset);
+    if (rawStartOffset === null || rawEndOffset === null || rawEndOffset <= rawStartOffset) return null;
+    const documentText = readEditorDocumentText(editor);
+    const rawSelectedText = documentText.slice(rawStartOffset, rawEndOffset);
     const leadingTrim = rawSelectedText.length - rawSelectedText.trimStart().length;
     const selectedText = rawSelectedText.trim();
     if (!selectedText) return null;
 
-    const beforeRange = range.cloneRange();
-    beforeRange.selectNodeContents(editor);
-    beforeRange.setEnd(range.startContainer, range.startOffset);
-    const documentTextLength = readEditorDocumentText(editor).length;
-    const startOffset = Math.max(0, Math.min(beforeRange.toString().length + leadingTrim, documentTextLength));
+    const documentTextLength = documentText.length;
+    const startOffset = Math.max(0, Math.min(rawStartOffset + leadingTrim, documentTextLength));
     const endOffset = Math.max(startOffset, Math.min(startOffset + selectedText.length, documentTextLength));
     if (endOffset <= startOffset) return null;
 

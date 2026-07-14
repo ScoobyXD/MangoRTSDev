@@ -316,6 +316,7 @@ import {
   type NodeEditorOverlayState,
   type OverlayResizeState,
 } from "./KanbanContentModel";
+import { shouldResetNodeEditorOverlayViewMode } from "./nodeEditorOverlayViewMode";
 
 const KANBAN_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 1, label: "1  URGENT(<1hr)" },
@@ -755,7 +756,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const openNodeEditorOverlay = useCallback((nodeID: string, nodeTitle: string, notifyRoute = true) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
-    restoreNodeEditorOverlayRatio();
+    if (shouldResetNodeEditorOverlayViewMode(nodeEditorOverlay, cleanNodeID)) restoreNodeEditorOverlayRatio();
     const cleanNodeTitle = humanLabelOrFallback(nodeTitle, cleanNodeID);
     setNodeEditorOverlay((current) => (
       current?.nodeID === cleanNodeID && current.nodeTitle === cleanNodeTitle
@@ -763,7 +764,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         : { nodeID: cleanNodeID, nodeTitle: cleanNodeTitle }
     ));
     if (notifyRoute) onNodeEditorOverlayOpen?.(cleanNodeID);
-  }, [onNodeEditorOverlayOpen, restoreNodeEditorOverlayRatio]);
+  }, [nodeEditorOverlay, onNodeEditorOverlayOpen, restoreNodeEditorOverlayRatio]);
 
   const closeNodeEditorOverlay = useCallback((notifyRoute = true) => {
     restoreNodeEditorOverlayRatio();

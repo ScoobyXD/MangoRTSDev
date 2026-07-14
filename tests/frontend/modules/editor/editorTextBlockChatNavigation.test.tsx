@@ -155,6 +155,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       message({ id: "comment-beta", selectionQuote: "beta", selectionStart: 6, selectionEnd: 10, message: "Beta note" }),
     ];
     const activatedMessageIDs: string[] = [];
+    const selectionRequests: Array<{ quote: string; startOffset: number; endOffset: number }> = [];
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
     const root = createRoot(container);
@@ -185,7 +186,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         onDocumentFlush={noop}
         onChangeSeen={noop}
         onChatHighlightActivate={(messageID) => activatedMessageIDs.push(messageID)}
-        onSelectionChatRequest={noop}
+        onSelectionChatRequest={(selection) => selectionRequests.push(selection)}
         onImageChatRequest={noop}
         onImageNodeRequest={noop}
       />,
@@ -231,6 +232,77 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       }));
     });
     assert.deepEqual(activatedMessageIDs, ["comment-beta"], "range selection must not be hijacked by comment navigation");
+
+    await act(async () => {
+      dom.window.document.dispatchEvent(new dom.window.Event("selectionchange"));
+      await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    });
+    const ordinaryCommentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Comment on selection"]');
+    assert.ok(ordinaryCommentButton, "an ordinary inline selection exposes the comment action");
+    await act(async () => ordinaryCommentButton.click());
+    assert.deepEqual(
+      selectionRequests.map(({ quote, startOffset, endOffset }) => ({ quote, startOffset, endOffset })),
+      [{ quote: "alpha", startOffset: 0, endOffset: 5 }],
+    );
+
+    await act(async () => root.render(
+      <NodeTextBlockEditor
+        blockID="block-2"
+        editable
+        nodeID="node-1"
+        apiBase=""
+        companyID="company-1"
+        currentUserID="user-1"
+        companyUsers={[]}
+        documentValue="<!-- mango-editor-html-v1 --><div>alpha</div><div>beta</div>"
+        contentChanges={[]}
+        chatMessages={[]}
+        activeChatAnchorMessageID=""
+        chatNavigationRequest={null}
+        surfaceText="#111827"
+        accent="#7c3aed"
+        outlineStyle="automatic-outline-numbering"
+        indentGuideColor="#94a3b8"
+        scrollbarTrack="#e2e8f0"
+        onFocus={noop}
+        onBlur={noop}
+        onDocumentChange={noop}
+        onDocumentFlush={noop}
+        onChangeSeen={noop}
+        onChatHighlightActivate={noop}
+        onSelectionChatRequest={(nextSelection) => selectionRequests.push(nextSelection)}
+        onImageChatRequest={noop}
+        onImageNodeRequest={noop}
+      />,
+    ));
+    const wrappedEditor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-2"]');
+    assert.ok(wrappedEditor);
+    await flushFrames();
+    wrappedEditor.innerHTML = "<div>alpha</div><div>beta</div>";
+    const lineTextNodes = Array.from(wrappedEditor.querySelectorAll("div"))
+      .map((line) => line.firstChild)
+      .filter((node): node is ChildNode => Boolean(node?.textContent));
+    const firstLine = lineTextNodes.find((node) => node.textContent === "alpha");
+    const secondLine = lineTextNodes.find((node) => node.textContent === "beta");
+    assert.ok(firstLine);
+    assert.ok(secondLine);
+    const wrappedSelection = dom.window.document.createRange();
+    wrappedSelection.setStart(firstLine, 0);
+    wrappedSelection.setEnd(secondLine, secondLine.textContent?.length ?? 0);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(wrappedSelection);
+    await act(async () => {
+      dom.window.document.dispatchEvent(new dom.window.Event("selectionchange"));
+      await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    });
+    const wrappedCommentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Comment on selection"]');
+    assert.ok(wrappedCommentButton, "a visually wrapped multi-line selection exposes the comment action");
+    await act(async () => wrappedCommentButton.click());
+    const wrappedRequest = selectionRequests[1];
+    assert.deepEqual(
+      wrappedRequest && { quote: wrappedRequest.quote, startOffset: wrappedRequest.startOffset, endOffset: wrappedRequest.endOffset },
+      { quote: "alpha\nbeta", startOffset: 0, endOffset: 10 },
+    );
 
     const threadedMessages = [
       message({ id: "parent", message: "Parent comment" }),

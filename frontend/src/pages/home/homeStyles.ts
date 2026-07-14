@@ -1641,8 +1641,9 @@ export const mailComposeSignatureBoxStyle: React.CSSProperties = {
 
 export const mailComposeSignatureTextareaStyle: React.CSSProperties = {
   ...mailPanelTextareaStyle,
-  height: 78,
-  minHeight: 66,
+  height: 240,
+  minHeight: 180,
+  maxHeight: "min(44vh, 420px)",
 };
 
 export const mailComposeOriginalStyle: React.CSSProperties = {

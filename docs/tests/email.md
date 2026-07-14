@@ -112,6 +112,8 @@ EMAIL83 - A canceled caller waiting on a same-key backend folder/page/detail pro
 EMAIL84 - The exact-account read-receipt cutover handles legacy personal summaries explicitly. A legacy `receipt_scope_id = user_id` row is merged into `user_id:normalized_account_email` only when that user has exactly one stored personal email connection; existing exact rows retain the strongest status, complete signal history, and timestamp bounds. Zero-account or multi-account legacy rows are deleted as an intentional ambiguous-history reset rather than retained as unreachable shadow data. The repair is a new idempotent forward migration that sorts before the separately committed legacy drop on fresh installs and still runs when that drop is already ledgered.
 EMAIL85 - A signed shared-mailbox webhook is acknowledged only after exact cache invalidation and either successful current-audience publication or a legitimate no-subscriber/no-authorized-recipient result. Resource-existence or audience lookup failure is retryable: webhook deduplication is released and the handler returns failure so the provider may redeliver. A retried `message.opened` payload retains its first receipt timestamp, and an identical signal timestamp cannot increment the stored receipt twice. Publication-time authorization is deadline-bound, limited to locally subscribed users, and remains fail-closed.
 EMAIL86 - Draft attachment preparation and the subsequent upload/link form one per-draft mutation lease. Empty-draft cleanup may run after concurrent work only when the last lease ends and every mutation in that group failed; one failed inline image must never delete a durable draft another upload/link still uses, and a successful mutation prevents later failure cleanup from deleting its resource.
+EMAIL87 - A multi-message email detail exposes a clear conversation-order control with Newest first as the default and Oldest first as the alternate. Ordering is deterministic, changes only presentation order, preserves exact-message actions/body loading and expansion state, and does not alter provider/thread identity or mailbox list ordering.
+EMAIL88 - Personal-account and shared-inbox signatures use a practical-height unified editor with explicit Edit and Preview modes. Durable signature-image references survive sanitization and insertion, and the signature editor, preview, and compose body eagerly hydrate those images through the existing authenticated `email_signature`/draft attachment paths without public URLs or raw stored bytes.
 
 ## Scenarios
 
@@ -559,3 +561,20 @@ Expected:
 - Singleton history merges into the normalized exact account with strongest status and complete timestamp/signal bounds. Ambiguous or orphan broad rows are deleted, and rerunning the migration is safe.
 - Legitimate zero-recipient publication is acknowledged. Audience timeout/error releases webhook deduplication and returns failure so the same delivery can retry without double-counting an already-stored `message.opened` signal.
 - Empty-draft cleanup runs once only after the last all-failed lease. Any successful upload/link prevents a sibling failure from deleting that durable draft.
+
+### Scenario EMAIL-S20: Conversation Order And Signature Image Preview
+
+Business logic covered:
+- EMAIL80
+- EMAIL87
+- EMAIL88
+
+Given:
+- A conversation has several sent and received messages with deterministic timestamps.
+- The exact mailbox signature includes a durable Mango attachment image.
+
+Expected:
+- The detail opens Newest first, the user can select Oldest first, and exact-message actions/loading remain attached to the same messages.
+- Opening signature settings provides a practical editor plus explicit sanitized Preview, and switching modes does not change mailbox scope or saved content.
+- The signature image appears in settings preview and after insertion into compose through authenticated eager hydration.
+- No signature path stores public object URLs, data URLs, provider secrets, or attachment bytes in the rich body.

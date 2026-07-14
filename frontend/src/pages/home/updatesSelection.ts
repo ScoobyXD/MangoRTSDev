@@ -58,8 +58,11 @@ export function updatesNotificationEventRequiresReload(input: {
   eventCompanyID?: string;
   source?: string;
   localSeenSource: string;
+  summaryOnlySource?: string;
 }): boolean {
   const eventCompanyID = input.eventCompanyID?.trim() ?? "";
   if (eventCompanyID && eventCompanyID !== input.activeCompanyID.trim()) return false;
-  return (input.source?.trim() ?? "") !== input.localSeenSource.trim();
+  const source = input.source?.trim() ?? "";
+  const summaryOnlySource = input.summaryOnlySource?.trim() ?? "";
+  return source !== input.localSeenSource.trim() && (!summaryOnlySource || source !== summaryOnlySource);
 }
