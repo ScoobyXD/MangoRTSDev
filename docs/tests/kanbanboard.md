@@ -23,7 +23,7 @@ KB6 - Generic Kanban board card APIs remain node-card APIs. Logic Gate work stat
 KB7 - Deleting a node from Kanban uses node soft-delete semantics: the actor must have edit access to the node, the node moves to that actor's Recycle Bin, and Kanban card placements plus Logic Gate Kanban projection rows are removed.
 KB8 - Deleting a Logic Gate removes the Logic Gate Kanban board/work placements owned by that Logic Gate.
 KB9 - Logic Gate Kanban board reads must be permission-filtered by the owning Logic Gate.
-KB10 - Users without view access to the owning Logic Gate must not receive card rows, `kanban.changed` hints, saved board state, or card metadata for that Logic Gate board.
+KB10 - Users without current View access to the existing same-company owning Logic Gate must not receive card rows, `kanban.changed` hints, saved board state, or card metadata. Admission proves resource existence separately from any administrator override, and every publication re-resolves the exact current View audience so revocation after subscription suppresses later hints without reconnecting.
 
 ### Columns, Status, And Card State
 
@@ -104,7 +104,7 @@ KB72 - A requested card can still show `from: {person} {date/time}` in the foote
 KB73 - Search filters cards before subgrouping is built.
 KB74 - Account filters cards before subgrouping is built.
 KB75 - Subgroup headers should reflect only the cards currently visible after search and account filters.
-KB76 - After a committed card-visible change, the backend publishes one compact `kanban.changed` hint only to the affected mounted `board:{board_id}` scope; card metadata remains in the canonical board response.
+KB76 - After a committed card-visible change, the backend publishes one compact `kanban.changed` hint only to currently authorized subscribers of the affected mounted `board:{board_id}` scope; card metadata remains in the canonical board response.
 KB77 - A `kanban.changed` hint for card placement, title, priority, due date, issue state, accounts, requested-by, placed-by, creation timestamp, or column structure coalesces one canonical mounted-board refresh without a full page refresh.
 KB78 - First mounted-board subscription acceptance, reconnect acceptance, and `kanban.changed` hints use one active targeted canonical board refresh plus at most one queued final refresh; they never overlap or abort/restart the active read. A later local board handler joining the accepted shared scope receives immediate acceptance. There is no projection sequence, replay log, or gap protocol.
 
@@ -129,11 +129,11 @@ KB94 - Email-card transfer does not restore the email to My Triage and does not 
 KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
 KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox, including when the email is dropped onto a Company Explorer Logic Gate row; the created card belongs to the Logic Gate/Kanban work path, not Company Explorer placement storage, and the visible email-origin marker and transfer behavior are the same after creation.
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
-KB98 - When a local email-to-Logic-Gate conversion has updated the board from the POST response, local command-result reconciliation updates Home once; no communications/workspace WebSocket event or broad cache invalidation is emitted, and the source mail row remains visible with patched Logic Gate icon state.
+KB98 - When a local email-to-Logic-Gate conversion has updated the board from the POST response, local command-result reconciliation updates Home once; the command emits no broad conversion/workspace WebSocket event or broad cache invalidation, and the source mail row remains visible with patched Logic Gate icon state. A later exact-mailbox provider update remains independently eligible for canonical reconciliation.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
 KB100 - Node editor popups opened from Kanban mount through the shared body-level modal layer above Key Views, Explorer, Search Explorer, and board-local stacking contexts. They expose a fullscreen toggle in the popup header; fullscreen changes the same mounted editor to browser-viewport geometry while preserving the previous board-relative popup size and position for restoration.
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
-KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
+KB102 - Direct email-to-Kanban column drops use the same exact-mailbox triage drag payload and Home conversion reconciliation event as Company Explorer email drops. Personal drops retain normalized `account_email`; shared drops retain `shared_inbox_id` and suppress personal identity, so source rows, local freshness suppression, Logic Gate icons, and unstarred state reconcile only in the source mailbox.
 KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
 KB104 - After a direct email-to-Kanban column drop succeeds, the created node opens in the normal node popup.
 
@@ -462,11 +462,13 @@ Expected:
 - If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
 - The created attached-email projection records `account_email` and, for Shared Triage, `shared_inbox_id` so later node email actions retain the source mailbox scope.
-- No workspace or communications WebSocket event is emitted, and local command-result reconciliation does not force a broad Home reload after the response updated the board.
+- The conversion command emits no broad workspace or communications WebSocket event, and local command-result reconciliation does not force a broad Home reload after the response updated the board; a later exact-mailbox provider update remains independently eligible for canonical reconciliation.
 
 ### Scenario KB-S10: Cache-First Single-Flight Arena Load And Realtime Reconciliation
 
 Business logic covered:
+- KB10
+- KB76
 - KB109
 - KB110
 - KB111
@@ -487,7 +489,7 @@ Business logic covered:
 Given:
 - Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching current-selection event.
 - The user quickly selects Logic Gate B and may then return to A.
-- The board subscription is first accepted, compact hints arrive while a canonical read is slow, the socket later reconnects, and another local board handler may join the accepted scope.
+- The board subscription is first accepted, compact hints arrive while a canonical read is slow, the socket later reconnects, another local board handler may join the accepted scope, and one legitimately subscribed viewer then loses owning-Logic-Gate View access.
 - The same Node is renamed successfully from Kanban while other title-bearing surfaces are mounted.
 - An ordinary `node_updated` is published once with no local board subscriber and once with a relevant mounted board subscriber.
 
@@ -496,6 +498,7 @@ Expected:
 - Forced-prop and current-selection paths do not create a second request or duplicate snapshot application.
 - Selecting B aborts A's obsolete request; an old A response cannot overwrite B or a newer A generation.
 - First/reconnect/late-handler acceptance and hints use one active guarded loader plus at most one queued final request; the canonical response refreshes rendered and cached minimal cards, including `created_from_email`.
+- Publication resolves the current exact owning-Logic-Gate View audience; the revoked subscriber receives no later hint while still-authorized mounted viewers do.
 - The no-subscriber publish does not query Kanban projection rows; the mounted-board case preserves exact affected-board lookup and delivery.
 - Each successful Kanban Node/owning-Logic-Gate title rename publishes one committed-title event and non-edited mounted labels converge without changing dirty editor text or an active title draft/caret.
 - Duplicate acceptance/hint work does not create concurrent or abort/restarted `/work` requests.

@@ -73,7 +73,7 @@ test("parses retained product and scoped mailbox message families", () => {
   const mailboxMessage = parseRealtimeMessage(JSON.stringify({
     type: "mailbox.message.changed",
     company_id: "company-1",
-    scope: "mailbox:personal:user:user-1",
+    scope: "mailbox:personal:account:user-1:owner@example.com",
     trigger: "message.created",
     message_id: "message-2",
     thread_id: "thread-1",
@@ -102,9 +102,12 @@ test("allows only narrow notification, mailbox, node-chat, and board scope famil
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
-  assert.equal(isSupportedRealtimeScope("mailbox:personal:user:user-1"), true);
+  assert.equal(isSupportedRealtimeScope("mailbox:personal:account:user-1:owner@example.com"), true);
   assert.equal(isSupportedRealtimeScope("mailbox:shared:shared-1"), true);
-  assert.equal(realtimePersonalMailboxScope(" user-1 "), "mailbox:personal:user:user-1");
+  assert.equal(realtimePersonalMailboxScope(" user-1 ", " OWNER@example.com "), "mailbox:personal:account:user-1:owner@example.com");
+  assert.equal(realtimePersonalMailboxScope("user-1", ""), "");
+  assert.equal(isSupportedRealtimeScope("mailbox:personal:user:user-1"), false);
+  assert.equal(isSupportedRealtimeScope("mailbox:personal:account:user-1:not-an-email"), false);
   assert.equal(realtimeSharedMailboxScope(" shared-1 "), "mailbox:shared:shared-1");
   assert.equal(isSupportedRealtimeScope("workspace:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("communications:user:user-1"), false);
@@ -178,12 +181,12 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     const unsubNotifications = client.subscribe("notifications:user:user-1", { onAccepted: () => { notificationAcceptances += 1; }, onNotificationCreated: () => { notifications += 1; } });
     const unsubChat = client.subscribe("chat:node:node-1", { onAccepted: () => { chatAcceptances += 1; }, onChatMessageCreated: () => { chat += 1; } });
     const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onKanbanChanged: () => { board += 1; } });
-    const unsubMailbox = client.subscribe("mailbox:personal:user:user-1", { onMailboxMessageChanged: () => { mailbox += 1; } });
+    const unsubMailbox = client.subscribe("mailbox:personal:account:user-1:owner@example.com", { onMailboxMessageChanged: () => { mailbox += 1; } });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 
     assert.equal(sockets.length, 1);
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
-    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:user:user-1", "notifications:user:user-1"]);
+    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
 
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
@@ -246,7 +249,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "kanban.changed", company_id: "company-1", scope: "board:logic-gate:gate-1", board_id: "logic-gate:gate-1" }) });
-    sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:user:user-1", trigger: "message.created", message_id: "mail-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:account:user-1:owner@example.com", trigger: "message.created", message_id: "mail-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:other", node_id: "other", block_id: "block-1", message_id: "m-2" }) });
 
     assert.equal(notifications, 1);
@@ -268,7 +271,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     client.ensureOpen();
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
     assert.equal(sockets.length, 2);
-    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:user:user-1", "notifications:user:user-1"]);
+    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
@@ -368,6 +371,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     "gvic_matrix:user:",
     "project_management:user:",
     "communications:user:",
+    "mailbox:personal:user:",
     "editor:node:",
     "editor:logic_gate:",
     "projection.delta",

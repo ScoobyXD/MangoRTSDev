@@ -45,17 +45,19 @@ function pin(kind: SidebarPin["kind"], id: string): SidebarPin {
 describe("sidebar pin drops", () => {
   it("routes triage message drops only to node and Logic Gate pins", () => {
     const transfer = dataTransfer();
-    transfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: ["message-1", "message-1", "message-2"] }));
+    transfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: ["message-1", "message-1", "message-2"], account_email: " OWNER@Example.TEST " }));
 
     const logicGateAction = readSidebarPinnedResourceDropAction(pin("logic_gate", "gate-1"), transfer);
     assert.deepEqual(logicGateAction && {
       kind: logicGateAction.kind,
       logicGateID: "logicGateID" in logicGateAction ? logicGateAction.logicGateID : "",
       messageIDs: "messageIDs" in logicGateAction ? logicGateAction.messageIDs : [],
+      accountEmail: "accountEmail" in logicGateAction ? logicGateAction.accountEmail : undefined,
     }, {
       kind: "triage_to_logic_gate",
       logicGateID: "gate-1",
       messageIDs: ["message-1", "message-2"],
+      accountEmail: "owner@example.test",
     });
 
     const nodeAction = readSidebarPinnedResourceDropAction(pin("node", "node-1"), transfer);
@@ -63,10 +65,12 @@ describe("sidebar pin drops", () => {
       kind: nodeAction.kind,
       nodeID: "nodeID" in nodeAction ? nodeAction.nodeID : "",
       messageIDs: "messageIDs" in nodeAction ? nodeAction.messageIDs : [],
+      accountEmail: "accountEmail" in nodeAction ? nodeAction.accountEmail : undefined,
     }, {
       kind: "triage_to_node",
       nodeID: "node-1",
       messageIDs: ["message-1", "message-2"],
+      accountEmail: "owner@example.test",
     });
 
     assert.equal(sidebarPinAcceptsPinnedResourceDrop(pin("project", "project-1"), transfer), false);

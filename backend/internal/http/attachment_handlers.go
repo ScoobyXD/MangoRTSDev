@@ -401,25 +401,19 @@ func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *
 func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
 	if resourceType == "email_draft" {
-		parsed, ok := parseEmailScopedAttachmentResourceID(resourceType, resourceID)
-		if !ok {
+		actor, ok := authenticatedActor(r)
+		if !ok || actorRoleForCompany(actor, companyID) == "" {
 			return false, nil
 		}
-		if parsed.scope == "personal" {
-			actor, ok := authenticatedActor(r)
-			if !ok || actorRoleForCompany(actor, companyID) == "" {
-				return false, nil
-			}
-			return s.canViewEmailScopedAttachmentResource(companyID, strings.TrimSpace(actor.User.UserID), resourceType, resourceID)
-		}
+		return s.canViewEmailDraftAttachmentResource(actor, companyID, resourceID)
 	}
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
 		return true, nil
 	}
 	switch resourceType {
-	case "email_draft", "email_message":
-		return s.canViewEmailScopedAttachmentResource(companyID, userID, resourceType, resourceID)
+	case "email_message":
+		return s.canViewEmailMessageAttachmentResource(companyID, userID, resourceID)
 	case "email_signature":
 		return s.canViewEmailSignatureAttachmentResource(companyID, userID, resourceID)
 	case "attached_email":
@@ -477,12 +471,12 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 			return false
 		}
 		if resourceType == "email_draft" {
-			accountFound, err := s.personalEmailAttachmentAccountExists(parsed.userID, parsed.accountEmail)
+			draftFound, err := s.emailDraftAttachmentResourceExists(companyID, parsed)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_check_email_account")
+				writeError(w, http.StatusInternalServerError, "failed_to_check_email_draft")
 				return false
 			}
-			if !accountFound {
+			if !draftFound {
 				writeAccessResourceNotFound(w)
 				return false
 			}
@@ -497,48 +491,118 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 		writeError(w, http.StatusConflict, "shared_inbox_not_mailbox")
 		return false
 	}
+	if resourceType == "email_draft" {
+		draftFound, err := s.emailDraftAttachmentResourceExists(companyID, parsed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_email_draft")
+			return false
+		}
+		if !draftFound {
+			writeAccessResourceNotFound(w)
+			return false
+		}
+	}
 	return true
 }
 
-func (s *Server) canViewEmailScopedAttachmentResource(companyID, userID, resourceType, resourceID string) (bool, error) {
-	resourceType = store.NormalizeAttachmentResourceType(resourceType)
-	parsed, ok := parseEmailScopedAttachmentResourceID(resourceType, resourceID)
+func (s *Server) canViewEmailMessageAttachmentResource(companyID, userID, resourceID string) (bool, error) {
+	parsed, ok := parseEmailScopedAttachmentResourceID("email_message", resourceID)
 	if !ok {
 		return false, nil
 	}
 	if parsed.scope == "personal" {
-		if userID != parsed.userID {
-			return false, nil
-		}
-		if resourceType == "email_draft" {
-			return s.personalEmailAttachmentAccountExists(parsed.userID, parsed.accountEmail)
-		}
-		return true, nil
+		return userID == parsed.userID, nil
 	}
 	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
 }
 
-func (s *Server) personalEmailAttachmentAccountExists(userID, accountEmail string) (bool, error) {
-	accountEmail = normalizeEmailForCompare(accountEmail)
-	if accountEmail == "" {
-		// Legacy personal draft links predate account-scoped resource IDs. They
-		// remain readable by their exact owner while new links always carry the
-		// account segment.
-		return true, nil
+func (s *Server) canViewEmailDraftAttachmentResource(actor ActorContext, companyID, resourceID string) (bool, error) {
+	parsed, ok := parseEmailScopedAttachmentResourceID("email_draft", resourceID)
+	if !ok {
+		return false, nil
 	}
-	connections, err := s.repo.ListUserEmailConnections(strings.TrimSpace(userID))
+	if parsed.scope == "personal" {
+		if strings.TrimSpace(actor.User.UserID) != parsed.userID {
+			return false, nil
+		}
+		return s.emailDraftAttachmentResourceExists(companyID, parsed)
+	}
+
+	folder, err := s.loadCommunicationsSharedInboxFolder(companyID, parsed.sharedInboxID)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
+		return false, nil
+	}
+	draftFound, err := s.emailDraftAttachmentResourceExists(companyID, parsed)
+	if err != nil || !draftFound {
+		return false, err
+	}
+	if actorCanManageCompany(actor, companyID) {
+		return true, nil
+	}
+	return s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+}
+
+func (s *Server) emailDraftAttachmentResourceExists(companyID string, parsed emailScopedAttachmentResource) (bool, error) {
+	if parsed.scope == "shared" {
+		return s.communicationsEmailDraftExists(store.CommunicationsEmailDraftGetInput{
+			CompanyID: companyID, DraftID: parsed.itemID, SharedInboxID: parsed.sharedInboxID,
+		})
+	}
+
+	connections, err := s.repo.ListUserEmailConnections(strings.TrimSpace(parsed.userID))
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	accountEmails := make(map[string]struct{}, len(connections))
 	for _, connection := range connections {
-		if normalizeEmailForCompare(connection.AccountEmail) == accountEmail {
+		accountEmail := normalizeEmailForCompare(connection.AccountEmail)
+		if accountEmail != "" {
+			accountEmails[accountEmail] = struct{}{}
+		}
+	}
+	if parsed.accountEmail != "" {
+		if _, ok := accountEmails[parsed.accountEmail]; !ok {
+			return false, nil
+		}
+		return s.communicationsEmailDraftExists(store.CommunicationsEmailDraftGetInput{
+			CompanyID: companyID, DraftID: parsed.itemID, PersonalUserID: parsed.userID, PersonalAccountEmail: parsed.accountEmail,
+		})
+	}
+
+	// Accountless personal IDs are legacy read compatibility only. Resolve them
+	// against the owner's current accounts and still require one exact live draft.
+	for accountEmail := range accountEmails {
+		found, err := s.communicationsEmailDraftExists(store.CommunicationsEmailDraftGetInput{
+			CompanyID: companyID, DraftID: parsed.itemID, PersonalUserID: parsed.userID, PersonalAccountEmail: accountEmail,
+		})
+		if err != nil {
+			return false, err
+		}
+		if found {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (s *Server) communicationsEmailDraftExists(input store.CommunicationsEmailDraftGetInput) (bool, error) {
+	_, err := s.repo.GetCommunicationsEmailDraft(input)
+	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Server) requireEmailSignatureAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {

@@ -207,6 +207,7 @@ function dispatchKanbanBoardContentsUpdated(detail: KanbanBoardContentsUpdatedDe
 export async function archiveHomeMailMessagesCommand(args: {
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   messageIDs: string[];
   archiveEmailMessage?: HomeArchiveEmailMessage;
   archiveEmailMessagesBatch?: HomeArchiveEmailMessagesBatch;
@@ -216,13 +217,18 @@ export async function archiveHomeMailMessagesCommand(args: {
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
   if (args.archiveEmailMessage && !args.archiveEmailMessagesBatch) {
     const archiveEmailMessage = args.archiveEmailMessage;
-    await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID)));
+    const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+    await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID, accountEmail)));
     return { messageIDs };
   }
   const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
   let result: ArchiveEmailMessagesBatchResult;
   try {
-    result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID, { background: true });
+    result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID, {
+      background: true,
+      accountEmail,
+    });
   } catch (archiveError) {
     const error = archiveError instanceof Error ? archiveError.message : "archive_failed";
     throw new Error(error);
@@ -243,6 +249,7 @@ export async function archiveHomeMailMessagesCommand(args: {
 export async function unarchiveHomeMailMessagesCommand(args: {
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   messageIDs: string[];
   unarchiveEmailMessage?: HomeUnarchiveEmailMessage;
 }): Promise<HomeMailMessagesCommandResult | null> {
@@ -250,13 +257,15 @@ export async function unarchiveHomeMailMessagesCommand(args: {
   if (messageIDs.length === 0) return null;
   const unarchiveEmailMessage = args.unarchiveEmailMessage ?? defaultUnarchiveEmailMessage;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
-  await Promise.all(messageIDs.map((messageID) => unarchiveEmailMessage(messageID, sharedInboxID, args.companyID)));
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+  await Promise.all(messageIDs.map((messageID) => unarchiveEmailMessage(messageID, sharedInboxID, args.companyID, accountEmail)));
   return { messageIDs };
 }
 
 export async function deleteHomeMailMessagesCommand(args: {
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   messageIDs: string[];
   deleteEmailMessage?: HomeDeleteEmailMessage;
 }): Promise<HomeMailMessagesCommandResult | null> {
@@ -264,13 +273,15 @@ export async function deleteHomeMailMessagesCommand(args: {
   if (messageIDs.length === 0) return null;
   const deleteEmailMessage = args.deleteEmailMessage ?? defaultDeleteEmailMessage;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
-  await Promise.all(messageIDs.map((messageID) => deleteEmailMessage(messageID, sharedInboxID, args.companyID)));
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+  await Promise.all(messageIDs.map((messageID) => deleteEmailMessage(messageID, sharedInboxID, args.companyID, accountEmail)));
   return { messageIDs };
 }
 
 export async function updateHomeMailMessageCommand(args: {
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   messageID: string;
   update: HomeMailMessageUpdate;
   updateEmailMessage?: HomeUpdateEmailMessage;
@@ -278,7 +289,9 @@ export async function updateHomeMailMessageCommand(args: {
   const messageID = args.messageID.trim();
   if (!messageID) return null;
   const updateEmailMessage = args.updateEmailMessage ?? defaultUpdateEmailMessage;
-  const message = await updateEmailMessage(messageID, args.update, args.sharedInboxID?.trim() || undefined, args.companyID);
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+  const message = await updateEmailMessage(messageID, args.update, sharedInboxID, args.companyID, accountEmail);
   return { message };
 }
 
@@ -327,6 +340,7 @@ export async function sendHomeMailComposeCommand(args: {
     input.shared_inbox_id = cleanSharedInboxID;
   }
   const cleanConnectedAccountEmail = args.connectedAccountEmail?.trim().toLowerCase() ?? "";
+  if (cleanConnectedAccountEmail && !cleanSharedInboxID) input.account_email = cleanConnectedAccountEmail;
   const sentToConnectedAccount = !!cleanConnectedAccountEmail && [...to, ...cc, ...bcc].some((address) => (
     address.email.trim().toLowerCase() === cleanConnectedAccountEmail
   ));
@@ -807,6 +821,7 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
   priority: number;
@@ -828,6 +843,7 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
   const convertTriageMessagesToExplorerTarget = args.convertTriageMessagesToExplorerTarget ?? defaultConvertTriageMessagesToExplorerTarget;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
   const conversionInput: Parameters<HomeConvertTriageMessagesToExplorerTarget>[0] = {
     companyID,
     target: args.target,
@@ -835,6 +851,7 @@ export async function convertMessagesToExplorerTargetCommand(args: {
     priority,
   };
   if (sharedInboxID) conversionInput.sharedInboxID = sharedInboxID;
+  if (accountEmail) conversionInput.accountEmail = accountEmail;
   const result = await convertTriageMessagesToExplorerTarget(conversionInput);
 
   const targetLogicGateID = explorerTargetLogicGateID(args.target);
@@ -874,6 +891,7 @@ export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   logicGateID: string;
   nodeID?: string;
   messageIDs: string[];
@@ -904,6 +922,8 @@ export async function convertMessagesToLogicGateCommand(args: {
   };
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
   if (sharedInboxID) conversionInput.sharedInboxID = sharedInboxID;
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+  if (accountEmail) conversionInput.accountEmail = accountEmail;
   if (nodeID) conversionInput.nodeID = nodeID;
   const result = await convertTriageMessagesToLogicGate(conversionInput);
   const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);

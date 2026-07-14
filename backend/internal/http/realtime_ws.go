@@ -21,13 +21,23 @@ import (
 )
 
 const (
-	webSocketGUID                      = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	maxRealtimeMessageBytes            = 1 << 20
-	realtimeWebSocketWriteTimeout      = 2 * time.Second
-	webSocketOpcodeText           byte = 0x1
-	webSocketOpcodeClose          byte = 0x8
-	webSocketOpcodePing           byte = 0x9
-	webSocketOpcodePong           byte = 0xA
+	webSocketGUID                              = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxRealtimeMessageBytes                    = 1 << 20
+	maxRealtimeScopeBytes                      = 384
+	maxRealtimeSubscriptionsPerConnection      = 16
+	realtimeWebSocketWriteTimeout              = 2 * time.Second
+	webSocketOpcodeText                   byte = 0x1
+	webSocketOpcodeClose                  byte = 0x8
+	webSocketOpcodePing                   byte = 0x9
+	webSocketOpcodePong                   byte = 0xA
+)
+
+const (
+	realtimeNotificationScopePrefix    = "notifications:user:"
+	realtimePersonalMailboxScopePrefix = "mailbox:personal:account:"
+	realtimeSharedMailboxScopePrefix   = "mailbox:shared:"
+	realtimeChatScopePrefix            = "chat:node:"
+	realtimeBoardScopePrefix           = "board:"
 )
 
 const (
@@ -284,6 +294,10 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Error: "scope_required"})
 		return
 	}
+	if len(scope) > maxRealtimeScopeBytes {
+		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Error: "scope_too_long"})
+		return
+	}
 	authorized, rejectCode, err := s.authorizeRealtimeSubscription(conn.actor, conn.companyID, scope)
 	if err != nil {
 		log.Printf("failed to authorize realtime subscription company_id=%s user_id=%s scope=%s: %v", conn.companyID, conn.userID, scope, err)
@@ -295,7 +309,10 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: rejectCode})
 		return
 	}
-	s.realtimeRegistry.subscribe(conn, scope)
+	if !s.realtimeRegistry.subscribeWithinLimit(conn, scope, maxRealtimeSubscriptionsPerConnection) {
+		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: "subscription_limit_exceeded"})
+		return
+	}
 	s.recordRealtimeActiveSubscriptions()
 	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope)
 	_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionAccepted, CompanyID: conn.companyID, Scope: scope})
@@ -311,11 +328,23 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
-	if userID := realtimePersonalMailboxUserIDFromScope(scope); userID != "" {
+	if userID, accountEmail := realtimePersonalMailboxIdentityFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
 		}
-		return true, "", nil
+		connections, err := s.repo.ListUserEmailConnections(userID)
+		if err != nil {
+			return false, "", err
+		}
+		for _, connection := range connections {
+			if strings.TrimSpace(connection.UserID) == userID &&
+				normalizeEmailForCompare(connection.AccountEmail) == accountEmail &&
+				strings.TrimSpace(connection.Status) == "connected" &&
+				strings.TrimSpace(connection.GrantID) != "" {
+				return true, "", nil
+			}
+		}
+		return false, "resource_not_found", nil
 	}
 	if sharedInboxID := realtimeSharedMailboxIDFromScope(scope); sharedInboxID != "" {
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
@@ -330,10 +359,20 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
 	}
+	if realtimeKnownScopePrefix(scope) {
+		return false, "invalid_scope", nil
+	}
 	return false, "unsupported_scope", nil
 }
 
 func (s *Server) authorizeRealtimeEntityScope(actor ActorContext, companyID, resourceType, resourceID, permission string) (bool, string, error) {
+	exists, err := s.realtimeEntityExists(companyID, resourceType, resourceID)
+	if err != nil {
+		return false, "", err
+	}
+	if !exists {
+		return false, "resource_not_found", nil
+	}
 	if actorCanManageCompany(actor, companyID) {
 		return true, "", nil
 	}
@@ -351,49 +390,99 @@ func (s *Server) authorizeRealtimeEntityScope(actor ActorContext, companyID, res
 	return true, "", nil
 }
 
+func (s *Server) realtimeEntityExists(companyID, resourceType, resourceID string) (bool, error) {
+	var err error
+	switch resourceType {
+	case store.EntityTypeNode:
+		_, err = s.repo.GetNode(companyID, resourceID)
+	case store.EntityTypeLogicGate:
+		_, err = s.repo.GetLogicGate(companyID, resourceID)
+	case store.EntityTypeSharedInbox:
+		item, loadErr := s.repo.GetCommunicationsSharedInboxFolder(companyID, resourceID)
+		if loadErr == nil {
+			return store.CommunicationsSharedInboxResourceType(item) == store.EntityTypeSharedInbox, nil
+		}
+		err = loadErr
+	default:
+		return false, store.ErrInvalid
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func realtimeBoardScope(boardID string) string {
-	return realtimeResourceScope("board:", boardID)
+	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+	if !isCanonicalUUID(logicGateID) {
+		return ""
+	}
+	return realtimeBoardScopePrefix + store.LogicGateKanbanBoardID(logicGateID)
 }
 
 func realtimeBoardIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, "board:")
+	scope = strings.TrimSpace(scope)
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, realtimeBoardScopePrefix) {
+		return ""
+	}
+	boardID := strings.TrimSpace(strings.TrimPrefix(scope, realtimeBoardScopePrefix))
+	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+	if !isCanonicalUUID(logicGateID) || scope != realtimeBoardScope(boardID) {
+		return ""
+	}
+	return boardID
 }
 
 func realtimeChatScope(nodeID string) string {
-	return realtimeResourceScope("chat:node:", nodeID)
+	return realtimeResourceScope(realtimeChatScopePrefix, nodeID)
 }
 
 func realtimeChatNodeIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, "chat:node:")
+	return realtimeResourceIDFromScope(scope, realtimeChatScopePrefix)
 }
 
 func realtimeNotificationScope(userID string) string {
-	return realtimeResourceScope("notifications:user:", userID)
+	return realtimeResourceScope(realtimeNotificationScopePrefix, userID)
 }
 
 func realtimeNotificationUserIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, "notifications:user:")
+	return realtimeResourceIDFromScope(scope, realtimeNotificationScopePrefix)
 }
 
-func realtimePersonalMailboxScope(userID string) string {
-	return realtimeResourceScope("mailbox:personal:user:", userID)
+func realtimePersonalMailboxScope(userID, accountEmail string) string {
+	userID = strings.TrimSpace(userID)
+	accountEmail = normalizeEmailForCompare(accountEmail)
+	if !isCanonicalUUID(userID) || !isRealtimeAccountEmail(accountEmail) {
+		return ""
+	}
+	return realtimePersonalMailboxScopePrefix + userID + ":" + accountEmail
 }
 
-func realtimePersonalMailboxUserIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, "mailbox:personal:user:")
+func realtimePersonalMailboxIdentityFromScope(scope string) (string, string) {
+	scope = strings.TrimSpace(scope)
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, realtimePersonalMailboxScopePrefix) {
+		return "", ""
+	}
+	identity := strings.TrimPrefix(scope, realtimePersonalMailboxScopePrefix)
+	userID, accountEmail, ok := strings.Cut(identity, ":")
+	accountEmail = normalizeEmailForCompare(accountEmail)
+	if !ok || !isCanonicalUUID(userID) || !isRealtimeAccountEmail(accountEmail) || scope != realtimePersonalMailboxScope(userID, accountEmail) {
+		return "", ""
+	}
+	return userID, accountEmail
 }
 
 func realtimeSharedMailboxScope(sharedInboxID string) string {
-	return realtimeResourceScope("mailbox:shared:", sharedInboxID)
+	return realtimeResourceScope(realtimeSharedMailboxScopePrefix, sharedInboxID)
 }
 
 func realtimeSharedMailboxIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, "mailbox:shared:")
+	return realtimeResourceIDFromScope(scope, realtimeSharedMailboxScopePrefix)
 }
 
 func realtimeResourceScope(prefix, resourceID string) string {
 	resourceID = strings.TrimSpace(resourceID)
-	if resourceID == "" {
+	if !isCanonicalUUID(resourceID) {
 		return ""
 	}
 	return prefix + resourceID
@@ -401,25 +490,62 @@ func realtimeResourceScope(prefix, resourceID string) string {
 
 func realtimeResourceIDFromScope(scope, prefix string) string {
 	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, prefix) {
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, prefix) {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, prefix))
+	resourceID := strings.TrimSpace(strings.TrimPrefix(scope, prefix))
+	if !isCanonicalUUID(resourceID) || scope != prefix+resourceID {
+		return ""
+	}
+	return resourceID
+}
+
+func isRealtimeAccountEmail(accountEmail string) bool {
+	if accountEmail == "" || len(accountEmail) > 254 || accountEmail != normalizeEmailForCompare(accountEmail) || strings.Count(accountEmail, "@") != 1 {
+		return false
+	}
+	at := strings.IndexByte(accountEmail, '@')
+	if at <= 0 || at == len(accountEmail)-1 {
+		return false
+	}
+	for _, char := range accountEmail {
+		if char <= 0x20 || char == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func realtimeKnownScopePrefix(scope string) bool {
+	for _, prefix := range []string{
+		realtimeNotificationScopePrefix,
+		realtimePersonalMailboxScopePrefix,
+		realtimeSharedMailboxScopePrefix,
+		realtimeChatScopePrefix,
+		realtimeBoardScopePrefix,
+	} {
+		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func realtimeScopeType(scope string) string {
-	switch {
-	case realtimeNotificationUserIDFromScope(scope) != "":
+	if realtimeNotificationUserIDFromScope(scope) != "" {
 		return "notifications"
-	case realtimePersonalMailboxUserIDFromScope(scope) != "", realtimeSharedMailboxIDFromScope(scope) != "":
-		return "mailbox"
-	case realtimeChatNodeIDFromScope(scope) != "":
-		return "chat"
-	case realtimeBoardIDFromScope(scope) != "":
-		return "board"
-	default:
-		return ""
 	}
+	personalUserID, _ := realtimePersonalMailboxIdentityFromScope(scope)
+	if personalUserID != "" || realtimeSharedMailboxIDFromScope(scope) != "" {
+		return "mailbox"
+	}
+	if realtimeChatNodeIDFromScope(scope) != "" {
+		return "chat"
+	}
+	if realtimeBoardIDFromScope(scope) != "" {
+		return "board"
+	}
+	return ""
 }
 
 func (s *Server) recordRealtimeActiveConnections() {

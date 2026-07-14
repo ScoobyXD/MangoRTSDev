@@ -400,6 +400,7 @@ test("convertTriageMessagesToKanbanColumnCommand targets a Logic Gate column", a
     columnID: " review ",
     messageIDs: [" msg-1 ", "msg-1", "msg-2"],
     sharedInboxID: " shared-1 ",
+    accountEmail: "ignored@example.test",
     priority: 4,
     client,
   });
@@ -411,6 +412,22 @@ test("convertTriageMessagesToKanbanColumnCommand targets a Logic Gate column", a
     target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
     messageIDs: ["msg-1", "msg-2"],
     priority: 4,
+    columnID: "review",
+  });
+
+  await convertTriageMessagesToKanbanColumnCommand({
+    context: { ...context, boardID: logicGateKanbanBoardID("gate-1") },
+    columnID: "review",
+    messageIDs: ["msg-3"],
+    accountEmail: " SECOND@Example.TEST ",
+    client,
+  });
+  assert.deepEqual(calls.convertTriageMessagesToExplorerTarget[1], {
+    companyID: "company-1",
+    accountEmail: "second@example.test",
+    target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
+    messageIDs: ["msg-3"],
+    priority: undefined,
     columnID: "review",
   });
 });

@@ -208,7 +208,7 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 
 Communications invitation response:
 
-- `POST /v1/communications/calendar-invites/respond?company_id={uuid}&shared_inbox_id={uuid}` accepts an authorized source `message_id` and `yes`, `maybe`, or `no`; `shared_inbox_id` is omitted for personal mail. The backend resolves raw iCalendar data and the message UID to exactly one provider event; callers do not supply grant, calendar, or provider event IDs.
+- `POST /v1/communications/calendar-invites/respond?company_id={uuid}&shared_inbox_id={uuid}` accepts an authorized source `message_id` and `yes`, `maybe`, or `no`. Shared-mailbox calls carry the exact `shared_inbox_id` and suppress the personal selector; personal calls omit `shared_inbox_id` and carry the selected normalized lowercase `account_email` query parameter. The backend authorizes that exact mailbox identity, resolves raw iCalendar data and the message UID to exactly one provider event, and does not accept grant, calendar, or provider event IDs from callers.
 
 - `GET /healthz`
 - `POST /v1/nodes`

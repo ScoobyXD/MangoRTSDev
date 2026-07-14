@@ -157,6 +157,7 @@ type SidebarExplorerTriagePriorityMenuState = {
   target: Parameters<CompanyExplorerTriageMessageDropHandler>[0];
   messageIDs: string[];
   sharedInboxID?: string;
+  accountEmail?: string;
 };
 
 type SidebarPinTriageDropAction = Extract<SidebarPinnedResourceDropAction, { kind: "triage_to_logic_gate" | "triage_to_node" }>;
@@ -393,7 +394,15 @@ export function AppSidebar({
   const requestExplorerTriageMessageDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point, source) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    setExplorerTriagePriorityMenu({ target, messageIDs: ids, sharedInboxID: source?.sharedInboxID?.trim() || undefined, x: point.x, y: point.y });
+    const sharedInboxID = source?.sharedInboxID?.trim() || undefined;
+    setExplorerTriagePriorityMenu({
+      target,
+      messageIDs: ids,
+      sharedInboxID,
+      accountEmail: sharedInboxID ? undefined : source?.accountEmail?.trim().toLowerCase() || undefined,
+      x: point.x,
+      y: point.y,
+    });
   }, []);
 
   const pickExplorerTriagePriority = useCallback(async (priority: number) => {
@@ -414,11 +423,13 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: menu.messageIDs,
         sharedInboxID: menu.sharedInboxID,
+        accountEmail: menu.accountEmail,
       });
       const conversion = await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
         sharedInboxID: menu.sharedInboxID,
+        accountEmail: menu.accountEmail,
         target,
         messageIDs: menu.messageIDs,
         priority,
@@ -428,6 +439,7 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,
+        accountEmail: menu.accountEmail,
         logicGateID: conversion?.logicGateID || (target.mode === "existing_logic_gate" ? target.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
         boardIDs: [
@@ -497,11 +509,13 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: menu.action.messageIDs,
         sharedInboxID: menu.action.sharedInboxID,
+        accountEmail: menu.action.accountEmail,
       });
       const conversion = await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
         sharedInboxID: menu.action.sharedInboxID,
+        accountEmail: menu.action.accountEmail,
         target,
         messageIDs: menu.action.messageIDs,
         priority,
@@ -511,6 +525,7 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.action.sharedInboxID,
+        accountEmail: menu.action.accountEmail,
         logicGateID: conversion?.logicGateID || (menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
         boardIDs: [

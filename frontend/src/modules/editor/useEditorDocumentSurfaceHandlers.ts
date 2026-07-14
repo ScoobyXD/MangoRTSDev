@@ -8,6 +8,7 @@ import {
   type AttachmentRequestJSON,
   type MangoAttachmentResourceType,
 } from "../attachments/attachmentApi";
+import { withPreparedEditorAttachmentResource } from "./editorAttachmentPreparation";
 import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
 import {
@@ -189,6 +190,7 @@ export type EditorImageAttachmentContext = {
   resourceID: string;
   informationID?: string;
   editorSurface?: string;
+  prepareResource?: () => Promise<void>;
   onError?: (message: string) => void;
 };
 
@@ -1120,7 +1122,7 @@ async function attachUploadedEditorImageData(
   context: EditorImageAttachmentContext | undefined,
 ): Promise<EditorImageData> {
   if (!editorImageAttachmentContextReady(context)) throw new Error("editor_image_attachment_context_unavailable");
-  const uploaded = await uploadMangoAttachment(context.requestJSON, {
+  const uploaded = await withPreparedEditorAttachmentResource(context.prepareResource, () => uploadMangoAttachment(context.requestJSON, {
     companyID: context.companyID,
     resourceType: context.resourceType,
     resourceID: context.resourceID,
@@ -1129,7 +1131,7 @@ async function attachUploadedEditorImageData(
     relationshipKind: "inline_image",
     informationID: context.informationID,
     editorSurface: context.editorSurface,
-  });
+  }));
   const attachment = uploaded.attachment;
   let displaySrc = imageData.src;
   try {
@@ -1194,18 +1196,19 @@ async function insertEditorClipboardImageData(
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
   if (clipboardData.attachmentID) {
+    const attachmentID = clipboardData.attachmentID;
     if (!editorImageAttachmentContextReady(editorImageAttachmentContext)) {
       throw new Error("editor_image_attachment_context_unavailable");
     }
-    await linkMangoResourceAttachment(editorImageAttachmentContext.requestJSON, {
+    await withPreparedEditorAttachmentResource(editorImageAttachmentContext.prepareResource, () => linkMangoResourceAttachment(editorImageAttachmentContext.requestJSON, {
       companyID: editorImageAttachmentContext.companyID,
       resourceType: editorImageAttachmentContext.resourceType,
       resourceID: editorImageAttachmentContext.resourceID,
-      attachmentID: clipboardData.attachmentID,
+      attachmentID,
       relationshipKind: "inline_image",
       informationID: editorImageAttachmentContext.informationID,
       editorSurface: editorImageAttachmentContext.editorSurface,
-    });
+    }));
     let displaySrc = clipboardData.src;
     try {
       displaySrc = await loadMangoAttachmentObjectURL(

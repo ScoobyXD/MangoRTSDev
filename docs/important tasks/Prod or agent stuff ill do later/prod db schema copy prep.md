@@ -2,6 +2,8 @@
 
 This is a prepare-only manifest. It does not apply SQL to prod.
 
+Update 2026-07-13: `communications_message_read_statuses` is a superseded user-wide mail-receipt table. `20260713_drop_legacy_communications_message_read_statuses.sql` removes it after the earlier receipt-summary migration; do not copy or recreate it. Personal receipt summaries are now isolated by exact user and normalized account identity.
+
 Update 2026-07-12: the inventory below is a historical 2026-07-07 snapshot. Current canonical schema plus `20260712_realtime_simplification.sql` remove `event_rows`, `company_projection_sequences`, and `notification_domain_event_projection_checkpoints`; do not recreate or copy those objects during a future prod migration.
 
 Update 2026-07-07T06:37:00Z: DBeaver comparison found prod was missing `communications_email_node_attachments`, `project_critical_path_steps`, `project_management_timeline_items`, and `project_management_timeline_projection` even though their migrations were marked applied. `backend/db/schema.sql` was repaired to include those canonical objects and `projects.health`; `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql` is the durable migration record. The temporary DBeaver repair SQL was promoted into `backend/db/migrations/` and should not remain as a separate runnable SQL source under `docs/infra`.

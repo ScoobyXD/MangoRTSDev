@@ -5,6 +5,8 @@ import (
 	"sync"
 )
 
+const realtimePublishFanoutLimit = 16
+
 type realtimeScopeKey struct {
 	companyID string
 	scope     string
@@ -12,9 +14,16 @@ type realtimeScopeKey struct {
 
 type realtimeSubscriptionRegistry struct {
 	mu               sync.RWMutex
+	publishLocksMu   sync.Mutex
+	publishLocks     map[realtimeScopeKey]*realtimeScopePublishLock
 	connections      map[string]*realtimeConnection
 	connectionScopes map[string]map[realtimeScopeKey]struct{}
 	scopeConnections map[realtimeScopeKey]map[string]*realtimeConnection
+}
+
+type realtimeScopePublishLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type realtimePublishResult struct {
@@ -24,9 +33,32 @@ type realtimePublishResult struct {
 
 func newRealtimeSubscriptionRegistry() *realtimeSubscriptionRegistry {
 	return &realtimeSubscriptionRegistry{
+		publishLocks:     map[realtimeScopeKey]*realtimeScopePublishLock{},
 		connections:      map[string]*realtimeConnection{},
 		connectionScopes: map[string]map[realtimeScopeKey]struct{}{},
 		scopeConnections: map[realtimeScopeKey]map[string]*realtimeConnection{},
+	}
+}
+
+func (r *realtimeSubscriptionRegistry) lockPublishScope(companyID, scope string) func() {
+	key := realtimeScopeKey{companyID: strings.TrimSpace(companyID), scope: strings.TrimSpace(scope)}
+	r.publishLocksMu.Lock()
+	lock := r.publishLocks[key]
+	if lock == nil {
+		lock = &realtimeScopePublishLock{}
+		r.publishLocks[key] = lock
+	}
+	lock.refs++
+	r.publishLocksMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		r.publishLocksMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && r.publishLocks[key] == lock {
+			delete(r.publishLocks, key)
+		}
+		r.publishLocksMu.Unlock()
 	}
 }
 
@@ -59,13 +91,17 @@ func (r *realtimeSubscriptionRegistry) removeConnection(connectionID string) {
 }
 
 func (r *realtimeSubscriptionRegistry) subscribe(conn *realtimeConnection, scope string) {
+	r.subscribeWithinLimit(conn, scope, 0)
+}
+
+func (r *realtimeSubscriptionRegistry) subscribeWithinLimit(conn *realtimeConnection, scope string, limit int) bool {
 	if r == nil || conn == nil {
-		return
+		return false
 	}
 	scope = strings.TrimSpace(scope)
 	companyID := strings.TrimSpace(conn.companyID)
 	if conn.id == "" || companyID == "" || scope == "" {
-		return
+		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -76,6 +112,12 @@ func (r *realtimeSubscriptionRegistry) subscribe(conn *realtimeConnection, scope
 		r.connectionScopes[conn.id] = scopes
 	}
 	key := realtimeScopeKey{companyID: companyID, scope: scope}
+	if _, exists := scopes[key]; exists {
+		return true
+	}
+	if limit > 0 && len(scopes) >= limit {
+		return false
+	}
 	scopes[key] = struct{}{}
 	bucket := r.scopeConnections[key]
 	if bucket == nil {
@@ -83,6 +125,7 @@ func (r *realtimeSubscriptionRegistry) subscribe(conn *realtimeConnection, scope
 		r.scopeConnections[key] = bucket
 	}
 	bucket[conn.id] = conn
+	return true
 }
 
 func (r *realtimeSubscriptionRegistry) unsubscribe(connectionID, companyID, scope string) {
@@ -146,6 +189,16 @@ func (r *realtimeSubscriptionRegistry) scopeSubscriptionCount(companyID, scope s
 	return len(r.scopeConnections[realtimeScopeKey{companyID: companyID, scope: scope}])
 }
 
+func (r *realtimeSubscriptionRegistry) connectionSubscriptionCount(connectionID string) int {
+	connectionID = strings.TrimSpace(connectionID)
+	if r == nil || connectionID == "" {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.connectionScopes[connectionID])
+}
+
 func (r *realtimeSubscriptionRegistry) hasSubscribers(companyID, scope string) bool {
 	return r.scopeSubscriptionCount(companyID, scope) > 0
 }
@@ -166,34 +219,71 @@ func (r *realtimeSubscriptionRegistry) hasScopeTypeSubscribers(companyID, scopeT
 	return false
 }
 
-func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload []byte) realtimePublishResult {
-	return r.publishMatching(companyID, scope, payload, nil)
+func (r *realtimeSubscriptionRegistry) publishUnlocked(companyID, scope string, payload []byte) realtimePublishResult {
+	return r.publishMatchingUnlocked(companyID, scope, payload, nil)
 }
 
-func (r *realtimeSubscriptionRegistry) publishToUsers(companyID, scope string, payload []byte, allowedUserIDs map[string]struct{}) realtimePublishResult {
+func (r *realtimeSubscriptionRegistry) publishToUsersUnlocked(companyID, scope string, payload []byte, allowedUserIDs map[string]struct{}) realtimePublishResult {
 	if len(allowedUserIDs) == 0 {
 		return realtimePublishResult{}
 	}
-	return r.publishMatching(companyID, scope, payload, func(conn *realtimeConnection) bool {
+	return r.publishMatchingUnlocked(companyID, scope, payload, func(conn *realtimeConnection) bool {
 		_, allowed := allowedUserIDs[strings.TrimSpace(conn.userID)]
 		return allowed
 	})
 }
 
-func (r *realtimeSubscriptionRegistry) publishMatching(companyID, scope string, payload []byte, matches func(*realtimeConnection) bool) realtimePublishResult {
+// publishMatchingUnlocked fans out one already-serialized exact-scope event.
+// Callers must hold the lock returned by lockPublishScope.
+func (r *realtimeSubscriptionRegistry) publishMatchingUnlocked(companyID, scope string, payload []byte, matches func(*realtimeConnection) bool) realtimePublishResult {
+	if r == nil {
+		return realtimePublishResult{}
+	}
 	connections := r.connectionsForScope(companyID, scope)
-	result := realtimePublishResult{}
+	targets := make([]*realtimeConnection, 0, len(connections))
 	for _, conn := range connections {
 		if conn == nil || (matches != nil && !matches(conn)) {
 			continue
 		}
-		if err := conn.sendText(payload); err != nil {
-			result.failed++
-			r.removeConnection(conn.id)
-			continue
-		}
-		result.delivered++
+		targets = append(targets, conn)
 	}
+	if len(targets) == 0 {
+		return realtimePublishResult{}
+	}
+
+	workerCount := len(targets)
+	if workerCount > realtimePublishFanoutLimit {
+		workerCount = realtimePublishFanoutLimit
+	}
+	jobs := make(chan *realtimeConnection)
+	var workers sync.WaitGroup
+	var resultMu sync.Mutex
+	result := realtimePublishResult{}
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			defer workers.Done()
+			for conn := range jobs {
+				delivered := true
+				if err := conn.sendText(payload); err != nil {
+					delivered = false
+					r.removeConnection(conn.id)
+				}
+				resultMu.Lock()
+				if delivered {
+					result.delivered++
+				} else {
+					result.failed++
+				}
+				resultMu.Unlock()
+			}
+		}()
+	}
+	for _, conn := range targets {
+		jobs <- conn
+	}
+	close(jobs)
+	workers.Wait()
 	return result
 }
 

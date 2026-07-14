@@ -4174,10 +4174,11 @@ function emailAttachmentIsCalendarInvite(attachment: EmailAttachment): boolean {
     || emailAttachmentFileName(attachment).toLowerCase().endsWith(".ics");
 }
 
-function CalendarInviteActions({ messageID, companyID, sharedInboxID, busy }: {
+function CalendarInviteActions({ messageID, companyID, sharedInboxID, accountEmail, busy }: {
   messageID: string;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   busy: boolean;
 }) {
   const [response, setResponse] = React.useState<CalendarInviteRSVPStatus | "">("");
@@ -4187,7 +4188,7 @@ function CalendarInviteActions({ messageID, companyID, sharedInboxID, busy }: {
     if (responding || busy) return;
     setResponding(true);
     setError("");
-    void respondToCalendarInvite({ messageID, status, companyID, sharedInboxID })
+    void respondToCalendarInvite({ messageID, status, companyID, sharedInboxID, accountEmail })
       .then(() => setResponse(status))
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Failed to respond to calendar invitation."))
       .finally(() => setResponding(false));
@@ -4375,11 +4376,12 @@ function AttachmentVisual({ filename, contentType, sourceURL, loading, failed }:
   );
 }
 
-function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }: {
+function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, accountEmail }: {
   messageID: string;
   attachment: EmailAttachment;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
 }) {
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
@@ -4425,7 +4427,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
     const controller = new AbortController();
     const previewPromise = mangoAttachmentID
       ? loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
-      : downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID).then((blob) => URL.createObjectURL(blob));
+      : downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail }).then((blob) => URL.createObjectURL(blob));
     void previewPromise
       .then((url) => {
         if (cancelled) {
@@ -4446,7 +4448,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       controller.abort();
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [apiBase, attachment, companyID, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID, shouldLoadPreview]);
+  }, [accountEmail, apiBase, attachment, companyID, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID, shouldLoadPreview]);
 
   const handleDownload = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4459,12 +4461,12 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       return;
     }
     if (!providerAttachmentID) return;
-    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID)
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail })
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         downloadURL(objectURL, filename, true);
       });
-  }, [apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
+  }, [accountEmail, apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   const handleOpen = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4480,12 +4482,12 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       return;
     }
     if (!providerAttachmentID) return;
-    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID)
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail })
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         openAttachmentURL(objectURL, filename, true);
       });
-  }, [apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
+  }, [accountEmail, apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   return (
     <div
@@ -4991,7 +4993,7 @@ function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecip
     .slice(0, 6);
 }
 
-export function ComposePanel({ compose, busy, replyMessage, emailSignature, emailSignatureAccountEmail, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, emailSignatureAccountEmail, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft, onEnsureDraft, onDiscardEmptyDraft }: {
   compose: ComposeState;
   busy: boolean;
   replyMessage?: EmailMessage | null;
@@ -5006,6 +5008,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: (signature: string) => void;
   onSaveDraft: (compose: ComposeState) => void;
+  onEnsureDraft: (compose: ComposeState) => Promise<ComposeState>;
+  onDiscardEmptyDraft: (compose: ComposeState) => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const bodyEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
@@ -5206,11 +5210,14 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       return;
     }
     try {
+      const preparedCompose = await onEnsureDraft({ ...compose, draftID: cleanDraftID });
+      const preparedSharedInboxID = preparedCompose.sharedInboxID.trim();
+      const preparedAccountEmail = preparedCompose.accountEmail.trim().toLowerCase();
       const resourceID = mangoEmailDraftResourceID({
         draftID: cleanDraftID,
         userID: currentUserID,
-        accountEmail: cleanAccountEmail,
-        sharedInboxID: cleanSharedInboxID,
+        accountEmail: preparedAccountEmail,
+        sharedInboxID: preparedSharedInboxID,
       });
       const results = await Promise.allSettled(selectedFiles.map(async (file) => {
         const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
@@ -5220,8 +5227,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           file,
           sourceKind: "email_outgoing",
           relationshipKind: "email_attachment",
-          messageID: compose.replyToMessageID.trim() || undefined,
-          editorSurface: cleanSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
+          messageID: preparedCompose.replyToMessageID.trim() || undefined,
+          editorSurface: preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
         });
         const attachment = uploaded.attachment;
         return {
@@ -5234,12 +5241,14 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       }));
       const additions = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
       if (additions.length > 0) update((current) => ({ draftID: cleanDraftID, attachments: [...current.attachments, ...additions] }));
+      else onDiscardEmptyDraft(preparedCompose);
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
       if (failures.length > 0) {
         const first = failures[0]?.reason;
         setAttachmentError(first instanceof Error ? first.message : `${failures.length} attachment upload${failures.length === 1 ? "" : "s"} failed.`);
       }
     } catch (attachError) {
+      onDiscardEmptyDraft({ ...compose, draftID: cleanDraftID });
       setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to upload attachment.");
     }
   };
@@ -5393,6 +5402,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       resourceType: "email_draft" as const,
       resourceID: composeAttachmentResourceID,
       editorSurface: composeEditorSurfaceID,
+      prepareResource: async () => {
+        await onEnsureDraft(compose);
+      },
+      onError: (message: string) => {
+        setAttachmentError(message);
+        onDiscardEmptyDraft(compose);
+      },
     }
     : undefined;
   const signatureAttachmentResourceID = React.useMemo(() => mangoEmailSignatureResourceID({
@@ -5803,7 +5819,7 @@ function emailMessageBodyIsLoaded(message: EmailMessage): boolean {
   return message.detail_fetched === true || typeof message.body === "string";
 }
 
-function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, enabled: boolean): { srcDoc: string } {
+function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, accountEmail: string | undefined, enabled: boolean): { srcDoc: string } {
   const apiBase = readAuthConfig().apiBase;
   const inlineAttachments = React.useMemo(
     () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
@@ -5829,7 +5845,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     }
     return sources;
   }, [inlineAttachments]);
-  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
+  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${sharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
   const [downloadedCIDState, setDownloadedSourceByContentID] = React.useState<{
     hydrationKey: string;
     sources: Record<string, string>;
@@ -5852,7 +5868,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
         if (mangoAttachmentID) {
           sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
         } else if (providerAttachmentID) {
-          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal });
+          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail });
           if (cancelled) return { keys, sourceURL: "" };
           sourceURL = URL.createObjectURL(blob);
         }
@@ -5880,7 +5896,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
       controller.abort();
       objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
     };
-  }, [apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+  }, [accountEmail, apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
 
   const srcDoc = React.useMemo(() => {
     if (!enabled) return "";
@@ -5892,10 +5908,11 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onLoadBody, onReply, onReplyAll, onForward }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onLoadBody, onReply, onReplyAll, onForward }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   fill: boolean;
   expanded: boolean;
   busy: boolean;
@@ -5917,7 +5934,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
   const hasAttachments = attachments.length > 0;
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
-  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded);
+  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, expanded && bodyLoaded);
   const showMessageMeta = !fill;
   const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
@@ -5991,6 +6008,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
                 attachment={attachment}
                 companyID={companyID}
                 sharedInboxID={sharedInboxID}
+                accountEmail={accountEmail}
               />
             ))}
           </div>
@@ -6001,6 +6019,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
           messageID={message.id}
           companyID={companyID}
           sharedInboxID={sharedInboxID}
+          accountEmail={accountEmail}
           busy={busy || !calendarResponseAvailable}
         />
       )}
@@ -6008,11 +6027,12 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   );
 }
 
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onLoadMessageBody, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onLoadMessageBody, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   loading: boolean;
   archiveAvailable: boolean;
   archiveLabel: string;
@@ -6133,6 +6153,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             message={conversationMessage}
             companyID={companyID}
             sharedInboxID={sharedInboxID}
+            accountEmail={accountEmail}
             fill={singleMessage}
             expanded={singleMessage || expandedMessageIDs.has(conversationMessage.id)}
             busy={busy}

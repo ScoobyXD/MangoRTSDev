@@ -1,4 +1,4 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-13
 
 # Auth
 
@@ -23,6 +23,7 @@ AUTH12 - After terminal auth failure, the frontend must stop product fetches, re
 AUTH13 - The app must not leave the user editing a dead authenticated surface with only a small websocket/auth error indicator.
 AUTH14 - Third-party provider credential failures, such as Nylas mailbox reauthorization for My Triage or Shared Triage, are not Mango auth failures and must not clear the Mango session or force the login page.
 AUTH15 - A third-party provider reauthorization requirement must never be returned to an already-authenticated Mango browser as a Mango auth `401`, `unauthorized`, terminal-auth, logout, or login-redirect response. The backend must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, so the frontend can show reconnect/repair UI while keeping the Mango session active.
+AUTH16 - A Mango session `401` or terminal logout stops authenticated work but must not purge an unsynchronized local email draft. The fallback remains isolated by company, Mango user, and exact personal-account/shared-inbox scope so another user or mailbox cannot see it; a later valid same-scope session may reconcile it.
 
 ## Scenarios
 
@@ -85,6 +86,7 @@ Business logic covered:
 - AUTH11
 - AUTH12
 - AUTH13
+- AUTH16
 
 Given:
 - A user has Mango open in the browser.
@@ -98,6 +100,7 @@ Expected:
 - The visible screen becomes the existing Mango login page.
 - The user is not left typing into an editor or work surface that can no longer save.
 - A small websocket/auth status badge is not the only user-visible auth failure state.
+- Any unsynchronized local email draft is retained under its exact company/user/account-or-inbox key rather than being destroyed by the `401`; no other user or mailbox can load that fallback.
 
 ### Scenario AUTH-S5: Provider Reauth Does Not Log Out Mango
 

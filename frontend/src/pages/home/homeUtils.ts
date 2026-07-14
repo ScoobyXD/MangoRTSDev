@@ -313,6 +313,7 @@ export function clampNumber(value: number, min: number, max: number): number {
 export type TriageMessageDragPayload = {
   messageIDs: string[];
   sharedInboxID?: string;
+  accountEmail?: string;
   companyID?: string;
 };
 
@@ -320,11 +321,13 @@ export function readTriageMessageDrag(dataTransfer: DataTransfer): TriageMessage
   try {
     const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
     if (!raw) return { messageIDs: [] };
-    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown; shared_inbox_id?: unknown; company_id?: unknown };
+    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown; shared_inbox_id?: unknown; account_email?: unknown; company_id?: unknown };
     if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return { messageIDs: [] };
+    const sharedInboxID = typeof parsed.shared_inbox_id === "string" ? parsed.shared_inbox_id.trim() || undefined : undefined;
     return {
       messageIDs: cleanIDList(parsed.message_ids.filter((value): value is string => typeof value === "string")),
-      sharedInboxID: typeof parsed.shared_inbox_id === "string" ? parsed.shared_inbox_id.trim() || undefined : undefined,
+      sharedInboxID,
+      accountEmail: sharedInboxID ? undefined : typeof parsed.account_email === "string" ? parsed.account_email.trim().toLowerCase() || undefined : undefined,
       companyID: typeof parsed.company_id === "string" ? parsed.company_id.trim() || undefined : undefined,
     };
   } catch {
@@ -1042,8 +1045,15 @@ export function canDragTriageMessageFromMailbox(mailbox: EmailMailbox): boolean 
   return mailbox === "primary" || mailbox === "starred" || mailbox === "all" || mailbox === "archive" || mailbox === "sent";
 }
 
-export function messageListFilterKey(companyID: string, viewID: HomeViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
-  return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
+export function messageListFilterKey(
+  companyID: string,
+  viewID: HomeViewID,
+  mailbox: EmailMailbox,
+  query: string,
+  unreadOnly: boolean,
+  mailboxScopeKey = "",
+): string {
+  return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly, mailboxScopeKey.trim()]);
 }
 
 export function emailMailboxScopeKey(

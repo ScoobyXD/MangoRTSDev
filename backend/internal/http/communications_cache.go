@@ -23,10 +23,18 @@ const (
 const communicationsCacheKeySeparator = "\x1f"
 
 type communicationsCache struct {
-	mu           sync.RWMutex
-	folders      map[string]cachedCommunicationsFolders
-	messagePages map[string]cachedCommunicationsMessagePage
-	messages     map[string]cachedCommunicationsMessage
+	mu                 sync.RWMutex
+	folders            map[string]cachedCommunicationsFolders
+	folderGenerations  map[string]communicationsCacheGeneration
+	pageGenerations    map[string]communicationsCacheGeneration
+	messageGenerations map[string]communicationsCacheGeneration
+	messagePages       map[string]cachedCommunicationsMessagePage
+	messages           map[string]cachedCommunicationsMessage
+}
+
+type communicationsCacheGeneration struct {
+	value    uint64
+	inFlight int
 }
 
 type cachedCommunicationsFolders struct {
@@ -46,9 +54,12 @@ type cachedCommunicationsMessage struct {
 
 func newCommunicationsCache() *communicationsCache {
 	return &communicationsCache{
-		folders:      map[string]cachedCommunicationsFolders{},
-		messagePages: map[string]cachedCommunicationsMessagePage{},
-		messages:     map[string]cachedCommunicationsMessage{},
+		folders:            map[string]cachedCommunicationsFolders{},
+		folderGenerations:  map[string]communicationsCacheGeneration{},
+		pageGenerations:    map[string]communicationsCacheGeneration{},
+		messageGenerations: map[string]communicationsCacheGeneration{},
+		messagePages:       map[string]cachedCommunicationsMessagePage{},
+		messages:           map[string]cachedCommunicationsMessage{},
 	}
 }
 
@@ -84,6 +95,49 @@ func (c *communicationsCache) setFolders(userID, accountScope string, folders []
 	c.evictOldestFoldersLocked(communicationsMaxCachedFolderUsers)
 }
 
+func (c *communicationsCache) beginFolderGeneration(userID, accountScope string) (uint64, func()) {
+	if c == nil {
+		return 0, func() {}
+	}
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	if key == "" {
+		return 0, func() {}
+	}
+	c.mu.Lock()
+	if c.folderGenerations == nil {
+		c.folderGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state := c.folderGenerations[key]
+	state.inFlight++
+	c.folderGenerations[key] = state
+	c.mu.Unlock()
+	var once sync.Once
+	return state.value, func() { once.Do(func() { c.endFolderGeneration(key) }) }
+}
+
+func (c *communicationsCache) setFoldersIfGeneration(userID, accountScope string, folders []NylasFolder, now time.Time, generation uint64) bool {
+	if c == nil {
+		return false
+	}
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	if key == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.folderGenerations == nil {
+		c.folderGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state, tracked := c.folderGenerations[key]
+	if !tracked || state.value != generation {
+		return false
+	}
+	c.folders[key] = cachedCommunicationsFolders{folders: cloneNylasFolders(folders), fetchedAt: now}
+	c.evictExpiredFoldersLocked(now, communicationsFoldersCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestFoldersLocked(communicationsMaxCachedFolderUsers)
+	return true
+}
+
 func (c *communicationsCache) getMessagePage(userID, accountScope string, query NylasMessageQuery, maxAge time.Duration, now time.Time) (NylasMessagePage, bool) {
 	if c == nil {
 		return NylasMessagePage{}, false
@@ -115,6 +169,53 @@ func (c *communicationsCache) setMessagePage(userID, accountScope string, query 
 	c.evictExpiredMessagePagesLocked(now, communicationsMessagesCacheTTL+communicationsMaxStaleTTL)
 	c.evictOldestMessagePagesForUserLocked(strings.TrimSpace(userID), communicationsMaxMessagePagesPerUser)
 	c.evictOldestMessagePagesLocked(communicationsMaxMessagePageEntries)
+	c.prunePageGenerationsLinearLocked()
+}
+
+func (c *communicationsCache) beginMessagePageGeneration(userID, accountScope string) (uint64, func()) {
+	if c == nil {
+		return 0, func() {}
+	}
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	if key == "" {
+		return 0, func() {}
+	}
+	c.mu.Lock()
+	if c.pageGenerations == nil {
+		c.pageGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state := c.pageGenerations[key]
+	state.inFlight++
+	c.pageGenerations[key] = state
+	c.mu.Unlock()
+	var once sync.Once
+	return state.value, func() { once.Do(func() { c.endMessagePageGeneration(key) }) }
+}
+
+func (c *communicationsCache) setMessagePageIfGeneration(userID, accountScope string, query NylasMessageQuery, page NylasMessagePage, now time.Time, generation uint64) bool {
+	if c == nil {
+		return false
+	}
+	generationKey := communicationsAccountScopedCacheKey(userID, accountScope)
+	cacheKey := communicationsMessagePageCacheKey(userID, accountScope, query)
+	if generationKey == "" || cacheKey == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pageGenerations == nil {
+		c.pageGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state, tracked := c.pageGenerations[generationKey]
+	if !tracked || state.value != generation {
+		return false
+	}
+	c.messagePages[cacheKey] = cachedCommunicationsMessagePage{page: cloneNylasMessagePage(page), fetchedAt: now}
+	c.evictExpiredMessagePagesLocked(now, communicationsMessagesCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestMessagePagesForUserLocked(strings.TrimSpace(userID), communicationsMaxMessagePagesPerUser)
+	c.evictOldestMessagePagesLocked(communicationsMaxMessagePageEntries)
+	c.prunePageGenerationsLinearLocked()
+	return true
 }
 
 func (c *communicationsCache) getMessage(userID, accountScope, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
@@ -176,6 +277,50 @@ func (c *communicationsCache) setMessage(userID, accountScope string, message Ny
 	c.evictOldestMessagesLocked(communicationsMaxMessageEntries)
 }
 
+func (c *communicationsCache) beginMessageGeneration(userID, accountScope, messageID string) (uint64, func()) {
+	if c == nil {
+		return 0, func() {}
+	}
+	key := communicationsMessageCacheKey(userID, accountScope, messageID)
+	if key == "" {
+		return 0, func() {}
+	}
+	c.mu.Lock()
+	if c.messageGenerations == nil {
+		c.messageGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state := c.messageGenerations[key]
+	state.inFlight++
+	c.messageGenerations[key] = state
+	c.mu.Unlock()
+	var once sync.Once
+	return state.value, func() { once.Do(func() { c.endMessageGeneration(key) }) }
+}
+
+func (c *communicationsCache) setMessageIfGeneration(userID, accountScope string, message NylasMessage, now time.Time, generation uint64) bool {
+	if c == nil {
+		return false
+	}
+	key := communicationsMessageCacheKey(userID, accountScope, message.ID)
+	if key == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.messageGenerations == nil {
+		c.messageGenerations = map[string]communicationsCacheGeneration{}
+	}
+	state, tracked := c.messageGenerations[key]
+	if !tracked || state.value != generation {
+		return false
+	}
+	c.messages[key] = cachedCommunicationsMessage{message: cloneNylasMessage(message), fetchedAt: now}
+	c.evictExpiredMessagesLocked(now, communicationsMessageCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestMessagesForUserLocked(strings.TrimSpace(userID), communicationsMaxMessageDetailsPerUser)
+	c.evictOldestMessagesLocked(communicationsMaxMessageEntries)
+	return true
+}
+
 func (c *communicationsCache) invalidateUser(userID string) {
 	if c == nil {
 		return
@@ -186,12 +331,18 @@ func (c *communicationsCache) invalidateUser(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.bumpFolderGenerationsForUserLocked(userID)
+	c.bumpPageGenerationsForUserLocked(userID)
+	c.bumpMessageGenerationsForUserLocked(userID)
 	c.deleteFoldersForUserLocked(userID)
 	c.deleteMessagePagesForUserLocked(userID)
 	c.deleteMessagesForUserLocked(userID)
+	c.pruneFolderGenerationsForUserLocked(userID)
+	c.prunePageGenerationsForUserLocked(userID)
+	c.pruneMessageGenerationsForUserLocked(userID)
 }
 
-func (c *communicationsCache) invalidateFolders(userID string, accountScope ...string) {
+func (c *communicationsCache) invalidateFolders(userID, accountScope string) {
 	if c == nil {
 		return
 	}
@@ -201,14 +352,13 @@ func (c *communicationsCache) invalidateFolders(userID string, accountScope ...s
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(accountScope) > 0 && strings.TrimSpace(accountScope[0]) != "" {
-		delete(c.folders, communicationsAccountScopedCacheKey(userID, accountScope[0]))
-		return
-	}
-	c.deleteFoldersForUserLocked(userID)
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	c.bumpFolderGenerationLocked(key)
+	delete(c.folders, key)
+	c.pruneFolderGenerationLocked(key)
 }
 
-func (c *communicationsCache) invalidateMessagePages(userID string, accountScope ...string) {
+func (c *communicationsCache) invalidateMessagePages(userID, accountScope string) {
 	if c == nil {
 		return
 	}
@@ -218,11 +368,10 @@ func (c *communicationsCache) invalidateMessagePages(userID string, accountScope
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(accountScope) > 0 && strings.TrimSpace(accountScope[0]) != "" {
-		c.deleteMessagePagesForUserAccountLocked(userID, accountScope[0])
-		return
-	}
-	c.deleteMessagePagesForUserLocked(userID)
+	generationKey := communicationsAccountScopedCacheKey(userID, accountScope)
+	c.bumpPageGenerationLocked(generationKey)
+	c.deleteMessagePagesForUserAccountLocked(userID, accountScope)
+	c.prunePageGenerationLocked(generationKey)
 }
 
 func (c *communicationsCache) invalidateMessage(userID, accountScope, messageID string) {
@@ -236,15 +385,77 @@ func (c *communicationsCache) invalidateMessage(userID, accountScope, messageID 
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if strings.TrimSpace(accountScope) != "" {
-		delete(c.messages, communicationsMessageCacheKey(userID, accountScope, messageID))
+	key := communicationsMessageCacheKey(userID, accountScope, messageID)
+	c.bumpMessageGenerationLocked(key)
+	delete(c.messages, key)
+	c.pruneMessageGenerationLocked(key)
+}
+
+func (c *communicationsCache) invalidateFoldersForAccountScope(accountScope string) {
+	if c == nil {
 		return
 	}
-	for key := range c.messages {
-		if communicationsCacheKeyUserID(key) == userID && communicationsMessageIDFromCacheKey(key) == messageID {
-			delete(c.messages, key)
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.folderGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope {
+			c.bumpFolderGenerationLocked(key)
 		}
 	}
+	for key := range c.folders {
+		if communicationsCacheKeyAccountScope(key) != accountScope {
+			continue
+		}
+		delete(c.folders, key)
+	}
+	c.pruneFolderGenerationsForAccountScopeLocked(accountScope)
+}
+
+func (c *communicationsCache) invalidateMessagePagesForAccountScope(accountScope string) {
+	if c == nil {
+		return
+	}
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.pageGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope {
+			c.bumpPageGenerationLocked(key)
+		}
+	}
+	for key := range c.messagePages {
+		if communicationsCacheKeyAccountScope(key) != accountScope {
+			continue
+		}
+		delete(c.messagePages, key)
+	}
+	c.prunePageGenerationsForAccountScopeLocked(accountScope)
+}
+
+func (c *communicationsCache) invalidateMessageForAccountScope(accountScope, messageID string) {
+	if c == nil {
+		return
+	}
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.messageGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope && communicationsMessageIDFromCacheKey(key) == messageID {
+			c.bumpMessageGenerationLocked(key)
+		}
+	}
+	for key := range c.messages {
+		if communicationsCacheKeyAccountScope(key) != accountScope || communicationsMessageIDFromCacheKey(key) != messageID {
+			continue
+		}
+		delete(c.messages, key)
+	}
+	c.pruneMessageGenerationsForAccountMessageLocked(accountScope, messageID)
 }
 
 func (c *communicationsCache) patchMessageMetadata(userID, accountScope, messageID string, update NylasMessageUpdate, providerMessage NylasMessage) {
@@ -257,6 +468,7 @@ func (c *communicationsCache) patchMessageMetadata(userID, accountScope, message
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.bumpMessageGenerationLocked(key)
 	entry, ok := c.messages[key]
 	if !ok {
 		return
@@ -281,18 +493,19 @@ func (c *communicationsCache) patchMessagePages(userID, accountScope string, mes
 		return
 	}
 	userID = strings.TrimSpace(userID)
-	accountScope = strings.TrimSpace(accountScope)
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
 	message.ID = strings.TrimSpace(message.ID)
 	if userID == "" || message.ID == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.bumpPageGenerationLocked(communicationsAccountScopedCacheKey(userID, accountScope))
 	for key, entry := range c.messagePages {
 		if communicationsCacheKeyUserID(key) != userID {
 			continue
 		}
-		if accountScope != "" && communicationsCacheKeyAccountScope(key) != communicationsNormalizeCacheAccountScope(accountScope) {
+		if communicationsCacheKeyAccountScope(key) != accountScope {
 			continue
 		}
 		query, ok := communicationsMessagePageQueryFromCacheKey(key)
@@ -324,7 +537,7 @@ func (c *communicationsCache) removeMessagesFromPages(userID, accountScope strin
 		return
 	}
 	userID = strings.TrimSpace(userID)
-	accountScope = strings.TrimSpace(accountScope)
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
 	if userID == "" {
 		return
 	}
@@ -341,11 +554,12 @@ func (c *communicationsCache) removeMessagesFromPages(userID, accountScope strin
 	mailbox = strings.TrimSpace(strings.ToLower(mailbox))
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.bumpPageGenerationLocked(communicationsAccountScopedCacheKey(userID, accountScope))
 	for key, entry := range c.messagePages {
 		if communicationsCacheKeyUserID(key) != userID {
 			continue
 		}
-		if accountScope != "" && communicationsCacheKeyAccountScope(key) != communicationsNormalizeCacheAccountScope(accountScope) {
+		if communicationsCacheKeyAccountScope(key) != accountScope {
 			continue
 		}
 		query, ok := communicationsMessagePageQueryFromCacheKey(key)
@@ -395,6 +609,202 @@ func (c *communicationsCache) deleteFoldersForUserLocked(userID string) {
 	for key := range c.folders {
 		if strings.HasPrefix(key, prefix) {
 			delete(c.folders, key)
+		}
+	}
+}
+
+func (c *communicationsCache) bumpFolderGenerationsForUserLocked(userID string) {
+	prefix := strings.TrimSpace(userID) + communicationsCacheKeySeparator
+	for key := range c.folderGenerations {
+		if strings.HasPrefix(key, prefix) {
+			c.bumpFolderGenerationLocked(key)
+		}
+	}
+}
+
+func (c *communicationsCache) bumpFolderGenerationLocked(key string) {
+	state, tracked := c.folderGenerations[key]
+	if !tracked {
+		return
+	}
+	state.value++
+	c.folderGenerations[key] = state
+}
+
+func (c *communicationsCache) bumpPageGenerationsForUserLocked(userID string) {
+	prefix := strings.TrimSpace(userID) + communicationsCacheKeySeparator
+	for key := range c.pageGenerations {
+		if strings.HasPrefix(key, prefix) {
+			c.bumpPageGenerationLocked(key)
+		}
+	}
+}
+
+func (c *communicationsCache) bumpPageGenerationLocked(key string) {
+	state, tracked := c.pageGenerations[key]
+	if !tracked {
+		return
+	}
+	state.value++
+	c.pageGenerations[key] = state
+}
+
+func (c *communicationsCache) bumpMessageGenerationsForUserLocked(userID string) {
+	prefix := strings.TrimSpace(userID) + communicationsCacheKeySeparator
+	for key := range c.messageGenerations {
+		if strings.HasPrefix(key, prefix) {
+			c.bumpMessageGenerationLocked(key)
+		}
+	}
+}
+
+func (c *communicationsCache) bumpMessageGenerationLocked(key string) {
+	state, tracked := c.messageGenerations[key]
+	if !tracked {
+		return
+	}
+	state.value++
+	c.messageGenerations[key] = state
+}
+
+func (c *communicationsCache) endFolderGeneration(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, tracked := c.folderGenerations[key]
+	if !tracked {
+		return
+	}
+	if state.inFlight > 0 {
+		state.inFlight--
+	}
+	c.folderGenerations[key] = state
+	c.pruneFolderGenerationLocked(key)
+}
+
+func (c *communicationsCache) endMessagePageGeneration(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, tracked := c.pageGenerations[key]
+	if !tracked {
+		return
+	}
+	if state.inFlight > 0 {
+		state.inFlight--
+	}
+	c.pageGenerations[key] = state
+	c.prunePageGenerationLocked(key)
+}
+
+func (c *communicationsCache) endMessageGeneration(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, tracked := c.messageGenerations[key]
+	if !tracked {
+		return
+	}
+	if state.inFlight > 0 {
+		state.inFlight--
+	}
+	c.messageGenerations[key] = state
+	c.pruneMessageGenerationLocked(key)
+}
+
+func (c *communicationsCache) pruneFolderGenerationLocked(key string) {
+	state, tracked := c.folderGenerations[key]
+	if !tracked || state.inFlight != 0 {
+		return
+	}
+	if _, cached := c.folders[key]; !cached {
+		delete(c.folderGenerations, key)
+	}
+}
+
+func (c *communicationsCache) prunePageGenerationLocked(key string) {
+	state, tracked := c.pageGenerations[key]
+	if tracked && state.inFlight == 0 && !c.hasMessagePageForGenerationKeyLocked(key) {
+		delete(c.pageGenerations, key)
+	}
+}
+
+func (c *communicationsCache) pruneMessageGenerationLocked(key string) {
+	state, tracked := c.messageGenerations[key]
+	if !tracked || state.inFlight != 0 {
+		return
+	}
+	if _, cached := c.messages[key]; !cached {
+		delete(c.messageGenerations, key)
+	}
+}
+
+func (c *communicationsCache) pruneFolderGenerationsForUserLocked(userID string) {
+	for key, state := range c.folderGenerations {
+		if communicationsCacheKeyUserID(key) == userID && state.inFlight == 0 {
+			delete(c.folderGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) prunePageGenerationsForUserLocked(userID string) {
+	for key, state := range c.pageGenerations {
+		if communicationsCacheKeyUserID(key) == userID && state.inFlight == 0 {
+			delete(c.pageGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) pruneMessageGenerationsForUserLocked(userID string) {
+	for key, state := range c.messageGenerations {
+		if communicationsCacheKeyUserID(key) == userID && state.inFlight == 0 {
+			delete(c.messageGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) pruneFolderGenerationsForAccountScopeLocked(accountScope string) {
+	for key, state := range c.folderGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope && state.inFlight == 0 {
+			delete(c.folderGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) prunePageGenerationsForAccountScopeLocked(accountScope string) {
+	for key, state := range c.pageGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope && state.inFlight == 0 {
+			delete(c.pageGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) pruneMessageGenerationsForAccountMessageLocked(accountScope, messageID string) {
+	for key, state := range c.messageGenerations {
+		if communicationsCacheKeyAccountScope(key) == accountScope && communicationsMessageIDFromCacheKey(key) == messageID && state.inFlight == 0 {
+			delete(c.messageGenerations, key)
+		}
+	}
+}
+
+func (c *communicationsCache) hasMessagePageForGenerationKeyLocked(generationKey string) bool {
+	prefix := generationKey + communicationsCacheKeySeparator
+	for key := range c.messagePages {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *communicationsCache) prunePageGenerationsLinearLocked() {
+	cachedGenerationKeys := make(map[string]struct{}, len(c.messagePages))
+	for key := range c.messagePages {
+		cachedGenerationKeys[communicationsAccountScopedCacheKey(communicationsCacheKeyUserID(key), communicationsCacheKeyAccountScope(key))] = struct{}{}
+	}
+	for key, state := range c.pageGenerations {
+		if state.inFlight != 0 {
+			continue
+		}
+		if _, cached := cachedGenerationKeys[key]; !cached {
+			delete(c.pageGenerations, key)
 		}
 	}
 }
@@ -626,6 +1036,7 @@ func (c *communicationsCache) evictExpiredFoldersLocked(now time.Time, maxAge ti
 	for key, entry := range c.folders {
 		if now.Sub(entry.fetchedAt) > maxAge {
 			delete(c.folders, key)
+			c.pruneFolderGenerationLocked(key)
 		}
 	}
 }
@@ -644,6 +1055,7 @@ func (c *communicationsCache) evictOldestFoldersLocked(maxEntries int) {
 			return
 		}
 		delete(c.folders, oldestKey)
+		c.pruneFolderGenerationLocked(oldestKey)
 	}
 }
 
@@ -696,6 +1108,7 @@ func (c *communicationsCache) evictExpiredMessagesLocked(now time.Time, maxAge t
 	for key, entry := range c.messages {
 		if now.Sub(entry.fetchedAt) > maxAge {
 			delete(c.messages, key)
+			c.pruneMessageGenerationLocked(key)
 		}
 	}
 }
@@ -717,6 +1130,7 @@ func (c *communicationsCache) evictOldestMessagesForUserLocked(userID string, ma
 			return
 		}
 		delete(c.messages, oldestKey)
+		c.pruneMessageGenerationLocked(oldestKey)
 	}
 }
 
@@ -734,6 +1148,7 @@ func (c *communicationsCache) evictOldestMessagesLocked(maxEntries int) {
 			return
 		}
 		delete(c.messages, oldestKey)
+		c.pruneMessageGenerationLocked(oldestKey)
 	}
 }
 

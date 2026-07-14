@@ -25,6 +25,8 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkDisplayRows.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkMatrixLoader.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailDrafts.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailboxRealtime.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceSnapshotCache.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/realtime/realtimeWebSocket.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),

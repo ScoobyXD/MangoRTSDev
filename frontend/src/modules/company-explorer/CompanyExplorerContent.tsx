@@ -128,7 +128,7 @@ type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
 type GVICProjectionCacheEntry = GVICProjectionTitleCacheEntry<ExplorerLogicGateRecord>;
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
-type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; sharedInboxID?: string; x: number; y: number };
+type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; sharedInboxID?: string; accountEmail?: string; x: number; y: number };
 
 function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerOpenInNewTabTarget | null {
   if (!row) return null;
@@ -3510,7 +3510,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
     const cleanMessageIDs = cleanExplorerIDs(messageIDs);
     if (cleanMessageIDs.length === 0) return;
-    setInternalTriageDropMenu({ target, messageIDs: cleanMessageIDs, sharedInboxID: source?.sharedInboxID?.trim() || undefined, x: point.x, y: point.y });
+    const sharedInboxID = source?.sharedInboxID?.trim() || undefined;
+    setInternalTriageDropMenu({
+      target,
+      messageIDs: cleanMessageIDs,
+      sharedInboxID,
+      accountEmail: sharedInboxID ? undefined : source?.accountEmail?.trim().toLowerCase() || undefined,
+      x: point.x,
+      y: point.y,
+    });
   }, [onTriageMessagesDrop]);
 
   const pickCompanyExplorerTriageDropPriority = useCallback(async (priority: number) => {
@@ -3529,11 +3537,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       companyID,
       messageIDs: menu.messageIDs,
       sharedInboxID: menu.sharedInboxID,
+      accountEmail: menu.accountEmail,
     });
     try {
       const result = await convertTriageMessagesToExplorerTarget({
         companyID,
         sharedInboxID: menu.sharedInboxID,
+        accountEmail: menu.accountEmail,
         target,
         messageIDs: menu.messageIDs,
         priority,
@@ -3549,6 +3559,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,
+        accountEmail: menu.accountEmail,
         logicGateID: result.board?.logic_gate_id?.trim() || (target.mode === "existing_logic_gate" ? target.logicGateID : undefined),
         nodeIDs: result.nodes.map((node) => node.node_id),
         boardIDs,

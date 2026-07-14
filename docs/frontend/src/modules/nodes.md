@@ -367,12 +367,12 @@ The projection object is **derived in memory** during render. It is not persiste
 - `loadNodes()` loads all nodes.
 - `loadDetails(selectedNodeID)` loads details panel data for one selected node.
 - `loadGraphRelationships(nodes)` reuses workspace snapshot relationship payloads filtered to currently loaded nodes.
-- Node relationship graph streaming/delta handling in `NodeRelationshipGraph.ts` uses a single `NodeRelationshipGraphStreamEnvelope` contract type for event application.
+- `NodeRelationshipGraph.ts` is an in-browser projection/cache helper. It applies committed mutation results locally and relies on canonical HTTP snapshot reloads; Node Map does not own a backend cross-user realtime stream.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
 - Folder scope is applied in memory from `folders` + `folder_items` in the workspace snapshot. When Company Explorer selects a node folder, Node Map renders nodes placed in that folder or descendant folders and only relationships whose endpoints are both visible.
 - When Company Explorer selects an individual node inside a folder, Node Map keeps the folder scope active and selects that node instead of expanding back to the all-node graph.
 - New nodes created while a folder scope is active are placed into that folder through `POST /v1/company-explorer/folder-items`, so UI-created nodes and agent-created nodes share the same API-backed placement model.
-- Moving a node to a different Company Explorer folder level through `POST /v1/company-explorer/folder-items` removes relationships touching that node. Node Map prunes those relationship lines from the local graph cache immediately and also consumes the backend `relationship_deleted` stream events.
+- Moving a node to a different Company Explorer folder level through `POST /v1/company-explorer/folder-items` removes relationships touching that node. Node Map prunes those relationship lines from the local graph cache immediately from the committed response and confirms later state through canonical HTTP reloads.
 
 ---
 

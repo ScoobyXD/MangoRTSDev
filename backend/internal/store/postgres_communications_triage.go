@@ -159,33 +159,6 @@ where company_id=$1::uuid
 	return err
 }
 
-func (r *PostgresRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, ErrInvalid
-	}
-
-	rows, err := r.db.Query(`
-select user_id::text, message_id, message, created_timestamp, updated_timestamp
-from communications_triage_items
-where user_id=$1
-order by created_timestamp desc, message_id asc`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.CommunicationsTriageItem, 0)
-	for rows.Next() {
-		item, err := scanCommunicationsTriageItem(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
 func (r *PostgresRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
 	userID = strings.TrimSpace(userID)
 	message = normalizeEmailMessageSnapshot(message)
@@ -212,28 +185,6 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 		return domain.CommunicationsTriageItem{}, ErrNotFound
 	}
 	return item, err
-}
-
-func (r *PostgresRepo) DeleteCommunicationsTriageItem(userID, messageID string) error {
-	userID = strings.TrimSpace(userID)
-	messageID = strings.TrimSpace(messageID)
-	if userID == "" || messageID == "" {
-		return ErrInvalid
-	}
-	result, err := r.db.Exec(`
-delete from communications_triage_items
-where user_id=$1 and message_id=$2`, userID, messageID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {

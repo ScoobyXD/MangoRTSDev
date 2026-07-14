@@ -92,9 +92,9 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["shared_inbox_id"] != "shared-inbox-1" || projectionPayload["account_email"] != "support@example.com" {
 		t.Fatalf("projection payload = %+v, want message/thread/mailbox provenance", projectionPayload)
 	}
-	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 0 {
-		t.Fatalf("triage items after conversion = %+v err=%v, want deleted", triageItems, err)
+	triageItems := communicationsTriageItemsForTest(repo, user.UserID)
+	if len(triageItems) != 0 {
+		t.Fatalf("triage items after conversion = %+v, want deleted", triageItems)
 	}
 	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
 	if err != nil {
@@ -228,9 +228,9 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != node.NodeID {
 		t.Fatalf("nodes after attach = %+v err=%v, want no created node", nodes, err)
 	}
-	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 0 {
-		t.Fatalf("triage items after attach = %+v err=%v, want deleted", triageItems, err)
+	triageItems := communicationsTriageItemsForTest(repo, user.UserID)
+	if len(triageItems) != 0 {
+		t.Fatalf("triage items after attach = %+v, want deleted", triageItems)
 	}
 	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
 	if err != nil {
@@ -329,9 +329,9 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != targetNode.NodeID {
 		t.Fatalf("nodes after transfer = %+v err=%v, want only target node", nodes, err)
 	}
-	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 0 {
-		t.Fatalf("triage items after transfer = %+v err=%v, want none", triageItems, err)
+	triageItems := communicationsTriageItemsForTest(repo, user.UserID)
+	if len(triageItems) != 0 {
+		t.Fatalf("triage items after transfer = %+v, want none", triageItems)
 	}
 }
 
@@ -375,9 +375,9 @@ func TestMemoryEmailConversionCommandRejectsExplorerFolderTarget(t *testing.T) {
 		t.Fatalf("ConvertCommunicationsTriageItems folder target err = %v, want ErrInvalid", err)
 	}
 
-	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 1 || triageItems[0].MessageID != message.ID {
-		t.Fatalf("triage items after rejected folder conversion = %+v err=%v, want original message", triageItems, err)
+	triageItems := communicationsTriageItemsForTest(repo, user.UserID)
+	if len(triageItems) != 1 || triageItems[0].MessageID != message.ID {
+		t.Fatalf("triage items after rejected folder conversion = %+v, want original message", triageItems)
 	}
 	nodes, err := repo.ListNodes(companyID)
 	if err != nil || len(nodes) != 0 {
@@ -728,9 +728,9 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 
 func assertEmailConversionRolledBack(t *testing.T, repo *MemoryRepo, companyID, userID, messageID string) {
 	t.Helper()
-	items, err := repo.ListCommunicationsTriageItems(userID)
-	if err != nil || len(items) != 1 || items[0].MessageID != messageID {
-		t.Fatalf("triage after failed conversion = %+v err=%v, want original item", items, err)
+	items := communicationsTriageItemsForTest(repo, userID)
+	if len(items) != 1 || items[0].MessageID != messageID {
+		t.Fatalf("triage after failed conversion = %+v, want original item", items)
 	}
 	nodes, err := repo.ListNodes(companyID)
 	if err != nil || len(nodes) != 0 {
@@ -745,6 +745,18 @@ func assertEmailConversionRolledBack(t *testing.T, repo *MemoryRepo, companyID, 
 		t.Fatalf("placements after failed conversion = %+v err=%v, want none", placements, err)
 	}
 	assertNoWorkspaceEvents(t, repo, companyID)
+}
+
+func communicationsTriageItemsForTest(repo *MemoryRepo, userID string) []domain.CommunicationsTriageItem {
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	items := make([]domain.CommunicationsTriageItem, 0)
+	for _, item := range repo.triageItems {
+		if item.UserID == userID {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func stringSliceContains(items []string, want string) bool {

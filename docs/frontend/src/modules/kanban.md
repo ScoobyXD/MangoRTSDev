@@ -108,7 +108,7 @@ Payload:
 }
 ```
 
-`shared_inbox_id` is omitted for personal mailbox/My Triage sources. Logic Gate Kanban columns accept this payload directly. A drop converts the messages through `/v1/communications/triage/convert` with `target.mode = existing_logic_gate` and `column_id` set to the dropped column. Dropping on an ordinary card or blank column space targets that card's/column's status lane and uses the backend default priority. Dropping on a supported priority group header or grouped card also sends that priority.
+The drag payload carries exactly one mailbox identity. Shared Triage sources carry `shared_inbox_id`; personal mailbox/My Triage sources omit it and carry the selected account as normalized lowercase `account_email`. Logic Gate Kanban columns accept this payload directly and preserve that exact identity in `/v1/communications/triage/convert`; there is no fallback to another personal account. The conversion uses `target.mode = existing_logic_gate` and `column_id` set to the dropped column. Dropping on an ordinary card or blank column space targets that card's/column's status lane and uses the backend default priority. Dropping on a supported priority group header or grouped card also sends that priority.
 
 Kanban dispatches the same `mangorts:home-triage-conversion-applied` local event as Company Explorer email drops before and after the conversion. This keeps Home's source mail list, local freshness suppression, Logic Gate placement marker, and `unstarred_message_ids` reconciliation consistent across direct Kanban drops and Explorer drops.
 
@@ -175,7 +175,7 @@ Endpoints:
 - `POST /v1/communications/email-nodes/transfer`
   - `{ company_id, source_board_id, source_card_id, target_board_id, target_card_id }`
 - `POST /v1/communications/triage/convert`
-  - `{ company_id, shared_inbox_id?, target: { mode: "existing_logic_gate", logic_gate_id }, message_ids, column_id?, priority? }`
+  - `{ company_id, shared_inbox_id?, account_email?, target: { mode: "existing_logic_gate", logic_gate_id }, message_ids, column_id?, priority? }`; shared sources send `shared_inbox_id`, while personal sources send normalized `account_email`, never both.
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.

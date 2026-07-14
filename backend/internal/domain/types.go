@@ -426,6 +426,7 @@ type CommunicationsMessageReadStatus struct {
 	ScopeType                string    `json:"-"`
 	ScopeID                  string    `json:"-"`
 	UserID                   string    `json:"-"`
+	PersonalAccountEmail     string    `json:"-"`
 	CompanyID                string    `json:"-"`
 	CompanyEmailConnectionID string    `json:"-"`
 	SharedInboxID            string    `json:"-"`

@@ -309,12 +309,14 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:user:[^:]+|mailbox:shared:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+)$/.test(scope.trim());
 }
 
-export function realtimePersonalMailboxScope(userID: string): string {
+export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
   const cleanUserID = userID.trim();
-  return cleanUserID ? `mailbox:personal:user:${cleanUserID}` : "";
+  const cleanAccountEmail = accountEmail.trim().toLowerCase();
+  if (!cleanUserID || cleanUserID.includes(":") || !/^[^:@\s]+@[^:@\s]+$/.test(cleanAccountEmail)) return "";
+  return `mailbox:personal:account:${cleanUserID}:${cleanAccountEmail}`;
 }
 
 export function realtimeSharedMailboxScope(sharedInboxID: string): string {

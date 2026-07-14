@@ -56,6 +56,7 @@ type Server struct {
 	communicationsArchiveWorkerDisabled     bool
 	metrics                                 MetricsRecorder
 	commCache                               *communicationsCache
+	communicationsFolderFlights             singleflight.Group
 	communicationsMessageFlights            singleflight.Group
 	communicationsMessagePageFlights        singleflight.Group
 	commArchiveMutations                    *communicationsArchiveMutationTracker
@@ -256,8 +257,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/email-nodes/transfer", s.handleCommunicationsEmailNodeTransfer)
 	mux.HandleFunc("/v1/communications/triage/convert", s.handleCommunicationsTriageConvert)
 	mux.HandleFunc("/v1/communications/triage/revert-card", s.handleCommunicationsTriageRevert)
-	mux.HandleFunc("/v1/communications/triage", s.handleCommunicationsTriage)
-	mux.HandleFunc("/v1/communications/triage/", s.handleCommunicationsTriageByID)
 	mux.HandleFunc("/v1/communications/my-logic-gates", s.handleCommunicationsMyLogicGates)
 	mux.HandleFunc("/v1/communications/my-logic-gates/", s.handleCommunicationsMyLogicGateByID)
 	mux.HandleFunc("/v1/notifications", s.handleNotifications)

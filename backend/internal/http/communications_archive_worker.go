@@ -90,7 +90,7 @@ func (s *Server) processCommunicationsArchiveJobItem(ctx context.Context, item s
 		if cached, ok := archiveFolderIDs[cacheKey]; ok {
 			archiveFolderID = cached
 		} else {
-			emailFolders, err := s.communicationsFolders(ctx, connection)
+			emailFolders, err := s.communicationsFolders(ctx, connection, false)
 			if err != nil {
 				return s.recordCommunicationsArchiveJobItemFailure(item, err)
 			}

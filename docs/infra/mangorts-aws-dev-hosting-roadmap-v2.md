@@ -70,10 +70,12 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 ### Phase 5: Keep Authenticated Retained Realtime
 - Keep browser live updates on `/v1/realtime/ws`.
 - Mint the short-lived WebSocket ticket through authenticated `fetch`, then connect without token-bearing URL query params.
-- Keep exactly three product scopes on the shared WebSocket client: user notifications/Updates, mounted Node chat, and the mounted Logic Gate Kanban board.
-- Reconcile canonical state on first subscription acceptance and reconnect acceptance; Updates fetches its feed only while open.
+- Keep four approved live product surfaces on the shared WebSocket client: user notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, and the actively viewed mailbox. The mailbox surface uses exact `mailbox:personal:account:{user_id}:{normalized_account_email}` and `mailbox:shared:{shared_inbox_id}` patterns; never restore the former user-wide or broad communications scope.
+- Reconcile canonical state on first subscription acceptance and reconnect acceptance. Updates fetches its feed only while open, and mailbox hints issue provider reads only for the exact active account/inbox; Shared Triage root/headings/plain folders and off-view mailboxes subscribe to nothing.
+- Treat mail and every other realtime payload as a compact post-commit hint. Canonical HTTP reads remain authoritative; same-browser title convergence remains a local command-result mechanism rather than another backend stream.
+- Keep resource admission existence checks, per-connection subscription bounds, publication-time chat/board/shared-mailbox audience reauthorization, bounded concurrent fan-out, and failed-connection eviction.
 - Keep retained delivery process-local for now. The committed dev and prod roots both default to two backend tasks and the target groups configure no stickiness, so mutation HTTP requests and recipient WebSockets may reach different tasks and cross-user live delivery is nondeterministic while two tasks run. A future broker may preserve the same publisher boundary; broker/stickiness work and task-count changes are deliberately deferred.
-- Add frontend tests for first acceptance, reconnect, and scope-specific message routing.
+- Keep frontend/backend tests for first acceptance, reconnect, exact scope routing, off-view request absence, revocation after subscribe, and stalled-client fan-out. Future Huddle CRDT/OT remains a separate product project.
 
 ### Phase 6: Tenant/Auth Safety
 - Keep explicit `company_id` in the API for now.
