@@ -1455,6 +1455,7 @@ type ChatPaneProps = {
   companyID?: string;
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
+  headerTrailing?: React.ReactNode;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
@@ -1495,6 +1496,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   companyID,
   messages,
   emailPane,
+  headerTrailing,
   activeTab = "chat",
   selectionAnchor,
   draft,
@@ -1780,6 +1782,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
               <span>Chat</span>
             </>
+          )}
+          {headerTrailing && (
+            <div style={{ minWidth: 0, marginLeft: "auto", display: "flex", alignItems: "center", justifyContent: "flex-end", overflow: "hidden" }}>
+              {headerTrailing}
+            </div>
           )}
         </div>
         {showingEmail ? (

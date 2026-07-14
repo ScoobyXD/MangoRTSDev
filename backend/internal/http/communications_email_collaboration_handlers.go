@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -108,6 +109,18 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			AccountEmail: scope.accountEmail, CreatedByUserID: actor.User.UserID, Message: providerSnapshot,
 		})
 		if err != nil {
+			scopeType := "personal"
+			if strings.TrimSpace(scope.sharedInboxID) != "" {
+				scopeType = "shared"
+			}
+			stage := store.EmailCollaborationEnsureErrorStage(err)
+			if stage == "" {
+				stage = "unknown"
+			}
+			log.Printf(
+				"email_collaboration_create outcome=error request_id=%s company_id=%s actor_user_id=%s scope=%s stage=%s sqlstate=%s error_category=%s",
+				requestCorrelationID(r), req.CompanyID, actor.User.UserID, scopeType, stage, store.EmailCollaborationEnsureErrorSQLState(err), store.EmailCollaborationEnsureErrorCategory(err),
+			)
 			s.writeEmailCollaborationStoreError(w, err, "failed_to_create_email_collaboration")
 			return
 		}
@@ -224,6 +237,8 @@ func (s *Server) writeEmailCollaborationStoreError(w http.ResponseWriter, err er
 		writeError(w, http.StatusBadRequest, "email_collaboration_principal_not_in_company")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "email_collaboration_not_found")
+	case store.IsEmailCollaborationStorageNotReady(err):
+		writeError(w, http.StatusServiceUnavailable, "email_collaboration_storage_not_ready")
 	default:
 		writeError(w, http.StatusInternalServerError, internalCode)
 	}

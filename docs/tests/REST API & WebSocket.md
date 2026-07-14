@@ -55,6 +55,8 @@ RW44 - `POST /v1/communications/triage/convert` resolves the provider connection
 RW45 - My Triage and Shared Triage email collaboration chat retain only the collaboration Node's existing `chat:node:{node_id}` scope. Email and Node mounts perform the same canonical Node projection/chat read on first acceptance, reconnect, and compact chat hints; no `chat:email`, collaboration-document, draft-body, presence, cursor, replay, or broad communications scope is added.
 RW46 - Email-collaboration ensure/create, participant expansion, chat writes, shared-draft create/update/send/discard, source-thread reads, and attachment authorization are authenticated HTTP operations. A durable chat commit may publish the existing Node chat hint and mention notifications; a shared-draft revision remains canonical HTTP state and never travels as editable body content over WebSocket.
 RW47 - Shared-draft optimistic concurrency is not CRDT/OT collaboration. Every update/send/discard supplies the expected revision, stale HTTP commands return conflict plus canonical metadata, and another participant observes the newer body through an authorized canonical draft read rather than WebSocket document deltas.
+RW48 - A never-opened My Triage or Shared Triage chat rail mounts no email-collaboration surface, performs no collaboration resolve or Node projection/chat read, and installs no `chat:node:{node_id}` subscription. The explicit Chat control may resolve an existing collaboration through authenticated HTTP; a pre-collaboration open rail has no Node chat scope until a successful ensure returns its Node. After a same-message rail has been opened, closing it may retain only an inert hidden component so an unsent composer survives reopening; the closed rail reserves no layout width, initiates no read merely because it is closed, and retains no Node chat subscription. Closing the rail or changing the exact message, mailbox, or view logically invalidates obsolete resolve/projection generations so their eventual results cannot update the current rail, and removes that rail's subscription; transport-level abort is not required. Reopening an existing collaboration follows RW45's canonical acceptance/reconnect behavior.
+RW49 - Every unexpected PostgreSQL failure during email-collaboration ensure/create is tagged with one fixed creation stage. A failure before a successful commit rolls back when a transaction exists; `begin_transaction` has no transaction to roll back, and a commit-stage error retains the database driver's commit outcome rather than claiming a rollback. Recognized missing/drifted table, column, type/function, privilege, datatype, unique/check-constraint states map to HTTP `503 email_collaboration_storage_not_ready`; invalid enum input maps there only at the two attached-email projection insertion stages. Existing domain validation/not-found/principal errors retain their 4xx mappings and all other store errors retain the generic 500 path. The failure log contains only request ID, company ID, actor user ID, personal/shared scope, fixed stage, SQLSTATE, and fixed category; it must never include the raw database message/detail/hint, SQL parameters, mailbox address, provider message/thread ID, subject, or serialized email body.
 
 ## Scenarios
 
@@ -414,12 +416,17 @@ Business logic covered:
 - RW45
 - RW46
 - RW47
+- RW48
+- RW49
 
 Given:
-- The same email collaboration chat is mounted from email detail and its standalone Node.
+- A user opens an email detail while Chat remains closed, then explicitly opens and closes its collaboration rail; the same durable chat may also be mounted from its standalone Node.
 - Two participants edit one shared draft at different revisions.
 
 Expected:
+- The closed email rail performs no collaboration HTTP resolution, Node projection/chat read, or socket subscription and reserves no hidden email-chat scope.
+- Explicit open may resolve the collaboration over authenticated HTTP; only an existing or successfully ensured Node installs the existing `chat:node:{node_id}` scope, and close or exact-scope navigation removes it.
+- A schema/ownership/constraint drift failure rolls the ensure transaction back, returns `503 email_collaboration_storage_not_ready`, and records only the fixed safe diagnostic fields from RW49; domain 4xx and unrelated 500 mappings do not change.
 - Both chat mounts retain the same `chat:node:{node_id}` subscription and coalesce canonical Node chat reads on acceptance/reconnect/hints.
 - No email-chat, document, draft, presence, cursor, replay, or broad communications scope is introduced.
 - Ensure/create, mentions, source reads, chat writes, shared-draft commands, and attachment checks remain authenticated HTTP operations.

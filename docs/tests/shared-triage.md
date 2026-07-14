@@ -181,13 +181,15 @@ ST152 - The top sender/subject line reserves only the actual width of its top-ri
 ST153 - Compact spacing preserves the shared-inbox card contract: unread dot/frame, selected pressed surface, conditional thread icon, ellipsis, scope-correct commands, and pointer/keyboard/drag affordances remain distinct and usable.
 ST154 - A shared-source collaboration appears as one ordinary conversation row in its source Shared Triage for a permanent participant who can navigate that mailbox. Mention participation alone does not grant navigation, listing, folder, or unrelated-message access to the shared inbox; a participant without that access receives only the collaboration thread through the guaranteed My Triage fallback.
 ST155 - A provider-owned source row and its virtual collaboration representation dedupe by exact shared inbox plus provider thread/message identity. The newest canonical message and rolled-up unread/starred/attachment/thread state remain authoritative, and no collaboration row crosses into another shared inbox.
-ST156 - Opening a collaboration-capable shared row mounts the shared Node ChatPane to the right of email detail. No Node is created for read/highlight/abandoned empty composer; the first nonempty chat submit or explicit shared-draft create ensures one collaboration Node whose successful chat rows are identical from email and Node perspectives.
+ST156 - Opening a collaboration-capable shared row leaves the Shared Triage email detail at full width with no chat rail. Only the row/detail's explicit **Chat** control opens the right-hand shared Node `ChatPane`; that control exposes its expanded state and the rail closes again without a durable mutation. Once open, the rail reads and writes the same chat records shown from the standalone Node. No Node is created for read/highlight/abandoned empty composer; the first nonempty chat submit or explicit shared-draft create ensures one collaboration Node whose successful chat rows are identical from email and Node perspectives.
 ST157 - Selected email text creates an exact message/quote/offset chat anchor, while an unanchored chat remains valid. Activating an anchor navigates to the correct card without adding a second conversation scrollbar or changing source content.
 ST158 - Reply All exposes Create Shared Draft for the exact selected source message. Every permanent participant can see the resulting revisioned shared draft in Drafts/My Drafts with its source shared inbox identified, but only collaboration participation authorizes that draft and no participant gains unrelated shared-inbox access.
 ST159 - Collaboration shared drafts are immediate-send only under EMAIL68. Their compose footer omits scheduled send and the ordinary Shared Triage browser scheduler excludes them; this does not change scheduled-send behavior for ordinary shared-inbox drafts.
 ST160 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
 ST161 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
 ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
+ST163 - An open Shared Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Shared-inbox viewers, provider recipients, and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
+ST164 - A Shared Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the source email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
 
 ## Scenarios
 
@@ -821,16 +823,21 @@ Business logic covered:
 - ST157
 - ST158
 - ST159
+- ST163
+- ST164
 
 Given:
 - A source Shared Triage message gains a collaboration through chat or Create Shared Draft.
 - One permanent participant can navigate the source shared inbox; another cannot.
 - A participant is also a provider/shared-inbox viewer and therefore receives both canonical provider and virtual collaboration list inputs.
+- A viewer first opens the source email without opening Chat, then explicitly opens the rail; an ensure or first-chat request may fail before a retry succeeds.
 
 Expected:
 - The navigable source Shared Triage shows one deduplicated ordinary conversation row; the participant without mailbox navigation sees the thread only through My Triage fallback.
 - Collaboration participation does not reveal the shared folder tree, unrelated messages, or another shared inbox.
-- Opening the source row mounts the same ChatPane and Node chat rows used by the standalone collaboration Node.
+- Opening the source row keeps email detail full width and Chat closed. Only the explicit accessible Chat control mounts the right-hand rail; closing it or changing exact message/mailbox/view makes no collaboration mutation.
+- The open rail renders the same ChatPane and Node chat rows used by the standalone collaboration Node, and its header shows the canonical deduplicated participant/group-provenance roster rather than provider recipients or current group members.
+- A failed ensure leaves no partial durable artifacts; a creation/write failure preserves the chat composer context, removes a failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - Selection anchors target the exact shared message, and reading/highlighting/abandoning a chat does not create a Node.
 - Create Shared Draft uses the exact Reply All source message and every permanent participant sees one revisioned draft with its source shared inbox labeled.
 - The collaboration shared draft cannot be scheduled and sends only after the server claims its current revision; ordinary shared-inbox drafts retain their existing scheduling behavior.

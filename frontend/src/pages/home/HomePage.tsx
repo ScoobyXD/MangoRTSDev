@@ -5827,7 +5827,6 @@ export function HomePage({
               setNextPageToken("");
             }}
             onEmailCollaborationChange={applyEmailCollaborationChange}
-            onEmailCollaborationError={setError}
           />
           {showLocalEntityRail && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
           {showLocalEntityRail && (
