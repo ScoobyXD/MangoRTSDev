@@ -955,6 +955,9 @@ func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nyl
 		if isNylasOutboundAttachmentFailure(streamErr) {
 			return streamErr
 		}
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
 		return requestErr
 	}
 	defer resp.Body.Close()
