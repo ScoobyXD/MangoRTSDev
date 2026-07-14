@@ -197,6 +197,7 @@ ST168 - Signed shared message/folder webhooks distinguish legitimate zero-delive
 ST169 - Shared Triage conversation headers show only the subject. Collapsed messages show sender/date/snippet and hide From/To/Cc/Bcc; activating the accessible disclosure reveals that exact message's labeled participants, full body, attachments, and actions without changing reply target, provider thread membership, or source inbox.
 ST170 - Ordinary shared-inbox compose/reply, due scheduled-draft execution, and collaboration shared-draft send all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green Undo row appears in the established triage notice area with a right-to-left countdown; Undo sends no provider request and preserves the durable draft/revision; for a due scheduled draft it also clears the persisted send time so the scheduler cannot retry it, while expiry dispatches once through the exact shared grant and existing collaboration claim/idempotency path.
 ST171 - Shared Triage uses the same responsive mail-control row as My Triage: compact search controls on the left, visible unread count plus Unread only and accessible Newest/Oldest ordering on the right, and clean wrapping at narrow widths. Newest first is the default. Ordering applies only to the current filtered/condensed page, does not change provider request identity or archive-page membership, and remains exact-shared-inbox scoped while search and unread-only filtering compose normally.
+ST172 - Shared Triage loads every folder-metadata page before deriving Inbox/Starred counters and uses the same full-height new-message body plus stable three-slot Sent header as My Triage. The disabled Archive page/go-next control remains visible in Sent, exact shared-inbox authorization is unchanged, sent Mango inline images receive an independent shared-inbox/message link, and controlled typing never reloads an unchanged hydrated image.
 
 ## Scenarios
 
@@ -915,3 +916,16 @@ Expected:
 - Shared Triage renders the same compact left search group and right unread/filter/order group as My Triage, wrapping cleanly without obscuring controls or changing authorization scope.
 - Newest is the initial visible/icon/accessible state; toggling changes all three to Oldest and back.
 - Search and unread-only remain exact-shared-inbox provider filters while ordering reverses only the already filtered/condensed fixed page, preserving page membership, selection, source inbox, and Archive page semantics.
+
+### Scenario ST-S24: Shared Counter, Sent Image, Typing, And Header Stability
+
+Business logic covered:
+- ST172
+
+Given:
+- An authorized shared mailbox has provider folders split across pages and a sent draft containing a signature or pasted image.
+- The user types beside the hydrated image, switches to Sent, and resizes the shared-mail pane.
+
+Expected:
+- Exact shared-mailbox counters include later folder pages, compose uses the available detail height, and ordinary typing produces no image refetch or flash.
+- Sent retains Compose/Sent/Archive-page geometry with archive disabled, and the inline image remains authorized through the shared-inbox/message link after draft cleanup.

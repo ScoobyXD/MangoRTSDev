@@ -994,6 +994,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	message = communicationsSendResponseWithLocalContent(message, sendReq)
+	if err := s.linkCommunicationsSentAttachments(cleanCompanyID, connection.UserID, r.URL.Query().Get("shared_inbox_id"), message.ID, sendReq.Attachments); err != nil {
+		log.Printf("communications send attachment promotion failed user_id=%s message_id=%s err=%v", connection.UserID, message.ID, err)
+	}
 	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
 		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, sendReq.Subject)
 	}
@@ -1002,6 +1005,53 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 	s.commCache.invalidateMessage(connection.UserID, cacheScope, message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
+}
+
+func communicationsSentMessageResourceID(userID, sharedInboxID, messageID string) string {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return ""
+	}
+	if sharedInboxID = strings.TrimSpace(sharedInboxID); sharedInboxID != "" {
+		return "shared:" + url.QueryEscape(sharedInboxID) + ":" + url.QueryEscape(messageID)
+	}
+	if userID = strings.TrimSpace(userID); userID != "" {
+		return "personal:" + url.QueryEscape(userID) + ":" + url.QueryEscape(messageID)
+	}
+	return ""
+}
+
+func (s *Server) linkCommunicationsSentAttachments(companyID, userID, sharedInboxID, messageID string, attachments []NylasAttachment) error {
+	companyID = strings.TrimSpace(companyID)
+	resourceID := communicationsSentMessageResourceID(userID, sharedInboxID, messageID)
+	if len(attachments) == 0 {
+		return nil
+	}
+	if companyID == "" || resourceID == "" {
+		return store.ErrInvalid
+	}
+	seen := make(map[string]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		attachmentID := communicationsAttachmentID(attachment)
+		if attachmentID == "" {
+			continue
+		}
+		if _, duplicate := seen[attachmentID]; duplicate {
+			continue
+		}
+		seen[attachmentID] = struct{}{}
+		relationshipKind := store.AttachmentRelationshipEmailAttachment
+		if attachment.IsInline || strings.TrimSpace(attachment.ContentID) != "" {
+			relationshipKind = store.AttachmentRelationshipEmailInline
+		}
+		if _, err := s.repo.LinkResourceAttachment(store.ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: "email_message", ResourceID: resourceID,
+			AttachmentID: attachmentID, RelationshipKind: relationshipKind, CreatedByUserID: strings.TrimSpace(userID),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func communicationsSendResponseWithLocalContent(message NylasMessage, sendReq NylasSendMessageRequest) NylasMessage {
@@ -1029,6 +1079,15 @@ func communicationsSendResponseWithLocalContent(message NylasMessage, sendReq Ny
 		}
 		if strings.TrimSpace(attachments[matchIndex].AttachmentID) == "" {
 			attachments[matchIndex].AttachmentID = sentAttachment.AttachmentID
+		}
+		if strings.TrimSpace(attachments[matchIndex].Filename) == "" {
+			attachments[matchIndex].Filename = sentAttachment.Filename
+		}
+		if strings.TrimSpace(attachments[matchIndex].ContentType) == "" {
+			attachments[matchIndex].ContentType = sentAttachment.ContentType
+		}
+		if attachments[matchIndex].Size <= 0 {
+			attachments[matchIndex].Size = sentAttachment.Size
 		}
 		if strings.TrimSpace(attachments[matchIndex].ContentID) == "" {
 			attachments[matchIndex].ContentID = sentAttachment.ContentID

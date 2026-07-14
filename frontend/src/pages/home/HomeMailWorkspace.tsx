@@ -405,6 +405,7 @@ export function HomeMailWorkspace({
     setEmailCollaborationError("");
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
+  const triageAdvanceVisible = triageAdvanceEnabled || (isArchivableListView && mailbox === "sent");
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
 
@@ -569,7 +570,7 @@ export function HomeMailWorkspace({
             </div>
           )}
           {isArchivableListView && (
-            <div style={triageAdvanceEnabled ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>
+            <div style={triageAdvanceVisible ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>
               <button className="mango-elevated-action" style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
               <button
                 className="mango-elevated-action"
@@ -582,12 +583,12 @@ export function HomeMailWorkspace({
                 <span style={mailArchiveActionLabelStyle}>Sent</span>
                 <SendPointerIcon />
               </button>
-              {triageAdvanceEnabled && (
+              {triageAdvanceVisible && (
                 <button
                   className="mango-elevated-action"
                   type="button"
                   style={triageAdvanceButtonStyle}
-                  disabled={advanceDisabled}
+                  disabled={!triageAdvanceEnabled || advanceDisabled}
                   onClick={onAdvanceTriagePage}
                 >
                   {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and go next ->" : "Archive page ->"}

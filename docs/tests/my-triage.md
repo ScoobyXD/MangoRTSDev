@@ -170,6 +170,7 @@ MT142 - Legacy personal `Seen` summaries are assigned to an exact account only f
 MT143 - My Triage conversation headers show only the subject. Collapsed messages show sender/date/snippet and hide From/To/Cc/Bcc; activating the accessible disclosure reveals that exact message's labeled participants, full body, attachments, and actions without changing reply target or thread membership.
 MT144 - Personal New, Reply, Reply All, Forward, and due scheduled-draft sends all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green Undo row appears in the existing triage notice area with a right-to-left countdown; Undo sends no provider request and keeps the durable draft/source available; for a due scheduled draft it also clears the persisted send time so the scheduler cannot retry it, while expiry dispatches once through the exact personal-account path.
 MT145 - My Triage uses one responsive mail-control row: a compact left-aligned search field and Search button, with the visible unread count, Unread only checkbox, and list-order control aligned to the right and wrapping cleanly at narrow widths. The list opens Newest first; the accessible icon/button exposes the current Newest/Oldest state and alternate action. Ordering is presentation-only over the current fixed page and composes with exact-account search and unread filtering without changing provider request identity, thread condensation, selection, or archive-page membership.
+MT146 - My Triage loads all provider folder pages before deriving Inbox/Starred counters, keeps new-message compose body height responsive to the remaining detail workspace, and preserves the three-slot Compose/Sent/Archive-page header in Sent with the archive control disabled. Personal Sent messages keep signature/inline Mango images through an exact user/message attachment link after draft cleanup, and typing beside any hydrated inline image does not reload or flash it.
 
 ## Scenarios
 
@@ -755,3 +756,16 @@ Expected:
 - Search and Search stay compact on the left while unread count, Unread only, and the icon-plus-state order button align right on the same row or wrap as intact groups without overlap.
 - The control starts Newest, exposes current/alternate state to assistive technology and tooltip users, and changes the visible label/icon when toggled.
 - Search and unread-only remain exact-account provider filters; ordering reverses only the resulting current 12-conversation page and never changes its membership, selection, thread condensation, provider filter key, or Archive page action.
+
+### Scenario MT-S19: Personal Counter, Sent Image, Typing, And Header Stability
+
+Business logic covered:
+- MT146
+
+Given:
+- A personal mailbox has Inbox and Starred on separate folder pages, and the user sends a draft containing a signature image.
+- The user types beside an inline image in New Message, views the result in Sent, and narrows or enlarges the detail pane.
+
+Expected:
+- Both provider-backed counters remain visible, the compose body consumes the available height without clipping its controls, and typing never blanks or reloads the image.
+- Sent preserves the ordinary three-button layout, disables Archive page/go-next, and renders the sent CID image after the source draft has been deleted.

@@ -25,6 +25,14 @@ export function emailAttachmentIsInlineContent(
     || attachment.content_disposition?.trim().toLowerCase() === "inline";
 }
 
+export function emailAttachmentHasResolvableContent(
+  attachment: Pick<EmailAttachment, "attachment_id" | "content" | "id">,
+): boolean {
+  return Boolean(attachment.attachment_id?.trim())
+    || Boolean(attachment.id?.trim())
+    || Boolean(attachment.content?.trim());
+}
+
 export function emailAttachmentContentIDKeys(
   attachment: Pick<EmailAttachment, "content_disposition" | "content_id" | "filename" | "id" | "is_inline">,
 ): string[] {

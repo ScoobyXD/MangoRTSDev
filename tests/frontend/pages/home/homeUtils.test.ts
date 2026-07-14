@@ -13,6 +13,7 @@ import {
   buildSharedInboxRows,
   condenseEmailThreadMessages,
   emailAttachmentIsReferencedInline,
+  emailAttachmentHasResolvableContent,
   emailAttachmentIsInlineContent,
   emailMessageHasMultipleThreadMessages,
   emailMessageRowAriaLabel,
@@ -240,6 +241,15 @@ test("email body inline cid attachments are treated as body images", () => {
   assert.equal(emailAttachmentIsReferencedInline(body, providerFileWithContentID), false);
   assert.equal(emailAttachmentIsInlineContent(inlineImage), true);
   assert.equal(emailAttachmentIsInlineContent(dashboard), false);
+  assert.equal(emailAttachmentHasResolvableContent({
+    attachment_id: "mango-inline-1",
+    id: "",
+    content: "",
+  }), true);
+  assert.equal(emailAttachmentHasResolvableContent({
+    attachment_id: "", id: "", content: "",
+  }), false);
+
   assert.deepEqual(
     visibleEmailAttachmentsForBody(body, [inlineImage, dashboard, providerFileWithContentID]).map((attachment) => attachment.filename),
     ["dashboard.png", "contract.pdf"],

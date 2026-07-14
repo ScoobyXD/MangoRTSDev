@@ -85,6 +85,7 @@ ATT50 - Every `email_draft` attachment list/content/send/edit authorization firs
 ATT51 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
 ATT52 - Draft attachment mutation ownership spans durable preparation plus the complete upload or existing-attachment link operation. Concurrent mutations for one exact draft share preparation but retain independent active leases until each settles. Failure cleanup may delete an otherwise-empty draft only after the last lease ends and only when every mutation failed; while another lease remains active, or after any mutation succeeds, the draft stays live.
 ATT53 - Signature editor, signature Preview, and composed-message insertion rehydrate each durable image after editor lifecycle replay through the exact `email_signature` authorization scope. Loading and terminal failure are explicit private preview states rather than attempts to navigate the browser to `mango-attachment:`; successful display uses a revocable object URL with contain sizing, cleanup revokes it and restores the durable reference, and the existing authenticated original/lightbox behavior remains independent.
+ATT54 - A successful ordinary personal/shared mailbox send promotes each Mango outgoing attachment from its draft-only ownership to an exact `email_message` resource link before local Sent state is returned. The link is idempotent, preserves inline versus ordinary relationship kind, uses personal user/message or shared-inbox/message authorization, and remains readable after the draft is deleted; the Sent viewer treats a durable `attachment_id` as a resolvable source even when provider response metadata omits filename or provider ID.
 
 ## Scenarios
 
@@ -441,3 +442,17 @@ Expected:
 - The first failure cannot delete the draft while the second lease is active.
 - A successful sibling latches the group as successful and no later failure deletes the draft.
 - When both fail, only the final settlement requests one empty-draft cleanup.
+
+### Scenario ATT-S16: Sent Inline Attachment Promotion
+
+Business logic covered:
+- ATT51
+- ATT54
+
+Given:
+- A personal or shared draft contains one Mango signature/inline image that is rewritten to CID for provider send.
+- The provider returns a message ID with partial attachment metadata, and the source draft is then deleted.
+
+Expected:
+- Mango backfills safe attachment metadata, creates one idempotent exact sent-message link with the inline relationship, and returns no raw attachment bytes.
+- The source draft link becomes unreadable as before, while the independent sent-message link authorizes display hydration and original viewing without a public or stale object URL.

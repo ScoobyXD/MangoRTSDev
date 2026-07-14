@@ -2,6 +2,7 @@ import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox
 import { normalizeEmailContentID } from "../../modules/communications/emailAttachments.js";
 export {
   emailAttachmentContentIDKeys,
+  emailAttachmentHasResolvableContent,
   emailAttachmentIsInlineContent,
   emailAttachmentIsReferencedInline,
   emailBodyContentIDReferences,

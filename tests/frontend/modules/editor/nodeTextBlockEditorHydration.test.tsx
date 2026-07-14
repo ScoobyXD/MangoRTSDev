@@ -179,10 +179,12 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
   let mountedRoot: { unmount(): void } | null = null;
   let pendingMountedRoot: { unmount(): void } | null = null;
+  let unifiedMountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { NodeTextBlockEditor }] = await Promise.all([
+    const [{ createRoot }, { NodeTextBlockEditor }, { UnifiedRichEditorSurface }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
+      import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
     ]);
     const noop = () => undefined;
     const emptyUsers: never[] = [];
@@ -337,7 +339,72 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     assert.equal(activeObservers, 0);
     assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
     assert.equal(animationFrames.size, 0);
+    const unifiedContainer = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(unifiedContainer);
+    fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      fetchedURLs.push(String(input));
+      if (init?.signal) fetchSignals.push(init.signal);
+      return new Response(new Blob(["image"], { type: "image/png" }), { status: 200 });
+    };
+    function ControlledUnifiedEditor() {
+      const [documentValue, setDocumentValue] = React.useState(attachmentDocument("attachment-unified"));
+      return (
+        <React.StrictMode>
+          <UnifiedRichEditorSurface
+            value={documentValue}
+            outlineStyle="automatic-outline-numbering"
+            surfaceID="my-triage-compose"
+            ariaLabel="Message"
+            surfaceText="#111827"
+            accent="#0ea5e9"
+            indentGuideColor="#94a3b8"
+            editorImageAttachmentContext={{
+              apiBase: "https://api.test",
+              companyID: "company-1",
+              resourceType: "email_draft",
+              resourceID: "personal:user-1:owner@example.test:draft-1",
+              editorSurface: "my-triage-compose",
+            }}
+            eagerEditorImageHydration
+            onChange={setDocumentValue}
+          />
+        </React.StrictMode>
+      );
+    }
+    const unifiedFetchCountBeforeMount = fetchedURLs.length;
+    const unifiedRoot = createRoot(unifiedContainer);
+    unifiedMountedRoot = unifiedRoot;
+    await act(async () => {
+      unifiedRoot.render(<ControlledUnifiedEditor />);
+    });
+    await flushAsyncWork();
+
+    const unifiedEditor = unifiedContainer.querySelector('[data-mango-unified-rich-editor="my-triage-compose"]');
+    const unifiedImage = unifiedEditor?.querySelector("img");
+    assert.ok(unifiedEditor);
+    assert.ok(unifiedImage);
+    assert.equal(fetchedURLs.length, unifiedFetchCountBeforeMount + 1);
+    const stableImageSource = unifiedImage.getAttribute("src");
+    const revokedBeforeTyping = revokedObjectURLs.length;
+
+    await act(async () => {
+      unifiedEditor.appendChild(dom.window.document.createTextNode("x"));
+      unifiedEditor.dispatchEvent(new dom.window.Event("input", { bubbles: true, cancelable: true }));
+    });
+    await flushAsyncWork();
+
+    assert.equal(unifiedEditor.querySelector("img"), unifiedImage);
+    assert.equal(unifiedImage.getAttribute("src"), stableImageSource);
+    assert.equal(fetchedURLs.length, unifiedFetchCountBeforeMount + 1);
+    assert.equal(revokedObjectURLs.length, revokedBeforeTyping);
+
+    await act(async () => unifiedRoot.unmount());
+    unifiedMountedRoot = null;
+    assert.equal(revokedObjectURLs.length, revokedBeforeTyping + 1);
   } finally {
+    if (unifiedMountedRoot) {
+      await act(async () => unifiedMountedRoot?.unmount());
+    }
     if (pendingMountedRoot) {
       await act(async () => pendingMountedRoot?.unmount());
     }

@@ -87,6 +87,7 @@ ED62 - A single-clicked node/project inline image exposes a small bottom-right d
 ED63 - Creating a node text box with the + action scrolls the new block into the visible workspace, focuses its rich editor, and places a usable caret at its end.
 ED64 - Turning selected text into chat keeps the source quote visibly annotated as soon as the chat composer opens and after the durable chat is created. The same canonical offset/quote fallback applies inside nested bullet and alphanumeric structures.
 ED65 - Unified-editor attachment hydration owns setup and cleanup in the same layout lifecycle. Cleanup replay cannot leave a durable `mango-attachment:` source stranded behind an already-applied-value guard: the authenticated hydration restarts whenever no active owner remains. Durable frames expose loading/ready/error state, hide native broken-image glyphs, use contain sizing, preserve the stored reference on failure, and retain double-click original-image viewing through its separately authorized loader.
+ED66 - Attachment hydration cleanup is tied to actual editor lifecycle/context/value replacement, not every controlled `value` rerender. A local input update that serializes the same live DOM keeps the active hydration owner, image element, decoded object URL, and selection intact; StrictMode replay and unmount still restart or dispose exactly once and revoke every owned URL.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1232,3 +1233,17 @@ Expected:
 - The larger signature editor switches coherently between Edit and read-only Preview, and its image displays through authenticated eager attachment hydration in both preview and compose.
 - Cleaning up and immediately replaying the editor lifecycle restarts exact-mailbox hydration; loading hides the durable protocol source, success uses contain sizing, and terminal failure shows Preview unavailable without losing the reference or double-click original view.
 - Sanitization still rejects unsafe attributes, public storage shortcuts, data URLs, and embedded file bytes.
+
+### Scenario ED-S14: Inline Images Stay Stable While Typing
+
+Business logic covered:
+- ED65
+- ED66
+
+Given:
+- A unified mail editor has eagerly hydrated one durable Mango image and reports each input through its controlled value.
+- The user types characters before and after the image, then the editor is unmounted.
+
+Expected:
+- Controlled rerenders retain the same image DOM node and object URL, issue no replacement fetch, and never show a one-frame blank or broken thumbnail.
+- Real unmount/context replacement still aborts pending work, restores the durable source, and revokes the owned object URL without weakening sanitization or original-image authorization.

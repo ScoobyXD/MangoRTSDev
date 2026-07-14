@@ -24,6 +24,48 @@ func assertURLQueryEqual(t *testing.T, got, want url.Values) {
 	}
 }
 
+func TestNylasRESTClientListFoldersLoadsEveryPage(t *testing.T) {
+	t.Parallel()
+
+	var gotQueries []url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/grants/grant-1/folders" {
+			t.Fatalf("path = %q, want /v3/grants/grant-1/folders", r.URL.Path)
+		}
+		gotQueries = append(gotQueries, r.URL.Query())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page_token") {
+		case "":
+			_, _ = w.Write([]byte(`{"data":[{"id":"inbox","name":"Inbox","total_count":16}],"next_cursor":"folders-page-2"}`))
+		case "folders-page-2":
+			_, _ = w.Write([]byte(`{"data":[{"id":"starred","name":"Starred","total_count":7}]}`))
+		default:
+			t.Fatalf("unexpected page token %q", r.URL.Query().Get("page_token"))
+		}
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	folders, err := client.ListFolders(context.Background(), "grant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 2 {
+		t.Fatalf("folders = %+v, want both pages", folders)
+	}
+	if folders[0].Name != "Inbox" || folders[0].TotalCount == nil || *folders[0].TotalCount != 16 {
+		t.Fatalf("inbox folder = %+v, want count 16", folders[0])
+	}
+	if folders[1].Name != "Starred" || folders[1].TotalCount == nil || *folders[1].TotalCount != 7 {
+		t.Fatalf("starred folder = %+v, want count 7", folders[1])
+	}
+	if len(gotQueries) != 2 {
+		t.Fatalf("folder requests = %d, want 2", len(gotQueries))
+	}
+	assertURLQueryEqual(t, gotQueries[0], url.Values{})
+	assertURLQueryEqual(t, gotQueries[1], url.Values{"page_token": {"folders-page-2"}})
+}
+
 func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 	t.Parallel()
 

@@ -119,6 +119,10 @@ EMAIL90 - Every outbound user-email entry point, including personal/shared compo
 EMAIL91 - While an outbound attempt is pending, Mango renders a neutral elevated Undo surface in the established top-of-triage notice area and in the node-attached reply dock when that is the active sender. Each pending attempt has its own clear Undo action, live seconds label, and rectangular progress fill anchored left so its right edge visibly depletes toward the left across the ten-second window; the Undo control and surface are not success-green.
 EMAIL92 - My Triage and Shared Triage share one responsive mailbox-list control row. Search remains a submitted exact-mailbox filter in a compact left group; unread count, Unread only, and an icon-plus-label ordering button form the right group. The ordering button visibly and accessibly reports Newest first or Oldest first, defaults to Newest first, and reverses only the current filtered/condensed page presentation without entering the provider filter key, changing thread identity, or changing fixed archive-page membership.
 EMAIL93 - A durable signature image begins in an explicit loading-preview state, obtains its display source only through the authenticated exact-mailbox attachment loader, uses contain sizing, and becomes visible only after the browser decodes that source. The hydration owner must restart after any setup/cleanup lifecycle replay, including React development replay, and revoke every superseded object URL. Final fetch/decode failure shows a non-broken Preview unavailable state while preserving the durable Mango reference and the independent authenticated original-image lightbox path.
+EMAIL94 - Folder metadata is complete before mailbox counters are derived: the backend follows every Nylas folder pagination cursor until exhaustion, preserves provider `total_count`/`unread_count`, and fails a repeated cursor instead of silently returning a partial list. Inbox and Starred counters render when their exact provider folders supply counts; Mango never substitutes a fabricated zero for missing provider metadata.
+EMAIL95 - After a provider accepts an ordinary personal/shared mailbox send, every Mango-owned attachment in that send is independently linked to the exact personal/shared `email_message` resource using the returned provider message ID before the response is exposed. Inline/CID relationship kind and missing filename/type/size metadata are retained, and Sent-body hydration accepts `attachment_id`-only metadata, so deleting the source draft cannot remove authorized image rendering.
+EMAIL96 - Controlled rich-editor value updates caused by typing do not dispose and recreate an unchanged attachment hydration owner. Object URLs, decoded image nodes, loading state, selection, and double-click behavior remain stable across ordinary keystrokes; cleanup still aborts pending work and revokes URLs on actual value/context replacement, lifecycle replay, or unmount.
+EMAIL97 - New-message compose stretches its body editor through the remaining detail-panel height with a practical minimum and internal scrolling. In My Triage and Shared Triage, entering Sent preserves the normal three-action header geometry; Compose and Sent retain their positions while Archive page/go-next remains present but disabled and non-actionable.
 
 ## Scenarios
 
@@ -609,3 +613,22 @@ Expected:
 - The Seen chip appears only from persisted provider open signals, lists distinct local occurrence times, and explicitly reports recipient identity unavailable plus the tracking-pixel limitation; list visibility never produces Seen.
 - No provider-send request begins during the ten-second window. Each neutral elevated countdown independently depletes right-to-left; Undo prevents that attempt, while expiry dispatches exactly once through the existing mailbox-scoped backend path.
 - Navigation or sender-component unmount does not bypass the gate, provider failure after expiry remains a real send error, and terminating the document before expiry sends nothing; Undo also clears an automatically due draft's persisted send time, while other durable-draft recovery follows the originating surface's existing persistence contract.
+
+### Scenario EMAIL-S22: Complete Counters, Durable Sent Images, Stable Typing, And Compose Geometry
+
+Business logic covered:
+- EMAIL94
+- EMAIL95
+- EMAIL96
+- EMAIL97
+
+Given:
+- Inbox and Starred metadata land on different provider folder pages.
+- A signature or pasted image is sent from a durable draft, then that draft is retired and the local Sent result is opened.
+- The user types repeatedly beside an already hydrated inline image and opens New Message in a tall detail pane before switching to Sent.
+
+Expected:
+- All folder pages are loaded before exact provider counts are shown, so Inbox and Starred counters do not disappear merely because one folder was on a later page.
+- The send response keeps provider-ready CID HTML plus Mango metadata, the attachment gains an independent exact sent-message link, and Sent renders it after draft deletion without public URLs or stale temporary sources.
+- Each keystroke retains the same hydrated image node/source and performs no new attachment fetch, decode, blanking, or object-URL revocation.
+- New Message gives the body the remaining usable height, and Sent keeps the three-button header with Archive page/go-next visibly disabled.
