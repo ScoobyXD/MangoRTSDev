@@ -54,6 +54,11 @@ import type { NodeContentChange } from "./nodeContentChanges";
 import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
 import {
   appendUniqueEditorAttachments,
+  editorChatAttachmentsReadyForSubmit,
+  failEditorChatAttachmentTransfer,
+  resolveEditorChatAttachmentTransfer,
+  stageEditorChatAttachmentTransfer,
+  transferTextBlockImageToChatDraft,
   nodeAttachmentUploadScopeMatches,
   textBlockAttachmentContextLabel,
   visibleNodeAttachmentUploads,
@@ -1430,6 +1435,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!canEdit) return;
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
+    if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
     if (!message && attachments.length === 0) return;
     const now = new Date().toISOString();
     const id = generateStableInformationID();
@@ -1593,33 +1599,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
-    let file: File | null = null;
-    try {
-      file = await prepareTextBlockImageFile(image, apiBase, companyID);
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_prepare_attachment");
-      return;
-    }
-    if (!file) {
-      onError("failed_to_prepare_attachment");
-      return;
-    }
-    let attachment: EditorChatAttachment;
-    try {
-      attachment = await uploadEditorAttachment(file, {
-        requestJSON,
-        companyID,
-        resourceType: "node",
-        resourceID: nodeID,
-        sourceKind: "chat_upload",
-        relationshipKind: "chat_attachment",
-        informationID: image.blockID,
-        editorSurface: "node_text_block_image_chat",
-      });
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
-      return;
-    }
     setFocusedTextBlockID("");
     setClosedChatBlockIDs((current) => {
       if (!current.has(image.blockID)) return current;
@@ -1640,10 +1619,46 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       delete next[image.blockID];
       return next;
     });
-    setChatDraftAttachments((current) => ({
-      ...current,
-      [image.blockID]: [...(current[image.blockID] ?? []), attachment],
-    }));
+
+    try {
+      await transferTextBlockImageToChatDraft({
+        image,
+        requestJSON,
+        companyID,
+        resourceType: "node",
+        resourceID: nodeID,
+        editorSurface: "node_text_block_image_chat",
+        createPendingID: generateStableInformationID,
+        uploadLegacyImage: async () => {
+          const file = await prepareTextBlockImageFile(image, apiBase, companyID);
+          if (!file) throw new Error("failed_to_prepare_attachment");
+          return uploadEditorAttachment(file, {
+            requestJSON,
+            companyID,
+            resourceType: "node",
+            resourceID: nodeID,
+            sourceKind: "chat_upload",
+            relationshipKind: "chat_attachment",
+            informationID: image.blockID,
+            editorSurface: "node_text_block_image_chat",
+          });
+        },
+        onStage: (attachment) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: stageEditorChatAttachmentTransfer(current[image.blockID] ?? [], attachment),
+        })),
+        onResolve: (pendingID, attachment) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: resolveEditorChatAttachmentTransfer(current[image.blockID] ?? [], pendingID, attachment),
+        })),
+        onReject: (pendingID) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: failEditorChatAttachmentTransfer(current[image.blockID] ?? [], pendingID),
+        })),
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_attach_image_to_chat");
+    }
   }, [apiBase, canEdit, companyID, nodeID, onError, requestJSON]);
 
   const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {

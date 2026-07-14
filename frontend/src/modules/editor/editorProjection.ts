@@ -22,6 +22,8 @@ export type EditorChatAttachment = {
   type: string;
   size: number;
   dataURL?: string;
+  /** Transient composer-only state. Durable projection payloads never serialize it. */
+  transferState?: "processing" | "failed";
 };
 
 export type EditorTextBlockChatMessage = {

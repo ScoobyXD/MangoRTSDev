@@ -186,6 +186,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     ]);
     const noop = () => undefined;
     const emptyUsers: never[] = [];
+    const flushedDocuments: string[] = [];
     const emptyChanges: never[] = [];
     const emptyMessages: never[] = [];
     const baseProps = {
@@ -209,7 +210,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       onFocus: noop,
       onBlur: noop,
       onDocumentChange: noop,
-      onDocumentFlush: noop,
+      onDocumentFlush: (value: string) => { flushedDocuments.push(value); },
       onChangeSeen: noop,
       onSelectionChatRequest: noop,
       onImageChatRequest: noop,
@@ -232,7 +233,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     });
     await flushAsyncWork();
 
-    const editor = container.querySelector('[data-node-text-block-id="block-1"]');
+    const editor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-1"]');
     const firstImage = editor?.querySelector("img");
     assert.ok(editor);
     assert.ok(firstImage);
@@ -244,6 +245,12 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     assert.equal(fetchedURLs.length, 1);
     assert.equal(fetchSignals[0]?.aborted, false);
     assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
+
+    await act(async () => {
+      editor.focus();
+      editor.blur();
+    });
+    assert.deepEqual(flushedDocuments, [], "focusing and selecting an unchanged image must not flush a node projection");
 
     const firstFrame = firstImage.closest('[data-mango-editor-image="true"]');
     assert.ok(firstFrame);

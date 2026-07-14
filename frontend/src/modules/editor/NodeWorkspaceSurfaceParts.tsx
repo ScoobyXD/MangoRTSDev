@@ -9,6 +9,8 @@ import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
+import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
+import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
@@ -715,15 +717,20 @@ function openChatAttachment(
   return Boolean(attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID));
 }
 
-function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: HTMLElement): TextBlockImageDraft | null {
+function readImageDraftFromFrame(
+  blockID: string,
+  frame: HTMLElement,
+  wrapper: HTMLElement,
+  viewport: HTMLElement,
+): TextBlockImageDraft | null {
   const imageData = readEditorImageData(frame);
   if (!imageData?.src) return null;
-  const frameRect = frame.getBoundingClientRect();
-  const wrapperRect = wrapper.getBoundingClientRect();
-  const x = Math.max(8, Math.min(frameRect.right - wrapperRect.left + 8, wrapperRect.width - 66));
-  const y = Math.max(6, Math.min(frameRect.top - wrapperRect.top + 4, wrapperRect.height - 34));
-  const downloadX = Math.max(4, Math.min(frameRect.right - wrapperRect.left - 32, wrapperRect.width - 32));
-  const downloadY = Math.max(4, Math.min(frameRect.bottom - wrapperRect.top - 32, wrapperRect.height - 32));
+  const layout = resolveTextBlockImageActionLayout(
+    frame.getBoundingClientRect(),
+    wrapper.getBoundingClientRect(),
+    viewport.getBoundingClientRect(),
+  );
+  if (!layout) return null;
   return {
     blockID,
     dataURL: imageData.src,
@@ -733,10 +740,7 @@ function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: H
     size: imageData.byteSize || imageDataURLByteSize(imageData.src),
     width: imageData.width,
     height: imageData.height,
-    x,
-    y,
-    downloadX,
-    downloadY,
+    ...layout,
   };
 }
 
@@ -797,6 +801,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const formattingControllerWasActivatedRef = useRef(false);
   const indentGuideFrameRef = useRef<number | null>(null);
   const selectionPointerDownRef = useRef(false);
+  const selectedImageFrameRef = useRef<HTMLElement | null>(null);
   const lastAppliedDocumentRef = useRef("");
   const userEditedDocumentRef = useRef(false);
   const deferredExternalDocumentRef = useRef<{ targetKey: string; value: string } | null>(null);
@@ -812,6 +817,17 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [contentChangeHighlightRects, setContentChangeHighlightRects] = useState<TextHighlightRect[]>([]);
   const [contentChangeLabels, setContentChangeLabels] = useState<NodeContentChangeLabelLayout[]>([]);
   const [activeContentChangeID, setActiveContentChangeID] = useState("");
+  const refreshImageDraft = useCallback(() => {
+    const editor = editorRef.current;
+    const wrapper = wrapperRef.current;
+    const frame = selectedImageFrameRef.current;
+    if (!editor || !wrapper || !frame?.isConnected || !editor.contains(frame)) {
+      if (frame && (!frame.isConnected || !editor?.contains(frame))) selectedImageFrameRef.current = null;
+      setImageDraft(null);
+      return;
+    }
+    setImageDraft(readImageDraftFromFrame(blockID, frame, wrapper, editor));
+  }, [blockID]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
@@ -867,9 +883,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [heightStorageKey, refreshTextHighlights]);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(refreshTextHighlights);
+    const frame = window.requestAnimationFrame(() => {
+      refreshTextHighlights();
+      refreshImageDraft();
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [documentValue, documentScrollTop, height, refreshTextHighlights]);
+  }, [documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights]);
 
   useEffect(() => {
     if (!chatNavigationRequest?.anchorMessageID) return;
@@ -938,10 +957,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       suppressNextDocumentFlushRef.current = false;
       return;
     }
+    if (!userEditedDocumentRef.current) return;
     const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
-    if (!userEditedDocumentRef.current && nextDocument.trim().length === 0 && documentValue.trim().length > 0 && lastAppliedDocumentRef.current !== documentValue) {
-      return;
-    }
     lastAppliedDocumentRef.current = nextDocument;
     onDocumentFlush(nextDocument);
     userEditedDocumentRef.current = false;
@@ -1305,8 +1322,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onPointerDown={(event) => {
           setSelectionDraft(null);
           const frame = findEditorImageFrame(event.currentTarget, event.target);
+          selectedImageFrameRef.current = frame;
           const wrapper = wrapperRef.current;
-          setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper) : null);
+          setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper, event.currentTarget) : null);
           if (event.button === 0 && !frame) selectionPointerDownRef.current = true;
           documentSurfaceHandlers.onPointerDown(event);
         }}
@@ -1548,6 +1566,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             onClick={(event) => {
               event.stopPropagation();
               onImageChatRequest(imageDraft);
+              selectedImageFrameRef.current = null;
               setImageDraft(null);
             }}
             style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
@@ -1561,6 +1580,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             onClick={(event) => {
               event.stopPropagation();
               onImageNodeRequest(imageDraft);
+              selectedImageFrameRef.current = null;
               setImageDraft(null);
             }}
             style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
@@ -1666,7 +1686,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
-  const canSubmit = editable && (draft.trim().length > 0 || draftAttachments.length > 0);
+  const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const composerMaxHeight = Math.max(CHAT_COMPOSER_MIN_HEIGHT, height - CHAT_COMPOSER_PANE_HEIGHT_RESERVE);
   const [composerSizing, setComposerSizing] = useState({ height: CHAT_COMPOSER_MIN_HEIGHT, scrolls: false });
@@ -2578,13 +2598,15 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
     <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
       {attachments.map((attachment) => {
         const selected = selectedAttachmentID === attachment.id;
+        const transferState = attachment.transferState;
         return (
           <span
             key={attachment.id}
             role="button"
             tabIndex={0}
             aria-pressed={selected}
-            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID) ? "Double-click to download" : attachment.name}
+            data-mango-chat-attachment-transfer-state={transferState}
+            title={transferState === "processing" ? "Attaching image" : transferState === "failed" ? "Image attachment failed" : isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID) ? "Double-click to download" : attachment.name}
             onClick={(event) => selectAttachment(event, attachment.id)}
             onDoubleClick={(event) => openAttachment(event, attachment)}
             onKeyDown={(event) => {
@@ -2631,7 +2653,12 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
               <AttachmentThumb attachment={attachment} apiBase={apiBase} companyID={companyID} />
             </button>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
-            <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
+            <span
+              aria-live={transferState ? "polite" : undefined}
+              style={{ flex: "0 0 auto", opacity: transferState ? 0.9 : 0.58, color: transferState === "failed" ? "#be123c" : undefined }}
+            >
+              {transferState === "processing" ? "Attaching..." : transferState === "failed" ? "Failed" : formatFileSize(attachment.size)}
+            </span>
             <button
               type="button"
               aria-label={`Remove ${attachment.name}`}

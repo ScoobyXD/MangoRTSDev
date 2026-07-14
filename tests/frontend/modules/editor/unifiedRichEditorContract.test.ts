@@ -250,7 +250,9 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(nodeWorkspaceParts, /resourceID: replyAttachmentResourceID/);
   assert.match(richTextEditing, /element\.getAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE\)/);
   assert.match(richTextEditing, /span\.setAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind\)/);
-  assert.match(editorSurfaceHandlers, /event\.key === "Tab" && !activeTableCell\.contains\(getCurrentEditorListItem\(root\)\)/);
+  assert.match(editorSurfaceHandlers, /if \(event\.key !== "Tab"\) return;[\s\S]*event\.preventDefault\(\)/);
+  assert.doesNotMatch(editorSurfaceHandlers, /event\.key === "Enter" \|\| event\.key === "Tab"/);
+  assert.doesNotMatch(editorSurfaceHandlers, /moveEditorTableSelection/);
 });
 
 test("the numeric font-size input commits on Enter and cancels cleanly on Escape", () => {
@@ -996,7 +998,7 @@ test("mentions, image preview and undo hydration, and retired table-cell control
   assert.match(editorSurfaceHandlers, /event\.key === "Backspace"[\s\S]*event\.key === "Delete"[\s\S]*applyAtomicMentionKeyboardEdit\(/);
 
   assert.match(imagePreview, /role: "dialog"[\s\S]*"aria-modal": true[\s\S]*position: "fixed"[\s\S]*inset: 0/);
-  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*top: 18[\s\S]*right: 18[\s\S]*borderRadius: 8/);
+  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE[\s\S]*top: 18[\s\S]*right: 18[\s\S]*"X"/);
   assert.match(imagePreview, /"aria-label": "Download image"[\s\S]*data-mango-image-preview-download[\s\S]*onClick: downloadActiveImagePreview/);
   assert.match(imagePreview, /width: "auto"[\s\S]*height: "auto"[\s\S]*maxWidth: "calc\(100vw - 32px\)"[\s\S]*maxHeight: "calc\(100vh - 32px\)"/);
   assert.doesNotMatch(imagePreview, /setTimeout|requestAnimationFrame|animation:|transition:|outline:/);
@@ -1324,6 +1326,8 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(kanbanOverlays, /position: "fixed"/);
   assert.match(kanbanOverlays, /top: fullscreen \? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : normalTopPx/);
   assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
+  assert.match(kanbanOverlays, /boardWidth - renderedLeftPx - KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX/);
+  assert.match(kanbanOverlays, /boardHeight - KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX/);
   assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
   assert.match(kanbanOverlays, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
   assert.match(kanbanOverlays, /closeButtonStyle=\{overlayHeaderButtonStyle\}/);
@@ -1350,16 +1354,27 @@ test("node window adapters mount the shared unified node shell", () => {
 
 test("node image actions cover attachment chat, inline/fullscreen download, portable copy, and new-block focus", () => {
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const attachmentTransfer = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/nodeTextBlockAttachments.ts"), "utf8");
+  const imageActions = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/nodeTextBlockImageActions.ts"), "utf8");
   const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
 
-  assert.match(nodeSurface, /prepareTextBlockImageFile\(image, apiBase, companyID\)/);
+  assert.match(nodeSurface, /setActiveChatBlockID\(image\.blockID\)[\s\S]*await transferTextBlockImageToChatDraft/);
+  assert.match(projectSummary, /setActivePaneTabs\([\s\S]*\[image\.blockID\]: "chat"[\s\S]*await transferTextBlockImageToChatDraft/);
+  assert.match(attachmentTransfer, /options\.onStage\(staged\);[\s\S]*if \(attachmentID\) \{[\s\S]*linkMangoResourceAttachment/);
+  assert.match(attachmentTransfer, /relationshipKind: "chat_attachment"/);
+  assert.match(attachmentTransfer, /else \{\s*resolved = await options\.uploadLegacyImage\(\)/);
+  assert.match(nodeSurface, /editorChatAttachmentsReadyForSubmit\(attachments\)/);
+  assert.match(projectSummary, /editorChatAttachmentsReadyForSubmit\(attachments\)/);
   assert.match(nodeSurface, /editor\?\.scrollIntoView\(\{ block: "center", inline: "nearest", behavior: "smooth" \}\)/);
   assert.match(nodeParts, /data-mango-inline-image-download="true"/);
   assert.match(nodeSurface, /pendingChatSelectionAnchor=\{selectionAnchor\}/);
   assert.match(handlers, /data-mango-image-preview-download/);
-  assert.match(handlers, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*borderRadius: 8/);
+  assert.match(handlers, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE[\s\S]*"X"/);
+  assert.match(nodeParts, /refreshImageDraft[\s\S]*\[documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights\]/);
+  assert.match(imageActions, /downloadY: frameRect\.bottom - wrapperRect\.top - 32/);
   assert.match(editorImages, /payload\[declaredImageType\] = blobPromise/);
   assert.match(editorImages, /createStandaloneImageClipboardHTML\(portableSource/);
 });

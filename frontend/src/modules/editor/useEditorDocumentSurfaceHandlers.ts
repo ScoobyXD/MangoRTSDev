@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal";
-import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE } from "./UnifiedNodeShell";
+import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE } from "./UnifiedNodeShell";
 import {
   downloadMangoAttachment,
   fetchMangoAttachmentBlob,
@@ -912,48 +912,6 @@ function insertEditorTableCellLineBreak(
   return true;
 }
 
-function moveEditorTableSelection(
-  root: HTMLElement,
-  direction: -1 | 1,
-  documentUndoHistory: EditorDocumentUndoHistory,
-  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
-  scheduleIndentGuideUpdate: (text: string) => void,
-): boolean {
-  const cell = getCurrentEditorTableCell(root);
-  const table = getEditorTableForCell(root, cell);
-  if (!cell || !table) return false;
-  const initialCoordinates = getEditorTableCellCoordinates(table, cell);
-  normalizeEditorTable(table);
-  const activeCell = initialCoordinates ? getEditorTableCellAt(table, initialCoordinates.rowIndex, initialCoordinates.columnIndex) ?? cell : cell;
-  const cells = getEditorTableRows(table).flatMap(getEditorTableCells);
-  const currentIndex = cells.indexOf(activeCell);
-  if (currentIndex < 0) return false;
-  const nextIndex = currentIndex + direction;
-  if (nextIndex >= 0 && nextIndex < cells.length) {
-    setSelectionInEditorTableCell(root, cells[nextIndex]);
-    return true;
-  }
-  if (direction < 0) {
-    setSelectionInEditorTableCell(root, cells[0]);
-    return true;
-  }
-
-  const undoBefore = snapshotEditorDocumentRoot(root);
-  const columns = getEditorTableColumnCount(table);
-  if (getEditorTableRows(table).length >= EDITOR_TABLE_MAX_ROWS) {
-    setSelectionInEditorTableCell(root, cells[cells.length - 1]);
-    return true;
-  }
-  const newRow = createEmptyEditorTableRow(root.ownerDocument, getEditorTableRows(table).length, columns);
-  const body = table.tBodies[0] ?? table.createTBody();
-  body.appendChild(newRow);
-  updateEditorTableColumnAttribute(table);
-  const firstCell = getEditorTableCells(newRow)[0];
-  if (firstCell) setSelectionInEditorTableCell(root, firstCell);
-  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
-  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
-  return true;
-}
 
 function insertEditorTableRowAt(table: HTMLTableElement, rowIndex: number): number | null {
   const rows = getEditorTableRows(table);
@@ -4349,20 +4307,14 @@ export function useEditorDocumentSurfaceHandlers({
           "data-mango-image-preview-close": "true",
           onClick: () => setActiveImagePreview(null),
           style: {
-            ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE,
+            ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE,
             position: "fixed",
             top: 18,
             right: 18,
             zIndex: 2,
-            width: 38,
-            height: 38,
-            borderRadius: 8,
-            fontSize: 24,
-            fontWeight: 900,
-            lineHeight: 1,
           } satisfies React.CSSProperties,
         },
-        "×",
+        "X",
       ),
       React.createElement(
         "div",
@@ -5006,7 +4958,7 @@ export function useEditorDocumentSurfaceHandlers({
           setActiveMentionIndex((current) => (current - 1 + mentionOptions.length) % mentionOptions.length);
           return;
         }
-        if (event.key === "Enter" || event.key === "Tab") {
+        if (event.key === "Enter") {
           event.preventDefault();
           insertMention(root, activeMentionDraft, mentionOptions[activeMentionIndex] ?? mentionOptions[0]);
           return;
@@ -5088,22 +5040,6 @@ export function useEditorDocumentSurfaceHandlers({
 
       const activeTableCell = getCurrentEditorTableCell(root);
       if (activeTableCell) {
-        if (event.key === "Tab" && !activeTableCell.contains(getCurrentEditorListItem(root))) {
-          event.preventDefault();
-          clearPendingTypingStyle();
-          pendingNativeUndoSnapshotRef.current = null;
-          clearEditorImageSelection(root);
-          moveEditorTableSelection(
-            root,
-            event.shiftKey ? -1 : 1,
-            documentUndoHistoryRef.current,
-            scheduleDocumentSave,
-            scheduleIndentGuideUpdate,
-          );
-          setActiveTableContextMenu(null);
-          clearEditorTableCellSelections(root);
-          return;
-        }
         if (event.key === "Enter") {
           event.preventDefault();
           clearPendingTypingStyle();

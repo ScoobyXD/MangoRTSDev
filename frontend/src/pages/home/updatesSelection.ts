@@ -58,10 +58,11 @@ export function resolveUpdateSeenPresentation(
   seenRowKey: string,
   hiddenNotificationKeys: ReadonlySet<string>,
 ): { previewRowKey: string; successorRowKey: string } {
-  const previewRowKey = orderedRows.some((row) => row.rowKey === seenRowKey) ? seenRowKey : "";
+  const successorRowKey = resolveUpdateSeenSuccessor(orderedRows, seenRowKey, hiddenNotificationKeys);
+  const clickedRowKey = orderedRows.some((row) => row.rowKey === seenRowKey) ? seenRowKey : "";
   return {
-    previewRowKey,
-    successorRowKey: resolveUpdateSeenSuccessor(orderedRows, seenRowKey, hiddenNotificationKeys),
+    previewRowKey: successorRowKey || clickedRowKey,
+    successorRowKey,
   };
 }
 

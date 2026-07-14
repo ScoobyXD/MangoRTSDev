@@ -76,16 +76,18 @@ ED51 - Node, Logic Gate, and Project editor headers keep Editor, Permissions, th
 ED52 - Node and Logic Gate entity headers keep shared controls, Outline Styles/Automatic Numbering, and More on one nonwrapping line, with More immediately following the outline control. The four GVIC cards remain in one compact horizontal row and may clip beneath a narrowing side pane instead of wrapping vertically. Apply-to-assigned-nodes is available only from More and requires an explicit Yes/No confirmation; only Yes performs the write.
 ED53 - A persisted person/entity mention retains its current chip appearance, identity, attributes, profile actions, and noneditable atomic DOM representation while participating in editing as one movable character. The caret can occupy the positions immediately before and after it; Left/Right crosses one entity at a time; adjacent entities, entity-only lines, and list items preserve valid boundary positions; Backspace/Delete removes or crosses the expected unit; and undo restores the entity with its identity intact. Backspace immediately before an entity at the start of a line performs the normal previous-line join/move instead of hitting a dead zone, and Enter immediately before it splits/moves content without downgrading the entity to plain text or corrupting list indentation.
 ED54 - Table creation and editing remain shared editor capabilities, but a table must not inject cell-level or table-overlay left/center/right alignment icons into its top-left cell. Alignment remains available only through the shared header toolbar, and removing the embedded controls must not remove table selection, caret placement, row/column editing, or the shared toolbar's active-table alignment behavior.
-ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a square red top-right X matching node close chrome plus a clearly visible bottom-right image download button; both have accessible button semantics. The X closes the preview, the download control downloads the original image, and supported Escape/backdrop dismissal remains intact.
+ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay uses the standard compact node-editor close-button template: a glossy bright-red square with the same border, shadow, radius, and uppercase white `X`; a clearly visible bottom-right image download button remains separate. Both controls have accessible button semantics. The X closes the preview, the download control downloads the original image, and supported Escape/backdrop dismissal remains intact.
 ED56 - The shared `ChatPane` may render one optional caller-owned `headerTrailing` slot in its existing header above the unchanged conversation rows. The slot is presentation input only: `ChatPane` does not fetch email collaborations, derive participant or group membership, or change message ordering, reply indentation, composer, attachment, mention, deletion, or realtime behavior. `EmailCollaborationChatSurface` may supply the EMAIL77 participant-roster header, while existing Node and Project callers that omit the slot retain their current UI and data dependencies.
 ED57 - A Node/project text-block annotation preserves its stable chat comment ID through highlight geometry. A normal click hit-tests that annotation without making the overlay intercept selection/editing, opens the shared chat surface, expands ancestors, scrolls the exact comment into view, and focuses its labeled article with `aria-current` and a visible focus outline; active selections and prevented editor actions do not navigate.
 ED58 - Node text-block comment selections use the same canonical plain-text model as saved annotation highlights, including block separators. A selection that visually wraps or crosses rendered lines must expose the comment action and persist the exact trimmed quote/start/end offsets; ordinary single-line selection remains unchanged.
 ED59 - Pasted ordered, alphanumeric, bullet, and nested list content is sanitized into editor-owned list structure. Safe ordered-list marker type/start/reversed semantics may survive, but source positioning/margins do not; list boxes, markers, and long content remain contained inside every editor/node border.
 ED60 - The mailbox signature surface provides a practical full editor and an explicit Edit/Preview mode using the same sanitized unified rich editor. Stored Mango attachment image references hydrate eagerly in both signature preview and composed message surfaces; preview never introduces public URLs, raw image bytes, or a second sanitizer.
 ED61 - Pasting one copied ordered/alphanumeric/bullet/checklist row at a collapsed caret inserts that row's inline content exactly at the caret in the current item; a caret at the first character must not create a duplicate structural row. Enter at the end of a parent item leaves its nested child list with that parent. Structural Tab/Shift+Tab prevent browser focus escape, preserve the active item's text and caret offset, and never consume a following row.
-ED62 - A single-clicked node/project inline image exposes a small bottom-right download button while retaining its comment/create-node actions. Attachment-backed images can be turned into chat by reloading the original Mango attachment bytes. Copy publishes the richest standards-supported clipboard payload: an image MIME representation plus portable data-image HTML and filename text when Async Clipboard supports them, with the existing sanitized Mango HTML fallback for editor-to-editor copy.
+ED62 - A single-clicked node/project inline image exposes a small download button anchored to that image's bottom-right corner while retaining its comment/create-node actions. Scrolling the nested editor recomputes the controls from the live image frame, so the download button travels with the thumbnail and disappears while the image is offscreen instead of staying pinned to browser chrome. Turning an attachment-backed image into chat opens the composer and stages its thumbnail immediately as `processing`, then creates only the existing attachment's `chat_attachment` resource link; it must not download or reupload the bytes. Chat send stays disabled until reconciliation replaces the pending item with the durable attachment. Failure keeps a visible removable failed item and never fabricates a saved attachment. Only a legacy image with no attachment ID may use the byte-upload fallback. Copy publishes the richest standards-supported clipboard payload: an image MIME representation plus portable data-image HTML and filename text when Async Clipboard supports them, with the existing sanitized Mango HTML fallback for editor-to-editor copy.
 ED63 - Creating a node text box with the + action scrolls the new block into the visible workspace, focuses its rich editor, and places a usable caret at its end.
 ED64 - Turning selected text into chat keeps the source quote visibly annotated as soon as the chat composer opens and after the durable chat is created. The same canonical offset/quote fallback applies inside nested bullet and alphanumeric structures.
+ED65 - In every unified rich editor surface from ED2, Tab is an editor indentation command and never browser focus navigation. Plain text and table-cell text receive one editor indent; structural list items nest through the shared list command. Shift+Tab performs the corresponding shared outdent or a prevented no-op when no outdent is possible. Tab must not accept a mention-menu item, move between table cells, leave the editor, or focus another app control.
+ED66 - Selecting an inline image, opening its chat action, or focusing and blurring an otherwise unchanged node/project text block is not a document edit and must not flush a projection save. A real document mutation still flushes through the existing debounce/blur/teardown guarantees.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -672,17 +674,16 @@ Current behavior:
 Primary reference:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:1550-1577`
 
-#### Finding 8: Tab With A Selection Is Destructive
+#### Finding 8: Tab Selection Retains Content (Resolved)
 
 Expected:
 - Indent selected lines/items while retaining their content and a useful selection.
 
-Actual:
-- Outside a structural list, Tab replaces the entire selected range with five spaces.
-- Multiline indentation is not implemented.
-- Shift+Tab modifies only the line containing selection start and collapses the selection.
-- Structural list Tab affects one active item rather than every selected item.
-- The current unit test explicitly requires selected-text replacement, so the undesirable behavior is locked in as an expected result.
+Current behavior:
+- Outside a structural list, Tab prefixes one five-space editor indent to every selected line while retaining its content and useful selection bounds.
+- Shift+Tab removes one shared indent from each selected line without navigating focus.
+- Structural-list Tab/Shift+Tab applies the shared nest/outdent command to the active item and preserves its text, caret, following rows, and editor focus.
+- Mounted interaction and plain editing tests lock in the non-destructive behavior.
 
 Primary references:
 - `frontend/src/modules/editor/plainTextEditing.ts:254-272`
@@ -718,14 +719,14 @@ Actual:
 Primary reference:
 - `frontend/src/modules/editor/plainTextEditing.ts:84-96`
 
-#### Finding 11: Table Routing Overrides List Routing
+#### Finding 11: Table Tab Routing No Longer Navigates Cells (Partially Resolved)
 
 Expected:
 - Lists inside cells should have an explicit and consistent nesting/outdent contract.
 
-Actual:
-- Table-cell detection runs before list detection.
-- Tab/Shift+Tab always navigate cells and cannot nest/outdent the list.
+Current behavior:
+- Tab/Shift+Tab never navigates to another cell or leaves the editor. Ordinary table-cell text receives the shared indent/outdent behavior, while a structural list inside a cell uses the shared list nest/outdent command.
+- Table-cell detection remains for table-specific Enter and deletion behavior.
 - In Bullet/Checklist mode, Enter in a nonempty ordinary cell can wrap the entire cell as a list instead of splitting at the caret.
 - Automatic numbering does not continue inside cells.
 
@@ -1191,7 +1192,7 @@ Expected:
 - Where supported, Relationships, Metadata, History, Save Settings, version/related-node commands, and surface-specific secondary actions remain available in the **More editor actions** menu with their existing authorization and disabled behavior.
 - Opening the menu moves focus to its first enabled action; Arrow Up/Down, Home, and End move among enabled actions; Escape closes it and restores focus to **More**.
 - The blocking surface mounts under the shared body-level modal layer and therefore paints and receives interaction above Key Views, Explorer, Search Explorer, and feature-local stacking contexts.
-- An inline-image preview mounts directly into its final dark overlay without an intermediate outline/geometry jump and exposes a bright-red top-right close button with an accessible name.
+- An inline-image preview mounts directly into its final dark overlay without an intermediate outline/geometry jump and exposes the standard compact glossy bright-red node close button with an uppercase white `X` and accessible name.
 - The topmost blocking modal traps Tab/Shift+Tab, closing restores prior focus, and existing accessible dialog naming plus Escape/backdrop close behavior remains intact; anchored editor panels may remain intentionally modeless until expanded/fullscreen.
 - Switching a Kanban or Project node panel into or out of fullscreen changes viewport geometry without remounting its live editor or losing its opener state.
 
@@ -1229,3 +1230,23 @@ Expected:
 - Paste keeps useful list semantics but removes source positioning and keeps markers/content inside the editor border.
 - The larger signature editor switches coherently between Edit and read-only Preview, and its image displays through authenticated eager attachment hydration in both preview and compose.
 - Sanitization still rejects unsafe attributes, public storage shortcuts, data URLs, and embedded file bytes.
+
+### Scenario ED-S14: Immediate Image Chat And Editor-Owned Tab
+
+Business logic covered:
+- ED62
+- ED65
+- ED66
+
+Given:
+- A node or project text block contains an attachment-backed inline image.
+- Its authorized attachment-link request is deliberately held open and may succeed or fail.
+- The user presses Tab or Shift+Tab in plain text, a structural list, and a table cell.
+- The user selects the image or blurs the unchanged text block.
+
+Expected:
+- Clicking the image chat action opens the chat pane and paints the selected thumbnail in a processing attachment row before the link request resolves.
+- The attachment-backed path creates the chat_attachment link without reading attachment content or starting a direct upload; success reconciles to the durable attachment, while failure remains visible, removable, and unsendable.
+- Scrolling the editor moves the inline download action by the same amount as the image frame and hides it while the image is outside the editor viewport.
+- Tab and Shift+Tab are always prevented from navigating browser focus; the shared editor indents or outdents the current text/list context and never uses Tab to accept a mention or move to another table cell.
+- Image selection and an untouched focus/blur cycle issue no projection save, while subsequent real edits retain normal save behavior.

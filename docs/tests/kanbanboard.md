@@ -161,6 +161,7 @@ KB123 - Ordinary `node_updated` processing performs no Kanban projection-row loo
 KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
 KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announces the exact source and destination board IDs only after commit. Mounted boards route both local command events and authorized `kanban.changed` hints through the same debounced single-flight canonical work loader, so the source card disappears immediately, destination/current projections converge, duplicate hints coalesce, and a failed command cannot leave false optimistic board state.
 KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked View access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
+KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
 
 ## Scenarios
 
@@ -423,6 +424,7 @@ Expected:
 Business logic covered:
 - KB100
 - KB107
+- KB127
 
 Given:
 - A user opens a node editor popup from a Kanban board card.
@@ -431,6 +433,7 @@ Given:
 Expected:
 - A fullscreen toggle appears in the header immediately to the left of the close action.
 - The popup mounts through the shared body-level modal layer and remains visually/interaction-wise above Key Views, Explorer, Search Explorer, and Kanban-local stacking contexts.
+- Before fullscreen, the normal modeless popup uses nearly all available Kanban board space with narrow top, bottom, left, and right margins; an older stored narrow default does not survive the geometry-key upgrade.
 - Activating fullscreen changes the same live popup to browser-viewport geometry instead of only filling the Kanban board area, without hiding the header actions or remounting the editor.
 - The fullscreen popup keeps a small visible gap at the viewport edges instead of touching the browser edges exactly.
 - While fullscreen, the popup is the topmost blocking modal, traps focus, and restores prior focus when closed; its normal board-anchored mode remains modeless.
