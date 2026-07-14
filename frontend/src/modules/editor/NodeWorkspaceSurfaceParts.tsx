@@ -277,6 +277,7 @@ type NodeTextBlockEditorProps = {
   documentValue: string;
   contentChanges: NodeContentChange[];
   chatMessages: EditorTextBlockChatMessage[];
+  pendingChatSelectionAnchor?: TextBlockSelectionAnchor;
   activeChatAnchorMessageID: string;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
   surfaceText: string;
@@ -351,8 +352,15 @@ function locateTextRangeBoundary(root: HTMLElement, targetOffset: number): TextR
       const child = parent.childNodes[index];
       if (child.nodeType === Node.TEXT_NODE) {
         const length = child.textContent?.length ?? 0;
-        const startOffset = getSelectionPointDocumentOffset(root, child, 0);
+        const rawStartOffset = getSelectionPointDocumentOffset(root, child, 0);
         const endOffset = getSelectionPointDocumentOffset(root, child, length);
+        // A cloned fragment that ends at the start of a nested list item drops
+        // that item's virtual leading newline. Recover it from the text node's
+        // known end boundary so stored document offsets map back to the exact
+        // first character instead of one character into the nested row.
+        const startOffset = rawStartOffset !== null && endOffset !== null
+          ? Math.max(rawStartOffset, endOffset - length)
+          : rawStartOffset;
         if (startOffset !== null && endOffset !== null && target >= startOffset && target <= endOffset) {
           return {
             container: child,
@@ -414,9 +422,24 @@ function getSelectionPointDocumentOffset(root: HTMLElement, container: Node | nu
   }
 }
 
-function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, activeMessageID: string, messages: EditorTextBlockChatMessage[]): TextHighlightRect[] {
+function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, activeMessageID: string, messages: EditorTextBlockChatMessage[], pendingAnchor?: TextBlockSelectionAnchor): TextHighlightRect[] {
   const documentText = readEditorDocumentText(root);
-  const ranges = resolveEditorTextBlockChatAnchorRanges(documentText, messages);
+  const pendingMessage: EditorTextBlockChatMessage[] = pendingAnchor?.source !== "email" && pendingAnchor?.quote
+    ? [{
+      id: "pending-chat-selection",
+      blockID: pendingAnchor.blockID,
+      selectionSource: "text",
+      selectionQuote: pendingAnchor.quote,
+      selectionStart: pendingAnchor.startOffset,
+      selectionEnd: pendingAnchor.endOffset,
+      authorID: "",
+      authorName: "",
+      message: "",
+      createdTimestamp: "",
+      attachments: [],
+    }]
+    : [];
+  const ranges = resolveEditorTextBlockChatAnchorRanges(documentText, [...messages, ...pendingMessage]);
   if (ranges.length === 0) return [];
   const wrapperRect = wrapper.getBoundingClientRect();
   const editorRect = root.getBoundingClientRect();
@@ -659,6 +682,23 @@ async function downloadChatAttachment(attachment: EditorChatAttachment, apiBase?
   return true;
 }
 
+async function downloadTextBlockImage(image: TextBlockImageDraft, apiBase: string, companyID: string): Promise<boolean> {
+  const attachmentID = image.attachmentID?.trim() ?? "";
+  if (attachmentID && apiBase.trim() && companyID.trim()) {
+    await downloadMangoAttachment({ apiBase, companyID, attachmentID, filename: image.filename, variant: "original" });
+    return true;
+  }
+  if (typeof document === "undefined" || !image.dataURL) return false;
+  const link = document.createElement("a");
+  link.href = image.dataURL;
+  link.download = image.filename?.trim() || "editor-image";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  return true;
+}
+
 function openChatAttachment(
   attachment: EditorChatAttachment,
   onPreviewImage: (attachment: EditorChatAttachment) => void,
@@ -680,15 +720,21 @@ function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: H
   const wrapperRect = wrapper.getBoundingClientRect();
   const x = Math.max(8, Math.min(frameRect.right - wrapperRect.left + 8, wrapperRect.width - 66));
   const y = Math.max(6, Math.min(frameRect.top - wrapperRect.top + 4, wrapperRect.height - 34));
+  const downloadX = Math.max(4, Math.min(frameRect.right - wrapperRect.left - 32, wrapperRect.width - 32));
+  const downloadY = Math.max(4, Math.min(frameRect.bottom - wrapperRect.top - 32, wrapperRect.height - 32));
   return {
     blockID,
     dataURL: imageData.src,
-    mimeType: imageDataURLMimeType(imageData.src),
-    size: imageDataURLByteSize(imageData.src),
+    attachmentID: imageData.attachmentID,
+    filename: imageData.filename,
+    mimeType: imageData.mimeType || imageDataURLMimeType(imageData.src),
+    size: imageData.byteSize || imageDataURLByteSize(imageData.src),
     width: imageData.width,
     height: imageData.height,
     x,
     y,
+    downloadX,
+    downloadY,
   };
 }
 
@@ -708,6 +754,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   documentValue,
   contentChanges,
   chatMessages,
+  pendingChatSelectionAnchor,
   activeChatAnchorMessageID,
   chatNavigationRequest,
   surfaceText,
@@ -778,12 +825,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       setContentChangeLabels((current) => current.length > 0 ? [] : current);
       return;
     }
-    const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages);
+    const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages, pendingChatSelectionAnchor);
     setTextHighlightRects(nextRects);
     const nextChangeVisuals = buildNodeContentChangeVisuals(editor, wrapper, contentChanges, activeContentChangeID);
     setContentChangeHighlightRects(nextChangeVisuals.rects);
     setContentChangeLabels(nextChangeVisuals.labels);
-  }, [activeChatAnchorMessageID, activeContentChangeID, chatMessages, contentChanges]);
+  }, [activeChatAnchorMessageID, activeContentChangeID, chatMessages, contentChanges, pendingChatSelectionAnchor]);
 
   useEffect(() => {
     targetKeyRef.current = documentTargetKey;
@@ -1209,6 +1256,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           {textHighlightRects.map((rect) => (
             <div
               key={rect.key}
+              data-mango-chat-source-highlight="true"
+              data-mango-chat-message-id={rect.messageID}
               style={{
                 position: "absolute",
                 left: rect.left,
@@ -1430,6 +1479,41 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           }}
         >
           <ChatIcon color={accent} />
+        </button>
+      )}
+      {imageDraft && (
+        <button
+          type="button"
+          title="Download image"
+          aria-label="Download image"
+          data-mango-inline-image-download="true"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            void downloadTextBlockImage(imageDraft, apiBase, companyID).catch(() => undefined);
+          }}
+          style={{
+            position: "absolute",
+            left: imageDraft.downloadX,
+            top: imageDraft.downloadY,
+            zIndex: 6,
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            border: "1px solid rgba(255,255,255,0.88)",
+            background: "rgba(15,23,42,0.82)",
+            color: "#ffffff",
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            boxShadow: "0 5px 16px rgba(15,23,42,0.30)",
+          }}
+        >
+          <DownloadIcon color="#ffffff" />
         </button>
       )}
       {editable && imageDraft && (

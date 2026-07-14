@@ -19,6 +19,7 @@ import { resolveCurrentAppSidebarPin } from "./appCommittedTitleState";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_STANDARD_VERTICAL_INSET_PX,
   NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
   fullscreenNodeEditorViewportRect,
   readNodeEditorFullscreenChromeActive,
@@ -92,13 +93,13 @@ function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionApplied
   window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
 }
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
-const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
+const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX;
 
 function notificationTypeCount(summary: NotificationSummary, type: string): number {
   return normalizeSidebarNotificationCount(summary.type_counts.find((item) => item.type === type)?.count);
 }
 const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
-const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
+const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v2";
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
@@ -3008,11 +3009,11 @@ const nodeEditorPopupBackdropStyle: React.CSSProperties = {
 const nodeEditorPopupStyle: React.CSSProperties = {
   position: "absolute",
   width: "min(1180px, calc(100vw - 44px))",
-  height: "min(820px, calc(100vh - 64px))",
+  height: "calc(100dvh - 16px)",
   minWidth: "min(420px, calc(100vw - 44px))",
-  minHeight: "min(320px, calc(100vh - 64px))",
+  minHeight: "min(320px, calc(100dvh - 16px))",
   maxWidth: "calc(100vw - 44px)",
-  maxHeight: "calc(100vh - 64px)",
+  maxHeight: "calc(100dvh - 16px)",
   boxSizing: "border-box",
   border: "1px solid rgba(100, 116, 139, 0.54)",
   borderRadius: 16,

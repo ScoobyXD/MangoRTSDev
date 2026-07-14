@@ -3883,8 +3883,8 @@ function criticalPathNodePreviewSurfaceStyle(accent: string): React.CSSPropertie
 
 const criticalPathNodePreviewEditorFrameStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 0,
-  height: "clamp(500px, 64vh, 820px)",
+  height: "min(980px, calc(100dvh - 16px))",
+  minHeight: "min(500px, calc(100dvh - 16px))",
   overflow: "hidden",
   background: EDITOR_NEU_PANEL_BACKGROUND,
 };

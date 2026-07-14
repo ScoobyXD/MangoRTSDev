@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
@@ -66,6 +68,28 @@ test("seen does not jump upward when there is no remaining row below", () => {
 
   assert.equal(resolveUpdateSeenSuccessor(orderedRows, "last", new Set(["last"])), "");
   assert.equal(resolveUpdateSeenSuccessor(orderedRows, "missing", new Set()), "");
+});
+
+test("Seen keeps the clicked row as the node preview while only the list cursor advances", () => {
+  const orderedRows = [
+    { rowKey: "clicked-node", notificationKey: "clicked" },
+    { rowKey: "next-node", notificationKey: "next" },
+  ];
+  assert.deepEqual(resolveUpdateSeenPresentation(orderedRows, "clicked-node", new Set(["clicked"])), {
+    previewRowKey: "clicked-node",
+    successorRowKey: "next-node",
+  });
+  assert.deepEqual(resolveUpdateSeenPresentation(orderedRows, "next-node", new Set(["next"])), {
+    previewRowKey: "next-node",
+    successorRowKey: "",
+  });
+});
+
+test("Updates Seen wires the clicked row to the preview without replacing it with the successor", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  assert.ok(source.includes("openUpdateNodePanel(options.previewRow, { focusRow: false })"));
+  assert.ok(source.includes("if (!openedClickedNode && updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow)"));
+  assert.ok(source.includes("{ advanceFromRowKey: row.rowKey, previewRow: row }"));
 });
 
 test("local Seen events do not reload Updates, while external same-company events do", () => {

@@ -59,6 +59,9 @@ import {
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_DEFAULT_BOARD_TITLE,
+  KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION,
+  KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED,
+  KANBAN_DEFAULT_GROUPINGS,
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_GROUP_FIELDS,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -143,6 +146,10 @@ function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
     out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
   }
   return out;
+}
+
+function defaultKanbanSavedGroupings(): SavedViewGrouping[] {
+  return KANBAN_DEFAULT_GROUPINGS.map((grouping) => ({ ...grouping }));
 }
 
 function firstAvailableKanbanGroupingField(groupings: SavedViewGrouping[]): KanbanGroupField | "" {
@@ -421,9 +428,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
   const [kanbanGroupingOpen, setKanbanGroupingOpen] = useState(false);
   const [kanbanGroupingView, setKanbanGroupingView] = useState<SavedView | null>(null);
-  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>([]);
-  const [kanbanDateAddedSortEnabled, setKanbanDateAddedSortEnabled] = useState(true);
-  const [kanbanDateAddedSortDirection, setKanbanDateAddedSortDirection] = useState<KanbanDateAddedSortDirection>("asc");
+  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>(defaultKanbanSavedGroupings);
+  const [kanbanDateAddedSortEnabled, setKanbanDateAddedSortEnabled] = useState(KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED);
+  const [kanbanDateAddedSortDirection, setKanbanDateAddedSortDirection] = useState<KanbanDateAddedSortDirection>(KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION);
   const [kanbanGroupingLoaded, setKanbanGroupingLoaded] = useState(false);
   const [kanbanGroupingLoading, setKanbanGroupingLoading] = useState(false);
   const [kanbanGroupingSaving, setKanbanGroupingSaving] = useState(false);
@@ -730,9 +737,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const minLeft = getNodeEditorOverlayMinLeftPx(boardRootRef.current, false) / boardWidth;
     return clampNodeEditorOverlayRatio({
       left: minLeft,
-      top: 0.02,
+      top: 0.01,
       width: Math.max(0.42, 0.98 - minLeft),
-      height: 0.94,
+      height: 0.98,
     }, { minLeft });
   }, []);
 
@@ -978,9 +985,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     if (!activeBoardIsLogicGate || !companyID) {
       setKanbanGroupingView(null);
-      setKanbanGroupingDraft([]);
-      setKanbanDateAddedSortEnabled(true);
-      setKanbanDateAddedSortDirection("asc");
+      setKanbanGroupingDraft(defaultKanbanSavedGroupings());
+      setKanbanDateAddedSortEnabled(KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED);
+      setKanbanDateAddedSortDirection(KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION);
       setKanbanGroupingLoaded(false);
       setKanbanGroupingError("");
       setKanbanGroupingLoading(false);
@@ -991,9 +998,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setKanbanGroupingLoading(true);
     setKanbanGroupingLoaded(false);
     setKanbanGroupingError("");
-    setKanbanGroupingDraft([]);
-    setKanbanDateAddedSortEnabled(true);
-    setKanbanDateAddedSortDirection("asc");
+    setKanbanGroupingDraft(defaultKanbanSavedGroupings());
+    setKanbanDateAddedSortEnabled(KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED);
+    setKanbanDateAddedSortDirection(KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION);
     void fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }).then((views) => {
       if (cancelled) return;
       const sortedViews = sortSavedViewsForKanban(views).filter((view) => (
@@ -1002,15 +1009,19 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       ));
       const selectedView = sortedViews[0] ?? null;
       const savedGroupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
-      const groupings = savedGroupings;
-      const dateAddedSortEnabled = normalizeKanbanDateAddedSortEnabled(selectedView?.settings?.date_added_sort_enabled);
-      const dateAddedSortDirection = normalizeKanbanDateAddedSortDirection(selectedView?.settings?.date_added_sort_direction);
+      const groupings = selectedView ? savedGroupings : defaultKanbanSavedGroupings();
+      const dateAddedSortEnabled = selectedView
+        ? normalizeKanbanDateAddedSortEnabled(selectedView.settings?.date_added_sort_enabled)
+        : KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED;
+      const dateAddedSortDirection = selectedView
+        ? normalizeKanbanDateAddedSortDirection(selectedView.settings?.date_added_sort_direction)
+        : KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION;
       setKanbanGroupingView(selectedView);
       setKanbanGroupingDraft(groupings);
       setKanbanDateAddedSortEnabled(dateAddedSortEnabled);
       setKanbanDateAddedSortDirection(dateAddedSortDirection);
       setKanbanGroupingLoaded(true);
-      kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(savedGroupings, dateAddedSortEnabled, dateAddedSortDirection);
+      kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(groupings, dateAddedSortEnabled, dateAddedSortDirection);
     }).catch((nextError) => {
       if (!cancelled) setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to load grouping");
     }).finally(() => {
@@ -1031,7 +1042,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const groupings = normalizeKanbanSavedGroupings(kanbanGroupingDraft);
     const signature = kanbanSavedViewSignature(groupings, kanbanDateAddedSortEnabled, kanbanDateAddedSortDirection);
     if (signature === kanbanGroupingPersistedSignatureRef.current) return undefined;
-    if (!kanbanGroupingView && groupings.length === 0 && kanbanDateAddedSortEnabled && kanbanDateAddedSortDirection === "asc") {
+    if (!kanbanGroupingView
+      && kanbanSavedViewSignature(groupings, kanbanDateAddedSortEnabled, kanbanDateAddedSortDirection)
+        === kanbanSavedViewSignature(defaultKanbanSavedGroupings(), KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED, KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION)) {
       kanbanGroupingPersistedSignatureRef.current = signature;
       return undefined;
     }

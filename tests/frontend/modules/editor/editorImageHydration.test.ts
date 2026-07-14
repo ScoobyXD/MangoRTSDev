@@ -6,7 +6,9 @@ import {
   editorAttachmentImageSource,
   hydrateEditorAttachmentImageFrames,
   refreshEditorAttachmentImageFrames,
+  writeEditorImageToSystemClipboard,
 } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { prepareTextBlockImageFile } from "../../../../frontend/src/modules/editor/nodeTextBlockImageFiles.js";
 
 class FakeImage {
   private readonly attributes = new Map<string, string>();
@@ -232,5 +234,92 @@ test("the shared hydration queue bounds attachment loads to four", async () => {
     cleanup();
   } finally {
     Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
+
+test("attachment-backed image copy publishes portable image, HTML, and text clipboard representations", async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const originalClipboardItem = Object.getOwnPropertyDescriptor(globalThis, "ClipboardItem");
+  const originalFileReader = Object.getOwnPropertyDescriptor(globalThis, "FileReader");
+  let writtenItems: TestClipboardItem[] = [];
+  class TestClipboardItem {
+    static supports(type: string) { return ["image/png", "text/html", "text/plain"].includes(type); }
+    constructor(readonly data: Record<string, Blob | Promise<Blob>>) {}
+  }
+  class TestFileReader {
+    result: string | ArrayBuffer | null = null;
+    error: DOMException | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL() {
+      this.result = "data:image/png;base64,cG9ydGFibGU=";
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { clipboard: { write: async (items: TestClipboardItem[]) => { writtenItems = items; } } },
+  });
+  Object.defineProperty(globalThis, "ClipboardItem", { configurable: true, value: TestClipboardItem });
+  Object.defineProperty(globalThis, "FileReader", { configurable: true, value: TestFileReader });
+  try {
+    let loadCount = 0;
+    assert.equal(writeEditorImageToSystemClipboard({} as Document, {
+      src: "blob:hydrated-image",
+      attachmentID: "attachment-copy",
+      filename: "diagram.png",
+      mimeType: "image/png",
+      width: 320,
+      height: 180,
+    }, async () => {
+      loadCount += 1;
+      return new Blob(["portable"], { type: "image/png" });
+    }), true);
+    await flushPromises();
+    assert.equal(loadCount, 1);
+    assert.equal(writtenItems.length, 1);
+    const payload = writtenItems[0].data;
+    assert.equal((await payload["image/png"]).type, "image/png");
+    const html = await (await payload["text/html"]).text();
+    assert.match(html, /<img src="data:image\/png;base64,cG9ydGFibGU="/);
+    assert.doesNotMatch(html, /blob:|mango-attachment:/);
+    assert.equal(await (await payload["text/plain"]).text(), "diagram.png");
+  } finally {
+    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
+    else delete (globalThis as { navigator?: unknown }).navigator;
+    if (originalClipboardItem) Object.defineProperty(globalThis, "ClipboardItem", originalClipboardItem);
+    else delete (globalThis as { ClipboardItem?: unknown }).ClipboardItem;
+    if (originalFileReader) Object.defineProperty(globalThis, "FileReader", originalFileReader);
+    else delete (globalThis as { FileReader?: unknown }).FileReader;
+  }
+});
+
+test("image chat preparation reloads an attachment-backed editor image as a File", async () => {
+  const originalFile = Object.getOwnPropertyDescriptor(globalThis, "File");
+  class TestFile extends Blob {
+    readonly name: string;
+    constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
+      super(parts, options);
+      this.name = name;
+    }
+  }
+  Object.defineProperty(globalThis, "File", { configurable: true, value: TestFile });
+  try {
+    const calls: string[] = [];
+    const file = await prepareTextBlockImageFile({
+      dataURL: "blob:display-only",
+      attachmentID: "attachment-chat",
+      filename: "whiteboard.png",
+      mimeType: "image/png",
+    }, "http://api", "company-1", async (apiBase, companyID, attachmentID, variant) => {
+      calls.push([apiBase, companyID, attachmentID, variant].join(":"));
+      return new Blob(["image"], { type: "image/png" });
+    });
+    assert.deepEqual(calls, ["http://api:company-1:attachment-chat:original"]);
+    assert.equal(file?.name, "whiteboard.png");
+    assert.equal(file?.type, "image/png");
+  } finally {
+    if (originalFile) Object.defineProperty(globalThis, "File", originalFile);
+    else delete (globalThis as { File?: unknown }).File;
   }
 });

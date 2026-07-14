@@ -98,7 +98,7 @@ export const nodeEditorOverlayResizeHandles: Array<{
   { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
 ];
 
-export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.02, top: 0.02, width: 0.96, height: 0.94 };
+export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.02, top: 0.01, width: 0.96, height: 0.98 };
 const NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX = 14;
 
 type NodeEditorOverlayClampOptions = {
@@ -121,12 +121,12 @@ export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRati
   const minLeft = Math.max(optionMinLeft, baseMinLeft);
   const maxWidth = allowHorizontalOverflow ? 2.4 : Math.max(0.42, Math.min(0.96, 0.98 - minLeft));
   const width = Math.max(0.42, Math.min(finiteRatio(value.width, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width), maxWidth));
-  const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.94));
+  const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.98));
   const defaultLeft = (1 - width) / 2;
   const effectiveMinLeft = allowHorizontalOverflow ? Math.max(optionMinLeft, Math.min(0.02, 0.24 - width)) : minLeft;
   const maxLeft = Math.max(effectiveMinLeft, 0.98 - width);
-  const minTop = 0.02;
-  const maxTop = Math.max(minTop, 0.98 - height);
+  const minTop = 0.01;
+  const maxTop = Math.max(minTop, 0.99 - height);
   return {
     left: Math.max(effectiveMinLeft, Math.min(finiteRatio(value.left, defaultLeft), maxLeft)),
     top: Math.max(minTop, Math.min(finiteRatio(value.top, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.top), maxTop)),

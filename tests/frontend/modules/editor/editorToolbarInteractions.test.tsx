@@ -412,6 +412,69 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await act(async () => editorRoot.dispatchEvent(selectedEmptyListBackspace));
     assert.equal(selectedEmptyListBackspace.defaultPrevented, false);
     assert.equal(editorRoot.querySelectorAll('li[data-mango-editor-list-item="bullet"]').length, 5);
+
+    editorRoot.innerHTML = '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">original</li></ul>';
+    const originalText = editorRoot.querySelector("li")?.firstChild;
+    assert.ok(originalText);
+    const pasteAtStart = dom.window.document.createRange();
+    pasteAtStart.setStart(originalText, 0);
+    pasteAtStart.collapse(true);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(pasteAtStart);
+    await act(async () => {
+      Simulate.paste(editorRoot, {
+        clipboardData: {
+          items: [],
+          files: [],
+          getData: (type: string) => type === "text/html"
+            ? '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">pasted </li></ul>'
+            : "pasted ",
+        },
+      } as never);
+    });
+    assert.equal(editorRoot.querySelectorAll("li").length, 1, "a single copied list row stays in the current row");
+    assert.equal(editorRoot.querySelector("li")?.textContent, "pasted original");
+
+    editorRoot.innerHTML = '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">parent<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">child</li></ul></li><li data-mango-editor-list-item="bullet">after</li></ul>';
+    const parentText = editorRoot.querySelector<HTMLLIElement>('li[data-mango-editor-list-item="bullet"]')?.firstChild;
+    assert.ok(parentText);
+    const parentEnd = dom.window.document.createRange();
+    parentEnd.setStart(parentText, parentText.textContent?.length ?? 0);
+    parentEnd.collapse(true);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(parentEnd);
+    const enterWithNestedChild = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(enterWithNestedChild));
+    const alphanumericRoot = editorRoot.querySelector<HTMLUListElement>('ul[data-mango-editor-list="bullet"]');
+    assert.ok(alphanumericRoot);
+    assert.equal(Array.from(alphanumericRoot.children).length, 3);
+    assert.equal(alphanumericRoot.firstElementChild?.querySelector("ul li")?.textContent, "child", "Enter preserves the parent's nested children");
+
+    const newRow = alphanumericRoot.children[1] as HTMLLIElement;
+    const tabNewRow = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(tabNewRow));
+    assert.equal(tabNewRow.defaultPrevented, true);
+    assert.equal(dom.window.document.activeElement, editorRoot, "Tab keeps browser focus in the editor");
+    assert.equal(alphanumericRoot.children.length, 2, "the new row indents instead of escaping the editor");
+    assert.equal(alphanumericRoot.lastElementChild?.textContent, "after");
+    assert.ok(alphanumericRoot.firstElementChild?.querySelector("ul")?.contains(newRow));
+    assert.ok(newRow.contains(dom.window.document.getSelection()?.anchorNode ?? null), "the caret remains in the indented row");
+
+    editorRoot.innerHTML = '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">first</li><li data-mango-editor-list-item="bullet">second</li><li data-mango-editor-list-item="bullet">third</li></ul>';
+    const secondItem = editorRoot.querySelectorAll<HTMLLIElement>("li")[1];
+    const secondText = secondItem.firstChild;
+    assert.ok(secondText);
+    const secondStart = dom.window.document.createRange();
+    secondStart.setStart(secondText, 0);
+    secondStart.collapse(true);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(secondStart);
+    const tabAtStart = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(tabAtStart));
+    assert.equal(tabAtStart.defaultPrevented, true);
+    assert.equal(secondItem.textContent, "second");
+    assert.equal(editorRoot.querySelectorAll<HTMLLIElement>("li")[2]?.textContent, "third", "Tab never consumes the following row");
+    assert.equal(dom.window.document.getSelection()?.anchorOffset, 0, "Tab preserves a beginning-of-row caret");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

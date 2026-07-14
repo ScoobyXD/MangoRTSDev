@@ -218,7 +218,7 @@ export function KanbanNodeEditorOverlay({
   const normalTopPx = (boardRect?.top ?? 0) + boardHeight * ratio.top;
   const normalLeftPx = (boardRect?.left ?? 0) + renderedLeftPx;
   const normalHeightPx = boardHeight * ratio.height;
-  const normalMaxHeightPx = Math.max(1, boardHeight - 64);
+  const normalMaxHeightPx = Math.max(1, boardHeight - 16);
 
   React.useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
 

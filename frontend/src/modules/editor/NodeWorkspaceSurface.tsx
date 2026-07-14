@@ -24,7 +24,6 @@ import {
   type ProjectRelationshipProjection,
 } from "../project-management/projectManagementApi";
 import {
-  fileFromDataURL,
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
   invalidateMangoResourceAttachmentsCache,
@@ -106,6 +105,7 @@ import {
   type TextBlockSelectionDraft,
   type TextBlockState,
 } from "./NodeWorkspaceSurfaceShared";
+import { prepareTextBlockImageFile } from "./nodeTextBlockImageFiles";
 
 const TEXT_TIMELINE_COLUMN_WIDTH_PX = 52;
 const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
@@ -1043,6 +1043,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     focusBlockIDRef.current = "";
     window.requestAnimationFrame(() => {
       const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${blockID}"]`);
+      editor?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
       focusContentEditableAtEnd(editor ?? null);
     });
   }, [blocks.length, canEdit]);
@@ -1592,7 +1593,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
-    const file = fileFromDataURL(image.dataURL, "selected-image.png");
+    let file: File | null = null;
+    try {
+      file = await prepareTextBlockImageFile(image, apiBase, companyID);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_prepare_attachment");
+      return;
+    }
     if (!file) {
       onError("failed_to_prepare_attachment");
       return;
@@ -1637,7 +1644,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ...current,
       [image.blockID]: [...(current[image.blockID] ?? []), attachment],
     }));
-  }, [canEdit, companyID, nodeID, onError, requestJSON]);
+  }, [apiBase, canEdit, companyID, nodeID, onError, requestJSON]);
 
   const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
@@ -2890,6 +2897,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     documentValue={block.document}
                     contentChanges={unseenChangesByBlockID.get(block.id) ?? []}
                     chatMessages={messages}
+                    pendingChatSelectionAnchor={selectionAnchor}
                     activeChatAnchorMessageID={activeChatAnchorMessageID}
                     chatNavigationRequest={chatNavigationRequest?.blockID === block.id
                       ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID }

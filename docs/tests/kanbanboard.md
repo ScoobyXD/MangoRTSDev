@@ -71,7 +71,7 @@ KB47 - Changing optional grouping rows, Date Added enabled state, or Date Added 
 KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack plus `settings.date_added_sort_enabled` and `settings.date_added_sort_direction`; Date Added must not be written as a grouping row.
 KB49 - The saved optional grouping stack from one Logic Gate must apply when the same user opens another Logic Gate Kanban board.
 KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings, Date Added enabled state, and Date Added sort direction without changing the first user's saved Logic Gate Kanban view row.
-KB51 - If a user has no Logic Gate Kanban saved view row, the board renders ungrouped with Date Added enabled ascending until the user changes grouping or Date Added sort settings.
+KB51 - If a user has no Logic Gate Kanban saved view row, the board defaults to Priority ascending grouping with Date Added enabled descending (newest first) until the user changes grouping or Date Added sort settings.
 
 ### Card Provenance Footer
 
@@ -188,6 +188,7 @@ Business logic covered:
 
 Given:
 - User A opens Logic Gate A's Kanban board.
+- With no saved view, User A initially sees Priority ascending grouping and Date Added enabled descending.
 - User A opens the Group popover.
 - User A sees no mandatory grouping rows.
 - User A adds priority ascending and by person descending as optional grouping rows.

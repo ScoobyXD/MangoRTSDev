@@ -76,12 +76,16 @@ ED51 - Node, Logic Gate, and Project editor headers keep Editor, Permissions, th
 ED52 - Node and Logic Gate entity headers keep shared controls, Outline Styles/Automatic Numbering, and More on one nonwrapping line, with More immediately following the outline control. The four GVIC cards remain in one compact horizontal row and may clip beneath a narrowing side pane instead of wrapping vertically. Apply-to-assigned-nodes is available only from More and requires an explicit Yes/No confirmation; only Yes performs the write.
 ED53 - A persisted person/entity mention retains its current chip appearance, identity, attributes, profile actions, and noneditable atomic DOM representation while participating in editing as one movable character. The caret can occupy the positions immediately before and after it; Left/Right crosses one entity at a time; adjacent entities, entity-only lines, and list items preserve valid boundary positions; Backspace/Delete removes or crosses the expected unit; and undo restores the entity with its identity intact. Backspace immediately before an entity at the start of a line performs the normal previous-line join/move instead of hitting a dead zone, and Enter immediately before it splits/moves content without downgrading the entity to plain text or corrupting list indentation.
 ED54 - Table creation and editing remain shared editor capabilities, but a table must not inject cell-level or table-overlay left/center/right alignment icons into its top-left cell. Alignment remains available only through the shared header toolbar, and removing the embedded controls must not remove table selection, caret placement, row/column editing, or the shared toolbar's active-table alignment behavior.
-ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a conspicuous bright-red top-right close button with an accessible name and button semantics; that button closes the preview while supported Escape/backdrop or existing double-click dismissal behavior remains intact.
+ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a square red top-right X matching node close chrome plus a clearly visible bottom-right image download button; both have accessible button semantics. The X closes the preview, the download control downloads the original image, and supported Escape/backdrop dismissal remains intact.
 ED56 - The shared `ChatPane` may render one optional caller-owned `headerTrailing` slot in its existing header above the unchanged conversation rows. The slot is presentation input only: `ChatPane` does not fetch email collaborations, derive participant or group membership, or change message ordering, reply indentation, composer, attachment, mention, deletion, or realtime behavior. `EmailCollaborationChatSurface` may supply the EMAIL77 participant-roster header, while existing Node and Project callers that omit the slot retain their current UI and data dependencies.
 ED57 - A Node/project text-block annotation preserves its stable chat comment ID through highlight geometry. A normal click hit-tests that annotation without making the overlay intercept selection/editing, opens the shared chat surface, expands ancestors, scrolls the exact comment into view, and focuses its labeled article with `aria-current` and a visible focus outline; active selections and prevented editor actions do not navigate.
 ED58 - Node text-block comment selections use the same canonical plain-text model as saved annotation highlights, including block separators. A selection that visually wraps or crosses rendered lines must expose the comment action and persist the exact trimmed quote/start/end offsets; ordinary single-line selection remains unchanged.
 ED59 - Pasted ordered, alphanumeric, bullet, and nested list content is sanitized into editor-owned list structure. Safe ordered-list marker type/start/reversed semantics may survive, but source positioning/margins do not; list boxes, markers, and long content remain contained inside every editor/node border.
 ED60 - The mailbox signature surface provides a practical full editor and an explicit Edit/Preview mode using the same sanitized unified rich editor. Stored Mango attachment image references hydrate eagerly in both signature preview and composed message surfaces; preview never introduces public URLs, raw image bytes, or a second sanitizer.
+ED61 - Pasting one copied ordered/alphanumeric/bullet/checklist row at a collapsed caret inserts that row's inline content exactly at the caret in the current item; a caret at the first character must not create a duplicate structural row. Enter at the end of a parent item leaves its nested child list with that parent. Structural Tab/Shift+Tab prevent browser focus escape, preserve the active item's text and caret offset, and never consume a following row.
+ED62 - A single-clicked node/project inline image exposes a small bottom-right download button while retaining its comment/create-node actions. Attachment-backed images can be turned into chat by reloading the original Mango attachment bytes. Copy publishes the richest standards-supported clipboard payload: an image MIME representation plus portable data-image HTML and filename text when Async Clipboard supports them, with the existing sanitized Mango HTML fallback for editor-to-editor copy.
+ED63 - Creating a node text box with the + action scrolls the new block into the visible workspace, focuses its rich editor, and places a usable caret at its end.
+ED64 - Turning selected text into chat keeps the source quote visibly annotated as soon as the chat composer opens and after the durable chat is created. The same canonical offset/quote fallback applies inside nested bullet and alphanumeric structures.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -129,6 +133,10 @@ Business logic covered:
 - ED53
 - ED54
 - ED55
+- ED61
+- ED62
+- ED63
+- ED64
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, an attached-email reply body, and a personal/shared mailbox signature.
@@ -155,7 +163,10 @@ Expected:
 - Highlight selection, **No highlight**, pending-caret typing, boundary-safe selected-run formatting, and sanitized serialization use one shared split control and command on every target: the main hitbox applies the chosen color without opening the picker, and the arrow opens the picker without applying color.
 - Person/entity chips behave as atomic character-like units at their before/after boundaries across adjacent chips, entity-only lines, and lists; navigation, Backspace/Delete, Enter, selection, and undo preserve entity identity and normal line/list behavior.
 - New tables expose alignment only through the shared header toolbar and do not inject alignment-icon overlays into a table cell.
-- Inline image preview mounts directly in its stable dark overlay with a bright-red accessible close button and no transient panel, outline, or geometry jump.
+- Inline image preview mounts directly in its stable dark overlay with a square node-style red X, a bottom-right download control, and no transient panel, outline, or geometry jump. A selected inline image exposes its own bottom-right download control; attachment-backed copies publish portable image clipboard data when supported.
+- A one-row list paste inserts at the exact caret without creating a second row; Enter preserves nested child hierarchy; Tab/Shift+Tab keep focus and the caret in the affected list item without consuming the following row.
+- Image-to-chat works for both inline data images and hydrated Mango attachment images, and selected text remains highlighted while the chat draft is open and after it is saved, including in nested lists.
+- The node + action scrolls and focuses the newly created text box.
 - Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
@@ -475,7 +486,7 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 - Clicking an existing link opens it in a new tab rather than placing the caret in it.
 - Mention Enter/Tab acceptance takes priority over newline and indentation behavior.
 - Mention/entity nodes are noneditable atomic spans that retain their identity and appearance while behaving as one character at their before/after boundaries. Navigation, range selection, Backspace/Delete, Enter, line joining/splitting, lists, adjacent entities, and undo must not create dead zones or first downgrade an entity to ordinary text.
-- Images are noneditable frames. Clicking selects them, dragging moves them, edge/corner dragging resizes them, double-click opens the stable dark fullscreen preview with its bright-red accessible close button, and Delete/Backspace removes a selected image.
+- Images are noneditable frames. Clicking selects them and exposes a bottom-right download button, dragging moves them, edge/corner dragging resizes them, double-click opens the stable dark fullscreen preview with its square node-style red X and image download button, and Delete/Backspace removes a selected image.
 - Image insertion always adds a clear break and a caret node after the frame.
 - Table insertion is a shared-toolbar command wherever the host supplies the table capability; compact hosts may omit it only through that explicit capability boundary. Node/project text-box headers do not duplicate the shared toolbar button, and table cells do not render their own alignment-icon overlay.
 
@@ -538,8 +549,8 @@ It does not fully preserve common source structures:
 - A selection across structural list content attempts to preserve Mango list attributes in rich HTML.
 - Plain-text list copy contains item text but not generated bullet/check markers or checklist state.
 - Range copy that includes an image can preserve the frame in rich HTML, but the plain-text output has no image placeholder beyond any surrounding text.
-- A custom-selected image uses a dedicated copy path.
-- There is no dedicated `onCut` handler despite the documented shared copy/cut contract.
+- A custom-selected image uses a dedicated copy path. Attachment-backed images reload original bytes for a standards-supported image MIME clipboard item and portable data-image HTML, while sanitized Mango frame HTML remains the synchronous fallback.
+- A dedicated image `onCut` path copies successfully before deleting the selected frame.
 
 ### Complete Codex Findings Register
 
@@ -632,19 +643,16 @@ Actual:
 Primary reference:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:1640-1653`
 
-#### Finding 6: Persisted Image Copy And Cut Are Broken Or Destructive
+#### Finding 6: Persisted Image Copy And Cut Are Broken Or Destructive (Resolved)
 
 Expected:
 - Copy should place usable image HTML/data on the clipboard.
 - Cut should copy successfully before deleting.
 
-Actual:
-- A hydrated durable image usually has a `blob:` display source plus an attachment ID.
-- A nonhydrated durable image has a `mango-attachment:` source.
-- Both clipboard writers require a safe raster data URL and reject those durable/display sources.
-- `copySelectedEditorImage` returns handled even when the clipboard writes fail.
-- The handler prevents the browser's default copy, potentially leaving an empty clipboard.
-- Ctrl+X directly removes the selected image without a dedicated cut/copy step.
+Current behavior:
+- Hydrated and nonhydrated durable images use their attachment ID to reload original bytes.
+- Async Clipboard receives the supported image MIME, portable data-image HTML, and filename text; the synchronous editor clipboard keeps sanitized Mango HTML.
+- Copy reports handled only after the synchronous representation is written, and image cut runs that copy path before deletion.
 
 Primary references:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:2242-2250`
@@ -653,15 +661,13 @@ Primary references:
 - `frontend/src/modules/editor/editorImages.ts:173-198`
 - `frontend/src/modules/editor/editorImages.ts:382-393`
 
-#### Finding 7: Structural List Enter Can Move Existing Child Hierarchy
+#### Finding 7: Structural List Enter Can Move Existing Child Hierarchy (Resolved)
 
 Expected:
 - Splitting a parent item at the end of its text should leave an existing child list attached to the intended parent.
 
-Actual:
-- `insertEditorListItemAfter` extracts everything from the caret to the end of the `<li>`.
-- That trailing fragment can include an existing nested list.
-- Enter at the end of parent text can move the child list under the newly created blank sibling.
+Current behavior:
+- The split range ends before the direct nested list, so Enter can split the parent's own content without moving its existing child hierarchy.
 
 Primary reference:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:1550-1577`
@@ -744,16 +750,14 @@ Actual:
 Primary reference:
 - `frontend/src/modules/editor/richTextEditing.ts:429-729`
 
-#### Finding 13: Same-Kind Structural List Paste Ignores The Caret Split
+#### Finding 13: Same-Kind Structural List Paste Ignores The Caret Split (Partially Resolved)
 
 Expected:
 - Pasting list items in the middle of an item should preserve text before and after the caret in a predictable list structure.
 
-Actual:
-- When the pasted fragment consists entirely of same-kind lists and the selection is collapsed, every pasted item is inserted after the current item.
-- The active item is not split at the caret.
-- Trailing text remains in the original item.
-- Noncollapsed or mixed-kind paste falls back to generic fragment insertion and can create awkward nested structures.
+Current behavior:
+- A single same-kind list item without a nested child is unwrapped and inserted exactly at the collapsed caret in the current row, including at its first character.
+- Multi-item, nested, noncollapsed, or mixed-kind paste retains the existing structural-fragment behavior and remains a follow-up area for a fuller split/merge contract.
 
 Primary reference:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:448-528`
@@ -823,21 +827,15 @@ Primary references:
 - `frontend/src/modules/editor/richTextEditing.ts:759-779`
 - `docs/tests/editor.md:14-17`
 
-#### Finding 18: Selected Durable Image Copy Reports Success Even When Nothing Was Written
+#### Finding 18: Selected Durable Image Copy Reports Success Even When Nothing Was Written (Resolved)
 
 This is the focused clipboard-state portion of Finding 6:
 
-- `copySelectedEditorImage` ignores the boolean result of `writeImageClipboardData`.
-- It also invokes the async system writer without waiting for success.
-- It then returns `true`, so `onCopy` prevents the browser default.
-- This can blank a user's clipboard while presenting no error.
+- `copySelectedEditorImage` now requires the synchronous HTML/text write to succeed before it reports handled and separately publishes the richest supported async image payload.
 
-#### Finding 19: Rich Text Defines Custom Copy But No Custom Cut
+#### Finding 19: Rich Text Defines Custom Copy But No Custom Cut (Image Case Resolved)
 
-- The shared handler contract includes `onCopy` but not `onCut`.
-- Browser cut behavior can mutate custom lists/mentions/images through native DOM rules.
-- A custom-selected image is not necessarily represented by a DOM range, so native cut cannot reliably copy it.
-- Ctrl+X special-cases only deletion of the selected image.
+- The shared handler now provides a dedicated custom-selected-image cut path that copies before deletion. Native range-cut semantics for arbitrary mixed custom lists/mentions remain outside this focused image fix.
 
 Primary reference:
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts:113-130`

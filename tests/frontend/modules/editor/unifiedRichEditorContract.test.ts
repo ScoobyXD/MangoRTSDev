@@ -16,6 +16,7 @@ import {
   UNIFIED_NODE_SHELL_SURFACE_CONTRACTS,
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
+import { NODE_EDITOR_STANDARD_VERTICAL_INSET_PX } from "../../../../frontend/src/modules/editor/nodeEditorFullscreenChrome.js";
 import {
   beginEditorAttachmentMutation,
   finishEditorAttachmentMutation,
@@ -455,7 +456,7 @@ test("shared editor clipboard routing keeps mixed content and copies images befo
   assert.match(editorImages, /createEditorImageFrame\(ownerDocument, \{ \.\.\.data, id: undefined \}, \{ durable: true \}\)/);
   assert.match(editorSurfaceHandlers, /editorImageTransferHTMLKind\(root\.ownerDocument, html\)/);
   assert.match(editorSurfaceHandlers, /shouldUseEditorImageFileTransferShortcut\(true, htmlKind, text\)/);
-  assert.match(editorSurfaceHandlers, /onCut\(event\)[\s\S]*copySelectedEditorImage\(root, event\.clipboardData\)[\s\S]*removeSelectedEditorImage\(root\)/);
+  assert.match(editorSurfaceHandlers, /onCut\(event\)[\s\S]*copySelectedEditorImage\(root, event\.clipboardData, editorImageAttachmentContext\)[\s\S]*removeSelectedEditorImage\(root\)/);
   assert.match(attachmentBackedPaste, /await withPreparedEditorAttachmentResource\(editorImageAttachmentContext\.prepareResource, \(\) => linkMangoResourceAttachment\(editorImageAttachmentContext\.requestJSON, \{/);
   assert.match(attachmentBackedPaste, /resourceType: editorImageAttachmentContext\.resourceType/);
   assert.match(attachmentBackedPaste, /resourceID: editorImageAttachmentContext\.resourceID/);
@@ -995,7 +996,8 @@ test("mentions, image preview and undo hydration, and retired table-cell control
   assert.match(editorSurfaceHandlers, /event\.key === "Backspace"[\s\S]*event\.key === "Delete"[\s\S]*applyAtomicMentionKeyboardEdit\(/);
 
   assert.match(imagePreview, /role: "dialog"[\s\S]*"aria-modal": true[\s\S]*position: "fixed"[\s\S]*inset: 0/);
-  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*top: 18[\s\S]*right: 18[\s\S]*background: "#ef4444"/);
+  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*top: 18[\s\S]*right: 18[\s\S]*borderRadius: 8/);
+  assert.match(imagePreview, /"aria-label": "Download image"[\s\S]*data-mango-image-preview-download[\s\S]*onClick: downloadActiveImagePreview/);
   assert.match(imagePreview, /width: "auto"[\s\S]*height: "auto"[\s\S]*maxWidth: "calc\(100vw - 32px\)"[\s\S]*maxHeight: "calc\(100vh - 32px\)"/);
   assert.doesNotMatch(imagePreview, /setTimeout|requestAnimationFrame|animation:|transition:|outline:/);
 
@@ -1339,4 +1341,24 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
   assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
   assert.match(projectSummary, /onNodeOpen\(selection\.nodeID\)/);
+  assert.equal(NODE_EDITOR_STANDARD_VERTICAL_INSET_PX, 16);
+  assert.match(homeParts, /NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX/);
+  assert.match(appSidebar, /NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX/);
+  assert.match(projectSummary, /height: "min\(980px, calc\(100dvh - 16px\)\)"/);
+});
+
+test("node image actions cover attachment chat, inline/fullscreen download, portable copy, and new-block focus", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+
+  assert.match(nodeSurface, /prepareTextBlockImageFile\(image, apiBase, companyID\)/);
+  assert.match(nodeSurface, /editor\?\.scrollIntoView\(\{ block: "center", inline: "nearest", behavior: "smooth" \}\)/);
+  assert.match(nodeParts, /data-mango-inline-image-download="true"/);
+  assert.match(nodeSurface, /pendingChatSelectionAnchor=\{selectionAnchor\}/);
+  assert.match(handlers, /data-mango-image-preview-download/);
+  assert.match(handlers, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*borderRadius: 8/);
+  assert.match(editorImages, /payload\[declaredImageType\] = blobPromise/);
+  assert.match(editorImages, /createStandaloneImageClipboardHTML\(portableSource/);
 });
