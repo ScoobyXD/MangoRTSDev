@@ -21,7 +21,7 @@ async function flushAsyncWork() {
   });
 }
 
-test("shared toolbar preserves collapsed typing formats and entities behave atomically", { timeout: 8_000 }, async () => {
+test("shared toolbar preserves collapsed typing formats, atomic entities, and native list range deletion", { timeout: 8_000 }, async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -390,6 +390,28 @@ test("shared toolbar preserves collapsed typing formats and entities behave atom
     });
     assert.equal(editorRoot.querySelectorAll("li").length, 2);
     assert.ok(editorRoot.querySelector('[data-mango-mention-user-id="ada"]'));
+
+    editorRoot.innerHTML = `<ul data-mango-editor-list="bullet">${Array.from(
+      { length: 5 },
+      () => '<li data-mango-editor-list-item="bullet"><br></li>',
+    ).join("")}</ul><div>after</div>`;
+    const emptyListItems = Array.from(editorRoot.querySelectorAll<HTMLLIElement>('li[data-mango-editor-list-item="bullet"]'));
+    assert.equal(emptyListItems.length, 5);
+    const emptyListSelection = dom.window.document.createRange();
+    emptyListSelection.setStart(emptyListItems[0], 0);
+    emptyListSelection.setEnd(emptyListItems[emptyListItems.length - 1], emptyListItems[emptyListItems.length - 1].childNodes.length);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(emptyListSelection);
+    await rememberSelection();
+    assert.equal(dom.window.document.getSelection()?.getRangeAt(0).collapsed, false);
+    const selectedEmptyListBackspace = new dom.window.KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => editorRoot.dispatchEvent(selectedEmptyListBackspace));
+    assert.equal(selectedEmptyListBackspace.defaultPrevented, false);
+    assert.equal(editorRoot.querySelectorAll('li[data-mango-editor-list-item="bullet"]').length, 5);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();
