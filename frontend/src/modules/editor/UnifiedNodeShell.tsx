@@ -57,6 +57,16 @@ export const UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE: React.CSSProperties =
   boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
 };
 
+export const UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE: React.CSSProperties = {
+  ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE,
+  width: 24,
+  height: 24,
+  borderRadius: 8,
+  fontSize: 16,
+  fontWeight: 700,
+  lineHeight: "20px",
+};
+
 function UnifiedNodeShellFullscreenIcon({ active = false }: { active?: boolean }) {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>

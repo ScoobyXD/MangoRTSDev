@@ -475,6 +475,41 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(secondItem.textContent, "second");
     assert.equal(editorRoot.querySelectorAll<HTMLLIElement>("li")[2]?.textContent, "third", "Tab never consumes the following row");
     assert.equal(dom.window.document.getSelection()?.anchorOffset, 0, "Tab preserves a beginning-of-row caret");
+    editorRoot.innerHTML = "plain";
+    const plainText = editorRoot.firstChild;
+    assert.ok(plainText);
+    const plainStart = dom.window.document.createRange();
+    plainStart.setStart(plainText, 0);
+    plainStart.collapse(true);
+    editorRoot.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(plainStart);
+    const plainTab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(plainTab));
+    assert.equal(plainTab.defaultPrevented, true);
+    assert.equal(dom.window.document.activeElement, editorRoot, "plain-text Tab cannot navigate focus");
+    assert.match(editorRoot.textContent ?? "", /^ {5}plain$/, "plain-text Tab inserts one editor indent");
+
+    editorRoot.innerHTML = '<table data-mango-editor-table="true"><tbody><tr><td data-mango-editor-table-cell="true">first</td><td data-mango-editor-table-cell="true">second</td></tr></tbody></table>';
+    const firstCell = editorRoot.querySelector<HTMLTableCellElement>("td");
+    const secondCell = editorRoot.querySelectorAll<HTMLTableCellElement>("td")[1];
+    const firstCellText = firstCell?.firstChild;
+    assert.ok(firstCell);
+    assert.ok(secondCell);
+    assert.ok(firstCellText);
+    const cellStart = dom.window.document.createRange();
+    cellStart.setStart(firstCellText, 0);
+    cellStart.collapse(true);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(cellStart);
+    const tableTab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(tableTab));
+    assert.equal(tableTab.defaultPrevented, true);
+    assert.equal(dom.window.document.activeElement, editorRoot, "table-cell Tab cannot navigate focus");
+    assert.match(firstCell.textContent ?? "", /^ {5}first$/, "table-cell Tab indents the cell text");
+    assert.equal(secondCell.textContent, "second");
+    assert.ok(firstCell.contains(dom.window.document.getSelection()?.anchorNode ?? null), "the caret remains in the current table cell");
+
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

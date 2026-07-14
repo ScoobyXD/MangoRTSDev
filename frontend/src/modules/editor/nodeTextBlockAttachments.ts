@@ -1,4 +1,32 @@
 import type { EditorChatAttachment } from "./editorProjection.js";
+import {
+  linkMangoResourceAttachment,
+  type AttachmentRequestJSON,
+  type MangoAttachmentResourceType,
+} from "../attachments/attachmentApi.js";
+
+export type TextBlockImageChatDraft = {
+  blockID: string;
+  dataURL: string;
+  attachmentID?: string;
+  filename?: string;
+  mimeType: string;
+  size: number;
+};
+
+type TransferTextBlockImageToChatDraftOptions = {
+  image: TextBlockImageChatDraft;
+  requestJSON: AttachmentRequestJSON;
+  companyID: string;
+  resourceType: MangoAttachmentResourceType;
+  resourceID: string;
+  editorSurface: string;
+  createPendingID: () => string;
+  uploadLegacyImage: () => Promise<EditorChatAttachment>;
+  onStage: (attachment: EditorChatAttachment) => void;
+  onResolve: (pendingID: string, attachment: EditorChatAttachment) => void;
+  onReject: (pendingID: string, cause: unknown) => void;
+};
 
 export type NodeAttachmentUploadScope = {
   companyID: string;
@@ -41,6 +69,87 @@ export function appendUniqueEditorAttachments(
     result.push(attachment);
   }
   return result;
+}
+export function stageEditorChatAttachmentTransfer(
+  current: readonly EditorChatAttachment[],
+  attachment: EditorChatAttachment,
+): EditorChatAttachment[] {
+  return appendUniqueEditorAttachments(current, [attachment]);
+}
+
+export function resolveEditorChatAttachmentTransfer(
+  current: readonly EditorChatAttachment[],
+  pendingID: string,
+  attachment: EditorChatAttachment,
+): EditorChatAttachment[] {
+  return appendUniqueEditorAttachments(
+    current.filter((item) => item.id !== pendingID),
+    [{ ...attachment, transferState: undefined }],
+  );
+}
+
+export function failEditorChatAttachmentTransfer(
+  current: readonly EditorChatAttachment[],
+  pendingID: string,
+): EditorChatAttachment[] {
+  return current.map((attachment) => (
+    attachment.id === pendingID ? { ...attachment, transferState: "failed" } : attachment
+  ));
+}
+
+export function editorChatAttachmentsReadyForSubmit(attachments: readonly EditorChatAttachment[]): boolean {
+  return attachments.every((attachment) => !attachment.transferState);
+}
+
+/**
+ * Stages the selected image synchronously so the composer opens immediately.
+ * Existing attachment-backed images only create the missing chat relationship;
+ * they never download or upload the file bytes again.
+ */
+export async function transferTextBlockImageToChatDraft(
+  options: TransferTextBlockImageToChatDraftOptions,
+): Promise<EditorChatAttachment> {
+  const attachmentID = options.image.attachmentID?.trim() ?? "";
+  const pendingID = `pending-image-chat:${options.createPendingID()}`;
+  const staged: EditorChatAttachment = {
+    id: pendingID,
+    attachmentID: attachmentID || undefined,
+    name: options.image.filename?.trim() || "editor-image.png",
+    type: options.image.mimeType.trim() || "image/png",
+    size: Number.isFinite(options.image.size) && options.image.size > 0 ? Math.round(options.image.size) : 0,
+    dataURL: options.image.dataURL,
+    transferState: "processing",
+  };
+  options.onStage(staged);
+
+  try {
+    let resolved: EditorChatAttachment;
+    if (attachmentID) {
+      await linkMangoResourceAttachment(options.requestJSON, {
+        companyID: options.companyID,
+        resourceType: options.resourceType,
+        resourceID: options.resourceID,
+        attachmentID,
+        relationshipKind: "chat_attachment",
+        informationID: options.image.blockID,
+        editorSurface: options.editorSurface,
+      });
+      resolved = {
+        id: attachmentID,
+        attachmentID,
+        name: staged.name,
+        type: staged.type,
+        size: staged.size,
+      };
+    } else {
+      resolved = await options.uploadLegacyImage();
+    }
+    options.onResolve(pendingID, resolved);
+    return resolved;
+  } catch (cause) {
+    options.onReject(pendingID, cause);
+    throw cause;
+  }
 }
 
 export function textBlockAttachmentContextLabel(

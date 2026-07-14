@@ -1,8 +1,8 @@
 import React from "react";
-import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
-import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { publishLiveSelection } from "../selectionCoordinator";
-import type { KanbanCardDropPlacement } from "./shared";
+import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph.js";
+import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared.js";
+import { publishLiveSelection } from "../selectionCoordinator.js";
+import type { KanbanCardDropPlacement } from "./shared.js";
 export type HighlightedEntity = { nodeID: string } | null;
 
 export type CompanyUser = {
@@ -98,7 +98,8 @@ export const nodeEditorOverlayResizeHandles: Array<{
   { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
 ];
 
-export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.02, top: 0.01, width: 0.96, height: 0.98 };
+export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.01, top: 0.01, width: 0.98, height: 0.98 };
+export const KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX = 8;
 const NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX = 14;
 
 type NodeEditorOverlayClampOptions = {
@@ -107,7 +108,7 @@ type NodeEditorOverlayClampOptions = {
 };
 
 export function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
-  return `kanban-node-editor-overlay-ratio-v2:${companyID}:${frameID}`;
+  return `kanban-node-editor-overlay-ratio-v3:${companyID}:${frameID}`;
 }
 
 function finiteRatio(value: unknown, fallback: number): number {
@@ -117,14 +118,14 @@ function finiteRatio(value: unknown, fallback: number): number {
 export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRatio>, options?: NodeEditorOverlayClampOptions): NodeEditorOverlayRatio {
   const allowHorizontalOverflow = options?.allowHorizontalOverflow === true;
   const optionMinLeft = finiteRatio(options?.minLeft, Number.NEGATIVE_INFINITY);
-  const baseMinLeft = allowHorizontalOverflow ? Number.NEGATIVE_INFINITY : 0.02;
+  const baseMinLeft = allowHorizontalOverflow ? Number.NEGATIVE_INFINITY : 0.01;
   const minLeft = Math.max(optionMinLeft, baseMinLeft);
-  const maxWidth = allowHorizontalOverflow ? 2.4 : Math.max(0.42, Math.min(0.96, 0.98 - minLeft));
+  const maxWidth = allowHorizontalOverflow ? 2.4 : Math.max(0.42, Math.min(0.98, 0.99 - minLeft));
   const width = Math.max(0.42, Math.min(finiteRatio(value.width, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width), maxWidth));
   const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.98));
-  const defaultLeft = (1 - width) / 2;
-  const effectiveMinLeft = allowHorizontalOverflow ? Math.max(optionMinLeft, Math.min(0.02, 0.24 - width)) : minLeft;
-  const maxLeft = Math.max(effectiveMinLeft, 0.98 - width);
+  const defaultLeft = typeof value.width === "number" && Number.isFinite(value.width) ? (1 - width) / 2 : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.left;
+  const effectiveMinLeft = allowHorizontalOverflow ? Math.max(optionMinLeft, Math.min(0.01, 0.24 - width)) : minLeft;
+  const maxLeft = Math.max(effectiveMinLeft, 0.99 - width);
   const minTop = 0.01;
   const maxTop = Math.max(minTop, 0.99 - height);
   return {

@@ -70,13 +70,13 @@ test("seen does not jump upward when there is no remaining row below", () => {
   assert.equal(resolveUpdateSeenSuccessor(orderedRows, "missing", new Set()), "");
 });
 
-test("Seen keeps the clicked row as the node preview while only the list cursor advances", () => {
+test("Seen advances both selection and node preview to the next remaining row", () => {
   const orderedRows = [
     { rowKey: "clicked-node", notificationKey: "clicked" },
     { rowKey: "next-node", notificationKey: "next" },
   ];
   assert.deepEqual(resolveUpdateSeenPresentation(orderedRows, "clicked-node", new Set(["clicked"])), {
-    previewRowKey: "clicked-node",
+    previewRowKey: "next-node",
     successorRowKey: "next-node",
   });
   assert.deepEqual(resolveUpdateSeenPresentation(orderedRows, "next-node", new Set(["next"])), {
@@ -85,10 +85,11 @@ test("Seen keeps the clicked row as the node preview while only the list cursor 
   });
 });
 
-test("Updates Seen wires the clicked row to the preview without replacing it with the successor", () => {
+test("Updates Seen selects and opens the successor row, retaining the clicked preview only at the bottom", () => {
   const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
-  assert.ok(source.includes("openUpdateNodePanel(options.previewRow, { focusRow: false })"));
-  assert.ok(source.includes("if (!openedClickedNode && updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow)"));
+  assert.ok(source.includes("if (updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow)"));
+  assert.ok(source.includes("options.previewRow && retainedClickedPreview"));
+  assert.ok(source.includes("if (!retainedClickedPreview) setActiveNodePanel(null)"));
   assert.ok(source.includes("{ advanceFromRowKey: row.rowKey, previewRow: row }"));
 });
 

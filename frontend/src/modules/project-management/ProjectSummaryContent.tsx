@@ -29,7 +29,6 @@ import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyE
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import { createRequestJSON } from "../api/requestJSON.js";
-import { fileFromDataURL } from "../attachments/attachmentApi.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
@@ -50,6 +49,14 @@ import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
+import {
+  editorChatAttachmentsReadyForSubmit,
+  failEditorChatAttachmentTransfer,
+  resolveEditorChatAttachmentTransfer,
+  stageEditorChatAttachmentTransfer,
+  transferTextBlockImageToChatDraft,
+} from "../editor/nodeTextBlockAttachments.js";
+import { prepareTextBlockImageFile } from "../editor/nodeTextBlockImageFiles.js";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
@@ -815,6 +822,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const submitChatMessage = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
+    if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
     if (!message && attachments.length === 0) return;
     const id = generateStableInformationID();
     const timestamp = new Date().toISOString();
@@ -903,32 +911,48 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [attachmentRequestJSON, companyID, projectID]);
 
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
-    const file = fileFromDataURL(image.dataURL, "selected-image.png");
-    if (!file) {
-      setError("Failed to prepare image attachment");
-      return;
-    }
+    setOpenChatBlockIDs((current) => new Set(current).add(image.blockID));
+    setActivePaneTabs((current) => ({ ...current, [image.blockID]: "chat" }));
     try {
-      const attachment = await uploadEditorAttachment(file, {
+      await transferTextBlockImageToChatDraft({
+        image,
         requestJSON: attachmentRequestJSON,
         companyID,
         resourceType: "project",
         resourceID: projectID,
-        sourceKind: "chat_upload",
-        relationshipKind: "chat_attachment",
-        informationID: image.blockID,
         editorSurface: "project_text_block_image_chat",
+        createPendingID: generateStableInformationID,
+        uploadLegacyImage: async () => {
+          const file = await prepareTextBlockImageFile(image, apiBase, companyID);
+          if (!file) throw new Error("Failed to prepare image attachment");
+          return uploadEditorAttachment(file, {
+            requestJSON: attachmentRequestJSON,
+            companyID,
+            resourceType: "project",
+            resourceID: projectID,
+            sourceKind: "chat_upload",
+            relationshipKind: "chat_attachment",
+            informationID: image.blockID,
+            editorSurface: "project_text_block_image_chat",
+          });
+        },
+        onStage: (attachment) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: stageEditorChatAttachmentTransfer(current[image.blockID] ?? [], attachment),
+        })),
+        onResolve: (pendingID, attachment) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: resolveEditorChatAttachmentTransfer(current[image.blockID] ?? [], pendingID, attachment),
+        })),
+        onReject: (pendingID) => setChatDraftAttachments((current) => ({
+          ...current,
+          [image.blockID]: failEditorChatAttachmentTransfer(current[image.blockID] ?? [], pendingID),
+        })),
       });
-      setOpenChatBlockIDs((current) => new Set(current).add(image.blockID));
-      setActivePaneTabs((current) => ({ ...current, [image.blockID]: "chat" }));
-      setChatDraftAttachments((current) => ({
-        ...current,
-        [image.blockID]: [...(current[image.blockID] ?? []), attachment],
-      }));
     } catch (attachmentError) {
       setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add chat attachment");
     }
-  }, [attachmentRequestJSON, companyID, projectID]);
+  }, [apiBase, attachmentRequestJSON, companyID, projectID]);
 
   const attachEmailToBlock = useCallback(async (blockID: string, message: Parameters<typeof messageAttachmentPayload>[0], scope: { sharedInboxID?: string; accountEmail?: string } = {}) => {
     const payload = messageAttachmentPayload(message, scope.sharedInboxID, scope.accountEmail);

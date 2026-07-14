@@ -85,6 +85,7 @@ ATT50 - Every `email_draft` attachment list/content/send/edit authorization firs
 ATT51 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
 ATT52 - Draft attachment mutation ownership spans durable preparation plus the complete upload or existing-attachment link operation. Concurrent mutations for one exact draft share preparation but retain independent active leases until each settles. Failure cleanup may delete an otherwise-empty draft only after the last lease ends and only when every mutation failed; while another lease remains active, or after any mutation succeeds, the draft stays live.
 ATT53 - Signature editor, signature Preview, and composed-message insertion rehydrate each durable image after editor lifecycle replay through the exact `email_signature` authorization scope. Loading and terminal failure are explicit private preview states rather than attempts to navigate the browser to `mango-attachment:`; successful display uses a revocable object URL with contain sizing, cleanup revokes it and restores the durable reference, and the existing authenticated original/lightbox behavior remains independent.
+ATT54 - Reusing an attachment-backed node/project inline image as a chat attachment creates only the authorized `chat_attachment` resource link for the existing attachment ID; it must not GET the original content or create an upload intent. The composer stages the selected thumbnail immediately as transient processing UI, blocks send until the link reconciles, replaces success with the durable reference, and keeps a failed item visible and removable without persisting transient state or image bytes. Only a legacy image with no attachment ID may use the upload fallback.
 
 ## Scenarios
 
@@ -311,6 +312,7 @@ Business logic covered:
 - ATT39
 - ATT40
 - ATT41
+- ATT54
 
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
@@ -322,6 +324,7 @@ Expected:
 - Collapsed historical cards make no body-detail or attachment-content reads. Expanding a card activates its lazy body read and abortable CID downloads; replacing or collapsing the card aborts work that no longer has a visible consumer.
 - Ordinary message detail does not fetch raw MIME merely because attachment metadata is empty or no calendar part is present; MIME recovery remains limited to a concrete missing inline-CID body reference, while calendar RSVP may still use authenticated raw MIME parsing.
 - A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens the original/highest-quality source directly in the stable dark fullscreen overlay with its bright-red accessible close button and no intermediate panel or geometry jump.
+- Turning an attachment-backed node/project editor image into chat paints it in the composer immediately, links the existing attachment without a content GET or upload intent, and reconciles success/failure before send becomes available.
 - Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
 - Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.
 - Copying an attachment-backed image to a different resource authorizes and links it to that destination before insertion, and a target switch prevents a stale asynchronous insertion.

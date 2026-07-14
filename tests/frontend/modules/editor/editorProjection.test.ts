@@ -55,11 +55,12 @@ test("parses node text block chat projection payloads", () => {
     selectionEnd: 25,
     mentionedUserIDs: ["user-2", "user-2", ""],
     mentionedGroupIDs: ["group-1"],
-    attachments: [{ id: "local-draft-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42 }],
+    attachments: [{ id: "local-draft-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, transferState: "processing" }],
   });
   assert.equal(payload.includes("attachment_id"), true);
   assert.equal(payload.includes("data_url"), false);
   assert.equal(payload.includes("data:text/csv"), false);
+  assert.equal(payload.includes("transfer_state"), false);
   const messages = parseEditorTextBlockChats([
     { information_id: "chat-1", type: "Text block chat", information: payload, created_timestamp: "2026-05-04T01:00:00.000Z" },
   ]);

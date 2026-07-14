@@ -586,12 +586,13 @@ export function UpdatesView({
         hiddenKeySet,
       )
       : { previewRowKey: "", successorRowKey: "" };
-    const openedClickedNode = Boolean(options.previewRow
-      && seenPresentation.previewRowKey === options.previewRow.rowKey
-      && updateRowNodeID(options.previewRow));
-    if (options.previewRow && openedClickedNode) openUpdateNodePanel(options.previewRow, { focusRow: false });
     const nextRowKey = seenPresentation.successorRowKey;
     const nextRow = nextRowKey ? visibleUpdateRows.find((row) => row.rowKey === nextRowKey) ?? null : null;
+    const retainedClickedPreview = Boolean(!nextRow
+      && options.previewRow
+      && seenPresentation.previewRowKey === options.previewRow.rowKey
+      && updateRowNodeID(options.previewRow));
+    if (options.previewRow && retainedClickedPreview) openUpdateNodePanel(options.previewRow, { focusRow: false });
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
       for (const key of hiddenKeys) next.add(key);
@@ -607,13 +608,13 @@ export function UpdatesView({
       setSelectedNotificationKey(nextKey);
       setSelectedNotificationKeys(new Set([nextKey]));
       setSelectionAnchorNotificationKey(nextKey);
-      if (!openedClickedNode && updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow);
+      if (updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow);
       else focusUpdateRow(nextRow.rowKey);
     } else if (options.advanceFromRowKey || hiddenKeys.includes(selectedNotificationKey)) {
       setSelectedNotificationKey("");
       setSelectedNotificationKeys(new Set());
       setSelectionAnchorNotificationKey("");
-      if (!openedClickedNode) setActiveNodePanel(null);
+      if (!retainedClickedPreview) setActiveNodePanel(null);
     }
     setContextMenu(null);
     void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {

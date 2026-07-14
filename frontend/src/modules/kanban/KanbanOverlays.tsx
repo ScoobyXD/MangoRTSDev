@@ -15,6 +15,7 @@ import { type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
   contextMenuDividerStyle,
+  KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX,
   contextMenuHoverHandlers,
   getNodeEditorOverlayMinLeftPx,
   KANBAN_EDGE_FRAME,
@@ -213,12 +214,12 @@ export function KanbanNodeEditorOverlay({
     ? Math.max(ratio.left, minLeftPx / boardWidth)
     : ratio.left;
   const renderedLeftPx = boardWidth * renderedLeft;
-  const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - 22) : 0;
+  const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX) : 0;
   const renderedWidth = boardWidth > 0 ? Math.min(ratio.width, availableWidthPx / boardWidth) : ratio.width;
   const normalTopPx = (boardRect?.top ?? 0) + boardHeight * ratio.top;
   const normalLeftPx = (boardRect?.left ?? 0) + renderedLeftPx;
   const normalHeightPx = boardHeight * ratio.height;
-  const normalMaxHeightPx = Math.max(1, boardHeight - 16);
+  const normalMaxHeightPx = Math.max(1, boardHeight - KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX);
 
   React.useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
 
