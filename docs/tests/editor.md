@@ -434,6 +434,7 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 - There is no keyboard command, checkbox role, or checked-state announcement for toggling a checklist item.
 - Enter in a nonempty item splits at the caret.
 - Enter in an item considered empty exits the list.
+- Backspace at a collapsed caret in an empty item exits that one item. A noncollapsed selection spanning empty bullet/checklist rows remains a native selected-range deletion, even when its placeholder-only rows flatten to identical text offsets.
 - Tab nests only if the item has a previous sibling.
 - Shift+Tab outdents only if the item is already inside a nested list.
 - Tab/Shift+Tab affect one active item, not every selected list item.

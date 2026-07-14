@@ -5042,6 +5042,15 @@ export function useEditorDocumentSurfaceHandlers({
         }
       }
 
+      // A DOM range spanning empty list rows can flatten to identical text
+      // offsets because the rows contain only <br> placeholders. Preserve the
+      // browser's normal selected-range deletion instead of treating its first
+      // row as a collapsed-caret "exit list" command.
+      const deletionSelection = event.key === "Backspace" || event.key === "Delete"
+        ? getEditorSelectionRange(root)
+        : null;
+      if (deletionSelection && !deletionSelection.collapsed) return;
+
       const activeEditorListItem = getCurrentEditorListItem(root);
       if (activeEditorListItem) {
         if (event.key === "Enter" && !event.shiftKey) {
