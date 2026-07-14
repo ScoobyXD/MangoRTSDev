@@ -175,13 +175,17 @@ func (s *Server) publishNodeChatDeleted(companyID, nodeID, blockID, messageID st
 }
 
 type capturedKanbanDelete struct {
-	boardID                  string
-	requiresCapturedAudience bool
-	allowedUserIDs           map[string]struct{}
+	boardID        string
+	allowedUserIDs map[string]struct{} // nil when the surviving board must reauthorize at publication time
 }
 
 func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets []store.CompanyExplorerDeleteTargetInput) []capturedKanbanDelete {
-	seen := map[string]bool{}
+	captureAudienceByBoardID := map[string]bool{}
+	addBoard := func(boardID string, captureAudience bool) {
+		if boardID = strings.TrimSpace(boardID); boardID != "" {
+			captureAudienceByBoardID[boardID] = captureAudienceByBoardID[boardID] || captureAudience
+		}
+	}
 	for _, target := range targets {
 		switch strings.TrimSpace(target.Kind) {
 		case "node":
@@ -191,28 +195,19 @@ func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets [
 				continue
 			}
 			for _, row := range rows {
-				if boardID := strings.TrimSpace(row.BoardID); boardID != "" {
-					if _, exists := seen[boardID]; !exists {
-						seen[boardID] = false
-					}
-				}
+				addBoard(row.BoardID, false)
 			}
 		case "logic_gate":
-			if boardID := store.LogicGateKanbanBoardID(target.ID); boardID != "" {
-				seen[boardID] = true
-			}
+			addBoard(store.LogicGateKanbanBoardID(target.ID), true)
 		case "kanban":
-			if boardID := strings.TrimSpace(target.ID); boardID != "" {
-				if _, exists := seen[boardID]; !exists {
-					seen[boardID] = false
-				}
-			}
+			addBoard(target.ID, false)
 		}
 	}
-	captured := make([]capturedKanbanDelete, 0, len(seen))
-	for boardID, requiresCapturedAudience := range seen {
-		item := capturedKanbanDelete{boardID: boardID, requiresCapturedAudience: requiresCapturedAudience}
-		if !requiresCapturedAudience {
+
+	captured := make([]capturedKanbanDelete, 0, len(captureAudienceByBoardID))
+	for boardID, captureAudience := range captureAudienceByBoardID {
+		item := capturedKanbanDelete{boardID: boardID}
+		if !captureAudience {
 			captured = append(captured, item)
 			continue
 		}
@@ -227,11 +222,10 @@ func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets [
 			continue
 		}
 		resolved, err := s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
-		if err == nil {
-			item.allowedUserIDs = resolved
-		} else {
-			item.allowedUserIDs = map[string]struct{}{}
+		if err != nil {
+			resolved = map[string]struct{}{}
 		}
+		item.allowedUserIDs = resolved
 		unlockPublishScope()
 		captured = append(captured, item)
 	}
@@ -241,7 +235,7 @@ func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets [
 func (s *Server) publishCapturedKanbanDeletes(companyID string, captured []capturedKanbanDelete) {
 	for _, item := range captured {
 		boardID := strings.TrimSpace(item.boardID)
-		if !item.requiresCapturedAudience {
+		if item.allowedUserIDs == nil {
 			s.publishKanbanChanged(companyID, boardID, "resource_deleted")
 			continue
 		}
@@ -249,11 +243,7 @@ func (s *Server) publishCapturedKanbanDeletes(companyID string, captured []captu
 		if scope == "" {
 			continue
 		}
-		allowedUserIDs := item.allowedUserIDs
-		if allowedUserIDs == nil {
-			allowedUserIDs = map[string]struct{}{}
-		}
-		s.publishRealtimeMessageWithAudience(companyID, scope, allowedUserIDs, realtimeKanbanChangedMessage{
+		s.publishRealtimeMessageWithAudience(companyID, scope, item.allowedUserIDs, realtimeKanbanChangedMessage{
 			Type:       realtimeMessageKanbanChanged,
 			CompanyID:  strings.TrimSpace(companyID),
 			Scope:      scope,

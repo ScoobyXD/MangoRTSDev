@@ -55,6 +55,15 @@ func (r *controlledRealtimeAudienceRepo) snapshotCalls() []realtimeAudienceResol
 	return slices.Clone(r.calls)
 }
 
+func subscribeRecordingRealtimeConnection(t *testing.T, server *Server, id, companyID, userID, scope string) *recordingRealtimeNetConn {
+	t.Helper()
+	network := &recordingRealtimeNetConn{}
+	conn := &realtimeConnection{id: id, companyID: companyID, userID: userID, conn: network}
+	server.realtimeRegistry.subscribe(conn, scope)
+	t.Cleanup(conn.close)
+	return network
+}
+
 func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &controlledRealtimeAudienceRepo{
@@ -71,23 +80,10 @@ func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *
 	allowedUserID := "11111111-1111-4111-8111-111111111111"
 	deniedUserID := "22222222-2222-4222-8222-222222222222"
 	unrelatedUserID := "33333333-3333-4333-8333-333333333333"
-	allowedNetworkA := &recordingRealtimeNetConn{}
-	allowedNetworkB := &recordingRealtimeNetConn{}
-	deniedNetwork := &recordingRealtimeNetConn{}
-	unrelatedNetwork := &recordingRealtimeNetConn{}
-	connections := []*realtimeConnection{
-		{id: "allowed-a", companyID: companyID, userID: allowedUserID, conn: allowedNetworkA},
-		{id: "allowed-b", companyID: companyID, userID: allowedUserID, conn: allowedNetworkB},
-		{id: "denied", companyID: companyID, userID: deniedUserID, conn: deniedNetwork},
-		{id: "unrelated", companyID: companyID, userID: unrelatedUserID, conn: unrelatedNetwork},
-	}
-	server.realtimeRegistry.subscribe(connections[0], scope)
-	server.realtimeRegistry.subscribe(connections[1], scope)
-	server.realtimeRegistry.subscribe(connections[2], scope)
-	server.realtimeRegistry.subscribe(connections[3], realtimeChatScope("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
-	for _, conn := range connections {
-		defer conn.close()
-	}
+	allowedNetworkA := subscribeRecordingRealtimeConnection(t, server, "allowed-a", companyID, allowedUserID, scope)
+	allowedNetworkB := subscribeRecordingRealtimeConnection(t, server, "allowed-b", companyID, allowedUserID, scope)
+	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "denied", companyID, deniedUserID, scope)
+	unrelatedNetwork := subscribeRecordingRealtimeConnection(t, server, "unrelated", companyID, unrelatedUserID, realtimeChatScope("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 
 	delivered, err := server.publishRealtimeMessageToCurrentEntityAudienceResult(
 		companyID,
@@ -136,14 +132,7 @@ func TestSharedMailboxPublicationDistinguishesNoSubscriberFromAudienceFailure(t 
 	companyID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 	sharedInboxID := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	scope := realtimeSharedMailboxScope(sharedInboxID)
-	conn := &realtimeConnection{
-		id:        "shared-audience-error",
-		companyID: companyID,
-		userID:    "44444444-4444-4444-8444-444444444444",
-		conn:      &recordingRealtimeNetConn{},
-	}
-	server.realtimeRegistry.subscribe(conn, scope)
-	defer conn.close()
+	subscribeRecordingRealtimeConnection(t, server, "shared-audience-error", companyID, "44444444-4444-4444-8444-444444444444", scope)
 
 	err := server.publishSharedMailboxWebhookHint(companyID, sharedInboxID, nylasWebhookChange{
 		Trigger:   "message.created",
@@ -156,7 +145,7 @@ func TestSharedMailboxPublicationDistinguishesNoSubscriberFromAudienceFailure(t 
 		t.Fatalf("audience calls after failure = %+v, want one deadline-bound lookup", calls)
 	}
 
-	server.realtimeRegistry.removeConnection(conn.id)
+	server.realtimeRegistry.removeConnection("shared-audience-error")
 	if err := server.publishSharedMailboxWebhookHint(companyID, sharedInboxID, nylasWebhookChange{
 		Trigger:   "message.created",
 		MessageID: "message-2",
@@ -197,14 +186,8 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 
 	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
 	scope := realtimeBoardScope(boardID)
-	allowedNetwork := &recordingRealtimeNetConn{}
-	deniedNetwork := &recordingRealtimeNetConn{}
-	allowedConn := &realtimeConnection{id: "delete-board-allowed", companyID: companyID, userID: allowed.UserID, conn: allowedNetwork}
-	deniedConn := &realtimeConnection{id: "delete-board-denied", companyID: companyID, userID: denied.UserID, conn: deniedNetwork}
-	server.realtimeRegistry.subscribe(allowedConn, scope)
-	server.realtimeRegistry.subscribe(deniedConn, scope)
-	defer allowedConn.close()
-	defer deniedConn.close()
+	allowedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-allowed", companyID, allowed.UserID, scope)
+	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-denied", companyID, denied.UserID, scope)
 
 	captured := server.captureKanbanBoardsForDeleteTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
 		Kind: "logic_gate",
@@ -266,20 +249,14 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 
 	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
 	scope := realtimeBoardScope(boardID)
-	beforeNetwork := &recordingRealtimeNetConn{}
-	afterNetwork := &recordingRealtimeNetConn{}
-	beforeConn := &realtimeConnection{id: "node-delete-before", companyID: companyID, userID: beforeCapture.UserID, conn: beforeNetwork}
-	afterConn := &realtimeConnection{id: "node-delete-after", companyID: companyID, userID: afterCapture.UserID, conn: afterNetwork}
-	server.realtimeRegistry.subscribe(beforeConn, scope)
-	server.realtimeRegistry.subscribe(afterConn, scope)
-	defer beforeConn.close()
-	defer afterConn.close()
+	beforeNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-before", companyID, beforeCapture.UserID, scope)
+	afterNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-after", companyID, afterCapture.UserID, scope)
 
 	captured := server.captureKanbanBoardsForDeleteTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
 		Kind: "node",
 		ID:   node.NodeID,
 	}})
-	if len(captured) != 1 || captured[0].requiresCapturedAudience {
+	if len(captured) != 1 || captured[0].allowedUserIDs != nil {
 		t.Fatalf("node delete capture = %+v, want board identity without tombstone audience", captured)
 	}
 	if calls := repo.snapshotCalls(); len(calls) != 0 {

@@ -236,12 +236,7 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 		return false, nil, err
 	}
 
-	candidates := map[string]struct{}{}
-	for _, userID := range candidateUserIDs {
-		if userID = strings.TrimSpace(userID); userID != "" {
-			candidates[userID] = struct{}{}
-		}
-	}
+	candidateUserIDs = cleanUUIDTextSlice(candidateUserIDs)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -251,13 +246,12 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
 		return false, []string{}, nil
 	}
-	userIDs := make([]string, 0, len(candidates))
-	for userID := range candidates {
+	userIDs := make([]string, 0, len(candidateUserIDs))
+	for _, userID := range candidateUserIDs {
 		if r.userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel) {
 			userIDs = append(userIDs, userID)
 		}
 	}
-	sort.Strings(userIDs)
 	return true, userIDs, nil
 }
 

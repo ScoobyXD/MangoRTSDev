@@ -4204,15 +4204,7 @@ func TestSharedNylasWebhookAudienceFailureRetriesOpenedWithoutInflatingSignalCou
 	config.WebhookSecret = "webhook-secret"
 	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}})
 	defer server.Close()
-	networkConn := &recordingRealtimeNetConn{}
-	conn := &realtimeConnection{
-		id:        "shared-webhook-retry-connection",
-		companyID: companyID,
-		userID:    user.UserID,
-		conn:      networkConn,
-	}
-	server.realtimeRegistry.subscribe(conn, realtimeSharedMailboxScope(folder.FolderID))
-	defer conn.close()
+	networkConn := subscribeRecordingRealtimeConnection(t, server, "shared-webhook-retry-connection", companyID, user.UserID, realtimeSharedMailboxScope(folder.FolderID))
 	handler := server.Routes()
 	body := `{"type":"message.opened","data":{"object":{"message_id":"retry-shared-message","thread_id":"retry-shared-thread","grant_id":"retry-shared-grant"}}}`
 

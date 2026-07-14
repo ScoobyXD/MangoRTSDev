@@ -1267,9 +1267,8 @@ export function HomePage({
     homeMailboxRequestOwnerIsCurrent(owner, currentMailboxRequestOwner())
   ), [currentMailboxRequestOwner]);
   const currentMailboxFolderOwner = useCallback((): HomeMailboxFolderOwner => ({
-    companyID,
     mailboxScopeKey: activeEmailMailboxScopeKeyRef.current,
-  }), [companyID]);
+  }), []);
   const mailboxFolderOwnerIsCurrent = useCallback((owner: HomeMailboxFolderOwner): boolean => (
     homeMailboxFolderOwnerIsCurrent(owner, currentMailboxFolderOwner())
   ), [currentMailboxFolderOwner]);
@@ -1986,7 +1985,7 @@ export function HomePage({
         const reads: Array<Promise<unknown>> = [];
         if (plan.folders) {
           const folderRead = loadFoldersRef.current?.({
-            owner: { companyID: subscribedTarget.companyID, mailboxScopeKey: subscribedMailboxScopeKey },
+            owner: { mailboxScopeKey: subscribedMailboxScopeKey },
             refresh: true,
           });
           if (folderRead) reads.push(folderRead);
@@ -2091,7 +2090,7 @@ export function HomePage({
         })
         .finally(() => {
           if (!keepPendingUntilConfirmation) forgetPendingArchiveMessages(batch);
-          if (!keepPendingUntilConfirmation) scheduleFolderMetadataRefresh({ companyID: batch.companyID, mailboxScopeKey: batch.owner.mailboxScopeKey });
+          if (!keepPendingUntilConfirmation) scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
         });
     }
   }, [forgetPendingArchiveMessages, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent, releasePendingArchiveMessagesLater, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
@@ -2748,7 +2747,7 @@ export function HomePage({
       };
       if (requestStillOwnsVisibleList()) {
         applyUpdatedMessageToCurrentView(normalized);
-        if (starredDelta !== 0) void loadFolders({ owner: { companyID, mailboxScopeKey: owner.mailboxScopeKey }, refresh: true });
+        if (starredDelta !== 0) void loadFolders({ owner: { mailboxScopeKey: owner.mailboxScopeKey }, refresh: true });
       }
     } catch (updateError) {
       if (starredDelta !== 0) adjustStarredMailboxCount(countKey, -starredDelta);
@@ -2790,7 +2789,7 @@ export function HomePage({
         const updated = { ...result.message, starred: nextStarred };
         if (requestStillOwnsVisibleList()) {
           applyUpdatedMessageToCurrentView(updated);
-          void loadFolders({ owner: { companyID, mailboxScopeKey: owner.mailboxScopeKey }, refresh: true });
+          void loadFolders({ owner: { mailboxScopeKey: owner.mailboxScopeKey }, refresh: true });
         }
       })
       .catch((starError) => {
@@ -2846,7 +2845,7 @@ export function HomePage({
       } else {
         setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
       }
-      scheduleFolderMetadataRefresh({ companyID, mailboxScopeKey: owner.mailboxScopeKey });
+      scheduleFolderMetadataRefresh({ mailboxScopeKey: owner.mailboxScopeKey });
     } catch (archiveError) {
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
       setError(formatError(archiveError, ids.length === 1 ? "Failed to archive message" : "Failed to archive messages"));
@@ -2881,7 +2880,7 @@ export function HomePage({
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message moved to Inbox." : `${ids.length} messages moved to Inbox.`);
-      scheduleFolderMetadataRefresh({ companyID, mailboxScopeKey: owner.mailboxScopeKey });
+      scheduleFolderMetadataRefresh({ mailboxScopeKey: owner.mailboxScopeKey });
     } catch (unarchiveError) {
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));

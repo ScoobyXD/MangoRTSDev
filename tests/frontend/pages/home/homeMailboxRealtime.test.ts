@@ -435,48 +435,15 @@ test("request ownership requires both the exact list key and exact account or sh
   assert.equal(homeMailboxRequestOwnerIsCurrent({ requestKey: "", mailboxScopeKey: current.mailboxScopeKey }, current), false);
 });
 
-test("folder ownership is company and exact mailbox scope, independent of presentation filters", () => {
-  const current: FolderOwner = {
-    companyID: "company-1",
-    mailboxScopeKey: "company-1:user-1:account-a@example.com",
-  };
-  let presentationFilter = "primary";
-  const captured = { ...current };
-  presentationFilter = "starred:q=urgent:unread";
-  assert.equal(
-    homeMailboxFolderOwnerIsCurrent(captured, current),
-    true,
-    `the exact folder owner survives ${presentationFilter}`,
-  );
-  assert.equal(homeMailboxFolderOwnerIsCurrent({ ...captured, companyID: "company-2" }, current), false);
-  assert.equal(homeMailboxFolderOwnerIsCurrent({ ...captured, mailboxScopeKey: "company-1:shared:inbox-1" }, current), false);
-});
-
-test("a pending folder load survives a list-filter change in the same exact mailbox", async () => {
-  const owner: FolderOwner = {
-    companyID: "company-1",
-    mailboxScopeKey: "company-1:user-1:account-a@example.com",
-  };
-  let currentOwner = owner;
-  let presentationFilter = "primary";
-  let finish!: () => void;
-  const coordinator = createHomeMailboxFolderLoadCoordinator({
-    isOwnerCurrent: (candidate) => homeMailboxFolderOwnerIsCurrent(candidate, currentOwner),
-    load: (candidate) => new Promise<boolean>((resolve) => {
-      finish = () => resolve(homeMailboxFolderOwnerIsCurrent(candidate, currentOwner));
-    }),
-  });
-  const loading = coordinator.request(owner);
-  presentationFilter = "starred:q=urgent:unread";
-  finish();
-  assert.equal(await loading, true, "the filter-only change cannot invalidate the folder response");
-  assert.equal(presentationFilter, "starred:q=urgent:unread");
-  coordinator.dispose();
+test("folder ownership is the exact company-scoped mailbox key, independent of presentation filters", () => {
+  const current: FolderOwner = { mailboxScopeKey: "company-1:user-1:account-a@example.com" };
+  assert.equal(homeMailboxFolderOwnerIsCurrent(current, current), true);
+  assert.equal(homeMailboxFolderOwnerIsCurrent({ mailboxScopeKey: "company-2:user-1:account-a@example.com" }, current), false);
+  assert.equal(homeMailboxFolderOwnerIsCurrent({ mailboxScopeKey: "company-1:shared:inbox-1" }, current), false);
 });
 
 test("a pending folder load is rejected after the exact mailbox scope changes", async () => {
   const owner: FolderOwner = {
-    companyID: "company-1",
     mailboxScopeKey: "company-1:user-1:account-a@example.com",
   };
   let currentOwner = owner;
@@ -488,7 +455,7 @@ test("a pending folder load is rejected after the exact mailbox scope changes", 
     }),
   });
   const loading = coordinator.request(owner);
-  currentOwner = { companyID: "company-1", mailboxScopeKey: "company-1:user-1:account-b@example.com" };
+  currentOwner = { mailboxScopeKey: "company-1:user-1:account-b@example.com" };
   coordinator.cancelObsolete(currentOwner);
   finish();
   assert.equal(await loading, false);
@@ -497,7 +464,6 @@ test("a pending folder load is rejected after the exact mailbox scope changes", 
 
 test("first acceptance queues one canonical folder refresh behind the initial folder load", async () => {
   const owner: FolderOwner = {
-    companyID: "company-1",
     mailboxScopeKey: "company-1:user-1:account-a@example.com",
   };
   let currentOwner = owner;
@@ -535,7 +501,7 @@ test("first acceptance queues one canonical folder refresh behind the initial fo
   assert.equal(await duplicateAccepted, true);
   assert.equal(loads.length, 2, "duplicate acceptance signals coalesce into the same final refresh");
 
-  currentOwner = { companyID: "company-2", mailboxScopeKey: "other" };
+  currentOwner = { mailboxScopeKey: "other" };
   coordinator.dispose();
 });
 

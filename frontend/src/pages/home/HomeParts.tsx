@@ -5056,12 +5056,6 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       },
     };
   };
-  const activeAttachmentMutationKey = attachmentMutationKey(compose);
-  React.useEffect(() => {
-    for (const [key, state] of attachmentMutationStatesRef.current) {
-      if (key !== activeAttachmentMutationKey && state.active === 0) attachmentMutationStatesRef.current.delete(key);
-    }
-  }, [activeAttachmentMutationKey]);
   const update = (patch: Partial<ComposeState> | ((current: ComposeState) => Partial<ComposeState>)) => {
     onChange((current) => ({
       ...current,

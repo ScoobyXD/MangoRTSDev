@@ -31,11 +31,7 @@ export type HomeMailboxRequestOwner = Readonly<{
   requestKey: string;
   mailboxScopeKey: string;
 }>;
-export type HomeMailboxFolderOwner = Readonly<{
-  companyID: string;
-  mailboxScopeKey: string;
-}>;
-
+export type HomeMailboxFolderOwner = Pick<HomeMailboxRequestOwner, "mailboxScopeKey">;
 
 export type HomeMailboxCountOverrideKey = "primary" | "starred";
 export type HomeMailboxCountOverrides = Record<string, Partial<Record<HomeMailboxCountOverrideKey, number>>>;
@@ -97,10 +93,8 @@ export function homeMailboxFolderOwnerIsCurrent(
   owner: HomeMailboxFolderOwner,
   current: HomeMailboxFolderOwner,
 ): boolean {
-  return !!owner.companyID.trim()
-    && !!owner.mailboxScopeKey.trim()
-    && owner.companyID.trim() === current.companyID.trim()
-    && owner.mailboxScopeKey.trim() === current.mailboxScopeKey.trim();
+  const mailboxScopeKey = owner.mailboxScopeKey.trim();
+  return !!mailboxScopeKey && mailboxScopeKey === current.mailboxScopeKey.trim();
 }
 
 export function cancelHomeMailboxListRequestTimers(
@@ -196,9 +190,7 @@ export function createHomeMailboxFolderLoadCoordinator(options: HomeMailboxFolde
 
   return {
     request(owner: HomeMailboxFolderOwner, refresh = false): Promise<boolean> {
-      const companyID = owner.companyID.trim();
-      const mailboxScopeKey = owner.mailboxScopeKey.trim();
-      const scopeKey = companyID && mailboxScopeKey ? `${companyID.length}:${companyID}${mailboxScopeKey}` : "";
+      const scopeKey = homeMailboxCountKey(owner.mailboxScopeKey);
       if (disposed || !scopeKey || !options.isOwnerCurrent(owner)) return Promise.resolve(false);
       let state = states.get(scopeKey);
       if (!state) {
