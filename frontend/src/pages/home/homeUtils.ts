@@ -1143,6 +1143,25 @@ export function messageReadStatusLabel(status?: EmailReadStatus): string {
   return "Seen";
 }
 
+export function messageReadStatusSignalTimestamps(status?: EmailReadStatus): string[] {
+  if (!status) return [];
+  const values = (status.signals ?? [])
+    .map((signal) => signal.timestamp?.trim() ?? "")
+    .filter((value) => value && !Number.isNaN(new Date(value).getTime()));
+  const unique = Array.from(new Set(values)).sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+  if (unique.length > 0) return unique;
+  const fallback = [status.first_signal_timestamp, status.last_signal_timestamp]
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value && !Number.isNaN(new Date(value).getTime()));
+  return Array.from(new Set(fallback)).sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+}
+
+export function formatMessageReadSignalTimestamp(raw: string): string {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+  return date.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
 export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
   const raw = status?.last_signal_timestamp || status?.first_signal_timestamp || "";
   if (!raw.trim()) return "";
@@ -1155,10 +1174,10 @@ export function messageReadStatusTitle(status?: EmailReadStatus): string {
   if (!status) return "";
   const label = messageReadStatusLabel(status);
   if (!label) return "";
-  const timestamp = messageReadStatusTimestamp(status);
-  const count = typeof status.signal_count === "number" && status.signal_count > 1 ? ` (${Math.floor(status.signal_count)} open signals)` : "";
-  const caveat = "Open tracking can be affected by recipient image and privacy settings.";
-  return timestamp ? `${label} ${timestamp}${count}. ${caveat}` : `${label}${count}. ${caveat}`;
+  const timestamps = messageReadStatusSignalTimestamps(status).map(formatMessageReadSignalTimestamp);
+  const observed = timestamps.length > 0 ? ` Observed: ${timestamps.join("; ")}.` : "";
+  const caveat = " Nylas does not identify which recipient loaded the tracking pixel; image proxies and privacy settings can create or suppress signals.";
+  return `${label}.${observed}${caveat}`;
 }
 
 function emailFolderTotalCount(folder: EmailFolder | undefined): number | undefined {

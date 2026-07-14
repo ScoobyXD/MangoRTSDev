@@ -2,6 +2,7 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 	"time"
 )
@@ -371,6 +372,10 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 	if next.SignalCount <= 0 {
 		next.SignalCount = 1
 	}
+	next.Signals = mergeCommunicationsMessageReadSignals(
+		next.Signals,
+		normalizeCommunicationsMessageReadSignalTimestamps(signalAt, input.SignalTimestamps),
+	)
 	if threadID != "" {
 		next.ThreadID = threadID
 	}
@@ -445,6 +450,45 @@ func normalizeEmailProvider(provider string) string {
 
 func communicationsMessageReadStatusKey(scopeType, scopeID, messageID string) string {
 	return strings.TrimSpace(scopeType) + ":" + strings.TrimSpace(scopeID) + ":" + strings.TrimSpace(messageID)
+}
+
+func normalizeCommunicationsMessageReadSignalTimestamps(fallback time.Time, values []time.Time) []time.Time {
+	seen := map[int64]struct{}{}
+	normalized := make([]time.Time, 0, len(values)+1)
+	for _, value := range values {
+		value = value.UTC()
+		if value.IsZero() {
+			continue
+		}
+		key := value.UnixNano()
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 && !fallback.IsZero() {
+		normalized = append(normalized, fallback.UTC())
+	}
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Before(normalized[j]) })
+	if len(normalized) > 50 {
+		normalized = normalized[len(normalized)-50:]
+	}
+	return normalized
+}
+
+func mergeCommunicationsMessageReadSignals(current []domain.CommunicationsMessageReadSignal, incoming []time.Time) []domain.CommunicationsMessageReadSignal {
+	values := make([]time.Time, 0, len(current)+len(incoming))
+	for _, signal := range current {
+		values = append(values, signal.Timestamp)
+	}
+	values = append(values, incoming...)
+	normalized := normalizeCommunicationsMessageReadSignalTimestamps(time.Time{}, values)
+	result := make([]domain.CommunicationsMessageReadSignal, 0, len(normalized))
+	for _, timestamp := range normalized {
+		result = append(result, domain.CommunicationsMessageReadSignal{Timestamp: timestamp})
+	}
+	return result
 }
 
 type communicationsMessageReadStatusScopeInfo struct {

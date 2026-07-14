@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
+import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
 import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
@@ -5415,6 +5417,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
+  const [expandedThreadMessageID, setExpandedThreadMessageID] = useState("");
   const [toDraft, setToDraft] = useState("");
   const [ccDraft, setCcDraft] = useState("");
   const [bccDraft, setBccDraft] = useState("");
@@ -5633,6 +5636,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  useEffect(() => {
+    setExpandedThreadMessageID((current) => {
+      if (current && displayThreadMessages.some((threadMessage) => threadMessage.id === current)) return current;
+      for (let index = displayThreadMessages.length - 1; index >= 0; index -= 1) {
+        const candidateID = displayThreadMessages[index]?.id?.trim();
+        if (candidateID) return candidateID;
+      }
+      return "";
+    });
+  }, [displayThreadMessages]);
   useEffect(() => {
     setEmailHighlightsByMessageID((current) => {
       let changed = false;
@@ -5941,6 +5954,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           account_email: mailboxScope.accountEmail,
         });
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
+        const latestIdentity = replySubmissionIdentityRef.current;
+        if (
+          latestIdentity.messageID !== submittedIdentity.messageID
+          || latestIdentity.replyTargetMessageID !== submittedIdentity.replyTargetMessageID
+          || latestIdentity.scopeKey !== submittedIdentity.scopeKey
+        ) return;
         setSentReplies((current) => [...current, sentWithTimestamp]);
         setBodyDraft("");
         setDraftAttachments([]);
@@ -5949,9 +5968,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setReplyAllMode(false);
         onReplyComplete?.();
       } catch (cause) {
-        const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
-        setError(nextError);
-        onError(nextError);
+        if (isOutboundEmailUndoneError(cause)) {
+          setError("");
+        } else {
+          const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
+          setError(nextError);
+          onError(nextError);
+        }
       } finally {
         setSending(false);
       }
@@ -6048,7 +6071,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const threadMessageID = threadMessage.id || messageID;
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = false;
+              const isExpanded = expandedThreadMessageID === threadMessageID;
               const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
+              const collapsedSnippet = emailBodyText(threadMessage.snippet || threadMessage.body || "").replace(/\s+/g, " ").trim();
               const useRichThreadBody = !canUseEmailSelection || /<(?:img|table|video|audio)\b|\bcid:/i.test(threadMessage.body ?? "") || (threadMessage.attachments ?? []).some((attachment) => attachment.is_inline || Boolean(attachment.content_id));
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
@@ -6072,13 +6097,34 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 >
                   {!hideInlineMessageChrome && (
                     <>
-                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto auto", alignItems: "start", gap: 8 }}>
-                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
-                          {fromLine}
-                        </div>
-                        <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
-                          {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
-                        </div>
+                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} email from ${fromLine}`}
+                          onClick={() => setExpandedThreadMessageID((current) => current === threadMessageID ? "" : threadMessageID)}
+                          style={{
+                            minWidth: 0,
+                            display: "grid",
+                            gridTemplateColumns: "auto minmax(0, 1fr) auto",
+                            alignItems: "center",
+                            gap: 7,
+                            border: 0,
+                            background: "transparent",
+                            color: surfaceText,
+                            cursor: "pointer",
+                            padding: "2px 0",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span aria-hidden="true" style={{ color: accent, fontSize: 13, fontWeight: 900 }}>{isExpanded ? "▾" : "›"}</span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>
+                            {fromLine}
+                          </span>
+                          <span style={{ color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
+                            {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
+                          </span>
+                        </button>
                         <button
                           type="button"
                           disabled={!replyEditingEnabled}
@@ -6122,22 +6168,25 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                           Reply all
                         </button>
                       </div>
-                      <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
-                        to {toLine}
-                      </div>
-                      {formatAddressList(threadMessage.cc) && (
-                        <div style={{ minWidth: 0, overflowWrap: "anywhere", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
-                          cc {formatAddressList(threadMessage.cc)}
+                      {isExpanded ? (
+                        <div role="group" aria-label="Message participants" style={{ display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10.5, fontWeight: 700 }}>
+                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>From:</strong> {fromLine}</div>
+                          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>To:</strong> {toLine}</div>
+                          {formatAddressList(threadMessage.cc) && (
+                            <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>Cc:</strong> {formatAddressList(threadMessage.cc)}</div>
+                          )}
+                          {formatAddressList(threadMessage.bcc) && (
+                            <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>Bcc:</strong> {formatAddressList(threadMessage.bcc)}</div>
+                          )}
                         </div>
-                      )}
-                      {formatAddressList(threadMessage.bcc) && (
-                        <div style={{ minWidth: 0, overflowWrap: "anywhere", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
-                          bcc {formatAddressList(threadMessage.bcc)}
+                      ) : collapsedSnippet ? (
+                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 650 }}>
+                          {collapsedSnippet}
                         </div>
-                      )}
+                      ) : null}
                     </>
                   )}
-                  {useRichThreadBody ? (
+                  {isExpanded && (useRichThreadBody ? (
                     <EmailBodyFrame
                       message={threadMessage}
                       apiBase={apiBase}
@@ -6171,8 +6220,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         activeSelection?.messageID === threadMessageID ? activeSelection : null
                       )}
                     </div>
-                  )}
-                  <EmailMessageAttachments
+                  ))}
+                  {isExpanded && (
+                    <EmailMessageAttachments
                     message={threadMessage}
                     apiBase={apiBase}
                     companyID={companyID}
@@ -6184,7 +6234,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     surfaceText={surfaceText}
                     strokeColor={strokeColor}
                     onError={onError}
-                  />
+                    />
+                  )}
                 </div>
               );
             })}
@@ -6278,6 +6329,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               boxSizing: "border-box",
             }}
           >
+            <OutboundEmailUndoBanner />
             {!inlineExpansion && (
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
                 {replyAllMode ? "Replying all" : "Replying"} to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}

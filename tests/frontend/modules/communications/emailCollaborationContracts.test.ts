@@ -181,7 +181,8 @@ test("shared draft API serializes collaboration identity and optimistic revision
   }
 });
 
-test("shared draft send uses immutable collaboration source and one expected revision", async () => {
+test("shared draft send uses immutable collaboration source after the universal undo window", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const originalFetch = globalThis.fetch;
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const responsePayload = {
@@ -206,12 +207,15 @@ test("shared draft send uses immutable collaboration source and one expected rev
   };
 
   try {
-    const sent = await sendEmailCollaborationDraft({
+    const pendingSend = sendEmailCollaborationDraft({
       companyID: " company/1 ",
       collaborationID: " collaboration/1 ",
       draftID: " draft:shared/1 ",
       expectedRevision: 9.8,
     });
+    assert.equal(calls.length, 0);
+    t.mock.timers.tick(10_000);
+    const sent = await pendingSend;
 
     assert.deepEqual(calls, [{
       path: "/v1/communications/email-collaborations/collaboration%2F1/drafts/draft%3Ashared%2F1/send?company_id=company%2F1",

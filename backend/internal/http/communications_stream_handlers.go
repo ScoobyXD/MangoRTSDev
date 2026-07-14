@@ -14,6 +14,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,14 +27,15 @@ type communicationsWebhookGrantContext struct {
 }
 
 type nylasWebhookChange struct {
-	Trigger         string
-	GrantID         string
-	MessageID       string
-	ThreadID        string
-	OccurredAt      time.Time
-	SignalCount     int
-	Message         domain.EmailMessageSnapshot
-	MessageHydrated bool
+	Trigger          string
+	GrantID          string
+	MessageID        string
+	ThreadID         string
+	OccurredAt       time.Time
+	SignalTimestamps []time.Time
+	SignalCount      int
+	Message          domain.EmailMessageSnapshot
+	MessageHydrated  bool
 }
 
 func (s *Server) handleNylasWebhook(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +141,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				ThreadID:                 change.ThreadID,
 				Status:                   "likely_read",
 				SignalTimestamp:          signalAt,
+				SignalTimestamps:         change.SignalTimestamps,
 				SignalCount:              change.SignalCount,
 			})
 			if err != nil {
@@ -244,12 +247,13 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 
 func parseNylasWebhookChange(payload map[string]any) nylasWebhookChange {
 	change := nylasWebhookChange{
-		Trigger:     normalizedNylasMailboxTrigger(firstStringValue(payload, "type", "trigger_type", "event")),
-		GrantID:     findStringField(payload, "grant_id"),
-		MessageID:   findNylasMessageID(payload),
-		ThreadID:    findStringField(payload, "thread_id"),
-		OccurredAt:  findNylasWebhookTimestamp(payload),
-		SignalCount: findNylasWebhookSignalCount(payload),
+		Trigger:          normalizedNylasMailboxTrigger(firstStringValue(payload, "type", "trigger_type", "event")),
+		GrantID:          findStringField(payload, "grant_id"),
+		MessageID:        findNylasMessageID(payload),
+		ThreadID:         findStringField(payload, "thread_id"),
+		OccurredAt:       findNylasWebhookTimestamp(payload),
+		SignalTimestamps: findNylasWebhookSignalTimestamps(payload),
+		SignalCount:      findNylasWebhookSignalCount(payload),
 	}
 	change.Message, change.MessageHydrated = nylasWebhookMessageSnapshot(payload, change.MessageID, change.ThreadID)
 	return change
@@ -673,6 +677,9 @@ func findNylasWebhookSignalCount(value any) int {
 }
 
 func findNylasWebhookTimestamp(value any) time.Time {
+	if timestamps := findNylasWebhookSignalTimestamps(value); len(timestamps) > 0 {
+		return timestamps[len(timestamps)-1]
+	}
 	object := nylasWebhookObject(value)
 	if messageData, ok := object["message_data"].(map[string]any); ok {
 		if ts := timeValue(messageData["timestamp"]); !ts.IsZero() {
@@ -697,6 +704,43 @@ func findNylasWebhookTimestamp(value any) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func findNylasWebhookSignalTimestamps(value any) []time.Time {
+	object := nylasWebhookObject(value)
+	timestamps := make([]time.Time, 0, 50)
+	seen := map[int64]struct{}{}
+	appendRecents := func(raw any) {
+		recents, ok := raw.([]any)
+		if !ok {
+			return
+		}
+		for _, recent := range recents {
+			recentMap, ok := recent.(map[string]any)
+			if !ok {
+				continue
+			}
+			timestamp := timeValue(recentMap["timestamp"]).UTC()
+			if timestamp.IsZero() {
+				continue
+			}
+			key := timestamp.UnixNano()
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			timestamps = append(timestamps, timestamp)
+		}
+	}
+	appendRecents(object["recents"])
+	if messageData, ok := object["message_data"].(map[string]any); ok {
+		appendRecents(messageData["recents"])
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
+	if len(timestamps) > 50 {
+		timestamps = timestamps[len(timestamps)-50:]
+	}
+	return timestamps
 }
 
 func nylasWebhookObject(value any) map[string]any {

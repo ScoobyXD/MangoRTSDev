@@ -14,7 +14,7 @@ test("node email mailbox scopes normalize personal accounts and suppress them fo
   assert.deepEqual(resolveEditorEmailMailboxScope("", ""), {});
 });
 
-test("node-attached email viewer retains triage thread, recipient, attachment, and image behavior", () => {
+test("node-attached email viewer discloses per-message recipients while retaining thread, attachment, and image behavior", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
 
   assert.match(nodeParts, /Expand all threads/);
@@ -22,8 +22,11 @@ test("node-attached email viewer retains triage thread, recipient, attachment, a
   assert.match(nodeParts, /Reply all/);
   assert.match(nodeParts, /setCcDraft/);
   assert.match(nodeParts, /setBccDraft/);
-  assert.match(nodeParts, /cc \{formatAddressList\(threadMessage\.cc\)\}/);
-  assert.match(nodeParts, /bcc \{formatAddressList\(threadMessage\.bcc\)\}/);
+  assert.match(nodeParts, /<strong>Cc:<\/strong> \{formatAddressList\(threadMessage\.cc\)\}/);
+  assert.match(nodeParts, /<strong>Bcc:<\/strong> \{formatAddressList\(threadMessage\.bcc\)\}/);
+  assert.match(nodeParts, /aria-expanded=\{isExpanded\}/);
+  assert.match(nodeParts, /\{isExpanded && \(useRichThreadBody/);
+  assert.match(nodeParts, /\{isExpanded && \(\s*<EmailMessageAttachments/);
   assert.match(nodeParts, /<EmailBodyFrame/);
   assert.match(nodeParts, /onSelectionChange=\{canUseEmailSelection/);
   assert.match(nodeParts, /rewriteEmailCIDImages/);

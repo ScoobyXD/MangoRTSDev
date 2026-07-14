@@ -1709,6 +1709,7 @@ type CommunicationsMessageReadStatusInput struct {
 	ThreadID                 string
 	Status                   string
 	SignalTimestamp          time.Time
+	SignalTimestamps         []time.Time
 	SignalCount              int
 }
 

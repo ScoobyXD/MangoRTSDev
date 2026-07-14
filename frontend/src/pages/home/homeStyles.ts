@@ -25,7 +25,6 @@ const HOME_KEY_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7p
 const HOME_KEY_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
 const HOME_KEY_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const HOME_KEY_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
-const HOME_MAIL_UNREAD_EDGE_FRAME = "linear-gradient(#38bdf8, #38bdf8)";
 const HOME_MAIL_STAR_YELLOW = "#facc15";
 const HOME_MAIL_STAR_EDGE_FRAME = "linear-gradient(135deg, #facc15 0%, #fde68a 45%, #f59e0b 100%)";
 const HOME_MAIL_STAR_EDGE_SHADOW = "0 0 0 2px rgba(250, 204, 21, 0.28), 0 0 28px rgba(250, 204, 21, 0.46), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
@@ -1896,8 +1895,8 @@ export function messageRowStyle(active: boolean, unread: boolean, hovered = fals
 
 export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, hovered = false, pendingStarred = false): React.CSSProperties {
   const framed = active || hovered || pendingStarred;
-  const outlined = framed || unread;
-  const frameBackground = pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
+  const outlined = framed;
+  const frameBackground = pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
   const borderColor = pendingStarred || outlined ? "transparent" : HOME_KEY_SOFT_BORDER;
   const rowSurface = active
     ? `${HOME_MAIL_SELECTED_SURFACE} padding-box, ${HOME_KEY_ACTIVE_SURFACE} padding-box`
@@ -1911,7 +1910,7 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     alignItems: "start",
     minHeight: 82,
     boxSizing: "border-box",
-    border: `${unread ? 2 : 1}px solid ${borderColor}`,
+    border: `1px solid ${borderColor}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
     background: outlined
       ? `${rowSurface}, ${frameBackground} border-box`

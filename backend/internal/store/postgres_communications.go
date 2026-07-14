@@ -696,8 +696,13 @@ func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input Communication
 	if initialCount <= 0 {
 		initialCount = 1
 	}
+	signalTimestamps := normalizeCommunicationsMessageReadSignalTimestamps(signalAt, input.SignalTimestamps)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
 
-	result, err := scanCommunicationsMessageReadReceiptSummary(r.db.QueryRow(`
+	result, err := scanCommunicationsMessageReadReceiptSummary(tx.QueryRow(`
 insert into communications_message_read_receipt_summaries (
   receipt_scope_type,
   receipt_scope_id,
@@ -745,8 +750,51 @@ returning receipt_scope_type, receipt_scope_id, coalesce(user_id::text, ''), coa
 		signalAt,
 		signalCount,
 	))
+	if err != nil {
+		_ = tx.Rollback()
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
+	for _, timestamp := range signalTimestamps {
+		if _, err := tx.Exec(`
+insert into communications_message_read_receipt_signals (receipt_scope_type, receipt_scope_id, message_id, signal_timestamp)
+values ($1, $2, $3, $4)
+on conflict do nothing`, scope.ScopeType, scope.ScopeID, messageID, timestamp); err != nil {
+			_ = tx.Rollback()
+			return domain.CommunicationsMessageReadStatus{}, err
+		}
+	}
+	signalRows, err := tx.Query(`
+select signal_timestamp
+from communications_message_read_receipt_signals
+where receipt_scope_type = $1 and receipt_scope_id = $2 and message_id = $3
+order by signal_timestamp asc`, scope.ScopeType, scope.ScopeID, messageID)
+	if err != nil {
+		_ = tx.Rollback()
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
+	for signalRows.Next() {
+		var signal domain.CommunicationsMessageReadSignal
+		if err := signalRows.Scan(&signal.Timestamp); err != nil {
+			_ = signalRows.Close()
+			_ = tx.Rollback()
+			return domain.CommunicationsMessageReadStatus{}, err
+		}
+		result.Signals = append(result.Signals, signal)
+	}
+	if err := signalRows.Err(); err != nil {
+		_ = signalRows.Close()
+		_ = tx.Rollback()
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
+	if err := signalRows.Close(); err != nil {
+		_ = tx.Rollback()
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
 	result.PersonalAccountEmail = scope.PersonalAccountEmail
-	return result, err
+	return result, nil
 }
 
 func (r *PostgresRepo) ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error) {
@@ -780,6 +828,7 @@ order by last_signal_timestamp desc, message_id asc`, args...)
 	}
 	defer rows.Close()
 
+	statusIndexByMessageID := make(map[string]int, len(ids))
 	statuses := make([]domain.CommunicationsMessageReadStatus, 0, len(ids))
 	for rows.Next() {
 		status, err := scanCommunicationsMessageReadReceiptSummary(rows)
@@ -787,9 +836,37 @@ order by last_signal_timestamp desc, message_id asc`, args...)
 			return nil, err
 		}
 		status.PersonalAccountEmail = scope.PersonalAccountEmail
+		statusIndexByMessageID[status.MessageID] = len(statuses)
 		statuses = append(statuses, status)
 	}
-	return statuses, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	signalRows, err := r.db.Query(`
+select message_id, signal_timestamp
+from communications_message_read_receipt_signals
+where receipt_scope_type = $1
+  and receipt_scope_id = $2
+  and message_id in (`+strings.Join(placeholders, ",")+`)
+order by message_id asc, signal_timestamp asc`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer signalRows.Close()
+	for signalRows.Next() {
+		var messageID string
+		var signal domain.CommunicationsMessageReadSignal
+		if err := signalRows.Scan(&messageID, &signal.Timestamp); err != nil {
+			return nil, err
+		}
+		if index, ok := statusIndexByMessageID[messageID]; ok {
+			statuses[index].Signals = append(statuses[index].Signals, signal)
+		}
+	}
+	return statuses, signalRows.Err()
 }
 
 func (r *PostgresRepo) ensureCommunicationsMessageReadStatusSchema() error {
@@ -833,6 +910,24 @@ create table if not exists communications_message_read_receipt_summaries (
     )
   )
 );
+
+create table if not exists communications_message_read_receipt_signals (
+  receipt_scope_type varchar not null,
+  receipt_scope_id varchar not null,
+  message_id text not null,
+  signal_timestamp timestamptz not null,
+  created_timestamp timestamptz not null default now(),
+  primary key (receipt_scope_type, receipt_scope_id, message_id, signal_timestamp),
+  foreign key (receipt_scope_type, receipt_scope_id, message_id)
+    references communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, message_id) on delete cascade
+);
+
+insert into communications_message_read_receipt_signals (
+  receipt_scope_type, receipt_scope_id, message_id, signal_timestamp
+)
+select receipt_scope_type, receipt_scope_id, message_id, last_signal_timestamp
+from communications_message_read_receipt_summaries
+on conflict do nothing;
 
 create index if not exists idx_communications_message_read_receipt_summaries_user_latest
   on communications_message_read_receipt_summaries(user_id, last_signal_timestamp desc)

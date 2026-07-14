@@ -566,7 +566,7 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /frame\.style\.minHeight = "0px"/);
   assert.match(homeParts, /frame\.style\.height = "0px"/);
   assert.match(homeParts, /fillAvailableHeight \? "100%" : minHeight/);
-  assert.match(homeParts, /gridTemplateRows: fill \? "minmax\(auto, 1fr\)" : "auto"/);
+  assert.match(homeParts, /gridTemplateRows: fill \? "auto minmax\(0, 1fr\)" : "auto"/);
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
   assert.match(homeParts, /saveMailReplyEditorHeight/);
@@ -1062,6 +1062,7 @@ test("node-attached replies load the exact mailbox signature and append it idemp
   assert.match(nodeWorkspaceParts, /const signature = await loadMailboxSignature\(\)/);
   assert.ok(nodeWorkspaceParts.indexOf("const signature = await loadMailboxSignature()") < nodeWorkspaceParts.indexOf("const sent = await sendEmail("));
   assert.match(nodeWorkspaceParts, /replySubmissionIdentityRef\.current/);
+  assert.match(nodeWorkspaceParts, /latestIdentity\.messageID !== submittedIdentity\.messageID/);
   assert.match(nodeWorkspaceParts, /applyEmailSignatureOnceForSession/);
   assert.doesNotMatch(nodeWorkspaceParts, /setBodyDraft\(mailboxSignature/);
   assert.match(signatureBody, /if \(!cleanSignature \|\| emailBodyHasSignature\(body, cleanSignature\)\) return body/);

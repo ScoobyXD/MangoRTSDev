@@ -258,7 +258,7 @@ test("email cid image sources are rewritten to resolved sources", () => {
 });
 
 
-test("unread dot and frame stay distinct from the full-card selected surface", () => {
+test("unread dot remains visible without restoring the blue unread card frame", () => {
   const unreadDot = messageUnreadDotStyle(true);
   assert.equal(unreadDot.visibility, "visible");
   assert.notEqual(unreadDot.background, "transparent");
@@ -270,9 +270,10 @@ test("unread dot and frame stay distinct from the full-card selected surface", (
   assert.equal(readDot.boxShadow, "none");
 
   const unreadRow = triageMessageRowStyle(false, true, true);
-  assert.equal(unreadRow.border, "2px solid transparent");
-  assert.match(String(unreadRow.background), /border-box/);
-  assert.match(String(unreadRow.background), /#38bdf8/);
+  const readRow = triageMessageRowStyle(false, false, true);
+  assert.equal(unreadRow.border, readRow.border);
+  assert.equal(unreadRow.background, readRow.background);
+  assert.doesNotMatch(String(unreadRow.background), /#38bdf8/);
 
   const selectedReadRow = triageMessageRowStyle(true, false, true);
   assert.equal(selectedReadRow.border, "1px solid transparent");
@@ -280,9 +281,8 @@ test("unread dot and frame stay distinct from the full-card selected surface", (
   assert.notEqual(selectedReadRow.background, unreadRow.background);
 
   const selectedUnreadRow = triageMessageRowStyle(true, true, true);
-  assert.equal(selectedUnreadRow.border, "2px solid transparent");
-  assert.match(String(selectedUnreadRow.background), /rgba\(25, 168, 255, 0\.12\)/);
-  assert.match(String(selectedUnreadRow.background), /#38bdf8/);
+  assert.equal(selectedUnreadRow.border, selectedReadRow.border);
+  assert.equal(selectedUnreadRow.background, selectedReadRow.background);
 });
 
 test("triage mail rows reserve only top-right metadata space and let snippets use the card width", () => {

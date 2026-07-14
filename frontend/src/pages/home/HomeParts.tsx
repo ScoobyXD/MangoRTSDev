@@ -58,6 +58,7 @@ export type EmailCollaborationNavigation = EmailCollaborationSelection & { reque
 import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
 import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, orderEmailConversationMessages, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type EmailConversationOrder } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
@@ -80,7 +81,7 @@ function MessageReadStatusText({ message }: { message: EmailMessage }) {
   const label = messageReadStatusLabel(message.read_status);
   if (!label) return null;
   const title = messageReadStatusTitle(message.read_status) || label;
-  return <span style={messageReadStatusStyle} title={title}>{label}</span>;
+  return <span style={messageReadStatusStyle} title={title}><MessageReadReceiptChip message={message} /></span>;
 }
 
 const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/EditorContent").then((module) => ({
@@ -6111,7 +6112,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const collaborationID = message.collaboration_id?.trim() || undefined;
   const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded);
-  const showMessageMeta = !fill;
+  const showMessageMeta = true;
   const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
   const itemStyle: React.CSSProperties = {
@@ -6119,7 +6120,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     height: fill ? "100%" : undefined,
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: fill ? "minmax(auto, 1fr)" : "auto",
+    gridTemplateRows: fill ? "auto minmax(0, 1fr)" : "auto",
     gap: 8,
     paddingTop: fill ? 0 : 10,
     borderTop: fill ? "none" : "1px solid rgba(148, 163, 184, 0.28)",
@@ -6132,19 +6133,26 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
           <button
             type="button"
             aria-expanded={expanded}
+            aria-label={`${expanded ? "Collapse" : "Expand"} message from ${formatAddressList(message.from) || "Unknown sender"}`}
             onClick={onToggleExpanded}
             style={{ border: "none", background: "transparent", padding: 0, minWidth: 0, display: "grid", gridTemplateColumns: "14px minmax(0, 1fr)", gap: 5, alignItems: "start", textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit", flex: "1 1 auto" }}
           >
-            <span aria-hidden="true" style={{ color: "rgba(71, 85, 105, 0.78)", lineHeight: 1.4 }}>{expanded ? "v" : ">"}</span>
+            <span aria-hidden="true" style={{ color: "rgba(71, 85, 105, 0.78)", lineHeight: 1.4 }}>{expanded ? "▾" : "›"}</span>
             <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
-              <span style={mutedSmallStyle}>
-                From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
+              <span style={{ ...mutedSmallStyle, fontWeight: 850, color: "#334155" }}>
+                {formatAddressList(message.from) || "Unknown sender"}
                 {messageDate && <span> - {messageDate}</span>}
               </span>
               {!expanded && message.snippet && <span style={{ ...mutedSmallStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.snippet}</span>}
-              {formatAddressList(message.cc) && <span style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</span>}
-              {formatAddressList(message.bcc) && <span style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</span>}
-              {messageIsSent(message) && (
+              {expanded && (
+                <span style={{ display: "grid", gap: 2 }}>
+                  <span style={mutedSmallStyle}><strong>From:</strong> {formatAddressList(message.from) || "Unknown sender"}</span>
+                  <span style={mutedSmallStyle}><strong>To:</strong> {formatAddressList(message.to) || "me"}</span>
+                  {formatAddressList(message.cc) && <span style={mutedSmallStyle}><strong>Cc:</strong> {formatAddressList(message.cc)}</span>}
+                  {formatAddressList(message.bcc) && <span style={mutedSmallStyle}><strong>Bcc:</strong> {formatAddressList(message.bcc)}</span>}
+                </span>
+              )}
+              {expanded && messageIsSent(message) && (
                 <span style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
                   <MessageReadStatusText message={message} />
                 </span>
@@ -6233,7 +6241,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onToggleStar: () => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
 }) {
-  const messageDate = formatMessageDate(message.date);
   const newestFirstConversationMessages = conversationMessagesForDetail(message, threadMessages);
   const singleMessage = newestFirstConversationMessages.length <= 1;
   const newestMessageID = newestFirstConversationMessages[0]?.id ?? message.id;
@@ -6325,14 +6332,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
       <div style={panelHeaderStyle}>
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
-          <div style={mutedSmallStyle}>From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}</div>
-          {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
-          {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
-          {messageDate && (
-            <div style={{ ...mutedSmallStyle, ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
-              <span>{messageDate}</span>
-            </div>
-          )}
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>

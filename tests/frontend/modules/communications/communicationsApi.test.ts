@@ -1025,7 +1025,8 @@ test("archive helpers call mailbox action endpoints", async () => {
   }
 });
 
-test("sendEmail scopes shared inbox sends through query params", async () => {
+test("sendEmail scopes shared inbox sends through query params after the universal undo window", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
@@ -1038,13 +1039,16 @@ test("sendEmail scopes shared inbox sends through query params", async () => {
     return jsonResponse({ message: message("sent-1", { subject: "Hello" }) });
   };
   try {
-    const sent = await sendEmail({
+    const pendingSend = sendEmail({
       to: [{ email: "customer@example.test" }],
       subject: "Hello",
       body: "Body",
       company_id: " company-1 ",
       shared_inbox_id: " shared-1 ",
     });
+    assert.equal(calls.length, 0);
+    t.mock.timers.tick(10_000);
+    const sent = await pendingSend;
     assert.equal(sent.id, "sent-1");
     assert.equal(sent.body, "Body");
     assert.deepEqual(calls, [{
@@ -1063,7 +1067,8 @@ test("sendEmail scopes shared inbox sends through query params", async () => {
   }
 });
 
-test("sendEmail leaves reply-history persistence to the caller", async () => {
+test("sendEmail leaves reply-history persistence to the caller", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   invalidateCommunicationsCache();
   const calls: string[] = [];
   const originalFetch = globalThis.fetch;
@@ -1077,7 +1082,7 @@ test("sendEmail leaves reply-history persistence to the caller", async () => {
   };
   try {
     await getEmailMessage("inbound-1", "company-1", "shared-1");
-    await sendEmail({
+    const pendingSend = sendEmail({
       to: [{ email: "customer@example.test" }],
       subject: "Re: Hello",
       body: "Sent reply",
@@ -1085,6 +1090,8 @@ test("sendEmail leaves reply-history persistence to the caller", async () => {
       company_id: "company-1",
       shared_inbox_id: "shared-1",
     });
+    t.mock.timers.tick(10_000);
+    await pendingSend;
 
     const cachedInbound = await getEmailMessage("inbound-1", "company-1", "shared-1");
     assert.equal(cachedInbound.local_replies, undefined);
