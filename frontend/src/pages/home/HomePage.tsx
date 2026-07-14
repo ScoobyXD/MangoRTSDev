@@ -59,6 +59,7 @@ import {
   type EmailProvider,
   type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
+import { isOutboundEmailUndoneError } from "../../modules/communications/outboundEmailUndo";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
@@ -97,6 +98,7 @@ import { markMyWorkMatrixCachesStaleForCompany, markMyWorkMatrixCachesStaleForTa
 import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
+import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, createHomeMailSharedReplyDraftID, deleteHomeMailDraft, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
@@ -3604,7 +3606,10 @@ export function HomePage({
         scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS, { owner: visibleOwner });
       }
     } catch (sendError) {
-      if (homeMailboxComposeSubmissionIsCurrent(composeRef.current, composeAtSubmit)) setError(formatError(sendError, "Failed to send message"));
+      if (homeMailboxComposeSubmissionIsCurrent(composeRef.current, composeAtSubmit)) {
+        if (isOutboundEmailUndoneError(sendError)) setNotice("Send undone. Your message is still open.");
+        else setError(formatError(sendError, "Failed to send message"));
+      }
     } finally {
       if (mailboxRequestOwnerIsCurrent(visibleOwner)) setBusy("");
     }
@@ -3670,8 +3675,28 @@ export function HomePage({
               }
             }
           })
-          .catch((scheduledSendError) => {
-            if (!cancelled) setError(formatError(scheduledSendError, "Failed to send scheduled message"));
+          .catch(async (scheduledSendError) => {
+            if (isOutboundEmailUndoneError(scheduledSendError)) {
+              const unscheduledCompose = { ...homeMailDraftToCompose(draft), scheduledAt: "" };
+              try {
+                const drafts = await syncHomeMailDraftFromCompose(companyID, currentUserID, unscheduledCompose, "");
+                if (!cancelled) {
+                  setMailDraftsForScopeIfActive(drafts, draft.sharedInboxID, draft.accountEmail);
+                  setNotice("Scheduled send undone; draft kept without a send time.");
+                }
+              } catch (unscheduleError) {
+                if (!cancelled) {
+                  setMailDraftsForScopeIfActive(
+                    readHomeMailDraftsForScope(companyID, currentUserID, draft.sharedInboxID, draft.accountEmail),
+                    draft.sharedInboxID,
+                    draft.accountEmail,
+                  );
+                  setError(formatError(unscheduleError, "Send was undone, but clearing its schedule failed to sync"));
+                }
+              }
+            } else if (!cancelled) {
+              setError(formatError(scheduledSendError, "Failed to send scheduled message"));
+            }
           })
           .finally(() => {
             scheduledMailDraftsInFlightRef.current.delete(draft.id);
@@ -5594,6 +5619,7 @@ export function HomePage({
       )}
       {error && !status?.connected && <div style={errorStyle}>{error}</div>}
       {notice && !status?.connected && <div style={noticeStyle}>{notice}</div>}
+      {(isMyWorkView || isUpdatesView || isInboxMatrixView) && <OutboundEmailUndoBanner />}
       {loadingStatus ? (
         <main style={centerStyle}>Loading email connection</main>
       ) : !status?.configured ? (

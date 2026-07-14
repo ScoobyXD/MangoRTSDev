@@ -423,21 +423,26 @@ type EmailMessageSnapshot struct {
 }
 
 type CommunicationsMessageReadStatus struct {
-	ScopeType                string    `json:"-"`
-	ScopeID                  string    `json:"-"`
-	UserID                   string    `json:"-"`
-	PersonalAccountEmail     string    `json:"-"`
-	CompanyID                string    `json:"-"`
-	CompanyEmailConnectionID string    `json:"-"`
-	SharedInboxID            string    `json:"-"`
-	MessageID                string    `json:"message_id,omitempty"`
-	ThreadID                 string    `json:"thread_id,omitempty"`
-	Status                   string    `json:"status"`
-	SignalCount              int       `json:"signal_count,omitempty"`
-	FirstSignalTimestamp     time.Time `json:"first_signal_timestamp"`
-	LastSignalTimestamp      time.Time `json:"last_signal_timestamp"`
-	CreatedTimestamp         time.Time `json:"created_timestamp,omitempty"`
-	UpdatedTimestamp         time.Time `json:"updated_timestamp,omitempty"`
+	ScopeType                string                            `json:"-"`
+	ScopeID                  string                            `json:"-"`
+	UserID                   string                            `json:"-"`
+	PersonalAccountEmail     string                            `json:"-"`
+	CompanyID                string                            `json:"-"`
+	CompanyEmailConnectionID string                            `json:"-"`
+	SharedInboxID            string                            `json:"-"`
+	MessageID                string                            `json:"message_id,omitempty"`
+	ThreadID                 string                            `json:"thread_id,omitempty"`
+	Status                   string                            `json:"status"`
+	SignalCount              int                               `json:"signal_count,omitempty"`
+	FirstSignalTimestamp     time.Time                         `json:"first_signal_timestamp"`
+	LastSignalTimestamp      time.Time                         `json:"last_signal_timestamp"`
+	Signals                  []CommunicationsMessageReadSignal `json:"signals,omitempty"`
+	CreatedTimestamp         time.Time                         `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp         time.Time                         `json:"updated_timestamp,omitempty"`
+}
+
+type CommunicationsMessageReadSignal struct {
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type CommunicationsEmailDraft struct {

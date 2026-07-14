@@ -97,12 +97,12 @@ ST83 - Successful local Shared Triage email conversion keeps converted source ro
 ST84 - Successful local Shared Triage email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 ST85 - When a dragged Shared Triage email is converted into a Logic Gate, Company Explorer Logic Gate, Kanban column, project, pinned Logic Gate, or non-Explorer eligible node target, the source email is set to unstarred through the company-owned shared mailbox grant after workspace conversion succeeds. The response returns `unstarred_message_ids`, and Shared Triage applies those IDs locally without full-list replacement, stale prefetched-page top-up, or repeated shared mailbox GETs.
 ST86 - Conversion-driven Shared Triage unstar reconciliation uses the committed response: the Starred source card de-stars immediately, and later canonical loads must not blank or incorrectly refill the active list.
-ST87 - Every unread Shared Triage email row shows the small top-left unread dot and a visibly thicker highlighted outer frame. Selection is independent: the entire selected card uses the established Mango selection surface, is exposed with `aria-pressed`, and remains visually distinct from unread state.
+ST87 - Every unread Shared Triage email row shows the small top-left unread dot, unread text emphasis, and accessible unread state without the retired blue/thick outer card frame. Selection is independent: the entire selected card uses the established Mango selection surface, is exposed with `aria-pressed`, and remains visually distinct from unread state.
 ST88 - Sent email read receipts from Shared Triage use Nylas open tracking on outbound shared mailbox sends by sending `tracking_options.opens = true` through the company-owned shared grant.
 ST89 - Shared mailbox `message.opened` receipts are stored in the company email connection/shared mailbox receipt scope, not in the viewer's personal user receipt scope.
 ST90 - Shared mailbox receipt webhooks update durable/cache receipt state for the correct company connection; browsers read the receipt through canonical Shared Triage APIs. A narrow invalidation hint may publish, but it carries no receipt/message body and does not replace the active list.
 ST91 - If a shared `message.opened` hint names the currently selected message or thread, Home invalidates and canonically reloads only that detail so the stored receipt summary converges. It does not trigger a message-list reload, top-up, or prefetch, and an unrelated selection performs no read.
-ST92 - Sent shared mailbox messages without a stored receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
+ST92 - Sent shared mailbox messages without a stored receipt must not show a green `Not opened` indicator. Only a persisted Nylas `message.opened` signal renders the compact `Seen` chip; hover/focus lists each distinct available occurrence in local date/time and labels the opener identity unavailable because Nylas does not identify the recipient. Inbox visibility, row preview, and Mango selection never create receipt state, and the tracking-pixel signal is not guaranteed human reading.
 ST93 - Multiple Shared Triage mailbox work surfaces that point at the same company email connection share receipt state for the same provider message, with read-time authorization on each linked shared inbox.
 ST94 - Nylas shared receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by company-owned shared mailbox sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
 ST95 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current Shared Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate shared read-receipt state unless a future feature explicitly adds that behavior.
@@ -194,6 +194,8 @@ ST165 - The exact shared-inbox signature, including authenticated Mango image re
 ST166 - A shared read-on-open provider command survives ordinary mailbox-tab, search, unread-only, and Home-view navigation under its captured exact shared inbox. Its response is barred from a newly selected inbox/list/selection, but navigation cannot cancel the provider mutation while retaining a false optimistic overlay.
 ST167 - Shared folder metadata is owned by company plus exact shared inbox, independent of Primary/Starred/Sent, search, and unread-only filters. A filter transition accepts an in-flight exact-inbox folder response; an inbox transition rejects it and performs destination reconciliation.
 ST168 - Signed shared message/folder webhooks distinguish legitimate zero-delivery from authorization infrastructure failure. No subscriber or no currently authorized viewer is acknowledged as a no-op. Existence/audience timeout or repository error releases deduplication and returns a retryable failure so a transient authorization outage does not permanently lose the exact-inbox hint. Retrying the same `message.opened` payload reuses its first receipt timestamp and does not inflate the signal count.
+ST169 - Shared Triage conversation headers show only the subject. Collapsed messages show sender/date/snippet and hide From/To/Cc/Bcc; activating the accessible disclosure reveals that exact message's labeled participants, full body, attachments, and actions without changing reply target, provider thread membership, or source inbox.
+ST170 - Ordinary shared-inbox compose/reply, due scheduled-draft execution, and collaboration shared-draft send all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green Undo row appears in the established triage notice area with a right-to-left countdown; Undo sends no provider request and preserves the durable draft/revision; for a due scheduled draft it also clears the persisted send time so the scheduler cannot retry it, while expiry dispatches once through the exact shared grant and existing collaboration claim/idempotency path.
 
 ## Scenarios
 
@@ -476,7 +478,7 @@ Expected:
 - Provider hints never inject or patch untrusted message payloads directly. First acceptance closes the initial-list race, and `message.created`, `message.updated` (including moves), `message.deleted`, and folder hints reconcile only the open exact shared inbox through one active request plus at most one queued final request.
 - Reconnect acceptance performs the same one-shot canonical reconciliation so disconnected mail is not stranded, without polling.
 - Local committed commands patch affected visible rows; narrow provider hints invalidate only exact company/shared-inbox/message/thread/page/folder cache keys.
-- Every unread row keeps its dot and thicker frame, while the selected row uses the distinct full-card Mango selection surface. Opening by pointer or keyboard clears unread/count immediately, and failure rolls back visibly.
+- Every unread row keeps its dot and text emphasis without a blue/thick outer frame, while the selected row uses the distinct full-card Mango selection surface. Opening by pointer or keyboard clears unread/count immediately, and failure rolls back visibly.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, directly consumes (or awaits) the matching company/shared-inbox-scoped prefetched logical page without duplicating provider reads, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request only after durable archive job rows are written, and provider archive mutations continue from the backend worker using the shared mailbox grant.
@@ -490,7 +492,7 @@ Expected:
 - Canonical archive-job reads reconcile pending Shared Triage archive bookkeeping from durable job-item state without blanking, fully reloading, or removing rows from the currently visible prefetched page.
 - Accepted background Shared Triage archive IDs are not treated as already archived in the frontend list cache; the current page remains stable while earlier page jobs drain in the backend.
 - Starring or unstarring a message updates the row and Starred count locally, and the committed HTTP response reconciles that concrete state without a broad echo-driven reload. A later relevant exact-mailbox provider update may coalesce one canonical active-list reconciliation, which must not reuse a stale prefetched page.
-- Every unread row keeps its top-left dot and thicker frame. Selection is a separate full-card surface, and pointer/keyboard open clears the selected thread card's loaded unread members immediately while scoped provider writes reconcile.
+- Every unread row keeps its top-left dot and text emphasis without a blue/thick outer frame. Selection is a separate full-card surface, and pointer/keyboard open clears the selected thread card's loaded unread members immediately while scoped provider writes reconcile.
 - Opening or returning to a Shared Triage mailbox does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
 - If the backend accepts the archive page but a durable job item later reaches failed state or remains incomplete, the source email is not deleted and can remain or reappear on the next canonical load.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
@@ -879,3 +881,19 @@ Expected:
 - Captured mark-read for A is not canceled by navigation and cannot patch B's visible state.
 - Filter changes preserve A's valid folder work; the exact-inbox change rejects it and loads B.
 - Empty audiences are acknowledged as legitimate no-ops. Lookup failure is returned as retryable failure, deduplication is released, and redelivery may publish after authorization recovers without counting an identical open signal twice.
+### Scenario ST-S22: Clean Shared Thread Disclosure, Seen Occurrences, And Undo Send
+
+Business logic covered:
+- ST87
+- ST92
+- ST169
+- ST170
+
+Given:
+- An unread multi-message Shared Triage conversation contains different participants per message, a sent message has multiple stored open signals, and an ordinary or collaboration shared draft is submitted.
+
+Expected:
+- The unread dot/emphasis remains but no unread card has the blue/thick frame; selection and keyboard state remain independent.
+- The overall header shows only the subject. Collapsed rows hide recipient details, while expanding one row reveals only that message's From/To/Cc/Bcc, body, files, and exact-message actions.
+- Seen appears only from persisted provider open signals; the focused/hovered chip lists local occurrence times and states recipient identity unavailable rather than guessing.
+- The non-green Undo row appears immediately, no shared-send HTTP request starts for ten seconds, Undo prevents dispatch and preserves the draft/revision, a due draft is unscheduled durably, and expiry sends once through the exact shared source and existing authoritative claim path.

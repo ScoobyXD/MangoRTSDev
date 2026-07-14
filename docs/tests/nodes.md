@@ -97,7 +97,7 @@ N68 - Node users with view access may see attachment counts/lists and download a
 N69 - Node attachment counts and lists are rebuilt from the backend node resource-link list when the workspace loads. Projection attachment references may support editor persistence, but they are not the canonical source for list/download availability.
 N70 - Per-text-box and node-wide attachment controls are part of the shared node workspace body, so every full node-window surface using that body receives the same attachment scope, count, list, permission, and download behavior.
 N71 - Node permissions opened from any full node-window entry point use the shared permissions contract in `docs/tests/permissions.md`: editable views always display `Save`, successful Save persists the current selection without closing, and read-only, denied, or failed-load views remain dismissible without writing.
-N72 - Node-attached email viewers use the shared email-thread contract: full-height body, expand-all, To/Cc/Bcc, exact-message Reply/Reply All, authenticated attachments and image actions, immediate reply focus, original-message context, calendar RSVP, and resize termination after pointer-up/cancel, lost capture, or window blur.
+N72 - Node-attached email viewers use the shared email-thread contract: a subject-only conversation header; accessible per-message disclosure whose collapsed row shows sender/date/snippet and hides From/To/Cc/Bcc; expanded-only labeled participant details, full body, attachments, and exact-message Reply/Reply All; full-height body, expand-all, authenticated image actions, immediate reply focus, original-message context, calendar RSVP, and resize termination after pointer-up/cancel, lost capture, or window blur.
 N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while view-only users receive no destructive action.
 N74 - Node chat detects safe `http://`, `https://`, `www.`, and bare-domain links, excludes trailing punctuation and email-address domains, renders links blue and underlined with opener isolation, and leaves unsafe/non-HTTP schemes as plain text.
 N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, attachment, Reply/Reply All, draft, and calendar operations use those stored fields instead of falling back to another grant.
@@ -132,6 +132,7 @@ N103 - Clicking a persisted editor annotation highlight with no active text sele
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
 N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
 N106 - Transient Node popup view mode is owned by the active popup instance, not canonical Node/board projections. Same-Node refresh or title reconciliation preserves fullscreen; only explicit user exit/close or opening a different Node may restore the normal saved non-fullscreen ratio.
+N107 - Every attached-email Reply and Reply All submission enters EMAIL90's centralized ten-second pre-dispatch gate. Its reply dock renders the same elevated non-green Undo/countdown surface; Undo starts no provider request and leaves the mounted composer intact under the node reply surface's existing persistence contract, while expiry dispatches once through the retained exact mailbox scope.
 
 ## Scenarios
 
@@ -649,3 +650,19 @@ Expected:
 - The live Node editor and fresh canonical data remain visible.
 - The reconciliation does not reset local fullscreen or the saved restore ratio.
 - The popup returns to normal only through explicit user action, close, or a different-Node open.
+### Scenario N-S22: Attached Email Disclosure And Undo Send
+
+Business logic covered:
+- N57
+- N58
+- N59
+- N72
+- N107
+
+Given:
+- A Node-attached multi-message email has different From/To/Cc/Bcc participants, files, and inline images per message, and the user submits Reply or Reply All.
+
+Expected:
+- The Node conversation header shows only the subject; collapsed rows show sender/date/snippet without recipient noise, and accessible expansion reveals only the chosen message's labeled participants, body, attachments, and actions.
+- Reply targeting, mailbox identity, attachments, inline images, calendar actions, and the bottom-docked editor remain intact.
+- The reply dock shows the neutral ten-second Undo surface. No provider request begins before expiry; Undo prevents dispatch and leaves the reply available, while expiry sends exactly once through the retained mailbox scope.

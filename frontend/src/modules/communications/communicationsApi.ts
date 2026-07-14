@@ -6,6 +6,7 @@ import type { NodeRecord } from "../node-map/shared.js";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
+import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -43,6 +44,13 @@ export type EmailAttachment = {
   size?: number;
 };
 
+export type EmailReadSignal = {
+  timestamp: string;
+  identity_available?: boolean;
+  person_name?: string;
+  person_email?: string;
+};
+
 export type EmailReadStatus = {
   message_id?: string;
   thread_id?: string;
@@ -50,6 +58,7 @@ export type EmailReadStatus = {
   signal_count?: number;
   first_signal_timestamp?: string;
   last_signal_timestamp?: string;
+  signals?: EmailReadSignal[];
 };
 
 export type EmailFolder = {
@@ -843,19 +852,21 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
   const { company_id: companyID, shared_inbox_id: sharedInboxID, account_email: accountEmail, ...messageInput } = input;
   const cleanCompanyID = companyID?.trim() ?? "";
   const query = createMailboxMessageMutationQuery(sharedInboxID, companyID, accountEmail);
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/send${query}`, {
-    method: "POST",
-    body: JSON.stringify({
-      ...(cleanCompanyID ? { company_id: cleanCompanyID } : {}),
-      ...messageInput,
-    }),
-  });
-  const message = sentEmailMessageForLocalLists({
-    ...payload.message,
-    body: payload.message.body?.trim() ? payload.message.body : messageInput.body,
-  });
-  applyEmailMessageToCachedPages(message, { prependIfMissing: true, companyID, sharedInboxID, accountEmail });
-  return message;
+  return scheduleOutboundEmailDispatch(async () => {
+    const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/send${query}`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...(cleanCompanyID ? { company_id: cleanCompanyID } : {}),
+        ...messageInput,
+      }),
+    });
+    const message = sentEmailMessageForLocalLists({
+      ...payload.message,
+      body: payload.message.body?.trim() ? payload.message.body : messageInput.body,
+    });
+    applyEmailMessageToCachedPages(message, { prependIfMissing: true, companyID, sharedInboxID, accountEmail });
+    return message;
+  }, { label: messageInput.subject?.trim() || "Email" });
 }
 
 export async function respondToCalendarInvite(input: {
@@ -982,20 +993,22 @@ export async function sendEmailCollaborationDraft(input: {
     throw new Error("email_collaboration_draft_send_input_required");
   }
   const query = new URLSearchParams({ company_id: companyID });
-  const payload = await apiFetchJSON<SendCommunicationsEmailCollaborationDraftResult>(
-    `/v1/communications/email-collaborations/${encodeURIComponent(collaborationID)}/drafts/${encodeURIComponent(draftID)}/send?${query.toString()}`,
-    {
-      method: "POST",
-      body: JSON.stringify({ expected_revision: expectedRevision }),
-    },
-  );
-  return {
-    ...payload,
-    message: cloneMessage(payload.message),
-    collaboration_id: payload.collaboration_id?.trim() || collaborationID,
-    draft_id: payload.draft_id?.trim() || draftID,
-    draft_deleted: payload.draft_deleted === true,
-  };
+  return scheduleOutboundEmailDispatch(async () => {
+    const payload = await apiFetchJSON<SendCommunicationsEmailCollaborationDraftResult>(
+      `/v1/communications/email-collaborations/${encodeURIComponent(collaborationID)}/drafts/${encodeURIComponent(draftID)}/send?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_revision: expectedRevision }),
+      },
+    );
+    return {
+      ...payload,
+      message: cloneMessage(payload.message),
+      collaboration_id: payload.collaboration_id?.trim() || collaborationID,
+      draft_id: payload.draft_id?.trim() || draftID,
+      draft_deleted: payload.draft_deleted === true,
+    };
+  }, { label: "Shared email" });
 }
 
 export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): Promise<CommunicationsEmailDraft> {

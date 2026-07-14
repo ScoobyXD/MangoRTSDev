@@ -7,6 +7,8 @@ import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, 
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { emailMessageRowKey } from "./homeUtils";
 import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationChatSession } from "./emailCollaborationChat";
+import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
+import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 import {
   accountEmailStyle,
   accountRowStyle,
@@ -164,7 +166,7 @@ function MessageReadStatusText({ message }: { message: EmailMessage }) {
   const label = messageReadStatusLabel(message.read_status);
   if (!label) return null;
   const title = messageReadStatusTitle(message.read_status) || label;
-  return <span style={messageReadStatusStyle} title={title}>{label}</span>;
+  return <span title={title}><MessageReadReceiptChip message={message} /></span>;
 }
 
 function MessageAttachmentCount({ message }: { message: EmailMessage }) {
@@ -451,6 +453,7 @@ export function HomeMailWorkspace({
             </div>
           )}
           {visibleError && <div style={inlineErrorStyle}>{visibleError}</div>}
+          {!visibleError && <OutboundEmailUndoBanner />}
           {notice && !visibleError && (
             <div style={{ ...inlineNoticeStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <span style={{ minWidth: 0 }}>{notice}</span>
