@@ -486,6 +486,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const localBoardMutationSeqRef = useRef(0);
   const pendingBoardMutationsRef = useRef(new Map<string, number>());
   const lastLocalBoardMutationAtRef = useRef(new Map<string, number>());
+  const requestCanonicalBoardRefreshRef = useRef<(boardID: string) => boolean>(() => false);
   const kanbanGroupingPersistedSignatureRef = useRef("");
   const kanbanGroupingSaveSeqRef = useRef(0);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
@@ -1578,7 +1579,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (!streamBoardID) return;
       invalidateArenaViewForBoard(streamBoardID, detail.logicGateID ?? "");
       invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-      if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
+      if (streamBoardID === activeBoardIDRef.current && !requestCanonicalBoardRefreshRef.current(streamBoardID)) {
+        void refreshBoard(streamBoardID);
+      }
     };
     window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
@@ -1620,6 +1623,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(flushCanonicalRefresh, KANBAN_REALTIME_REFRESH_DEBOUNCE_MS);
     };
+    const requestCanonicalRefreshForBoard = (requestedBoardID: string) => {
+      if (requestedBoardID !== streamBoardID) return false;
+      scheduleCanonicalRefresh();
+      return true;
+    };
+    requestCanonicalBoardRefreshRef.current = requestCanonicalRefreshForBoard;
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `board:${streamBoardID}`, {
       onAccepted() {
         scheduleCanonicalRefresh();
@@ -1631,6 +1640,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     });
     return () => {
       unsubscribe();
+      if (requestCanonicalBoardRefreshRef.current === requestCanonicalRefreshForBoard) {
+        requestCanonicalBoardRefreshRef.current = () => false;
+      }
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       canonicalRefresh.dispose();
     };

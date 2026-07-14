@@ -900,6 +900,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	sourceAssignment := assignment
 	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, sourceLogicGateID)
 	if len(locations) == 0 {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
@@ -1034,7 +1035,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment: assignment,
 	}
-	events, err := r.appendDomainEventsLocked(logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	events, err := r.appendDomainEventsLocked(logicGateAssignmentMovedWorkspaceEventInputs(result, sourceAssignment, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err

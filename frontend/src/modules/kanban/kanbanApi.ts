@@ -8,8 +8,12 @@ import {
   invalidateKanbanBoardContentsCache,
   invalidateKanbanBoardContentsForCompany,
 } from "./KanbanBoardContentStore.js";
-import { logicGateIDFromKanbanBoardID, logicGateKanbanBoardID } from "./shared.js";
-import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared.js";
+import {
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
+  logicGateIDFromKanbanBoardID,
+  logicGateKanbanBoardID,
+} from "./shared.js";
+import type { KanbanBoard, KanbanBoardContentsUpdatedDetail, KanbanCard, KanbanColumn } from "./shared.js";
 
 type CacheEntry<T> = {
   value: T;
@@ -51,6 +55,30 @@ function markLogicGateAssignmentWorkspaceSnapshotsStale(args: { apiBase: string;
   if (logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(logicGateID));
   if (fromLogicGateID && fromLogicGateID !== logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
   if (args.nodeID?.trim()) markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
+}
+
+function reconcileCommittedCrossLogicGateAssignment(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID: string;
+  fromLogicGateID: string;
+  nodeID: string;
+}): void {
+  const logicGateIDs = Array.from(new Set([
+    args.fromLogicGateID.trim(),
+    args.logicGateID.trim(),
+  ].filter(Boolean)));
+  for (const logicGateID of logicGateIDs) {
+    invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
+  }
+  markLogicGateAssignmentWorkspaceSnapshotsStale(args);
+  if (typeof window === "undefined") return;
+  for (const logicGateID of logicGateIDs) {
+    const boardID = logicGateKanbanBoardID(logicGateID);
+    window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, {
+      detail: { companyID: args.companyID, boardID, logicGateID },
+    }));
+  }
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -314,7 +342,9 @@ export async function moveLogicGateAssignment(args: {
   priority?: number | null;
   mutationOrigin?: LogicGateAssignmentMutationOrigin;
 }): Promise<LogicGateAssignmentCommandResult> {
-  if (!args.fromLogicGateID || args.fromLogicGateID === args.logicGateID) {
+  const logicGateID = args.logicGateID.trim();
+  const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
+  if (!fromLogicGateID || fromLogicGateID === logicGateID) {
     const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
       method: "PUT",
       json: {
@@ -333,8 +363,8 @@ export async function moveLogicGateAssignment(args: {
     method: "POST",
     json: {
       company_id: args.companyID,
-      to_logic_gate_id: args.logicGateID,
-      from_logic_gate_id: args.fromLogicGateID,
+      to_logic_gate_id: logicGateID,
+      from_logic_gate_id: fromLogicGateID,
       status: args.status,
       column_id: args.columnID,
       mutation_origin: args.mutationOrigin ?? "matrix",
@@ -342,8 +372,13 @@ export async function moveLogicGateAssignment(args: {
       priority: args.priority,
     },
   });
-  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
-  markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
+  reconcileCommittedCrossLogicGateAssignment({
+    apiBase: args.apiBase,
+    companyID: args.companyID,
+    logicGateID,
+    fromLogicGateID,
+    nodeID: args.nodeID,
+  });
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 

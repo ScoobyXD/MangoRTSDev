@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
@@ -26,6 +27,13 @@ import {
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { resolveEditorEmailMailboxScope } from "./editorEmailMailboxScope.js";
+import {
+  applyEmailSignatureOnceForSession,
+  beginEmailSignatureApplicationSession,
+  loadedEmailSignatureForScope,
+  type EmailSignatureApplicationSession,
+  type ScopedEmailSignatureState,
+} from "./emailSignatureBody.js";
 import { splitChatTextLinks } from "./nodeChatLinks";
 import {
   getEditorSelectionOffsets,
@@ -282,6 +290,7 @@ type NodeTextBlockEditorProps = {
   onDocumentFlush: (document: string) => void;
   onDocumentConflict?: () => void;
   onChangeSeen: (changeID: string) => void;
+  onChatHighlightActivate?: (messageID: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
   onImageChatRequest: (image: TextBlockImageDraft) => void;
   onImageNodeRequest: (image: TextBlockImageDraft) => void;
@@ -305,6 +314,7 @@ function storeTextBlockHeight(storageKey: string, height: number) {
 
 type TextHighlightRect = {
   key: string;
+  messageID?: string;
   left: number;
   top: number;
   width: number;
@@ -423,6 +433,7 @@ function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, active
       if (width < 1 || height < 2) return;
       rects.push({
         key: `${anchorRange.messageID}:${rectIndex}:${Math.round(left)}:${Math.round(top)}`,
+        messageID: anchorRange.messageID,
         left,
         top,
         width,
@@ -433,6 +444,19 @@ function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, active
   }
 
   return rects;
+}
+
+function textHighlightMessageIDAtPoint(rects: TextHighlightRect[], wrapper: HTMLElement, clientX: number, clientY: number): string {
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const x = clientX - wrapperRect.left;
+  const y = clientY - wrapperRect.top;
+  for (let index = rects.length - 1; index >= 0; index -= 1) {
+    const rect = rects[index];
+    if (x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height) {
+      return rect.messageID ?? "";
+    }
+  }
+  return "";
 }
 
 function firstVisibleRangeRect(root: HTMLElement, wrapper: HTMLElement, startOffset: number, endOffset: number): DOMRect | null {
@@ -694,6 +718,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onDocumentFlush,
   onDocumentConflict,
   onChangeSeen,
+  onChatHighlightActivate,
   onSelectionChatRequest,
   onImageChatRequest,
   onImageNodeRequest,
@@ -1231,6 +1256,16 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           documentSurfaceHandlers.onPointerDown(event);
         }}
         onPointerMove={documentSurfaceHandlers.onPointerMove}
+        onClick={(event) => {
+          documentSurfaceHandlers.onClick(event);
+          if (event.defaultPrevented || event.button !== 0 || !onChatHighlightActivate) return;
+          const selection = event.currentTarget.ownerDocument.getSelection();
+          if (selection && !selection.isCollapsed) return;
+          const wrapper = wrapperRef.current;
+          if (!wrapper) return;
+          const messageID = textHighlightMessageIDAtPoint(textHighlightRects, wrapper, event.clientX, event.clientY);
+          if (messageID) onChatHighlightActivate(messageID);
+        }}
         onKeyUp={(event) => {
           if (!editable) return;
           documentSurfaceHandlers.onKeyUp(event);
@@ -1448,6 +1483,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   );
 };
 
+export type ChatMessageFocusRequest = {
+  messageID: string;
+  requestID: number;
+};
+
 type ChatPaneProps = {
   blockID: string;
   editable: boolean;
@@ -1465,6 +1505,7 @@ type ChatPaneProps = {
   active: boolean;
   currentUserID: string;
   activeMessageID: string;
+  messageFocusRequest?: ChatMessageFocusRequest | null;
   accent: string;
   surfaceText: string;
   panelBackground: string;
@@ -1504,6 +1545,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   active,
   currentUserID,
   activeMessageID,
+  messageFocusRequest,
   accent,
   surfaceText,
   panelBackground,
@@ -1525,6 +1567,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const handledMessageFocusRequestRef = useRef("");
+  const messageFocusRequestPendingRef = useRef(false);
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
@@ -1543,6 +1587,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
   const hasEmailPane = Boolean(emailPane);
   const showingEmail = hasEmailPane && activeTab === "email";
+  const messageFocusRequestKey = messageFocusRequest?.messageID.trim()
+    ? `${blockID}:${messageFocusRequest.requestID}:${messageFocusRequest.messageID.trim()}`
+    : "";
+  const messageFocusRequestPending = Boolean(
+    messageFocusRequestKey
+    && messages.some((message) => message.id === messageFocusRequest?.messageID.trim())
+    && handledMessageFocusRequestRef.current !== messageFocusRequestKey
+  );
+  messageFocusRequestPendingRef.current = messageFocusRequestPending;
 
   const resizeComposer = useCallback(() => {
     const textarea = textareaRef.current;
@@ -1608,9 +1661,52 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     });
   }, [messages]);
 
+  useLayoutEffect(() => {
+    const messageID = messageFocusRequest?.messageID.trim() ?? "";
+    if (!messageID || !messageFocusRequest) return;
+    const requestKey = messageFocusRequestKey;
+    if (handledMessageFocusRequestRef.current === requestKey) return;
+    if (!messages.some((message) => message.id === messageID)) return;
+    if (showingEmail) {
+      onActiveTabChange?.("chat");
+      return;
+    }
+
+    const messageByID = new Map(messages.map((message) => [message.id, message]));
+    const ancestorIDs: string[] = [];
+    const visited = new Set<string>([messageID]);
+    let parentID = messageByID.get(messageID)?.parentID?.trim() ?? "";
+    while (parentID && !visited.has(parentID)) {
+      visited.add(parentID);
+      ancestorIDs.push(parentID);
+      parentID = messageByID.get(parentID)?.parentID?.trim() ?? "";
+    }
+    if (ancestorIDs.some((ancestorID) => collapsedThreadIDs.has(ancestorID))) {
+      setCollapsedThreadIDs((previous) => {
+        const next = new Set(previous);
+        for (const ancestorID of ancestorIDs) next.delete(ancestorID);
+        return next;
+      });
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const messageList = messageListRef.current;
+      if (!messageList) return;
+      const messageElement = Array.from(messageList.querySelectorAll<HTMLElement>("[data-node-chat-message-id]"))
+        .find((element) => element.getAttribute("data-node-chat-message-id") === messageID);
+      if (!messageElement) return;
+      handledMessageFocusRequestRef.current = requestKey;
+      messageElement.focus({ preventScroll: true });
+      messageElement.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [collapsedThreadIDs, messageFocusRequest, messageFocusRequestKey, messages, onActiveTabChange, showingEmail]);
+
   useEffect(() => {
     if (!editable) return;
     if (showingEmail) return;
+    if (messageFocusRequestPendingRef.current) return;
     if (!replyTargetID) return;
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
@@ -1619,6 +1715,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   useEffect(() => {
     if (!editable) return;
     if (showingEmail) return;
+    if (messageFocusRequestPendingRef.current) return;
     if (!active || replyTargetID) return;
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
@@ -2112,6 +2209,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
   const isActive = activeMessageID === message.id;
   const canDelete = editable && canDeleteEditorTextBlockChatMessage(message, currentUserID);
   const authorAccent = userAccentForName(message.authorName || message.authorID);
+  const [focused, setFocused] = useState(false);
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
@@ -2119,6 +2217,14 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
   return (
     <div
       data-node-chat-message-id={message.id}
+      role="article"
+      aria-label={`Chat comment from ${message.authorName || "Unknown author"}`}
+      aria-current={isActive ? "true" : undefined}
+      tabIndex={-1}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
       onClick={(event) => {
         event.stopPropagation();
         onActivate(message.id);
@@ -2137,6 +2243,8 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         borderRadius: 10,
         background: isActive ? "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(230,252,255,0.48) 48%, rgba(247,239,255,0.54))" : "transparent",
         boxShadow: isActive ? `0 8px 20px rgba(15,23,42,0.10), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)` : "none",
+        outline: focused ? `2px solid ${accent}` : "none",
+        outlineOffset: -2,
         padding: "4px 4px 4px 0",
         cursor: "pointer",
       }}
@@ -4741,8 +4849,9 @@ const EmailMessageAttachments: React.FC<{
   strokeColor: string;
   onError: (message: string) => void;
 }> = ({ message, apiBase, companyID, sharedInboxID, accountEmail, respondable, accent, surfaceText, strokeColor, onError }) => {
-  const attachments = (message.attachments ?? []).filter((attachment) => !attachment.is_inline && !attachment.content_id?.trim());
-  const hasCalendarInvite = (message.attachments ?? []).some(emailAttachmentIsCalendarInvite);
+  const allAttachments = message.attachments ?? [];
+  const attachments = visibleEmailAttachmentsForBody(message.body || message.snippet || "", allAttachments);
+  const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const [previewAttachment, setPreviewAttachment] = useState<EmailAttachment | null>(null);
   const [previewURL, setPreviewURL] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -4841,8 +4950,10 @@ const EmailMessageAttachments: React.FC<{
         <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 7 }}>
           {attachments.map((attachment, index) => {
             const filename = emailAttachmentFilename(attachment);
-            const presentationKind = classifyAttachmentPresentation({ filename, mimeType: emailAttachmentContentType(attachment) });
+            const contentType = emailAttachmentContentType(attachment);
+            const presentationKind = classifyAttachmentPresentation({ filename, mimeType: contentType });
             const image = presentationKind === "image";
+            const sizeLabel = (attachment.size ?? 0) > 0 ? formatFileSize(attachment.size ?? 0) : "Size unavailable";
             return (
               <div
                 key={attachment.id?.trim() || attachment.attachment_id?.trim() || `${filename}:${index}`}
@@ -4860,7 +4971,7 @@ const EmailMessageAttachments: React.FC<{
                 )}
                 <span style={{ minWidth: 0, display: "grid", gap: 3 }}>
                   <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8 }}>{filename}</strong>
-                  <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.5, fontWeight: 700 }}>{formatFileSize(attachment.size ?? 0)}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.76)", fontSize: 9.5, fontWeight: 700 }} title={`${contentType} - ${sizeLabel}`}>{contentType} · {sizeLabel}</span>
                 </span>
                 <button type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} onClick={(event) => { event.stopPropagation(); void downloadAttachment(attachment); }} style={{ width: 28, height: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
                   <DownloadIcon color={accent} />
@@ -5182,6 +5293,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     () => resolveEditorEmailMailboxScope(sharedInboxID, accountEmail),
     [accountEmail, sharedInboxID],
   );
+  const mailboxSignatureScopeKey = useMemo(() => (
+    [companyID.trim(), mailboxScope.sharedInboxID ?? "", mailboxScope.accountEmail ?? ""].join("\u0000")
+  ), [companyID, mailboxScope]);
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
@@ -5190,6 +5304,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [bccDraft, setBccDraft] = useState("");
   const [subjectDraft, setSubjectDraft] = useState("");
   const [bodyDraft, setBodyDraft] = useState("");
+  const [mailboxSignatureState, setMailboxSignatureState] = useState<ScopedEmailSignatureState>({
+    scopeKey: "",
+    loaded: false,
+    body: "",
+  });
   const [replyTargetMessageID, setReplyTargetMessageID] = useState("");
   const [replyAllMode, setReplyAllMode] = useState(false);
   const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
@@ -5206,6 +5325,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const replyEditorControllerRef = useRef<UnifiedRichEditorFormattingController | null>(null);
   const appliedInitialReplyTargetRef = useRef("");
+  const mailboxSignatureStateRef = useRef<ScopedEmailSignatureState>(mailboxSignatureState);
+  const mailboxSignatureLoadRef = useRef<{ scopeKey: string; promise: Promise<string> } | null>(null);
+  const replySignatureSessionRef = useRef<EmailSignatureApplicationSession | null>(null);
+  const replySubmissionIdentityRef = useRef({ messageID, replyTargetMessageID: "", scopeKey: mailboxSignatureScopeKey });
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const replyDockRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
@@ -5213,6 +5336,54 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [emailHighlightsByMessageID, setEmailHighlightsByMessageID] = useState<EmailLocalHighlightsByMessageID>(() => ({
     [messageID]: readStoredEmailLocalHighlights(messageID),
   }));
+
+  mailboxSignatureStateRef.current = mailboxSignatureState;
+  replySubmissionIdentityRef.current = { messageID, replyTargetMessageID, scopeKey: mailboxSignatureScopeKey };
+
+  const loadMailboxSignature = useCallback((): Promise<string> => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID || (!mailboxScope.sharedInboxID && !mailboxScope.accountEmail)) {
+      const nextState = { scopeKey: mailboxSignatureScopeKey, loaded: true, body: "" };
+      mailboxSignatureStateRef.current = nextState;
+      setMailboxSignatureState(nextState);
+      return Promise.resolve("");
+    }
+    const loadedSignature = loadedEmailSignatureForScope(mailboxSignatureStateRef.current, mailboxSignatureScopeKey);
+    if (loadedSignature !== null) return Promise.resolve(loadedSignature);
+    const activeLoad = mailboxSignatureLoadRef.current;
+    if (activeLoad?.scopeKey === mailboxSignatureScopeKey) return activeLoad.promise;
+
+    const pendingState = { scopeKey: mailboxSignatureScopeKey, loaded: false, body: "" };
+    mailboxSignatureStateRef.current = pendingState;
+    setMailboxSignatureState(pendingState);
+    let request: Promise<string>;
+    request = getEmailSignature(cleanCompanyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail)
+      .then((signature) => {
+        const body = signature?.body_editor_html ?? "";
+        if (mailboxSignatureLoadRef.current?.promise === request) {
+          mailboxSignatureLoadRef.current = null;
+          const nextState = { scopeKey: mailboxSignatureScopeKey, loaded: true, body };
+          mailboxSignatureStateRef.current = nextState;
+          setMailboxSignatureState(nextState);
+        }
+        return body;
+      })
+      .catch((cause) => {
+        if (mailboxSignatureLoadRef.current?.promise === request) {
+          mailboxSignatureLoadRef.current = null;
+          const nextState = { scopeKey: mailboxSignatureScopeKey, loaded: false, body: "" };
+          mailboxSignatureStateRef.current = nextState;
+          setMailboxSignatureState(nextState);
+        }
+        throw cause;
+      });
+    mailboxSignatureLoadRef.current = { scopeKey: mailboxSignatureScopeKey, promise: request };
+    return request;
+  }, [companyID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, mailboxSignatureScopeKey]);
+
+  useEffect(() => {
+    void loadMailboxSignature().catch(() => undefined);
+  }, [loadMailboxSignature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5223,6 +5394,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSentReplies([]);
     setReplyTargetMessageID("");
     setReplyAllMode(false);
+    setBodyDraft("");
+    replySignatureSessionRef.current = null;
     setReplyToolbarTab("format");
     setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setReplySelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
@@ -5311,6 +5484,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
   const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const replyEditingEnabled = editable && !sending;
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
@@ -5379,6 +5553,49 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyTargetMessage = useMemo(() => (
     replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
   ), [displayThreadMessages, replyTargetMessageID]);
+  const ensureReplySignature = useCallback((targetMessageID: string) => {
+    const cleanTargetMessageID = targetMessageID.trim();
+    if (!cleanTargetMessageID) return;
+    replySignatureSessionRef.current = beginEmailSignatureApplicationSession(
+      replySignatureSessionRef.current,
+      mailboxSignatureScopeKey,
+    );
+    const loadedSignature = loadedEmailSignatureForScope(
+      mailboxSignatureStateRef.current,
+      mailboxSignatureScopeKey,
+    );
+    if (loadedSignature !== null) {
+      setBodyDraft((current) => {
+        const result = applyEmailSignatureOnceForSession(
+          current,
+          loadedSignature,
+          replySignatureSessionRef.current,
+          mailboxSignatureScopeKey,
+        );
+        replySignatureSessionRef.current = result.session;
+        return result.body;
+      });
+      return;
+    }
+    void loadMailboxSignature().catch(() => undefined);
+  }, [loadMailboxSignature, mailboxSignatureScopeKey]);
+
+  useEffect(() => {
+    const session = replySignatureSessionRef.current;
+    if (!replyTargetMessageID || !session || session.scopeKey !== mailboxSignatureScopeKey || session.applied) return;
+    const loadedSignature = loadedEmailSignatureForScope(mailboxSignatureState, mailboxSignatureScopeKey);
+    if (loadedSignature === null) return;
+    setBodyDraft((current) => {
+      const result = applyEmailSignatureOnceForSession(
+        current,
+        loadedSignature,
+        replySignatureSessionRef.current,
+        mailboxSignatureScopeKey,
+      );
+      replySignatureSessionRef.current = result.session;
+      return result.body;
+    });
+  }, [mailboxSignatureScopeKey, mailboxSignatureState, replyTargetMessageID]);
 
   useEffect(() => {
     const targetID = initialReplyTargetMessageID?.trim() ?? "";
@@ -5398,8 +5615,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setCcDraft(replyDrafts?.cc ?? "");
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    ensureReplySignature(target.id);
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, displayThreadMessages, editable, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID]);
+  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -5521,8 +5739,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, []);
 
   const selectReplyTarget = useCallback((target: EmailMessage, replyAll = false) => {
-    if (!editable) return;
+    if (!editable || sending) return;
     if (replyTargetMessageID === target.id && replyAllMode === replyAll) {
+      replySignatureSessionRef.current = null;
       setReplyTargetMessageID("");
       setReplyAllMode(false);
       return;
@@ -5534,51 +5753,83 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setCcDraft(replyDrafts?.cc ?? "");
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    ensureReplySignature(target.id);
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, editable, message?.subject, replyAllMode, replyTargetMessageID]);
+  }, [accountEmail, editable, ensureReplySignature, message?.subject, replyAllMode, replyTargetMessageID, sending]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
-    const replyBody = replyEditorControllerRef.current?.flush() ?? bodyDraft;
-    setSending(true);
-    void sendEmail({
+    const submittedIdentity = {
+      messageID: message.id,
+      replyTargetMessageID: replyTargetMessage.id,
+      scopeKey: mailboxSignatureScopeKey,
+    };
+    const submittedBody = replyEditorControllerRef.current?.flush() ?? bodyDraft;
+    const submittedRecipients = {
       to: recipients,
       cc: ccRecipients,
       bcc: bccRecipients,
       subject: subjectDraft.trim(),
-      body: serializeEditorBodyForEmailHTML(replyBody),
-      attachments: draftAttachments
-        .map((attachment) => {
-          const attachmentID = attachment.attachmentID?.trim() || attachment.id.trim();
-          return {
-            id: attachmentID,
-            attachment_id: attachmentID,
-            filename: attachment.name.trim() || "attachment",
-            content_type: attachment.type.trim() || "application/octet-stream",
-            size: attachment.size,
-          };
-        })
-        .filter((attachment) => attachment.attachment_id),
-      reply_to_message_id: replyTargetMessage.id,
-      company_id: companyID,
-      shared_inbox_id: mailboxScope.sharedInboxID,
-      account_email: mailboxScope.accountEmail,
-    })
-      .then((sent) => {
+      attachments: draftAttachments,
+    };
+    setSending(true);
+    setError("");
+    void (async () => {
+      try {
+        const signature = await loadMailboxSignature();
+        const currentIdentity = replySubmissionIdentityRef.current;
+        if (
+          currentIdentity.messageID !== submittedIdentity.messageID
+          || currentIdentity.replyTargetMessageID !== submittedIdentity.replyTargetMessageID
+          || currentIdentity.scopeKey !== submittedIdentity.scopeKey
+        ) return;
+        const signedBody = applyEmailSignatureOnceForSession(
+          submittedBody,
+          signature,
+          replySignatureSessionRef.current,
+          submittedIdentity.scopeKey,
+        );
+        replySignatureSessionRef.current = signedBody.session;
+        if (signedBody.body !== submittedBody) setBodyDraft(signedBody.body);
+        const sent = await sendEmail({
+          to: submittedRecipients.to,
+          cc: submittedRecipients.cc,
+          bcc: submittedRecipients.bcc,
+          subject: submittedRecipients.subject,
+          body: serializeEditorBodyForEmailHTML(signedBody.body),
+          attachments: submittedRecipients.attachments
+            .map((attachment) => {
+              const attachmentID = attachment.attachmentID?.trim() || attachment.id.trim();
+              return {
+                id: attachmentID,
+                attachment_id: attachmentID,
+                filename: attachment.name.trim() || "attachment",
+                content_type: attachment.type.trim() || "application/octet-stream",
+                size: attachment.size,
+              };
+            })
+            .filter((attachment) => attachment.attachment_id),
+          reply_to_message_id: submittedIdentity.replyTargetMessageID,
+          company_id: companyID,
+          shared_inbox_id: mailboxScope.sharedInboxID,
+          account_email: mailboxScope.accountEmail,
+        });
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
         setSentReplies((current) => [...current, sentWithTimestamp]);
         setBodyDraft("");
         setDraftAttachments([]);
+        replySignatureSessionRef.current = null;
         setReplyTargetMessageID("");
         setReplyAllMode(false);
         onReplyComplete?.();
-      })
-      .catch((cause) => {
+      } catch (cause) {
         const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
         setError(nextError);
         onError(nextError);
-      })
-      .finally(() => setSending(false));
+      } finally {
+        setSending(false);
+      }
+    })();
   };
 
   const syncReplyToolbarFormatState = useCallback(() => {
@@ -5704,7 +5955,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         </div>
                         <button
                           type="button"
-                          disabled={!editable}
+                          disabled={!replyEditingEnabled}
                           onClick={() => selectReplyTarget(threadMessage, false)}
                           style={{
                             minHeight: 22,
@@ -5712,8 +5963,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: editable ? "pointer" : "default",
-                            opacity: editable ? 1 : 0.46,
+                            cursor: replyEditingEnabled ? "pointer" : "default",
+                            opacity: replyEditingEnabled ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -5725,7 +5976,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={!editable}
+                          disabled={!replyEditingEnabled}
                           onClick={() => selectReplyTarget(threadMessage, true)}
                           style={{
                             minHeight: 22,
@@ -5733,8 +5984,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: editable ? "pointer" : "default",
-                            opacity: editable ? 1 : 0.46,
+                            cursor: replyEditingEnabled ? "pointer" : "default",
+                            opacity: replyEditingEnabled ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -5906,13 +6157,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>To:</span>
-              <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={toDraft} disabled={!replyEditingEnabled} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Cc:</span>
-              <input value={ccDraft} disabled={!editable} onChange={(event) => setCcDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={ccDraft} disabled={!replyEditingEnabled} onChange={(event) => setCcDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Bcc:</span>
-              <input value={bccDraft} disabled={!editable} onChange={(event) => setBccDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={bccDraft} disabled={!replyEditingEnabled} onChange={(event) => setBccDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Subject:</span>
-              <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={subjectDraft} disabled={!replyEditingEnabled} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
             </div>
             {draftAttachments.length > 0 && (
               <DraftAttachmentList
@@ -5930,9 +6181,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               type="button"
               aria-label="Add attachment"
               title="Add attachment"
-              disabled={!editable}
+              disabled={!replyEditingEnabled}
               onClick={() => fileInputRef.current?.click()}
-              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
+              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: replyEditingEnabled ? "pointer" : "default", opacity: replyEditingEnabled ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
             >
               <PlusIcon color={accent} />
             </button>
@@ -5968,13 +6219,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   onOutlineStyleChange={changeReplyOutlineStyle}
                   reserveHeaderOffset={false}
                   visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
-                  disabled={!editable}
+                  disabled={!replyEditingEnabled}
                 />
               </div>
               <UnifiedRichEditorSurface
                 key={`attached-email-reply:${replyAttachmentResourceID}:${replyTargetMessageID}`}
                 value={bodyDraft}
-                editable={editable}
+                editable={replyEditingEnabled}
                 outlineStyle={replyOutlineStyle}
                 surfaceID="attached-email-reply"
                 ariaLabel="Reply body"
@@ -5983,7 +6234,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 accent={accent}
                 indentGuideColor={strokeColor}
                 formattingControllerRef={replyEditorControllerRef}
-                style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px 24px", scrollPaddingBottom: 24, color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: replyEditingEnabled ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px 24px", scrollPaddingBottom: 24, color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: replyEditingEnabled ? surfaceText : "transparent", cursor: replyEditingEnabled ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 onSelectionHighlightColorChange={setReplyHighlightColor}
@@ -6012,7 +6263,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               type="file"
               multiple
               tabIndex={-1}
-              disabled={!editable}
+              disabled={!replyEditingEnabled}
               style={{ display: "none" }}
               onChange={(event) => {
                 if (event.currentTarget.files) addEmailDraftAttachments(event.currentTarget.files);

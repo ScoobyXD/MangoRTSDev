@@ -179,6 +179,7 @@ ST150 - Shared read-on-open timers, optimistic overlays, and mutation responses 
 ST151 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
 ST152 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
 ST153 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
+ST154 - The exact shared-inbox signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that inbox. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, reply-mode switches, or another shared inbox never duplicate or replace it.
 
 ## Scenarios
 
@@ -782,3 +783,19 @@ Expected:
 - A viewer may list/get only A's database drafts and attachments; only an editor may create/update/delete or mutate draft attachments. A cannot enumerate or take over B/personal IDs, personal/provider drafts never appear in Shared Triage, scope cannot be reassigned on conflict or soft-delete reuse, and a shared account-email spoof is replaced by the canonical inbox account.
 - Recoverable auth/provider/service/network errors retain pending drafts; only explicit revocation, deleted inbox, or non-mail-bearing scope purges A. Out-of-order loads cannot overwrite saves, deletes, B, or personal storage.
 - Compose persists the live exact-inbox draft before attachment upload. Permission revocation denies the former viewer, and draft deletion denies every draft-scoped actor including manager/admin attempts while the independent sent-message link stays valid.
+
+### Scenario ST-S18: Shared Signature Image And Start-Action Reliability
+
+Business logic covered:
+- ST120
+- ST137
+- ST154
+
+Given:
+- Shared Inbox A has a saved signature containing a Mango image, while Shared Inbox B and the user's personal account have different signatures.
+- An authorized editor opens settings and starts New compose, Reply, and Reply All while signature hydration overlaps typing or draft restoration.
+
+Expected:
+- Settings immediately show the image through A's authenticated `email_signature` attachment context, and Save durably persists the exact flushed sanitized HTML.
+- Every A start action receives A's signature exactly once; B and personal scopes never leak into it.
+- Late completion preserves typed/restored content, and autosave, rerender, or reply-mode changes cannot duplicate or replace the signature.

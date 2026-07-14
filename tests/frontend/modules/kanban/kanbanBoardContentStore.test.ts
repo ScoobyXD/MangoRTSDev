@@ -163,6 +163,47 @@ test("deduplicates concurrent Logic Gate work reads and returns isolated clones"
   }
 });
 
+test("post-commit invalidation starts a fresh flight and rejects the superseded pre-mutation result", async () => {
+  const originalFetch = globalThis.fetch;
+  const apiBase = "https://api.example.test/post-commit-generation";
+  const companyID = "company-1";
+  const logicGateID = "gate-generation";
+  const boardID = logicGateKanbanBoardID(logicGateID);
+  const firstResponse = deferred<Response>();
+  const secondResponse = deferred<Response>();
+  let calls = 0;
+  primeKanbanBoardContentsCache(apiBase, companyID, boardID, boardContents(companyID, logicGateID, "cached-source-card", 1));
+  invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1 ? firstResponse.promise : secondResponse.promise;
+  }) as typeof fetch;
+
+  try {
+    const preMutation = getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID);
+    await Promise.resolve();
+    assert.equal(calls, 1);
+
+    invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+    const postCommit = getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID);
+    await Promise.resolve();
+    assert.equal(calls, 2, "post-commit reload must not join the pre-mutation flight");
+
+    secondResponse.resolve(jsonResponse(workViewPayload(companyID, logicGateID, "fresh-destination-card", 2)));
+    assert.equal((await postCommit).cards[0]?.card_id, "fresh-destination-card");
+
+    firstResponse.resolve(jsonResponse(workViewPayload(companyID, logicGateID, "stale-source-card", 1)));
+    await assert.rejects(preMutation, (cause: unknown) => cause instanceof Error && cause.name === "AbortError");
+    const cached = peekKanbanBoardContentsCache(apiBase, companyID, boardID);
+    assert.equal(cached?.stale, false);
+    assert.equal(cached?.contents.cards[0]?.card_id, "fresh-destination-card");
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearKanbanBoardContentsCache(apiBase, companyID, boardID);
+  }
+});
+
 test("keeps invalidated snapshots for synchronous cache-first rendering", () => {
   const apiBase = "https://api.example.test/cache-first";
   const companyID = "company-1";

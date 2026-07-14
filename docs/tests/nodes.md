@@ -121,6 +121,9 @@ N92 - Mounted Node chat performs one single-flight canonical durable-chat refres
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban/Project editor panels may remain modeless until fullscreen. Fullscreen toggling preserves the live node editor instance and opener state.
 N95 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
+N96 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
+N97 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
+N98 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
 
 ## Scenarios
 
@@ -580,3 +583,23 @@ Expected:
 - Failed renames publish no committed-title event.
 - First/reconnect/late-handler acceptance and hints run one canonical durable-chat read at a time with at most one queued final read.
 - No replay log, gap protocol, recovery worker, or dirty editor-text replacement is introduced.
+
+### Scenario N-S19: Annotation Navigation, Attached Files, And Reply Signature
+
+Business logic covered:
+- N72
+- N75
+- N96
+- N97
+- N98
+
+Given:
+- One Node text block has multiple highlighted annotations mapped to different stable chat comment IDs, including a comment inside a collapsed thread.
+- The Node has one converted email and one directly attached email with body CID images and ordinary files.
+- The exact personal/shared signature may load after the user starts a reply.
+
+Expected:
+- Clicking each highlight without selecting text reveals the chat panel, expands only the needed thread, scrolls to the exact comment, and exposes a visible accessible focus target without the composer stealing focus.
+- Drag-selection and normal editor input do not trigger chat navigation, and existing chat-to-highlight behavior still works.
+- Both email paths display unreferenced files with metadata and authorized actions under the originating mailbox identity.
+- Reply and Reply All append the exact saved signature once, including after late hydration, without overwriting typed text.

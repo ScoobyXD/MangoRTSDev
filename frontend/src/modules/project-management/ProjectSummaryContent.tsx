@@ -278,6 +278,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionDraft>>({});
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [chatNavigationRequests, setChatNavigationRequests] = useState<Record<string, { anchorMessageID: string; requestID: number }>>({});
+  const [chatMessageFocusRequests, setChatMessageFocusRequests] = useState<Record<string, { messageID: string; requestID: number }>>({});
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -1899,6 +1900,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         void flushProjectTextBlockSave(block.id).catch(() => undefined);
                       }}
                       onChangeSeen={() => undefined}
+                      onChatHighlightActivate={(messageID) => {
+                        setFocusedTextBlockID(block.id);
+                        setActiveRichTextBlockID("");
+                        projectFormattingControllerRef.current = null;
+                        setOpenChatBlockIDs((current) => new Set(current).add(block.id));
+                        setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
+                        setActiveChatMessageIDs((current) => ({ ...current, [block.id]: messageID }));
+                        setChatMessageFocusRequests((current) => ({
+                          ...current,
+                          [block.id]: {
+                            messageID,
+                            requestID: (current[block.id]?.requestID ?? 0) + 1,
+                          },
+                        }));
+                      }}
                       onSelectionChatRequest={(selection) => {
                         setChatSelectionAnchors((current) => ({ ...current, [block.id]: selection }));
                         setOpenChatBlockIDs((current) => new Set(current).add(block.id));
@@ -1964,6 +1980,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         active={focusedTextBlockID === block.id}
                         currentUserID={currentUserID || "local-user"}
                         activeMessageID={activeChatMessageIDs[block.id] ?? ""}
+                        messageFocusRequest={chatMessageFocusRequests[block.id] ?? null}
                         accent={accent}
                         surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
                         panelBackground={EDITOR_NEU_PANEL_BACKGROUND}

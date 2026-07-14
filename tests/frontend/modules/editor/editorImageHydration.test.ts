@@ -154,6 +154,39 @@ test("hydration waits for the near-viewport observer and uses the configured mar
   }
 });
 
+test("eager hydration loads compact signature previews without waiting for an observer callback", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  let observerCreations = 0;
+  class FakeIntersectionObserver {
+    constructor() { observerCreations += 1; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() { return []; }
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds = [];
+  }
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: FakeIntersectionObserver });
+  try {
+    const frame = new FakeSpan("signature-logo");
+    const root = new FakeRoot([frame]);
+    let calls = 0;
+    const cleanup = hydrateEditorAttachmentImageFrames(root as unknown as HTMLElement, async () => {
+      calls += 1;
+      return "blob:signature-logo";
+    }, { eager: true });
+    await flushPromises();
+    assert.equal(observerCreations, 0);
+    assert.equal(calls, 1);
+    assert.equal(frame.image.src, "blob:signature-logo");
+    cleanup();
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
+
 test("hydration retries a visible attachment after a bounded backoff", async () => {
   const originalSpan = globalThis.HTMLSpanElement;
   const originalObserver = globalThis.IntersectionObserver;

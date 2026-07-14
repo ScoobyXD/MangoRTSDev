@@ -47,6 +47,7 @@ type UnifiedRichEditorSurfaceProps = {
   scrollbarTrack?: string;
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
+  eagerEditorImageHydration?: boolean;
   onEditorImageAttachmentError?: (message: string) => void;
   onChange: (nextValue: string) => void;
   onFlush?: (nextValue: string) => void;
@@ -73,6 +74,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   scrollbarTrack = "transparent",
   formattingControllerRef,
   editorImageAttachmentContext,
+  eagerEditorImageHydration = false,
   onEditorImageAttachmentError,
   onChange,
   onFlush,
@@ -140,7 +142,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     const editor = editorRef.current;
     if (!editor) return;
     const hydrationContextKey = editorImageAttachmentContext
-      ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim()].join("\u0000")
+      ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim(), eagerEditorImageHydration ? "eager" : "viewport"].join("\u0000")
       : "";
     if (lastAppliedValueRef.current === value && attachmentHydrationContextKeyRef.current === hydrationContextKey) return;
     restoreSelectionForHydrationRef.current?.(editor);
@@ -157,7 +159,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
           variant,
           options,
         )
-      ));
+      ), { eager: eagerEditorImageHydration });
     }
     attachmentHydrationContextKeyRef.current = hydrationContextKey;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
@@ -169,7 +171,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
-  }, [editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
+  }, [eagerEditorImageHydration, editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
 
   useEffect(() => () => {
     attachmentHydrationCleanupRef.current?.();

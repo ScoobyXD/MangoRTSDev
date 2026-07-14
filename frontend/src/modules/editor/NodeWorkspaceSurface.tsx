@@ -395,6 +395,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openChatBlockIDs));
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
+  const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
@@ -936,6 +937,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (nodeChanged) return {};
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
+    setChatMessageFocusRequest((current) => (
+      !current || (!nodeChanged && Boolean(messageIDsByBlock.get(current.blockID)?.has(current.messageID))) ? current : null
+    ));
     if (projectionsLoaded) {
       setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
       setSelectedEmailIDsByBlock((current) => Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID)))));
@@ -2769,6 +2773,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               return next;
             });
           };
+          const revealChatMessage = (messageID: string) => {
+            focusChat();
+            setActiveChatMessageIDs((current) => ({ ...current, [block.id]: messageID }));
+            setChatMessageFocusRequest((current) => ({
+              blockID: block.id,
+              messageID,
+              requestID: (current?.requestID ?? 0) + 1,
+            }));
+          };
           const clearReplyTarget = () => {
             setChatReplyTargets((current) => {
               if (!current[block.id]) return current;
@@ -2899,6 +2912,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     }}
                     onDocumentConflict={() => onError("This text box changed elsewhere while you were editing. Mango kept and saved your local version.")}
                     onChangeSeen={onMarkChangeSeen}
+                    onChatHighlightActivate={revealChatMessage}
                     onSelectionChatRequest={openSelectionChat}
                     onImageChatRequest={addImageChatComment}
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
@@ -2930,6 +2944,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     active={chatIsActive}
                     currentUserID={author.userID}
                     activeMessageID={activeChatMessageID}
+                    messageFocusRequest={chatMessageFocusRequest?.blockID === block.id
+                      ? { messageID: chatMessageFocusRequest.messageID, requestID: chatMessageFocusRequest.requestID }
+                      : null}
                     accent={accent}
                     surfaceText={surfaceText}
                     panelBackground={panelBackground}

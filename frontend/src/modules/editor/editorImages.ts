@@ -52,9 +52,14 @@ export type EditorAttachmentImageObjectURLLoader = (
 
 type EditorAttachmentHydrationOwner = {
   loadObjectURL: EditorAttachmentImageObjectURLLoader;
+  options: EditorAttachmentHydrationOptions;
   disposeGeneration: (() => void) | null;
   cleanup: () => void;
 };
+
+export type EditorAttachmentHydrationOptions = Readonly<{
+  eager?: boolean;
+}>;
 
 type EditorAttachmentHydrationTask = {
   cancelled: boolean;
@@ -353,7 +358,11 @@ export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string
   return true;
 }
 
-function startEditorAttachmentImageHydrationGeneration(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
+function startEditorAttachmentImageHydrationGeneration(
+  root: HTMLElement,
+  loadObjectURL: EditorAttachmentImageObjectURLLoader,
+  options: EditorAttachmentHydrationOptions,
+): () => void {
   const frames = Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"], span[${EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE}]`))
     .filter((node): node is HTMLSpanElement => node instanceof HTMLSpanElement);
   const framesByAttachmentID = new Map<string, HTMLSpanElement[]>();
@@ -423,7 +432,7 @@ function startEditorAttachmentImageHydrationGeneration(root: HTMLElement, loadOb
     cancelQueuedTasks.add(cancel);
   };
 
-  if (framesByAttachmentID.size > 0 && typeof IntersectionObserver !== "undefined") {
+  if (!options.eager && framesByAttachmentID.size > 0 && typeof IntersectionObserver !== "undefined") {
     observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
@@ -471,16 +480,21 @@ function disposeEditorAttachmentHydrationOwner(root: HTMLElement, owner: EditorA
   editorAttachmentHydrationOwnerByRoot.delete(root);
 }
 
-export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
+export function hydrateEditorAttachmentImageFrames(
+  root: HTMLElement,
+  loadObjectURL: EditorAttachmentImageObjectURLLoader,
+  options: EditorAttachmentHydrationOptions = {},
+): () => void {
   editorAttachmentHydrationOwnerByRoot.get(root)?.cleanup();
   const owner: EditorAttachmentHydrationOwner = {
     loadObjectURL,
+    options,
     disposeGeneration: null,
     cleanup: () => disposeEditorAttachmentHydrationOwner(root, owner),
   };
   editorAttachmentHydrationOwnerByRoot.set(root, owner);
   try {
-    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, loadObjectURL);
+    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, loadObjectURL, options);
   } catch (cause) {
     disposeEditorAttachmentHydrationOwner(root, owner);
     throw cause;
@@ -494,7 +508,7 @@ export function refreshEditorAttachmentImageFrames(root: HTMLElement): boolean {
   owner.disposeGeneration?.();
   owner.disposeGeneration = null;
   try {
-    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, owner.loadObjectURL);
+    owner.disposeGeneration = startEditorAttachmentImageHydrationGeneration(root, owner.loadObjectURL, owner.options);
   } catch (cause) {
     disposeEditorAttachmentHydrationOwner(root, owner);
     throw cause;

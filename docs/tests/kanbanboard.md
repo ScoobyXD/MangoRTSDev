@@ -158,6 +158,7 @@ KB121 - The dedicated Logic Gate work version changes for gate/header/default/pe
 KB122 - Logic Gate boards and columns remain synthesized contract data rather than persisted legacy Kanban board/column rows; a response-contract salt invalidates ETags when synthesized shapes or ordering constants change.
 KB123 - Ordinary `node_updated` processing performs no Kanban projection-row lookup when that company has no relevant local board subscriber. With a mounted board subscriber, it resolves affected boards and preserves exact board-scoped publication correctness.
 KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
+KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announces the exact source and destination board IDs only after commit. Mounted boards route both local command events and authorized `kanban.changed` hints through the same debounced single-flight canonical work loader, so the source card disappears immediately, destination/current projections converge, duplicate hints coalesce, and a failed command cannot leave false optimistic board state.
 
 ## Scenarios
 
@@ -505,3 +506,21 @@ Expected:
 - No projection replay or sequence-gap path exists.
 - The work payload contains the required minimal collections and none of the redundant collections.
 - Authorization is checked before any `304`, and canonical status rank preserves business ordering.
+
+### Scenario KB-S11: Reassignment Removes The Source Card Immediately
+
+Business logic covered:
+- KB76
+- KB77
+- KB78
+- KB113
+- KB125
+
+Given:
+- Logic Gate A is mounted, the user opens a Node card, assigns it to Logic Gate B, and closes the Node.
+- Local completion and realtime may identify the same source/destination boards more than once.
+
+Expected:
+- Only after mutation success, exact caches for A and B are invalidated and announced; A canonically reloads and removes the card without a browser refresh.
+- Any mounted B projection converges through the same loader, local and socket hints deduplicate/coalesce, and stale loads cannot reinsert the card into A.
+- A rejected/failed reassignment emits no success event and preserves A's current snapshot.

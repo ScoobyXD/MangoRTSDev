@@ -78,6 +78,54 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 	}
 }
 
+func TestMemoryCrossLogicGateMoveEventsIdentifySourceAndDestinationBoards(t *testing.T) {
+	repo, companyID, sourceGate, node, actorUserID := setupWorkItemAssignmentEventTest(t, "aaaaaaaaaaac")
+	targetGate, err := repo.CreateLogicGate(companyID, "Target Event Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	priority := 3
+	assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: actorUserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	moved, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:       companyID,
+		LogicGateID:     targetGate.LogicGateID,
+		FromLogicGateID: sourceGate.LogicGateID,
+		NodeID:          node.NodeID,
+		Status:          "requested",
+		ActorUserID:     actorUserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+	}
+
+	sourceBoardID := assigned.Card.BoardID
+	targetBoardID := moved.Card.BoardID
+	if sourceBoardID == targetBoardID {
+		t.Fatalf("cross-gate move board ids are equal: %q", sourceBoardID)
+	}
+	for _, eventIndex := range []int{0, 1} {
+		payload := moved.Events[eventIndex].Payload
+		if payload["board_id"] != targetBoardID || payload["source_board_id"] != sourceBoardID {
+			t.Fatalf("move event[%d] board routing = %+v, want source %q and destination %q", eventIndex, payload, sourceBoardID, targetBoardID)
+		}
+		if payload["source_logic_gate_id"] != sourceGate.LogicGateID {
+			t.Fatalf("move event[%d] source Logic Gate = %+v, want %q", eventIndex, payload, sourceGate.LogicGateID)
+		}
+	}
+}
+
 func assertKanbanEventCardColumn(t *testing.T, event domain.DomainEvent, wantColumnID string) {
 	t.Helper()
 	card, ok := event.Payload["card"].(domain.KanbanCard)

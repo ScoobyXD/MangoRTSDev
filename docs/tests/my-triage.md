@@ -152,6 +152,7 @@ MT124 - Personal read-on-open timers, optimistic overlays, and mutation response
 MT125 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT126 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
 MT127 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
+MT128 - The exact personal-account signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that account. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, or reply-mode switches neither duplicate the signature nor replace deliberate edits.
 
 ## Scenarios
 
@@ -621,3 +622,19 @@ Expected:
 - Each personal draft API operation and Drafts-tab row requires the exact authenticated user/account database scope. User B cannot list, fetch, overwrite, move, delete, or access attachments for User A's draft even when the draft ID is known, the tab never lists provider Drafts, and a successful remote load cannot resurrect an unmarked stale browser draft.
 - Recoverable errors retain pending local drafts; only explicit revocation/deletion purges the exact scope. Out-of-order loads cannot overwrite newer loads, saves, deletes, or another personal account.
 - Compose persists the live exact-account draft before attachment upload. Deleting it denies draft-scoped attachment access to every actor, while the independent sent-message link stays valid.
+
+### Scenario MT-S13: Personal Signature Image And Start-Action Reliability
+
+Business logic covered:
+- MT96
+- MT114
+- MT128
+
+Given:
+- Personal Account A has a saved signature containing a Mango image, while Account B has a different signature.
+- The user opens signature settings, starts New compose, Reply, and Reply All, and a signature load overlaps typing or draft restoration.
+
+Expected:
+- Settings immediately show the image through the authenticated exact-account attachment context, and Save persists the flushed sanitized signature.
+- Each Account A start action receives A's signature exactly once; Account B never leaks into it.
+- Late completion appends without replacing typed/restored content, and autosave, rerender, or switching reply modes cannot duplicate the signature.

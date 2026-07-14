@@ -77,6 +77,7 @@ ED52 - Node and Logic Gate entity headers keep shared controls, Outline Styles/A
 ED53 - A persisted person/entity mention retains its current chip appearance, identity, attributes, profile actions, and noneditable atomic DOM representation while participating in editing as one movable character. The caret can occupy the positions immediately before and after it; Left/Right crosses one entity at a time; adjacent entities, entity-only lines, and list items preserve valid boundary positions; Backspace/Delete removes or crosses the expected unit; and undo restores the entity with its identity intact. Backspace immediately before an entity at the start of a line performs the normal previous-line join/move instead of hitting a dead zone, and Enter immediately before it splits/moves content without downgrading the entity to plain text or corrupting list indentation.
 ED54 - Table creation and editing remain shared editor capabilities, but a table must not inject cell-level or table-overlay left/center/right alignment icons into its top-left cell. Alignment remains available only through the shared header toolbar, and removing the embedded controls must not remove table selection, caret placement, row/column editing, or the shared toolbar's active-table alignment behavior.
 ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a conspicuous bright-red top-right close button with an accessible name and button semantics; that button closes the preview while supported Escape/backdrop or existing double-click dismissal behavior remains intact.
+ED56 - A Node/project text-block annotation preserves its stable chat comment ID through highlight geometry. A normal click hit-tests that annotation without making the overlay intercept selection/editing, opens the shared chat surface, expands ancestors, scrolls the exact comment into view, and focuses its labeled article with `aria-current` and a visible focus outline; active selections and prevented editor actions do not navigate.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1187,3 +1188,17 @@ Expected:
 - An inline-image preview mounts directly into its final dark overlay without an intermediate outline/geometry jump and exposes a bright-red top-right close button with an accessible name.
 - The topmost blocking modal traps Tab/Shift+Tab, closing restores prior focus, and existing accessible dialog naming plus Escape/backdrop close behavior remains intact; anchored editor panels may remain intentionally modeless until expanded/fullscreen.
 - Switching a Kanban or Project node panel into or out of fullscreen changes viewport geometry without remounting its live editor or losing its opener state.
+
+### Scenario ED-S12: Highlight Click Reveals The Exact Chat Comment
+
+Business logic covered:
+- ED56
+
+Given:
+- A Node or project text block has multiple persisted annotations, and one target comment is nested in a collapsed chat thread.
+- The user clicks a highlight, drags a new text selection across it, and continues typing with the keyboard.
+
+Expected:
+- The simple click opens the shared chat pane, expands the target's ancestors, scrolls the exact stable comment ID into view, and places visible accessible focus on its labeled comment article.
+- The chat composer does not steal requested comment focus.
+- Drag selection, editing, and prevented/default editor actions do not navigate, and multiple highlights never collapse to the wrong comment.

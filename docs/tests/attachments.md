@@ -76,6 +76,8 @@ ATT42 - Outbound email has a separate aggregate limit of exactly 24,000,000 atta
 ATT43 - After outbound preflight succeeds, S3 bodies open lazily inside the admitted provider send and stream directly into a deterministic-length Nylas multipart request. Each returned object length must match the authorized metadata before reading; the stream is bounded to that exact size, detects short, long, and failing readers, and closes on success, failure, provider rejection, or cancellation. Outbound send creates neither base64 attachment copies nor a complete multipart buffer, while incoming Nylas MIME recovery and calendar attachment content remain unchanged.
 ATT44 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
 ATT45 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
+ATT46 - Separate email attachment lists hide only attachments whose normalized Content-ID is actually referenced by the message body. `is_inline`, `content_disposition=inline`, or a Content-ID alone is not sufficient to hide a file; every unreferenced provider/Mango attachment remains visible with its metadata and existing authorized preview/download action in My Triage, Shared Triage, and attached-email Node viewers.
+ATT47 - Email-signature images remain private Mango attachment references. Signature settings eagerly hydrate the compact authenticated preview through the exact mailbox-scoped `email_signature` resource, while save/send continue to persist references and provider-safe HTML rather than secrets, storage keys, public URLs, or inline file bytes.
 
 ## Scenarios
 
@@ -367,3 +369,22 @@ Expected:
 - Authorization runs on every content request. A matching validator returns `304` before S3/object storage, uses private cache semantics and `nosniff`, and never exposes storage identifiers.
 - A derivative row whose object is missing falls back to the original once.
 - Existing-image repair is human-only, dry-run by default, requires company plus limit, reports a deterministic next cursor, cannot apply without the explicit confirmation guard, and exits nonzero after its report when apply has failures.
+
+### Scenario ATT-S13: Node Email Attachment Discovery And Signature Preview
+
+Business logic covered:
+- ATT11
+- ATT12
+- ATT24
+- ATT46
+- ATT47
+
+Given:
+- One incoming message contains a body-referenced CID image plus an ordinary PDF that also carries provider Content-ID metadata.
+- The message is converted to a new Node and separately attached to an existing Node.
+- A mailbox signature contains a Mango-owned image.
+
+Expected:
+- The CID image renders in the body and is not duplicated below it, while the unreferenced PDF remains listed with filename, type, size, and authenticated download in both Node paths.
+- The viewer reads canonical message metadata under the retained mailbox scope and never persists provider bytes or invents another attachment owner.
+- Opening signature settings loads the image preview immediately through authorized Mango content reads; saving remains durable and exposes no private object URL or credential.

@@ -110,11 +110,26 @@ func logicGateAssignmentSavedWorkspaceEventInputs(result LogicGateNodeAssignment
 	}
 }
 
-func logicGateAssignmentMovedWorkspaceEventInputs(result LogicGateNodeAssignmentResult, meta workItemAssignmentEventMetadata) []DomainEventInput {
+func logicGateAssignmentMovedWorkspaceEventInputs(result LogicGateNodeAssignmentResult, sourceAssignment domain.NodeLogicGateAssignment, meta workItemAssignmentEventMetadata) []DomainEventInput {
 	card := logicGateAssignmentWorkspaceCard(result)
+	assignmentEvent := workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentMovedEventType, result.Assignment, result.Node, meta)
+	cardEvent := kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_moved", card, true, meta)
+	sourceLogicGateID := strings.TrimSpace(sourceAssignment.LogicGateID)
+	sourceBoardID := LogicGateKanbanBoardID(sourceLogicGateID)
+	if sourceBoardID == "" {
+		sourceBoardID = strings.TrimSpace(sourceAssignment.CompatibilityBoardID)
+	}
+	if sourceBoardID != "" && sourceBoardID != strings.TrimSpace(card.BoardID) {
+		assignmentEvent.Payload["source_board_id"] = sourceBoardID
+		cardEvent.Payload["source_board_id"] = sourceBoardID
+	}
+	if sourceLogicGateID != "" && sourceLogicGateID != strings.TrimSpace(result.Assignment.LogicGateID) {
+		assignmentEvent.Payload["source_logic_gate_id"] = sourceLogicGateID
+		cardEvent.Payload["source_logic_gate_id"] = sourceLogicGateID
+	}
 	return []DomainEventInput{
-		workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentMovedEventType, result.Assignment, result.Node, meta),
-		kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_moved", card, true, meta),
+		assignmentEvent,
+		cardEvent,
 		nodeUpdatedWorkspaceEventInputWithMetadata(result.Node, meta),
 	}
 }

@@ -229,9 +229,11 @@ func (s *Server) publishKanbanChangesForEvents(events []domain.DomainEvent) {
 			continue
 		}
 		if isKanbanRealtimeDomainEvent(event.Type) {
-			if boardID := domainEventPayloadString(event.Payload, "board_id"); boardID != "" {
-				key := companyID + "\x00" + boardID
-				changes[key] = boardChange{companyID: companyID, boardID: boardID, changeType: event.Type}
+			for _, boardPayloadKey := range []string{"board_id", "source_board_id"} {
+				if boardID := domainEventPayloadString(event.Payload, boardPayloadKey); boardID != "" {
+					key := companyID + "\x00" + boardID
+					changes[key] = boardChange{companyID: companyID, boardID: boardID, changeType: event.Type}
+				}
 			}
 		}
 		if strings.TrimSpace(event.Type) != "node_updated" {

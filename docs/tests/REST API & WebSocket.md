@@ -52,6 +52,7 @@ RW41 - Node chat and Logic Gate Kanban publication re-resolve the current exact 
 RW42 - Home retains at most one exact mailbox scope: the selected connected personal account for My Triage or the selected mail-bearing shared inbox for Shared Triage. Shared root/headings/group rows/plain folders, Drafts, non-mail views, inaccessible resources, and inactive mailboxes retain no fallback mailbox subscription and issue no provider GET because of a hint. Navigation loads and subscribes the destination mailbox and cancels timers, pending work, and the old subscription. Equivalent shared-inbox metadata/callback replacement retains the existing exact company/scope subscription lifetime; only an actual target or mail-bearing transition reinstalls it.
 RW43 - First mailbox acceptance and reconnect acceptance each coalesce one canonical exact-mailbox folder/list reconciliation, closing the initial-list-to-subscription race. `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active list and folder metadata; folder create/update/delete hints reconcile folder metadata; selected detail reloads only when its message/thread is identified and that captured selection is still active when delayed/queued work executes. Exact cache invalidation and delayed request keys include company plus personal account/shared inbox, and obsolete or off-view work issues no provider read. Realtime reconciliation uses authoritative exact-key refreshes: it bypasses reusable mail caches, coalesces with same-key in-flight work, and generation-fences provider reads begun before invalidation from repopulating folder, page, or detail caches.
 RW44 - `POST /v1/communications/triage/convert` resolves the provider connection from exactly one source mailbox key. A personal conversion sends normalized `account_email` in the query and the backend verifies that account belongs to the authenticated user; a shared conversion sends `shared_inbox_id`, ignores/suppresses personal identity, and performs exact inbox permission and company-connection resolution. The drag payload, every Explorer/Kanban/project/pin handoff, and the same-browser committed-result event retain that same key.
+RW45 - A committed cross-Logic-Gate Node assignment event carries canonical source and destination board/Logic Gate IDs. Realtime deduplicates those board IDs and publishes one compact `kanban.changed` hint to each currently authorized mounted board audience; same-window success invalidates/announces the same exact boards. Clients reconcile through canonical conditional work reads, while command failure publishes no success hint and transport payloads contain no projection delta.
 
 ## Scenarios
 
@@ -399,3 +400,20 @@ Expected:
 - `message.created`, `message.updated` (including moves), and `message.deleted` reconcile only the active list/folders; folder events reconcile folders; selected detail reloads only for a directly named selected message/thread.
 - Payloads remain compact hints and canonical HTTP data remains authoritative.
 - Personal conversion requests retain normalized Account B `account_email` end to end and cannot fall back to Account A. Shared conversion requests retain only Shared Inbox A as the client request selector; the backend resolves its canonical company mailbox account after exact permission checks.
+
+### Scenario RW-S17: Cross-Gate Assignment Publishes Both Board Hints
+
+Business logic covered:
+- RW20
+- RW27
+- RW41
+- RW45
+
+Given:
+- A Node moves from Logic Gate A to Logic Gate B while A, B, neither, or both boards have retained subscriptions.
+- A same-window completion and its socket echo may arrive in either order, or the command may fail.
+
+Expected:
+- The committed event identifies both board IDs once; the server reauthorizes each mounted audience and sends one compact hint per affected subscribed board.
+- No-subscriber boards cause no unnecessary projection fan-out, and local/socket duplicates coalesce through the existing canonical single-flight read path.
+- Failure emits no success hint, and realtime never carries card deltas or false optimistic membership.
