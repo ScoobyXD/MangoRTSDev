@@ -502,6 +502,21 @@ test("conversation ordering can be switched to oldest first without changing the
   assert.deepEqual(orderEmailConversationMessages(messages, "oldest").map((message) => message.id), ["oldest", "middle", "newest"]);
 });
 
+test("mailbox ordering composes with search and unread filtering without mutating the filtered page", () => {
+  const page = [
+    emailMessage("old-match", "thread-1", 100, { unread: true, subject: "Quarterly plan" }),
+    emailMessage("read-match", "thread-2", 200, { unread: false, subject: "Quarterly plan" }),
+    emailMessage("new-match", "thread-3", 400, { unread: true, subject: "Quarterly review" }),
+    emailMessage("other", "thread-4", 300, { unread: true, subject: "Status report" }),
+  ];
+  const filtered = page.filter((message) => message.unread && message.subject.toLowerCase().includes("quarterly"));
+  const filteredIDs = filtered.map((message) => message.id);
+
+  assert.deepEqual(orderEmailConversationMessages(filtered, "newest").map((message) => message.id), ["new-match", "old-match"]);
+  assert.deepEqual(orderEmailConversationMessages(filtered, "oldest").map((message) => message.id), ["old-match", "new-match"]);
+  assert.deepEqual(filtered.map((message) => message.id), filteredIDs);
+});
+
 test("message documents preserve Mango-authored email body structure", () => {
   const documentHTML = messageDocument('<div data-mango-email-body="true">hello<br>  structure</div>');
 

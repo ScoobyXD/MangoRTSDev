@@ -191,3 +191,35 @@ test("permissions, node chat links, drafts, and shared image selection use expli
   assert.match(drafts, /return replyMessageID \? `reply:/);
   assert.match(drafts, /supersededHomeMailDraftIDs/);
 });
+
+test("My and Shared Triage share compact search, unread, and accessible list-order controls", () => {
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
+  const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
+  const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
+  const controlStart = homeWorkspace.indexOf("<form style={searchRowStyle}");
+  const controlEnd = homeWorkspace.indexOf("{!isArchivableListView && (", controlStart);
+  assert.ok(controlStart >= 0 && controlEnd > controlStart);
+  const controls = homeWorkspace.slice(controlStart, controlEnd);
+
+  assert.match(controls, /mailSearchControlsStyle[\s\S]*aria-label="Search mail"[\s\S]*type="submit"/);
+  assert.match(controls, /mailControlStatusStyle[\s\S]*unreadMessageCount[\s\S]*Unread only[\s\S]*mailOrderButtonStyle/);
+  assert.match(controls, /aria-pressed=\{messageListOrder === "oldest"\}/);
+  assert.ok(controls.includes("aria-label={\`Email order:"));
+  assert.ok(controls.includes("title={\`Currently"));
+  assert.match(controls, /data-mail-list-order=\{messageListOrder\}/);
+  assert.match(controls, /MailOrderIcon order=\{messageListOrder\}/);
+  assert.match(homeStyles, /mailSearchControlsStyle[\s\S]*maxWidth: 250/);
+  assert.match(homeStyles, /searchRowStyle[\s\S]*flexWrap: "wrap"/);
+  assert.match(homeStyles, /mailControlStatusStyle[\s\S]*justifyContent: "flex-end"[\s\S]*flexWrap: "wrap"/);
+
+  assert.match(homePage, /useState<EmailConversationOrder>\("newest"\)/);
+  assert.match(homePage, /return orderEmailConversationMessages\(listMessages, messageListOrder\)/);
+  assert.match(homePage, /messageListOrder=\{messageListOrder\}/);
+  assert.match(homePage, /onToggleMessageListOrder=\{\(\) => setMessageListOrder/);
+  const filterKeyStart = homePage.indexOf("const activeMessageListKey = messageListFilterKey(");
+  const visibleListStart = homePage.indexOf("const visibleMessages = useMemo", filterKeyStart);
+  assert.ok(filterKeyStart >= 0 && visibleListStart > filterKeyStart);
+  assert.doesNotMatch(homePage.slice(filterKeyStart, visibleListStart), /messageListOrder/);
+  assert.equal((homePage.match(/<HomeMailWorkspace/g) ?? []).length, 1);
+  assert.match(homePage, /activeViewID=\{activeViewID\}/);
+});

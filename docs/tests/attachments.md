@@ -84,6 +84,7 @@ ATT49 - Email-signature images remain private Mango attachment references. Signa
 ATT50 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
 ATT51 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
 ATT52 - Draft attachment mutation ownership spans durable preparation plus the complete upload or existing-attachment link operation. Concurrent mutations for one exact draft share preparation but retain independent active leases until each settles. Failure cleanup may delete an otherwise-empty draft only after the last lease ends and only when every mutation failed; while another lease remains active, or after any mutation succeeds, the draft stays live.
+ATT53 - Signature editor, signature Preview, and composed-message insertion rehydrate each durable image after editor lifecycle replay through the exact `email_signature` authorization scope. Loading and terminal failure are explicit private preview states rather than attempts to navigate the browser to `mango-attachment:`; successful display uses a revocable object URL with contain sizing, cleanup revokes it and restores the durable reference, and the existing authenticated original/lightbox behavior remains independent.
 
 ## Scenarios
 
@@ -412,6 +413,7 @@ Business logic covered:
 - ATT24
 - ATT48
 - ATT49
+- ATT53
 
 Given:
 - One incoming message contains a body-referenced CID image plus an ordinary PDF that also carries provider Content-ID metadata.
@@ -422,6 +424,7 @@ Expected:
 - The CID image renders in the body and is not duplicated below it, while the unreferenced PDF remains listed with filename, type, size, and authenticated download in both Node paths.
 - The viewer reads canonical message metadata under the retained mailbox scope and never persists provider bytes or invents another attachment owner.
 - Opening signature settings loads the image preview immediately through authorized Mango content reads; saving remains durable and exposes no private object URL or credential.
+- Signature editor and compose survive immediate hydration cleanup/replay, expose loading or terminal Preview unavailable states without a broken browser thumbnail, use contain sizing on success, revoke stale display URLs, retain the durable reference, and keep the authorized original/lightbox path.
 
 ### Scenario ATT-S15: Concurrent Draft Attachment Preparation And Cleanup
 

@@ -616,6 +616,38 @@ button, input, textarea, select {
   user-select: none;
 }
 
+.editor-document-scroll span[data-mango-editor-image-hydration="loading"],
+.editor-document-scroll span[data-mango-editor-image-hydration="error"] {
+  background: color-mix(in srgb, var(--panel, #ffffff) 88%, #6b7280 12%);
+}
+
+.editor-document-scroll span[data-mango-editor-image-hydration="loading"] img,
+.editor-document-scroll span[data-mango-editor-image-hydration="error"] img {
+  visibility: hidden;
+}
+
+.editor-document-scroll span[data-mango-editor-image-hydration="loading"]::before,
+.editor-document-scroll span[data-mango-editor-image-hydration="error"]::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  color: var(--muted, #6b7280);
+  font: 600 12px/1.35 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: 0.01em;
+  text-align: center;
+  pointer-events: none;
+}
+
+.editor-document-scroll span[data-mango-editor-image-hydration="loading"]::before {
+  content: "Loading image...";
+}
+
+.editor-document-scroll span[data-mango-editor-image-hydration="error"]::before {
+  content: "Preview unavailable";
+}
 .editor-document-scroll span[data-mango-editor-image="true"]::after {
   content: "";
   position: absolute;

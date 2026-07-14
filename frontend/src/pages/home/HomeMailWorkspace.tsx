@@ -2,7 +2,7 @@ import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { emailMessageRowKey } from "./homeUtils";
@@ -25,11 +25,14 @@ import {
   mailArchiveActionsStyle,
   mailComposeSentActionsStyle,
   mailComposeSentTriageActionsStyle,
-  mailFiltersRowStyle,
   mailListTitleStackStyle,
   mailListToolbarStyle,
   mailListPrimaryTitleStyle,
   mailMessageListFrameStyle,
+  mailControlStatusStyle,
+  mailOrderButtonStyle,
+  mailOrderLabelStyle,
+  mailSearchControlsStyle,
   mailPanelInputStyle,
   mailPanelPrimaryButtonStyle,
   mailPanelSearchButtonStyle,
@@ -62,7 +65,6 @@ import {
   triageSnippetStyle,
   triageMessageStarButtonStyle,
   triageSubjectStyle,
-  mailUnreadFilterRowStyle,
   unreadCountInlineStyle,
 } from "./homeStyles";
 
@@ -110,6 +112,21 @@ function ChevronDownIcon() {
   return (
     <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
       <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function MailOrderIcon({ order }: { order: EmailConversationOrder }) {
+  const newestFirst = order === "newest";
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M2.5 3.25h6M2.5 6.25h4.5M2.5 9.25h3" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+      <path
+        d={newestFirst ? "M11.5 2.5v10.25m0 0-2-2m2 2 2-2" : "M11.5 13.5V3.25m0 0-2 2m2-2 2 2"}
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -217,6 +234,7 @@ export function HomeMailWorkspace({
   mailboxCounts,
   messageListRef,
   messages,
+  messageListOrder,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
@@ -256,6 +274,7 @@ export function HomeMailWorkspace({
   onOpenSentMailbox,
   onOpenSpamMailbox,
   onOpenStarredMailbox,
+  onToggleMessageListOrder,
   onOpenForward,
   onEmailSignatureChange,
   onSaveEmailSignature,
@@ -279,6 +298,7 @@ export function HomeMailWorkspace({
   archiveLabel: string;
   busy: string;
   companyID: string;
+  messageListOrder: EmailConversationOrder;
   currentUserID: string;
   compose: ComposeState;
   draftCount: number;
@@ -336,6 +356,7 @@ export function HomeMailWorkspace({
   onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
   onOpenForward: (message?: EmailMessage) => void;
+  onToggleMessageListOrder: () => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: (signature: string) => void;
   onSaveComposeDraft: (compose: ComposeState) => void;
@@ -581,39 +602,45 @@ export function HomeMailWorkspace({
             </div>
           )}
           <form style={searchRowStyle} onSubmit={onSubmitSearch}>
-            <input
-              style={mailPanelInputStyle}
-              value={searchDraft}
-              onChange={(event) => onSearchDraftChange(event.target.value)}
-              placeholder="Search mail"
-            />
-            <button className="mango-elevated-action" type="submit" style={mailPanelSearchButtonStyle}>Search</button>
+            <div style={mailSearchControlsStyle}>
+              <input
+                aria-label="Search mail"
+                style={mailPanelInputStyle}
+                value={searchDraft}
+                onChange={(event) => onSearchDraftChange(event.target.value)}
+                placeholder="Search mail"
+              />
+              <button className="mango-elevated-action" type="submit" style={mailPanelSearchButtonStyle}>Search</button>
+            </div>
+            <div style={mailControlStatusStyle}>
+              {(isArchivableListView || mailFilterStatus) && (
+                <span style={isArchivableListView ? unreadCountInlineStyle : selectedCountStyle}>
+                  {mailFilterStatus || `${unreadMessageCount} unread`}
+                </span>
+              )}
+              <label style={checkboxStyle}>
+                <input
+                  type="checkbox"
+                  checked={unreadOnly}
+                  onChange={(event) => onToggleUnreadOnly(event.target.checked)}
+                />
+                <span>Unread only</span>
+              </label>
+              <button
+                className="mango-elevated-action"
+                type="button"
+                style={mailOrderButtonStyle}
+                aria-pressed={messageListOrder === "oldest"}
+                aria-label={`Email order: ${messageListOrder === "newest" ? "newest first" : "oldest first"}. Activate for ${messageListOrder === "newest" ? "oldest first" : "newest first"}.`}
+                title={`Currently ${messageListOrder === "newest" ? "newest first" : "oldest first"}; show ${messageListOrder === "newest" ? "oldest first" : "newest first"}`}
+                data-mail-list-order={messageListOrder}
+                onClick={onToggleMessageListOrder}
+              >
+                <MailOrderIcon order={messageListOrder} />
+                <span style={mailOrderLabelStyle}>{messageListOrder === "newest" ? "Newest" : "Oldest"}</span>
+              </button>
+            </div>
           </form>
-          {isArchivableListView ? (
-            <div style={mailUnreadFilterRowStyle}>
-              <span style={unreadCountInlineStyle}>{mailFilterStatus || `${unreadMessageCount} unread`}</span>
-              <label style={checkboxStyle}>
-                <input
-                  type="checkbox"
-                  checked={unreadOnly}
-                  onChange={(event) => onToggleUnreadOnly(event.target.checked)}
-                />
-                <span>Unread only</span>
-              </label>
-            </div>
-          ) : (
-            <div style={mailFiltersRowStyle}>
-              <label style={checkboxStyle}>
-                <input
-                  type="checkbox"
-                  checked={unreadOnly}
-                  onChange={(event) => onToggleUnreadOnly(event.target.checked)}
-                />
-                <span>Unread only</span>
-              </label>
-              {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
-            </div>
-          )}
           {!isArchivableListView && (
             <div style={listHeaderStyle}>
               <span>{mailboxLabel(mailbox)}</span>

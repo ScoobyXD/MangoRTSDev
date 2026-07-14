@@ -6,6 +6,7 @@ export const EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE = "data-mango-editor-attachmen
 export const EDITOR_IMAGE_FILENAME_ATTRIBUTE = "data-mango-editor-filename";
 export const EDITOR_IMAGE_MIME_TYPE_ATTRIBUTE = "data-mango-editor-mime-type";
 export const EDITOR_IMAGE_BYTE_SIZE_ATTRIBUTE = "data-mango-editor-byte-size";
+export const EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE = "data-mango-editor-image-hydration";
 
 const SAFE_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+=*$/i;
 const EDITOR_ATTACHMENT_IMAGE_SOURCE_PREFIX = "mango-attachment:";
@@ -59,6 +60,7 @@ type EditorAttachmentHydrationOwner = {
 
 export type EditorAttachmentHydrationOptions = Readonly<{
   eager?: boolean;
+  onError?: (attachmentID: string) => void;
 }>;
 
 type EditorAttachmentHydrationTask = {
@@ -163,10 +165,16 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   image.style.display = "block";
   image.style.width = "100%";
   image.style.height = "100%";
-  image.style.objectFit = "fill";
+  image.style.objectFit = "contain";
   image.style.pointerEvents = "none";
-  image.src = resolveEditorImageFrameSource(data.src, attachmentID, Boolean(options.durable));
+  const displaySource = resolveEditorImageFrameSource(data.src, attachmentID, Boolean(options.durable));
   frame.appendChild(image);
+  if (attachmentID && isEditorAttachmentImageSource(displaySource)) {
+    setEditorImageFrameHydrationState(frame, "loading");
+  } else {
+    setEditorImageFrameHydrationState(frame, "ready");
+  }
+  image.src = displaySource;
   return frame;
 }
 
@@ -381,6 +389,24 @@ export function findEditorImageFrame(root: HTMLElement, target: EventTarget | nu
   return frame instanceof HTMLSpanElement && root.contains(frame) ? frame : null;
 }
 
+export type EditorImageFrameHydrationState = "loading" | "ready" | "error";
+
+export function setEditorImageFrameHydrationState(
+  frame: HTMLElement,
+  state: EditorImageFrameHydrationState,
+): void {
+  frame.setAttribute(EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE, state);
+  if (state === "loading") {
+    frame.setAttribute("aria-busy", "true");
+    frame.setAttribute("title", "Loading embedded image preview");
+  } else {
+    frame.removeAttribute("aria-busy");
+    frame.setAttribute("title", state === "error" ? "Embedded image preview unavailable" : "Double-click to view full size");
+  }
+  const image = frame.querySelector("img") as HTMLImageElement | null;
+  if (image) image.style.visibility = state === "ready" ? "visible" : "hidden";
+}
+
 export function editorImageFrameNeedsAttachmentHydration(frame: HTMLElement): boolean {
   const data = readEditorImageData(frame);
   if (!data?.attachmentID) return false;
@@ -389,7 +415,11 @@ export function editorImageFrameNeedsAttachmentHydration(frame: HTMLElement): bo
   return !src || isEditorAttachmentImageSource(src);
 }
 
-export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string): boolean {
+export function setEditorImageFrameDisplaySource(
+  frame: HTMLElement,
+  src: string,
+  onError?: () => void,
+): boolean {
   const data = readEditorImageData(frame);
   if (!data?.attachmentID) return false;
   const cleanSrc = src.trim();
@@ -397,7 +427,24 @@ export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string
   const image = frame.querySelector("img") as HTMLImageElement | null;
   if (!image) return false;
   frame.setAttribute(EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE, data.attachmentID);
+  const durableSource = isEditorAttachmentImageSource(cleanSrc);
+  setEditorImageFrameHydrationState(frame, "loading");
+  image.onload = null;
+  image.onerror = null;
+  if (!durableSource) {
+    image.onload = () => {
+      if (image.getAttribute("src") === cleanSrc) setEditorImageFrameHydrationState(frame, "ready");
+    };
+    image.onerror = () => {
+      if (image.getAttribute("src") !== cleanSrc) return;
+      setEditorImageFrameHydrationState(frame, "error");
+      onError?.();
+    };
+  }
   image.src = cleanSrc;
+  if (!durableSource && image.complete && image.naturalWidth > 0) {
+    setEditorImageFrameHydrationState(frame, "ready");
+  }
   return true;
 }
 
@@ -411,6 +458,7 @@ function startEditorAttachmentImageHydrationGeneration(
   const framesByAttachmentID = new Map<string, HTMLSpanElement[]>();
   for (const frame of frames) {
     if (!editorImageFrameNeedsAttachmentHydration(frame)) continue;
+    setEditorImageFrameHydrationState(frame, "loading");
     const attachmentID = readEditorImageData(frame)?.attachmentID?.trim() ?? "";
     if (!attachmentID) continue;
     const matchingFrames = framesByAttachmentID.get(attachmentID) ?? [];
@@ -446,7 +494,9 @@ function startEditorAttachmentImageHydrationGeneration(
         }
         let applied = false;
         for (const frame of attachmentFrames) {
-          if (root.contains(frame) && setEditorImageFrameDisplaySource(frame, objectURL)) applied = true;
+          if (root.contains(frame) && setEditorImageFrameDisplaySource(
+            frame, objectURL, () => options.onError?.(attachmentID),
+          )) applied = true;
         }
         if (applied) {
           objectURLs.add(objectURL);
@@ -459,7 +509,13 @@ function startEditorAttachmentImageHydrationGeneration(
         scheduledAttachmentIDs.delete(attachmentID);
         const retryCount = retryCountByAttachmentID.get(attachmentID) ?? 0;
         const retryDelay = EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS[retryCount];
-        if (retryDelay === undefined) return;
+        if (retryDelay === undefined) {
+          for (const frame of attachmentFrames) {
+            if (root.contains(frame)) setEditorImageFrameHydrationState(frame, "error");
+          }
+          options.onError?.(attachmentID);
+          return;
+        }
         retryCountByAttachmentID.set(attachmentID, retryCount + 1);
         const retryTimer = setTimeout(() => {
           retryTimers.delete(retryTimer);

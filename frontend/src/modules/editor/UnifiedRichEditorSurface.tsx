@@ -88,6 +88,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const editorRef = useRef<HTMLDivElement | null>(null);
   const attachmentHydrationCleanupRef = useRef<(() => void) | null>(null);
   const attachmentHydrationContextKeyRef = useRef("");
+  const editorImageAttachmentErrorRef = useRef(onEditorImageAttachmentError);
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
@@ -100,6 +101,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const targetKeyRef = useRef(`unified-rich-editor:${surfaceID}`);
   const lastAppliedValueRef = useRef("");
   const userEditedRef = useRef(false);
+  editorImageAttachmentErrorRef.current = onEditorImageAttachmentError;
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
@@ -111,6 +113,9 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   );
   const documentIsEmpty = !editorBodyHasEmailContent(value);
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
+  const attachmentHydrationContextKey = editorImageAttachmentContext
+    ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim(), eagerEditorImageHydration ? "eager" : "viewport"].join("\u0000")
+    : "";
 
   useEffect(() => {
     targetKeyRef.current = `unified-rich-editor:${surfaceID}`;
@@ -141,10 +146,9 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const hydrationContextKey = editorImageAttachmentContext
-      ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim(), eagerEditorImageHydration ? "eager" : "viewport"].join("\u0000")
-      : "";
-    if (lastAppliedValueRef.current === value && attachmentHydrationContextKeyRef.current === hydrationContextKey) return;
+    if (lastAppliedValueRef.current === value
+      && attachmentHydrationContextKeyRef.current === attachmentHydrationContextKey
+      && (!editorImageAttachmentContext || attachmentHydrationCleanupRef.current)) return;
     restoreSelectionForHydrationRef.current?.(editor);
     const selectionOffsets = getEditorSelectionOffsets(editor);
     attachmentHydrationCleanupRef.current?.();
@@ -159,9 +163,15 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
           variant,
           options,
         )
-      ), { eager: eagerEditorImageHydration });
+      ), {
+        eager: eagerEditorImageHydration,
+        onError: () => editorImageAttachmentErrorRef.current?.(
+          "An embedded image preview could not be loaded. The saved image reference was preserved.",
+        ),
+      });
     }
-    attachmentHydrationContextKeyRef.current = hydrationContextKey;
+    const hydrationCleanup = attachmentHydrationCleanupRef.current;
+    attachmentHydrationContextKeyRef.current = attachmentHydrationContextKey;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     pendingFontSizeRef.current = null;
     pendingHighlightColorRef.current = undefined;
@@ -171,12 +181,13 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
-  }, [eagerEditorImageHydration, editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
-
-  useEffect(() => () => {
-    attachmentHydrationCleanupRef.current?.();
-    attachmentHydrationCleanupRef.current = null;
-  }, []);
+    return () => {
+      hydrationCleanup?.();
+      if (attachmentHydrationCleanupRef.current === hydrationCleanup) {
+        attachmentHydrationCleanupRef.current = null;
+      }
+    };
+  }, [attachmentHydrationContextKey, eagerEditorImageHydration, scheduleIndentGuideUpdate, value]);
 
   useEffect(() => {
     const editor = editorRef.current;
