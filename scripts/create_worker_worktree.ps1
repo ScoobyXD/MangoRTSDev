@@ -15,23 +15,16 @@ $mainRoot = Resolve-AgentPath -Path $MainPath
 Assert-AgentMainWorktree -RepoPath $mainRoot
 Assert-AgentCleanStatus -RepoPath $mainRoot -Context "main worktree"
 
-$baseSlug = ConvertTo-MangoWorktreePurposeSlug -Name $Name
-$suffixNumber = Get-MangoNextCodexSuffixNumber -RepoPath $mainRoot
-while ($suffixNumber -le 9999999) {
-  $suffix = "{0:D7}" -f $suffixNumber
-  $slug = "$baseSlug$suffix"
-  $branchName = "codex/$slug"
-  $workerPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoRTSDev-$slug"
+$slug = ConvertTo-AgentSlug -Name $Name
+$branchName = "codex/$slug"
+$workerPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoRTSDev-$slug"
 
-  if ((-not (Test-AgentBranchExists -RepoPath $mainRoot -BranchName $branchName)) -and (-not (Test-Path -LiteralPath $workerPath))) {
-    break
-  }
-
-  $suffixNumber += 1
+if (Test-AgentBranchExists -RepoPath $mainRoot -BranchName $branchName) {
+  throw "Branch '$branchName' already exists."
 }
 
-if ($suffixNumber -gt 9999999) {
-  throw "Could not find an available 7-digit worker suffix."
+if (Test-Path -LiteralPath $workerPath) {
+  throw "Worktree path '$workerPath' already exists."
 }
 
 Invoke-AgentGit -RepoPath $mainRoot -Arguments @("fetch", "origin")

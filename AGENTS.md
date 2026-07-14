@@ -37,7 +37,7 @@ When Jonat asks a project/Local task in the Codex desktop app to create, spawn, 
 
 - The canonical user-visible Git branch identity is `codex/<descriptive-english-words><7 digits>`, for example `codex/fix-worktree-names0000123`.
 - The descriptive portion contains only English letters and hyphen-separated words. Do not prepend or retain a GUID, UUID, thread ID, or other opaque identifier. The collision-safe seven-digit allocation suffix is the only numeric portion and must be the final seven characters.
-- Include a dedicated `MANGORTS_WORKTREE_PURPOSE: <short English purpose>` line in every app-worker prompt so the naming hook receives a concise human-readable purpose instead of inferring one from the full task.
+- Include `MANGORTS_WORKTREE_PURPOSE: <short English purpose>` in every app-worker prompt and make the worker's first command `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\ensure_codex_worktree_branch.ps1 -Purpose "<short English purpose>"`. Run it before inspecting or changing project files.
 - The Codex app owns the opaque checkout directory beneath `.codex/worktrees`; do not rename that internal directory. Treat the suffix-bearing Git branch as the canonical worker identity.
 
 ### Default: create the worker, then stop without integration

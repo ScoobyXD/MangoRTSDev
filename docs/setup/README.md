@@ -3,7 +3,6 @@
 Start here for repeatable developer-machine setup:
 
 - [`hermes-windows-zero-to-mangorts.md`](./hermes-windows-zero-to-mangorts.md) — full zero-to-ready Windows + Hermes bootstrap handoff for a future local agent.
-- [`codex-app-worktree-naming.md`](./codex-app-worktree-naming.md) — canonical app-worker branch naming, hook installation, trust, and app-owned directory boundaries.
 
 Related files:
 
