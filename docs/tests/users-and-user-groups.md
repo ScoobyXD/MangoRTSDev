@@ -46,6 +46,7 @@ UG35 - The email-collaboration chat mention picker may target an active same-com
 UG36 - At the accepted chat transaction, a valid group mention resolves the selected group's current active same-company user closure through the existing group hierarchy plus membership source rows, deduplicates users across direct and overlapping group mentions, and snapshots those user IDs as collaboration participants. A valid empty group adds no participant; a missing, deleted, or cross-company group is rejected.
 UG37 - An email-collaboration group mention is deliberately different from the dynamic group pointers in UG23: later member/hierarchy changes do not add or remove collaboration participants, change Node access, or rewrite historical mention notifications.
 UG38 - Mentioning an already-participating user is idempotent. The actor remains a participant but receives no self-mention notification; every other newly mentioned resolved user receives at most one notification for the committed chat.
+UG39 - Email-collaboration chat roster membership is rendered from the collaboration's snapshotted participant rows, never recomputed from the current user-group tree. Each distinct participant `user_id` contributes once: creator/direct rows receive an accessible person avatar, while rows with `added_via_type=group` may be grouped into one provenance avatar/pill per immutable `added_via_id`. The pill's participant count comes from those rows, while the current group record supplies only its display label. Direct/group overlap never duplicates a user, later group changes never alter the roster or access, and a renamed, missing, or deleted group label falls back safely without dropping its represented snapshotted users.
 
 ## Scenarios
 
@@ -179,11 +180,13 @@ Business logic covered:
 - UG36
 - UG37
 - UG38
+- UG39
 
 Given:
 - A collaboration chat selects one company user and one nested company group whose resolved members overlap that user.
 - Another selected group is valid but empty, and requests also try a deleted or cross-company group.
 - Group membership changes after the chat commits.
+- The collaboration's email-chat header is opened after the mentioned group is renamed or no longer available for display lookup.
 
 Expected:
 - Selected principal IDs, not display labels, identify mentions.
@@ -191,3 +194,4 @@ Expected:
 - The empty valid group adds nobody without inventing a user; deleted/cross-company groups are rejected.
 - The actor receives no self-mention notification and retries/overlap produce no duplicate participant or notification.
 - Later group changes still affect dynamic resource permission/GVIC group pointers under UG23 but do not affect the collaboration snapshot.
+- The open email-chat header represents each durable participant `user_id` once through a direct/creator avatar or group-provenance cohort. Any group pill counts only its snapshotted rows; missing current group metadata uses a safe fallback and neither recalculates membership nor hides represented users. The underlying shared ChatPane remains usable by Node callers without requiring them to render this email-specific header.

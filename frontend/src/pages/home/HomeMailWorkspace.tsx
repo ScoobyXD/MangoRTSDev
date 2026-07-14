@@ -6,6 +6,7 @@ import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailM
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { emailMessageRowKey } from "./homeUtils";
+import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationChatSession } from "./emailCollaborationChat";
 import {
   accountEmailStyle,
   accountRowStyle,
@@ -269,7 +270,6 @@ export function HomeMailWorkspace({
   onToggleStar,
   onToggleUnreadOnly,
   onEmailCollaborationChange,
-  onEmailCollaborationError,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -349,23 +349,38 @@ export function HomeMailWorkspace({
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
-  onEmailCollaborationError: (message: string) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
   const [allMailboxMenuOpen, setAllMailboxMenuOpen] = React.useState(false);
   const [emailSelection, setEmailSelection] = React.useState<EmailCollaborationSelection | null>(null);
   const [emailNavigation, setEmailNavigation] = React.useState<EmailCollaborationNavigation | null>(null);
+  const [emailChatSession, setEmailChatSession] = React.useState<EmailCollaborationChatSession>(null);
+  const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
+  const emailChatAvailable = activeViewID === "my-triage" || activeViewID.startsWith("shared:");
+  const emailChatKey = emailChatAvailable && selectedMessageRowKey
+    ? JSON.stringify([activeViewID, mailbox, selectedMessageRowKey])
+    : "";
+  const emailChatMounted = emailCollaborationChatSessionMounted(emailChatSession, emailChatKey);
+  const emailChatVisible = emailCollaborationChatSessionVisible(emailChatSession, emailChatKey);
+  const visibleError = emailCollaborationError || error;
+  const clearEmailCollaborationError = React.useCallback(() => setEmailCollaborationError(""), []);
   const emailNavigationSequenceRef = React.useRef(0);
   const clearEmailSelection = React.useCallback(() => setEmailSelection(null), []);
   const navigateToEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
     emailNavigationSequenceRef.current += 1;
     setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
   }, []);
+  const toggleEmailChat = React.useCallback(() => {
+    if (!emailChatKey) return;
+    setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
+  }, [emailChatKey]);
   React.useEffect(() => {
     setEmailSelection(null);
     setEmailNavigation(null);
-  }, [selectedMessageRowKey]);
+    setEmailChatSession((current) => reconcileEmailCollaborationChatSession(current, emailChatKey));
+    setEmailCollaborationError("");
+  }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
@@ -435,8 +450,8 @@ export function HomeMailWorkspace({
               <button style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
             </div>
           )}
-          {error && <div style={inlineErrorStyle}>{error}</div>}
-          {notice && !error && (
+          {visibleError && <div style={inlineErrorStyle}>{visibleError}</div>}
+          {notice && !visibleError && (
             <div style={{ ...inlineNoticeStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <span style={{ minWidth: 0 }}>{notice}</span>
               {noticeAction && (
@@ -764,10 +779,10 @@ export function HomeMailWorkspace({
               minHeight: 0,
               height: "100%",
               display: "grid",
-              gridTemplateColumns: showDetailResizeHandle && (activeViewID === "my-triage" || activeViewID.startsWith("shared:"))
+              gridTemplateColumns: showDetailResizeHandle && emailChatVisible
                 ? "minmax(0, 1fr) minmax(320px, 38%)"
                 : "minmax(0, 1fr)",
-              gridTemplateRows: !showDetailResizeHandle && (activeViewID === "my-triage" || activeViewID.startsWith("shared:"))
+              gridTemplateRows: !showDetailResizeHandle && emailChatVisible
                 ? "auto auto"
                 : "minmax(0, 1fr)",
               overflow: "hidden",
@@ -783,6 +798,9 @@ export function HomeMailWorkspace({
               archiveAvailable={archiveAvailable}
               archiveLabel={archiveLabel}
               busy={!!busy}
+              chatAvailable={emailChatAvailable}
+              chatOpen={emailChatVisible}
+              onToggleChat={toggleEmailChat}
               onLoadMessageBody={onLoadMessageBody}
               onReply={onOpenReply}
               onReplyAll={onOpenReplyAll}
@@ -796,8 +814,10 @@ export function HomeMailWorkspace({
               onEmailSelection={setEmailSelection}
               selectionNavigation={emailNavigation}
             />
-            {(activeViewID === "my-triage" || activeViewID.startsWith("shared:")) && (
+            {emailChatMounted && (
               <EmailCollaborationChatSurface
+                active={emailChatVisible}
+                id="email-collaboration-chat"
                 companyID={companyID}
                 currentUserID={currentUserID}
                 message={selectedMessage}
@@ -810,7 +830,8 @@ export function HomeMailWorkspace({
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
                 onCollaborationChange={onEmailCollaborationChange}
-                onError={onEmailCollaborationError}
+                onError={setEmailCollaborationError}
+                onSuccess={clearEmailCollaborationError}
               />
             )}
           </div>

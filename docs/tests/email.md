@@ -100,6 +100,9 @@ EMAIL72 - Local fallback draft data is purged only for explicit authorization re
 EMAIL73 - Each remote draft load owns one exact scope generation and local revision. It may replace only that scope and only while still current; an older load cannot overwrite a newer completed load, local save, local delete, remote save completion, another personal account, or another shared inbox. Returned values and the fallback mirror both reflect the current scope state.
 EMAIL74 - An `email_draft` attachment can be created, linked, listed, sent, or read only while the exact owning draft still exists and is not deleted. Personal access is exact owner/account; legacy accountless personal IDs are live-draft owner-only read compatibility and never mutation authority; shared access uses the exact live inbox and current permissions. Compose creates the durable draft before attachment upload/link. Deleting a draft makes all draft-only attachment paths unreadable even to manager/admin bypass attempts, while an independently linked `email_message`/sent attachment remains readable through its own live authorization.
 EMAIL75 - Every email conversion and local mail mutation retains one exact source mailbox request key. Personal My Triage drag payloads and `POST /v1/communications/triage/convert` carry normalized `account_email`; Shared Triage carries `shared_inbox_id` and suppresses any personal account parameter. Explorer, Kanban, project, and pin handoffs preserve that identity through the committed-result event, so one personal account cannot convert, unstar, archive, update, move, or delete through another account's grant.
+EMAIL76 - Email collaboration chat is progressive disclosure in My Triage and Shared Triage. Selecting or opening an email keeps the email detail at its full available width and leaves the chat rail unmounted and closed by default; reading or highlighting text must not open it. Only the explicit, keyboard-operable **Chat** control opens the right-hand rail, exposes its expanded state accessibly, and reserves rail width. Closing the rail or selecting a different exact message, mailbox, or view removes that rail without creating, deleting, or otherwise mutating a collaboration, Node, chat, or shared draft.
+EMAIL77 - An open email-collaboration chat header shows the collaboration's current durable participant roster. `collaboration.participants` is the only membership authority and each `user_id` contributes at most once: creator/direct-user rows render accessible person avatars from current same-company display data with a safe identity fallback, while rows whose immutable `added_via_type` is `group` may be represented together by one deduplicated group-provenance avatar/pill per `added_via_id`. A group pill's count comes only from those snapshotted participant rows and its current group record supplies only a display label. Current group membership/hierarchy never recalculates the roster or access, and a renamed, missing, or deleted group label never removes the represented users. Before a collaboration exists, the open header may label only the current actor as the prospective creator without performing a durable write. A committed mention refreshes the canonical collaboration so the newly added durable participants appear in the open email-chat header without relying on mention text or provider recipients. This roster header is an email-surface adapter; EMAIL56 still shares the durable ChatPane data and semantics without requiring an unchanged standalone-Node caller to fetch or display collaboration participants.
+EMAIL78 - Collaboration ensure/create and the first chat write have explicit retry-safe failure behavior. A failed ensure transaction leaves no partial Node, attached-email projection, permission, participant, or collaboration; a failed subsequent chat write leaves any already committed empty collaboration reusable under EMAIL52 but removes the failed optimistic chat row. The open composer preserves the user's typed text, selected mention principals, reply target, and email-selection anchor, re-enables submission, and permits a deliberate retry against the same exact source. My Triage and Shared Triage translate `failed_to_create_email_collaboration` and `email_collaboration_storage_not_ready` into concise actionable text; either identifier may support diagnostics but must not be the sole user-facing error, while other provider/authorization failures retain their established error handling.
 
 ## Scenarios
 
@@ -392,15 +395,20 @@ Business logic covered:
 - EMAIL57
 - EMAIL58
 - EMAIL64
+- EMAIL76
+- EMAIL78
 
 Given:
 - A user opens and highlights text in a personal or shared email that has no collaboration.
-- The user may abandon the chat, submit a root chat, reply to a chat, or race another create request for the same source conversation.
+- The user may leave the rail closed, explicitly open and close it, abandon the composer, submit a root chat, reply to a chat, or race another create request for the same source conversation.
+- The provider, source-authorization, collaboration-store, or following chat write may fail before the first chat is durably visible.
 - The same collaboration is later opened from its standalone Node.
 
 Expected:
 - Listing, opening, selecting, and an abandoned empty chat composer create no collaboration or Node.
+- Selecting, reading, or highlighting the email leaves the chat rail closed and preserves the email's full detail width; only the explicit accessible Chat control mounts the rail, and closing or changing scope performs no durable mutation.
 - The first nonempty chat submit converges on one private standalone Node keyed by exact mailbox scope and provider thread/message identity; a later chat-write failure leaves that idempotent collaboration reusable rather than duplicating it on retry.
+- A failed ensure leaves no partial durable collaboration artifacts; either failure preserves the typed composer context, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - The Node has one source-scoped attached-email projection and no Logic Gate, project, status, priority, GVIC, or other work assignment.
 - Email detail and Node detail render the same durable chat IDs through the shared ChatPane and Node chat scope, including identical reply indentation, attachment, mention, link, delete, and refresh behavior.
 - A selection-backed root chat stores and later navigates to the exact message, quote, and offsets; an unanchored root chat is valid, and replies retain the root's anchor instead of following the newest message.
@@ -415,6 +423,7 @@ Business logic covered:
 - EMAIL62
 - EMAIL63
 - EMAIL64
+- EMAIL77
 
 Given:
 - A chat mentions one user directly and a group whose resolved membership overlaps that user.
@@ -424,6 +433,7 @@ Given:
 Expected:
 - The accepted chat write snapshots each distinct current same-company user once and grants permanent collaboration participation/edit access.
 - Later group changes, mention deletion, and duplicate mentions neither revoke nor duplicate participants.
+- Before creation the open email-chat header shows only the current actor as prospective creator without writing anything. After creation it represents every canonical participant `user_id` once through a creator/direct-user avatar or a group-provenance cohort; group counts come from participant rows rather than current membership, and a missing group label does not drop represented users. The unchanged Node caller still shares the underlying durable ChatPane data under EMAIL56 without being required to render this email-specific roster adapter.
 - Every participant can read the complete canonical source thread without receiving provider credentials or an auto-forwarded provider copy.
 - Personal-source collaboration appears in each participant's My Triage. Shared-source collaboration appears in its Shared Triage where navigable and in My Triage for a participant who cannot navigate that shared mailbox.
 - A participant who is also a provider recipient sees one row, because the virtual and provider-owned representations dedupe by exact source scope plus provider thread/message identity.

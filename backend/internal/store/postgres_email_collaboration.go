@@ -190,7 +190,7 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("begin_transaction", err)
 	}
 	defer tx.Rollback()
 	// The immutable mailbox scope is the convergence boundary. A request keyed
@@ -198,11 +198,11 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	// acquire the same lock.
 	lockKey := communicationsEmailCollaborationScopeLockKey(input.CompanyID, scope)
 	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("lock_scope", err)
 	}
 	var member bool
 	if err := tx.QueryRowContext(ctx, `select exists(select 1 from company_memberships where company_id=$1::uuid and user_id=$2::uuid)`, input.CompanyID, input.CreatedByUserID).Scan(&member); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("check_creator_membership", err)
 	}
 	if !member {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrPrincipalNotInCompany
@@ -210,36 +210,39 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	if existing, err := postgresEmailCollaborationLookupForEnsure(ctx, tx, input, scope); err == nil {
 		existing, err = reconcilePostgresEnsuredEmailCollaborationTx(ctx, tx, existing, input)
 		if err != nil {
-			return CommunicationsEmailCollaborationEnsureResult{}, err
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("reconcile_existing", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return CommunicationsEmailCollaborationEnsureResult{}, err
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("commit_existing", err)
 		}
 		return CommunicationsEmailCollaborationEnsureResult{Collaboration: existing}, nil
 	} else if !errors.Is(err, ErrNotFound) {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("lookup_existing", err)
 	}
 	nodeID, informationID, collaborationID := newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
 	if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, default_access, created_timestamp)
 values ($1::uuid, $2::uuid, $3, 'no_access', now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message)); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_node", err)
 	}
 	information := communicationsEmailAttachedProjectionPayload(informationID, collaborationID, input)
 	if _, err := tx.ExecContext(ctx, `
 insert into node_information (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, informationID, nodeID, information); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_attached_email_history", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 insert into node_projection_table (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, nodeID, informationID, information); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_attached_email_projection", err)
 	}
 	if _, _, err := placeEmailCollaborationNodeInDefaultFolderTx(ctx, tx, input.CompanyID, nodeID, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("place_explorer_node", err)
 	}
-	snapshot, _ := json.Marshal(input.Message)
+	snapshot, err := json.Marshal(input.Message)
+	if err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("encode_message_snapshot", err)
+	}
 	if _, err := tx.ExecContext(ctx, `
 insert into communications_email_collaborations (
   company_id, collaboration_id, node_id, attached_email_information_id,
@@ -253,26 +256,25 @@ insert into communications_email_collaborations (
 )`, input.CompanyID, collaborationID, nodeID, informationID, scope.scopeType,
 		scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, scope.accountEmail,
 		input.Message.ThreadID, input.Message.ID, string(snapshot), input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_collaboration", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 insert into communications_email_collaboration_participants
   (company_id, collaboration_id, user_id, added_by_user_id, added_via_type, added_via_id, created_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, $3::uuid, 'creator', null, now())`, input.CompanyID, collaborationID, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_creator_participant", err)
 	}
 	if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: input.CreatedByUserID, AccessLevel: EntityPermissionEdit}); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("grant_creator_access", err)
 	}
-	if err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{CompanyID: input.CompanyID, NodeID: nodeID}); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
+	// Standalone collaboration Nodes intentionally begin without Logic Gate,
+	// project, status, priority, GVIC, Kanban, or timeline dependencies.
 	item, err := postgresEmailCollaborationByID(ctx, tx, input.CompanyID, collaborationID, input.CreatedByUserID)
 	if err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("load_created", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("commit_created", err)
 	}
 	return CommunicationsEmailCollaborationEnsureResult{Collaboration: item, Created: true}, nil
 }

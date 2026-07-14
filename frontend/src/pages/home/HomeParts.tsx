@@ -29,6 +29,7 @@ import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
+import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
@@ -6148,7 +6149,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   );
 }
 
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6159,11 +6160,14 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   archiveLabel: string;
   busy: boolean;
   deleteAvailable: boolean;
+  chatAvailable: boolean;
+  chatOpen: boolean;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
   onCreateSharedDraft: (message: EmailMessage) => void;
+  onToggleChat: () => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -6278,6 +6282,23 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
+        {chatAvailable && (
+          <button
+            type="button"
+            aria-controls="email-collaboration-chat"
+            aria-expanded={chatOpen}
+            aria-pressed={chatOpen}
+            title={chatOpen ? "Close email chat" : "Open email chat"}
+            style={{
+              ...mailPanelSmallButtonStyle,
+              borderColor: chatOpen ? "rgba(249,115,22,0.72)" : mailPanelSmallButtonStyle.borderColor,
+              color: chatOpen ? "#c2410c" : mailPanelSmallButtonStyle.color,
+            }}
+            onClick={onToggleChat}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ChatIcon color={chatOpen ? "#f97316" : "rgba(71,85,105,0.85)"} />Chat</span>
+          </button>
+        )}
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>

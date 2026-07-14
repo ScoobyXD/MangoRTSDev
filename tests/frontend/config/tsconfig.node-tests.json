@@ -53,6 +53,8 @@
     "../pages/home/homeUtils.test.ts",
     "../../../frontend/src/pages/home/emailCollaborationRows.ts",
     "../pages/home/emailCollaborationRows.test.ts",
+    "../../../frontend/src/pages/home/emailCollaborationChat.ts",
+    "../pages/home/emailCollaborationChat.test.ts",
     "../../../frontend/src/pages/home/updatesSelection.ts",
     "../../../frontend/src/pages/home/updatesCurrentEntityLabels.ts",
     "../pages/home/updatesSelection.test.ts",

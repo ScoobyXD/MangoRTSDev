@@ -77,6 +77,7 @@ ED52 - Node and Logic Gate entity headers keep shared controls, Outline Styles/A
 ED53 - A persisted person/entity mention retains its current chip appearance, identity, attributes, profile actions, and noneditable atomic DOM representation while participating in editing as one movable character. The caret can occupy the positions immediately before and after it; Left/Right crosses one entity at a time; adjacent entities, entity-only lines, and list items preserve valid boundary positions; Backspace/Delete removes or crosses the expected unit; and undo restores the entity with its identity intact. Backspace immediately before an entity at the start of a line performs the normal previous-line join/move instead of hitting a dead zone, and Enter immediately before it splits/moves content without downgrading the entity to plain text or corrupting list indentation.
 ED54 - Table creation and editing remain shared editor capabilities, but a table must not inject cell-level or table-overlay left/center/right alignment icons into its top-left cell. Alignment remains available only through the shared header toolbar, and removing the embedded controls must not remove table selection, caret placement, row/column editing, or the shared toolbar's active-table alignment behavior.
 ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a conspicuous bright-red top-right close button with an accessible name and button semantics; that button closes the preview while supported Escape/backdrop or existing double-click dismissal behavior remains intact.
+ED56 - The shared `ChatPane` may render one optional caller-owned `headerTrailing` slot in its existing header above the unchanged conversation rows. The slot is presentation input only: `ChatPane` does not fetch email collaborations, derive participant or group membership, or change message ordering, reply indentation, composer, attachment, mention, deletion, or realtime behavior. `EmailCollaborationChatSurface` may supply the EMAIL77 participant-roster header, while existing Node and Project callers that omit the slot retain their current UI and data dependencies.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -208,15 +209,18 @@ Expected:
 Business logic covered:
 - ED9
 - ED22
+- ED56
 
 Given:
 - A user opens a chat pane inside a node or project text block.
+- An email collaboration supplies its participant roster through the optional shared ChatPane header slot, while Node and Project callers omit it.
 
 Expected:
 - Chat remains a conversation composer.
 - Chat does not show the unified rich editor toolbar.
 - Chat does not receive rich editor indentation, paste, delete, list, or font-size semantics.
 - Chat-specific quote/prefill and mention behavior can continue independently.
+- The email caller's roster renders above the shared conversation, but ChatPane performs no collaboration/member lookup; callers that omit the slot render exactly their existing chat header and behavior.
 - Typing `@` or `!` in node, Logic Gate, or chat text opens a people list whose profile color is derived first from normalized user ID, then normalized email, then normalized display name, so the same user keeps the same color between openings and surfaces.
 - The shared palette uses opaque, dark profile backgrounds with readable white foregrounds and dark borders. Profile/avatar color remains visible on ordinary, hovered, keyboard-active, and selected suggestion rows and must meet the shared minimum contrast test.
 - A keyboard-active rich-editor row adds only a translucent tint of that user's profile color plus the existing active rail; it does not replace the opaque full-color avatar. Chat may retain its existing active-row treatment, but its avatar also remains opaque and full-color.

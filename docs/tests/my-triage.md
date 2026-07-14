@@ -154,13 +154,15 @@ MT126 - The top sender/subject line reserves only the width actually occupied by
 MT127 - Compact spacing must not change card meaning or accessibility: unread keeps its top-left dot and thicker frame, selected keeps its independent full-card pressed surface, thread count retains its conditional icon, truncation uses ellipsis, and pointer/keyboard/drag targets remain usable.
 MT128 - A personal-source collaboration is represented as one ordinary My Triage conversation row for every permanent participant, including a participant who was not a provider recipient. A shared-source collaboration also appears in My Triage as the guaranteed fallback when that participant cannot navigate the source Shared Triage mailbox.
 MT129 - Provider-owned and virtual collaboration rows with the same immutable source mailbox plus provider thread/message identity are merged into one row. The newest canonical message and rolled-up unread/starred/attachment/thread state remain authoritative, while the collaboration/Node identity is retained for chat and shared-draft actions.
-MT130 - Opening a collaboration-capable row shows the shared Node ChatPane on the right of the email detail without copying its messages. Reading, highlighting, or abandoning an empty chat creates no Node; submitting the first nonempty root/reply chat ensures the collaboration Node and a successful chat write then displays that same message from either email or Node perspective.
+MT130 - Opening a collaboration-capable row leaves the My Triage email detail at full width with no chat rail. Only the row/detail's explicit **Chat** control opens the right-hand shared Node `ChatPane`; that control exposes its expanded state and the rail closes again without a durable mutation. Once open, the rail reads and writes the same chat records shown from the standalone Node without copying messages. Reading, highlighting, or abandoning an empty chat creates no Node; submitting the first nonempty root/reply chat ensures the collaboration Node and a successful chat write then displays that same message from either email or Node perspective.
 MT131 - Selecting email body text exposes the shared chat action and captures exact message ID, trimmed quote, and text offsets; users may also create an unanchored chat. Activating an anchored chat navigates/highlights the correct message card and preserves the thread detail's single-scroll-surface behavior.
 MT132 - Reply All exposes an explicit Create Shared Draft action for the exact selected message. The resulting collaboration draft follows EMAIL65 through EMAIL69 and appears once in My Drafts with source-mailbox and shared-state context, distinct from the user's private personal drafts.
 MT133 - A collaboration shared draft sends immediately through EMAIL68. Its compose footer does not expose scheduled send, and the My Triage browser scheduler ignores shared drafts even if legacy/local state contains a timestamp.
 MT134 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT135 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
 MT136 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
+MT137 - An open My Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Provider recipients and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
+MT138 - A My Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
 
 ## Scenarios
 
@@ -660,16 +662,21 @@ Business logic covered:
 - MT131
 - MT132
 - MT133
+- MT137
+- MT138
 
 Given:
 - A personal email owner creates an anchored or unanchored chat and mentions another user/group.
 - One participant is not a provider recipient, and another participant can also see the provider-owned row.
 - A participant creates a shared draft from Reply All.
+- The owner first opens the email without opening Chat, then explicitly opens the rail; an ensure or first-chat request may fail before a retry succeeds.
 
 Expected:
 - No collaboration Node exists until the first nonempty chat is submitted or explicit shared-draft creation is invoked; a retry reuses an already committed ensure if the subsequent chat write failed.
 - Every permanent participant sees one ordinary deduplicated My Triage row backed by the canonical source conversation, including the shared-source fallback case.
-- Opening the row mounts the same shared ChatPane data shown on the Node; replies, indentation, selection navigation, mentions, attachments, and refresh semantics remain identical.
+- Opening the row keeps email detail full width and Chat closed. Only the explicit accessible Chat control mounts the right-hand rail; closing it or changing exact message/mailbox/view makes no collaboration mutation.
+- The open rail renders the same shared ChatPane data shown on the Node; replies, indentation, selection navigation, mentions, attachments, and refresh semantics remain identical, and its header shows the canonical deduplicated participant/group-provenance roster.
+- A failed ensure leaves no partial durable artifacts; a creation/write failure preserves the chat composer context, removes a failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - The exact selected message supplies an anchored chat and Create Shared Draft Reply All context.
 - My Drafts keeps exact-account private drafts isolated while also showing the one active participant-authorized collaboration draft with explicit source/shared context.
 - The shared draft cannot be scheduled; its current revision is sent immediately through the collaboration source while ordinary private drafts retain the existing browser-driven scheduling path.
