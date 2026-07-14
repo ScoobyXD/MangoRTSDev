@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -51,6 +52,106 @@ func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 	}
 	if page.NextPageToken != "next-page" {
 		t.Fatalf("next page token = %q, want next-page", page.NextPageToken)
+	}
+}
+
+func TestNylasRESTClientListMessagesNativeSearchUsesOnlyAllowedParameters(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"message-1","subject":"Hello","snippet":"Preview","body":"<p>Full body</p>","attachments":[{"id":"attachment-1","filename":"invoice.pdf","content_type":"application/pdf","content":"provider-bytes"}]}],"next_cursor":"next-page"}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	unread := true
+	starred := true
+	page, err := client.ListMessages(context.Background(), "grant-1", NylasMessageQuery{
+		Limit:             communicationsNylasMaxMessageLimit,
+		PageToken:         "page-1",
+		FolderID:          "INBOX",
+		Query:             "invoice",
+		SearchQueryNative: "in:inbox -category:social -category:promotions invoice is:unread",
+		Unread:            &unread,
+		Starred:           &starred,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotQuery) != 3 || gotQuery.Get("limit") != "12" || gotQuery.Get("page_token") != "page-1" ||
+		gotQuery.Get("search_query_native") != "in:inbox -category:social -category:promotions invoice is:unread" {
+		t.Fatalf("native query = %v, want only limit, page_token, and search_query_native", gotQuery)
+	}
+	for _, forbidden := range []string{"select", "in", "thread_id", "q", "unread", "starred"} {
+		if gotQuery.Has(forbidden) {
+			t.Fatalf("native query unexpectedly contains %q: %v", forbidden, gotQuery)
+		}
+	}
+	if page.NextPageToken != "next-page" {
+		t.Fatalf("next page token = %q, want next-page", page.NextPageToken)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].Body != "" || len(page.Messages[0].Attachments) != 1 ||
+		page.Messages[0].Attachments[0].ID != "attachment-1" || page.Messages[0].Attachments[0].Content != "" {
+		t.Fatalf("native list message = %+v, want preview metadata without body or attachment bytes", page.Messages)
+	}
+}
+
+func TestNylasRESTClientListMessagesThreadIDTakesPrecedenceOverNativeSearch(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	unread := true
+	starred := true
+	_, err := client.ListMessages(context.Background(), "grant-1", NylasMessageQuery{
+		Limit:             communicationsNylasMaxMessageLimit,
+		PageToken:         "thread-page",
+		FolderID:          "INBOX",
+		ThreadID:          "thread-1",
+		Query:             "ignored",
+		SearchQueryNative: "in:anywhere",
+		Unread:            &unread,
+		Starred:           &starred,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotQuery) != 4 || gotQuery.Get("limit") != "12" || gotQuery.Get("page_token") != "thread-page" ||
+		gotQuery.Get("thread_id") != "thread-1" || gotQuery.Get("select") != nylasMessageListSelect {
+		t.Fatalf("thread query = %v, want only structured thread preview parameters", gotQuery)
+	}
+	for _, forbidden := range []string{"search_query_native", "in", "q", "unread", "starred"} {
+		if gotQuery.Has(forbidden) {
+			t.Fatalf("thread query unexpectedly contains %q: %v", forbidden, gotQuery)
+		}
+	}
+}
+
+func TestParseNylasAPIErrorParsesNestedErrorObject(t *testing.T) {
+	t.Parallel()
+
+	err := parseNylasAPIError(
+		http.StatusBadRequest,
+		http.Header{"Retry-After": []string{"3"}},
+		[]byte(`{"request_id":"request-1","error":{"type":"invalid_request_error","message":"You cannot combine native and structured query parameters."}}`),
+	)
+	var apiErr NylasAPIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want NylasAPIError", err)
+	}
+	if apiErr.StatusCode != http.StatusBadRequest || apiErr.Code != "invalid_request_error" ||
+		apiErr.Message != "You cannot combine native and structured query parameters." || apiErr.RetryAfter != "3" {
+		t.Fatalf("Nylas API error = %+v", apiErr)
 	}
 }
 

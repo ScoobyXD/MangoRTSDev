@@ -294,6 +294,7 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		page = filterGooglePrimaryMessagePage(connection, query, page)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, page)
 	case http.MethodPost:
 		connection, ok := s.requireCommunicationsSendConnection(w, r)
@@ -1526,6 +1527,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 			}
 			return NylasMessagePage{}, err
 		}
+		page = filterGooglePrimaryMessagePage(connection, query, page)
 		s.commCache.setMessagePage(connection.UserID, cacheScope, cacheQuery, page, time.Now().UTC())
 		return page, nil
 	})
@@ -1799,12 +1801,23 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 }
 
 func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessageQuery, error) {
+	if strings.TrimSpace(query.ThreadID) != "" {
+		query.Mailbox = "all"
+		query.SearchQueryNative = ""
+		query.FolderID = ""
+		query.Query = ""
+		query.Unread = nil
+		query.Starred = nil
+		return query, nil
+	}
+
 	switch query.Mailbox {
 	case "", "all":
 		if connection.Provider == "google" {
 			query.SearchQueryNative = gmailAllSearch(query.Query, query.Unread)
 			query.Query = ""
 			query.Unread = nil
+			query.FolderID = ""
 		}
 		return query, nil
 	case "primary":
@@ -1833,6 +1846,7 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			query.Query = ""
 			query.Unread = nil
 			query.Starred = nil
+			query.FolderID = ""
 		}
 		return query, nil
 	case "archive":
@@ -1939,12 +1953,29 @@ func gmailSpamSearch(userQuery string, unread *bool) string {
 func gmailSearch(base []string, userQuery string, unread *bool) string {
 	parts := append([]string{}, base...)
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
-		parts = append(parts, trimmed)
+		parts = append(parts, "("+trimmed+")")
 	}
 	if unread != nil && *unread {
 		parts = append(parts, "is:unread")
 	}
 	return strings.Join(parts, " ")
+}
+
+func filterGooglePrimaryMessagePage(connection domain.UserEmailConnection, query NylasMessageQuery, page NylasMessagePage) NylasMessagePage {
+	if strings.TrimSpace(strings.ToLower(connection.Provider)) != "google" ||
+		strings.TrimSpace(query.ThreadID) != "" ||
+		normalizeCommunicationsMailbox(query.Mailbox) != "primary" {
+		return page
+	}
+	primaryQuery := NylasMessageQuery{Mailbox: "primary"}
+	messages := make([]NylasMessage, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		if nylasMessageMatchesCachedPageQuery(message, primaryQuery) {
+			messages = append(messages, message)
+		}
+	}
+	page.Messages = messages
+	return page
 }
 
 func findNylasSystemFolderID(folders []NylasFolder, system string) string {

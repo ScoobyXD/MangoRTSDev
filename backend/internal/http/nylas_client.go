@@ -434,30 +434,35 @@ func (c *NylasRESTClient) ListFolders(ctx context.Context, grantID string) ([]Ny
 }
 
 func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error) {
-	values := url.Values{"select": []string{nylasMessageListSelect}}
+	values := url.Values{}
 	if query.Limit > 0 {
 		values.Set("limit", strconv.Itoa(query.Limit))
 	}
 	if strings.TrimSpace(query.PageToken) != "" {
 		values.Set("page_token", strings.TrimSpace(query.PageToken))
 	}
-	if strings.TrimSpace(query.FolderID) != "" {
-		values.Set("in", strings.TrimSpace(query.FolderID))
-	}
-	if strings.TrimSpace(query.ThreadID) != "" {
-		values.Set("thread_id", strings.TrimSpace(query.ThreadID))
-	}
-	if strings.TrimSpace(query.Query) != "" {
-		values.Set("q", strings.TrimSpace(query.Query))
-	}
-	if strings.TrimSpace(query.SearchQueryNative) != "" {
-		values.Set("search_query_native", strings.TrimSpace(query.SearchQueryNative))
-	}
-	if query.Unread != nil {
-		values.Set("unread", strconv.FormatBool(*query.Unread))
-	}
-	if query.Starred != nil {
-		values.Set("starred", strconv.FormatBool(*query.Starred))
+	threadID := strings.TrimSpace(query.ThreadID)
+	nativeSearch := strings.TrimSpace(query.SearchQueryNative)
+	switch {
+	case threadID != "":
+		values.Set("select", nylasMessageListSelect)
+		values.Set("thread_id", threadID)
+	case nativeSearch != "":
+		values.Set("search_query_native", nativeSearch)
+	default:
+		values.Set("select", nylasMessageListSelect)
+		if strings.TrimSpace(query.FolderID) != "" {
+			values.Set("in", strings.TrimSpace(query.FolderID))
+		}
+		if strings.TrimSpace(query.Query) != "" {
+			values.Set("q", strings.TrimSpace(query.Query))
+		}
+		if query.Unread != nil {
+			values.Set("unread", strconv.FormatBool(*query.Unread))
+		}
+		if query.Starred != nil {
+			values.Set("starred", strconv.FormatBool(*query.Starred))
+		}
 	}
 
 	var response struct {
@@ -472,7 +477,17 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 	if next == "" {
 		next = response.NextCursor
 	}
-	return NylasMessagePage{Messages: response.Data, NextPageToken: next}, nil
+	return NylasMessagePage{Messages: normalizeNylasMessageListResponse(response.Data), NextPageToken: next}, nil
+}
+
+func normalizeNylasMessageListResponse(messages []NylasMessage) []NylasMessage {
+	for messageIndex := range messages {
+		messages[messageIndex].Body = ""
+		for attachmentIndex := range messages[messageIndex].Attachments {
+			messages[messageIndex].Attachments[attachmentIndex].Content = ""
+		}
+	}
+	return messages
 }
 
 func (c *NylasRESTClient) GetThread(ctx context.Context, grantID, threadID string) (NylasThread, error) {
@@ -1066,15 +1081,26 @@ func (c *NylasRESTClient) doBytes(ctx context.Context, method, path string, quer
 
 func parseNylasAPIError(statusCode int, headers http.Header, raw []byte) error {
 	var payload struct {
-		Error   string `json:"error"`
+		Error   json.RawMessage `json:"error"`
+		Code    string          `json:"code"`
+		Type    string          `json:"type"`
+		Message string          `json:"message"`
+	}
+	_ = json.Unmarshal(raw, &payload)
+	var errorText string
+	var nestedError struct {
 		Code    string `json:"code"`
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	}
-	_ = json.Unmarshal(raw, &payload)
-	code := firstNonBlank(payload.Code, payload.Error, payload.Type)
-	message := strings.TrimSpace(payload.Message)
-	if code == "" && len(strings.TrimSpace(string(raw))) > 0 {
+	if len(payload.Error) > 0 {
+		if err := json.Unmarshal(payload.Error, &errorText); err != nil {
+			_ = json.Unmarshal(payload.Error, &nestedError)
+		}
+	}
+	code := firstNonBlank(payload.Code, nestedError.Code, payload.Type, nestedError.Type, errorText)
+	message := firstNonBlank(payload.Message, nestedError.Message)
+	if code == "" && message == "" && len(strings.TrimSpace(string(raw))) > 0 {
 		message = strings.TrimSpace(string(raw))
 	}
 	return NylasAPIError{StatusCode: statusCode, Code: code, Message: message, RetryAfter: strings.TrimSpace(headers.Get("Retry-After"))}

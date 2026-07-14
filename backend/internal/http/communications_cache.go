@@ -533,7 +533,7 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 	}
 	switch strings.TrimSpace(strings.ToLower(query.Mailbox)) {
 	case "", "primary":
-		if nylasMessageHasAnyFolder(message, []string{"sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"}) {
+		if nylasMessageHasAnyFolder(message, []string{"sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "category:social", "category:promotions"}) {
 			return false
 		}
 		return len(nylasMessageFolderTokens(message)) == 0 || nylasMessageHasAnyFolder(message, []string{"inbox", "\\inbox"})

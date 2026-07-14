@@ -1917,7 +1917,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 
   const mailbox = params.mailbox ?? "primary";
   if (mailbox === "primary") {
-    return messageIsArchived(message) || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+    return messageIsArchived(message) || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "category:social", "category:promotions"]);
   }
   if (mailbox === "archive") {
     return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
@@ -2457,7 +2457,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
   if (mailbox === "spam") return messageHasAnyFolder(message, ["spam", "\\spam", "junk", "\\junk"]);
-  if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
+  if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "category:social", "category:promotions"])) return false;
   return !messageHasFolderMetadata(message) || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }
 
