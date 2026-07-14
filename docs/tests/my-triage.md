@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # My Triage Tests
 
@@ -89,7 +89,7 @@ MT76 - Personal reply drafts are unique per company, user, mailbox scope, and or
 MT77 - A saved personal reply draft stores or reloads the original message context, and reopening the draft shows the original email being answered above the compose editor.
 MT78 - Personal compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active mailbox address from generated recipients.
 MT79 - Personal compose supports scheduled sends by saving a scheduled draft with a due timestamp, sending it through the normal personal send path when due while the app is open, and deleting the scheduled draft only after send succeeds.
-MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, attached-email reply, and signature editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, text highlight color, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior. The visible controls use the shared font-size minus/value/plus, Bold, Underline, highlight-color, and outline-style controls rather than a personal-compose-only toolbar.
+MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, attached-email reply, and signature editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, table, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior. The visible controls use the complete shared toolbar inventory rather than a personal-compose-only toolbar.
 MT81 - Personal compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 MT82 - Received personal email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the user is allowed to see.
 MT83 - Links in received personal email bodies, forwarded/replied original-message previews, sent reply bodies, and email signatures must open in a new browser tab when clicked.
@@ -114,7 +114,7 @@ MT101 - The conversation detail pane is the only vertical scroll container for a
 MT102 - The newest conversation card is expanded by default and older cards are collapsed to headers. When a new inbound or outbound message joins the selected thread it becomes the expanded card and the previously expanded cards collapse; users can manually expand or collapse a card without introducing nested scrolling.
 MT103 - The personal reply editor has a useful minimum/default height, can be resized vertically, and automatically saves and restores the user's clamped height preference for that mailbox scope; layout changes must not squeeze it below the minimum.
 MT104 - Clicking a My Triage list row while compose/reply is open quietly preserves the current draft, exits compose, selects the clicked row, and displays its detail on the first click without reloading or blanking the list.
-MT105 - Personal compose/reply font-size, Bold, Underline, and highlight controls preserve the editor selection when toolbar focus changes. Font size applies to selected text or pending caret; Bold/Underline toggle off as well as on; highlight applies only to a restored non-collapsed selection and supports clear/no-highlight. Enter commits a numeric font-size value once, while Escape cancels it without a blur commit.
+MT105 - Personal compose/reply font-size, Bold, Underline, Italic, Highlight/**No highlight**, alignment, and table controls preserve the editor selection when toolbar focus changes. Font size and highlight apply to selected text or pending collapsed-caret typing; **No highlight** clears selected/pending highlight; inline controls toggle off as well as on; and hover/focus/active styling applies only to the individual control. Enter commits a numeric font-size value once, while Escape cancels it without a blur commit.
 MT106 - At personal send time, each authorized `mango-attachment:` image reference is deduplicated, resolved from Mango S3, assigned a unique alphanumeric content ID, added as an inline provider attachment, and rewritten to `cid:` in outbound HTML. Missing or unauthorized references fail the send instead of producing a broken image placeholder.
 
 ## Nylas Configuration Contract
@@ -135,7 +135,7 @@ MT107 - My Triage automatically inserts the default signature for the exact acti
 MT108 - My Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
 MT109 - Personal remote-draft reconciliation keeps the newest reply draft for each mailbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without reintroducing the active mailbox or duplicate recipients.
 MT110 - Personal Save Draft and Send flush the mounted unified editor first and persist or submit the exact sanitized HTML returned by that flush, including the user's final DOM edit.
-MT111 - The personal-account signature editor is a mailbox-scoped unified rich editor using the shared toolbar, including working font-size minus/value/plus and highlight controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered mailbox-scoped pending sync without overtaking newer saves.
+MT111 - The personal-account signature editor is a mailbox-scoped unified rich editor using the complete shared toolbar, including font-size, Bold, Underline, Italic, Highlight/**No highlight**, alignment, and table controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered mailbox-scoped pending sync without overtaking newer saves.
 MT112 - Personal primary-inbox prefetch builds a bounded logical page of at most 12 unique thread rows, stops on a repeated page token or the configured provider-page budget, and never performs an unbounded serialized fill.
 MT113 - Advance directly consumes the exact personal mailbox/filter/page-token prefetch, awaiting a matching in-flight prefetch instead of duplicating it. The click must not make a list request before swapping an available prefetched page.
 MT114 - Initial next-page prefetch and provider mark-read yield foreground priority to the selected detail request while preserving immediate optimistic unread UI.
@@ -363,7 +363,7 @@ Expected:
 - Reopening a reply draft shows the original email context above the compose editor.
 - Reply, Reply All, Forward, Cc, and Bcc compose paths send through the normal personal mailbox connection and preserve local sent/reply reconciliation.
 - A future scheduled send is saved as a scheduled draft, is sent through the normal personal send path when due while the app is open, and is deleted only after send succeeds.
-- Rich compose controls use the unified editor behavior and shared segmented format/outline toolbar controls used by node, Logic Gate, project, and attached-email reply editor surfaces.
+- Rich compose controls use the unified editor behavior and complete shared segmented format/outline toolbar used by node, Logic Gate, project, and attached-email reply surfaces.
 - Rich compose controls persist sanitized rich HTML, and legacy plain text drafts still send as escaped/linkified HTML.
 - Save Draft and Send flush the compose editor and use the exact returned sanitized HTML.
 - Received Cc recipients are visible in message detail.
@@ -488,12 +488,12 @@ Business logic covered:
 - MT111
 
 Given:
-- A user opens the signature editor for a personal account, formats text with font-size, Bold, Underline, or highlight controls, and saves.
+- A user opens the signature editor for a personal account, formats text with the shared font-size, Bold, Underline, Italic, Highlight/No highlight, alignment, or table controls, and saves.
 - A signature load, legacy backfill, failed retry, or newer save may overlap that edit.
 
 Expected:
 - The signature editor uses the same unified rich editor host, semantics, formatting controller, and toolbar as personal compose/reply; it is not a native textarea.
-- Font-size minus/value/plus and highlight controls operate on the preserved selection.
+- Font-size, inline-format, highlight/No highlight, alignment, and table controls operate on the preserved selection or appropriate collapsed-caret/context semantics.
 - Save Signature persists the exact flushed sanitized HTML for that account and reports success only after the remote save succeeds.
 - Stale hydration cannot overwrite the newer local edit, an empty remote row remains authoritative, and pending retries/backfills are serialized before newer saves without replacing them.
 - Embedded inline file bytes are rejected before durable signature persistence.
@@ -547,7 +547,7 @@ Expected:
 - Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable draft.
 - Reconciliation removes older remote reply drafts for the same mailbox/source-message scope, and reopening Reply All restores saved To/Cc/Bcc recipients with active-mailbox exclusion intact.
 - The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference when another personal reply opens.
-- Font-size minus/value/plus applies to the preserved selection or pending caret; Bold and Underline toggle on/off; highlight applies to the preserved selected range and can be cleared; the active indicators follow the current selection.
+- Font-size and highlight apply to the preserved selection or pending collapsed-caret typing style; Bold, Underline, and Italic toggle on/off; **No highlight** clears selected/pending highlight; alignment and table actions use the preserved context; active indicators follow the selection or pending state.
 - Saving, transitioning away, or sending flushes the mounted editor first so the final edit cannot be lost to stale compose state.
 - Clicking a different email row quietly saves the active draft, closes compose, and shows the clicked message on the first click without replacing the visible list.
 

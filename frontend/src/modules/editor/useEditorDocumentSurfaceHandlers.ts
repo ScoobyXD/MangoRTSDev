@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import {
   fileFromDataURL,
   linkMangoResourceAttachment,
@@ -42,12 +43,14 @@ import {
   createEditorTableElement,
   deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
+  readEditorTextAlign,
   linkifyEditorPlainTextToHTML,
   readEditorTableColumnWidths,
   readEditorTableOffsetPercent,
   readEditorTableTextAlign,
   readEditorTableWidthPercent,
   readEditorListKind,
+  mapEditorSelectedTextRunOffsets,
   readEditorDocumentText,
   normalizeEditorHighlightColor,
   normalizeEditorHighlightSpans,
@@ -58,7 +61,7 @@ import {
   serializeEditorDocumentHTML,
   type EditorHighlightColor,
   type EditorListKind,
-  type EditorTableTextAlign,
+  type EditorTextAlignment,
 } from "./richTextEditing";
 import {
   recordEditorDocumentUndoChange,
@@ -121,6 +124,8 @@ import {
   type EditorImageData,
 } from "./editorImages";
 
+export type { EditorTextAlignment } from "./richTextEditing";
+
 export type EditorDocumentSurfaceHandlers = Pick<
   EditorDocumentSurfaceProps,
   | "onBeforeInput"
@@ -156,6 +161,7 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   scrollMemoryRef: React.MutableRefObject<EditorScrollMemory>;
   documentUndoHistoryRef: React.MutableRefObject<EditorDocumentUndoHistory>;
   pendingEditorFontSizeRef: React.MutableRefObject<number | null>;
+  pendingEditorHighlightColorRef: React.MutableRefObject<EditorHighlightColor | null | undefined>;
   outlineStyle: EditorOutlineStyleID;
   setDocumentScrollTop: React.Dispatch<React.SetStateAction<number>>;
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
@@ -165,6 +171,7 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   onSelectionFontSizeChange: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
   mentionUsers?: MentionableCompanyUser[];
   mentionAccent?: string;
   mentionSurfaceText?: string;
@@ -185,23 +192,32 @@ export type EditorImageAttachmentContext = {
   onError?: (message: string) => void;
 };
 
-export type EditorInlineStyleCommand = "bold" | "underline";
+export type EditorInlineStyleCommand = "bold" | "underline" | "italic";
 
 export type EditorSelectionInlineFormatState = {
   bold: boolean;
   underline: boolean;
+  italic: boolean;
 };
 
 export type EditorSelectionFormatState = EditorSelectionInlineFormatState & {
   fontSize: number;
   highlightColor: EditorHighlightColor | null;
+  textAlignment: EditorTextAlignment;
 };
+type EditorPendingTypingStyle = {
+  fontSize?: number;
+  highlightColor?: EditorHighlightColor | null;
+  inlineFormat?: EditorSelectionInlineFormatState;
+};
+
 
 export type EditorDocumentFormattingController = {
   applyFontSizeValue: (fontSize: number) => boolean;
   adjustFontSize: (delta: number) => boolean;
   toggleInlineFormat: (command: EditorInlineStyleCommand) => boolean;
   applyHighlightColor: (color: EditorHighlightColor | null) => boolean;
+  applyTextAlignment: (alignment: EditorTextAlignment) => boolean;
   insertLink: (href: string) => boolean;
   insertList: (kind: EditorListKind) => boolean;
   toggleNumberedList: () => boolean;
@@ -217,6 +233,7 @@ export type UseEditorDocumentFormattingControllerOptions = {
   outlineStyle: EditorOutlineStyleID;
   documentUndoHistoryRef: React.MutableRefObject<EditorDocumentUndoHistory>;
   pendingEditorFontSizeRef: React.MutableRefObject<number | null>;
+  pendingEditorHighlightColorRef: React.MutableRefObject<EditorHighlightColor | null | undefined>;
   restoreSelection: (root: HTMLElement) => boolean;
   insertTable: (root?: HTMLElement | null) => boolean;
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
@@ -224,13 +241,14 @@ export type UseEditorDocumentFormattingControllerOptions = {
   onSelectionFontSizeChange: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
 };
 
 function clampEditorFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
 }
 
-const PENDING_FONT_SIZE_CANCEL_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Backspace", "Delete", "End", "Home", "PageDown", "PageUp"]);
+const PENDING_TYPING_STYLE_CANCEL_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Backspace", "Delete", "End", "Home", "PageDown", "PageUp"]);
 const EDITOR_MENTION_SELECTOR = `[${EDITOR_MENTION_ATTRIBUTE}="true"]`;
 
 function rootContainsRange(root: HTMLElement, range: Range): boolean {
@@ -245,9 +263,8 @@ function getEditorSelectionRange(root: HTMLElement): Range | null {
   return rootContainsRange(root, range) ? range : null;
 }
 
-export function getEditorSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
-  const range = getEditorSelectionRange(root);
-  if (!range) return null;
+function getEditorRangeOffsets(root: HTMLElement, range: Range): { start: number; end: number } | null {
+  if (!rootContainsRange(root, range)) return null;
   const startRange = range.cloneRange();
   startRange.selectNodeContents(root);
   startRange.setEnd(range.startContainer, range.startOffset);
@@ -258,6 +275,11 @@ export function getEditorSelectionOffsets(root: HTMLElement): { start: number; e
     start: startRange.toString().length,
     end: endRange.toString().length,
   };
+}
+
+export function getEditorSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
+  const range = getEditorSelectionRange(root);
+  return range ? getEditorRangeOffsets(root, range) : null;
 }
 
 export function setEditorSelectionByOffsets(root: HTMLElement, start: number, end = start) {
@@ -464,20 +486,7 @@ function applyMentionBreakingKeyboardEdit(
   return true;
 }
 
-function readInlineFontSize(element: HTMLElement): number | null {
-  const parsed = Number.parseFloat(element.style.fontSize.trim());
-  return Number.isFinite(parsed) ? clampEditorFontSize(parsed) : null;
-}
 
-function findMatchingFontSizeSpan(root: HTMLElement, node: Node, fontSize: number): HTMLSpanElement | null {
-  let current: Node | null = node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode;
-  const targetFontSize = clampEditorFontSize(fontSize);
-  while (current && current !== root) {
-    if (current instanceof HTMLSpanElement && root.contains(current) && readInlineFontSize(current) === targetFontSize) return current;
-    current = current.parentNode;
-  }
-  return null;
-}
 
 function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   const range = getEditorSelectionRange(root);
@@ -715,7 +724,7 @@ function clearEditorTableCellSelections(root: HTMLElement) {
   });
 }
 
-function getEditorTableAlignmentAction(root: HTMLElement, node: Node | EventTarget | null): { table: HTMLTableElement; align: EditorTableTextAlign } | null {
+function getEditorTableAlignmentAction(root: HTMLElement, node: Node | EventTarget | null): { table: HTMLTableElement; align: EditorTextAlignment } | null {
   const element = node instanceof Element
     ? node
     : node instanceof Node ? node.parentElement : null;
@@ -730,7 +739,7 @@ function getEditorTableAlignmentAction(root: HTMLElement, node: Node | EventTarg
 function applyEditorTableAlignmentAction(
   root: HTMLElement,
   table: HTMLTableElement,
-  align: EditorTableTextAlign,
+  align: EditorTextAlignment,
   documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
@@ -1280,30 +1289,178 @@ function insertPreparedEditorImage(
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
 }
 
-function replaceSelectionWithStyledText(root: HTMLElement, text: string, fontSize: number): boolean {
-  const range = getEditorSelectionRange(root);
-  if (!range) return false;
-  const nextFontSize = clampEditorFontSize(fontSize);
-  if (range.collapsed && range.startContainer.nodeType === Node.TEXT_NODE) {
-    const textNode = range.startContainer as Text;
-    if (findMatchingFontSizeSpan(root, textNode, nextFontSize)) {
-      textNode.insertData(range.startOffset, text);
-      setCollapsedSelectionInTextNode(root, textNode, range.startOffset + text.length);
-      return true;
+const EDITOR_INLINE_STYLE_COMMANDS = ["bold", "underline", "italic"] as const;
+
+function editorElementDefinesInlineFormat(element: HTMLElement, command: EditorInlineStyleCommand): boolean {
+  const tagName = element.tagName.toLowerCase();
+  if (tagNameIndicatesInlineFormat(element, command)) return true;
+  if (tagName === "a") return false;
+  const style = element.style;
+  if (command === "bold") {
+    const weight = Number.parseInt(style.fontWeight, 10);
+    return Number.isFinite(weight) ? weight >= 600 : style.fontWeight === "bold" || style.fontWeight === "bolder";
+  }
+  if (command === "italic") return style.fontStyle === "italic" || style.fontStyle === "oblique";
+  return style.textDecorationLine.split(/\s+/).includes("underline")
+    || style.textDecoration.split(/\s+/).includes("underline");
+}
+
+function editorTextNodeHasInlineFormatDefinition(
+  root: HTMLElement,
+  node: Text,
+  command: EditorInlineStyleCommand,
+): boolean {
+  let current = node.parentElement;
+  while (current && current !== root) {
+    if (editorElementDefinesInlineFormat(current, command)) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
+function liftEditorInlineTargetOutOfAncestor(
+  target: HTMLSpanElement,
+  ancestor: HTMLElement,
+) {
+  let pivot: HTMLElement = target;
+  while (pivot.parentElement && pivot.parentElement !== ancestor) {
+    pivot = splitEditorInlineWrapperAroundPivot(pivot.parentElement, pivot);
+  }
+  if (pivot.parentElement !== ancestor) return;
+  const before = ancestor.cloneNode(false) as HTMLElement;
+  const after = ancestor.cloneNode(false) as HTMLElement;
+  while (ancestor.firstChild && ancestor.firstChild !== pivot) before.appendChild(ancestor.firstChild);
+  while (pivot.nextSibling) after.appendChild(pivot.nextSibling);
+  const replacements: Node[] = [];
+  appendEditorCloneWhenNotEmpty(before, replacements);
+  replacements.push(pivot);
+  appendEditorCloneWhenNotEmpty(after, replacements);
+  ancestor.replaceWith(...replacements);
+}
+
+function wrapEditorSelectedTextRunsWithInlineFormat(
+  root: HTMLElement,
+  range: Range,
+  format: EditorSelectionInlineFormatState,
+): boolean {
+  const runs = editorSelectedTextRuns(root, range);
+  let wrapped = false;
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index];
+    const parent = run.node.parentElement ?? root;
+    const needsChange = EDITOR_INLINE_STYLE_COMMANDS.some((command) => (
+      format[command]
+        ? !readElementInlineFormat(root, parent, command)
+        : editorTextNodeHasInlineFormatDefinition(root, run.node, command)
+    ));
+    if (!needsChange) continue;
+    const runRange = root.ownerDocument.createRange();
+    runRange.setStart(run.node, run.startOffset);
+    runRange.setEnd(run.node, run.endOffset);
+    const target = root.ownerDocument.createElement("span");
+    target.appendChild(runRange.extractContents());
+    runRange.insertNode(target);
+
+    for (const command of EDITOR_INLINE_STYLE_COMMANDS) {
+      if (format[command]) continue;
+      let ancestor = target.parentElement;
+      while (ancestor && ancestor !== root) {
+        if (!editorElementDefinesInlineFormat(ancestor, command)) {
+          ancestor = ancestor.parentElement;
+          continue;
+        }
+        liftEditorInlineTargetOutOfAncestor(target, ancestor);
+        ancestor = target.parentElement;
+      }
+    }
+
+    for (const command of EDITOR_INLINE_STYLE_COMMANDS) {
+      if (!format[command]) continue;
+      const currentParent = target.parentElement ?? root;
+      if (readElementInlineFormat(root, currentParent, command)) continue;
+      const tagName = command === "bold" ? "strong" : command === "underline" ? "u" : "em";
+      const wrapper = root.ownerDocument.createElement(tagName);
+      target.replaceWith(wrapper);
+      wrapper.appendChild(target);
+    }
+
+    const children = Array.from(target.childNodes);
+    target.replaceWith(...children);
+    wrapped = true;
+  }
+  return wrapped;
+}
+function readEditorTextNodeEffectiveFontSize(root: HTMLElement, node: Text): number | null {
+  const element = node.parentElement ?? root;
+  const value = root.ownerDocument.defaultView?.getComputedStyle(element).fontSize ?? element.style.fontSize;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? clampEditorFontSize(parsed) : null;
+}
+
+function applyEditorTypingStyleToRecentlyInsertedText(
+  root: HTMLElement,
+  text: string,
+  style: EditorPendingTypingStyle,
+): boolean {
+  const offsets = getEditorSelectionOffsets(root);
+  if (!offsets || offsets.start !== offsets.end || !text) return false;
+  const endOffset = offsets.end;
+  const startOffset = Math.max(0, endOffset - text.length);
+  if (startOffset >= endOffset) return false;
+  const selectInsertedText = () => {
+    setEditorSelectionByOffsets(root, startOffset, endOffset);
+    return getEditorSelectionRange(root);
+  };
+  let applied = false;
+
+  if (style.inlineFormat) {
+    const range = selectInsertedText();
+    if (range) applied = wrapEditorSelectedTextRunsWithInlineFormat(root, range, style.inlineFormat) || applied;
+  }
+
+  if (style.fontSize !== undefined) {
+    const range = selectInsertedText();
+    if (range) {
+      const nextFontSize = clampEditorFontSize(style.fontSize);
+      const alreadyStyled = editorSelectedTextRuns(root, range).every((run) => readEditorTextNodeEffectiveFontSize(root, run.node) === nextFontSize);
+      if (!alreadyStyled) {
+        const spans = wrapEditorSelectedTextRuns(
+          root,
+          range,
+          (fragment) => fragment.childNodes.forEach(stripNestedEditorFontSizes),
+          (span) => { span.style.fontSize = `${nextFontSize}px`; },
+        );
+        normalizeEditorFontSizeSpans(root, spans);
+        applied = spans.length > 0 || applied;
+      }
     }
   }
-  const span = root.ownerDocument.createElement("span");
-  span.style.fontSize = `${nextFontSize}px`;
-  const textNode = root.ownerDocument.createTextNode(text);
-  span.appendChild(textNode);
-  range.deleteContents();
-  range.insertNode(span);
-  range.setStart(textNode, textNode.data.length);
-  range.collapse(true);
-  const selection = root.ownerDocument.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  return true;
+
+  if (Object.prototype.hasOwnProperty.call(style, "highlightColor")) {
+    const range = selectInsertedText();
+    if (range) {
+      const color = style.highlightColor ?? null;
+      const alreadyStyled = editorSelectedTextRuns(root, range).every((run) => readSelectionHighlightColor(root, run.node.parentElement ?? root) === color);
+      if (!alreadyStyled) {
+        const spans = wrapEditorSelectedTextRuns(
+          root,
+          range,
+          (fragment) => fragment.childNodes.forEach(stripNestedEditorHighlights),
+          (span) => setEditorElementHighlight(span, color),
+        );
+        normalizeEditorHighlightSpans(root);
+        if (color === null) {
+          spans.forEach((span) => {
+            if (root.contains(span)) unwrapEditorHighlightClearSpan(span);
+          });
+        }
+        applied = spans.length > 0 || applied;
+      }
+    }
+  }
+
+  setEditorSelectionByOffsets(root, endOffset, endOffset);
+  return applied;
 }
 
 function stripNestedEditorFontSizes(node: Node) {
@@ -1317,24 +1474,24 @@ type EditorSelectedTextRun = {
   endOffset: number;
 };
 
+
 function editorSelectedTextRuns(root: HTMLElement, range: Range): EditorSelectedTextRun[] {
-  const runs: EditorSelectedTextRun[] = [];
+  const selectionOffsets = getEditorRangeOffsets(root, range);
+  if (!selectionOffsets) return [];
+  const textNodes: Text[] = [];
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-    if (!node.data.length) continue;
-    let intersects = false;
-    try {
-      intersects = range.intersectsNode(node);
-    } catch {
-      intersects = false;
-    }
-    if (!intersects) continue;
-    const startOffset = range.startContainer === node ? range.startOffset : 0;
-    const endOffset = range.endContainer === node ? range.endOffset : node.data.length;
-    if (endOffset <= startOffset) continue;
-    runs.push({ node, startOffset, endOffset });
+    textNodes.push(node);
   }
-  return runs;
+  const selectionNodes = textNodes.map((node) => ({
+    text: node.data,
+    selectable: !node.parentElement?.closest(`[contenteditable="false"], [${EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE}="true"]`),
+  }));
+  return mapEditorSelectedTextRunOffsets(selectionNodes, selectionOffsets.start, selectionOffsets.end).map((run) => ({
+    node: textNodes[run.nodeIndex],
+    startOffset: run.startOffset,
+    endOffset: run.endOffset,
+  }));
 }
 
 function wrapEditorSelectedTextRuns(
@@ -1463,21 +1620,8 @@ function stripNestedEditorHighlights(node: Node) {
 }
 
 function unwrapEditorHighlightClearSpan(span: HTMLSpanElement) {
-  const ownerDocument = span.ownerDocument;
-  const firstChild = span.firstChild;
-  const lastChild = span.lastChild;
-  if (!ownerDocument || !firstChild || !lastChild) {
-    span.remove();
-    return;
-  }
   const children = Array.from(span.childNodes);
   span.replaceWith(...children);
-  const range = ownerDocument.createRange();
-  range.setStartBefore(firstChild);
-  range.setEndAfter(lastChild);
-  const selection = ownerDocument.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 export function applyEditorHighlightColorToRoot(
@@ -1485,6 +1629,7 @@ export function applyEditorHighlightColorToRoot(
   colorInput: string | null,
   options: {
     documentUndoHistory: EditorDocumentUndoHistory;
+    pendingEditorHighlightColorRef: React.MutableRefObject<EditorHighlightColor | null | undefined>;
     scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
     scheduleIndentGuideUpdate: (text: string) => void;
     onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
@@ -1493,8 +1638,13 @@ export function applyEditorHighlightColorToRoot(
   const color = colorInput === null ? null : normalizeEditorHighlightColor(colorInput);
   if (colorInput !== null && !color) return false;
   const range = getEditorSelectionRange(root);
-  if (!range || range.collapsed) return false;
+  if (!range) return false;
   root.focus({ preventScroll: true });
+  options.onSelectionHighlightColorChange?.(color);
+  if (range.collapsed) {
+    options.pendingEditorHighlightColorRef.current = color;
+    return true;
+  }
   const undoBefore = snapshotEditorDocumentRoot(root);
   const selectionOffsets = getEditorSelectionOffsets(root);
   const spans = wrapEditorSelectedTextRuns(
@@ -1511,7 +1661,7 @@ export function applyEditorHighlightColorToRoot(
     });
   }
   if (selectionOffsets) setEditorSelectionByOffsets(root, selectionOffsets.start, selectionOffsets.end);
-  options.onSelectionHighlightColorChange?.(color);
+  options.pendingEditorHighlightColorRef.current = undefined;
   recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
   commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
   return true;
@@ -2389,12 +2539,13 @@ function restoreEditorDocumentUndoSnapshot(
   onSelectionFontSizeChange: (fontSize: number) => void,
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void,
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void,
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void,
 ) {
   root.innerHTML = deserializeEditorDocumentHTML(snapshot.html);
   setEditorSelectionByOffsets(root, snapshot.selectionStart, snapshot.selectionEnd);
   clearEditorImageSelection(root);
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
-  syncSelectionFontSize(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+  syncSelectionFormatState(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
 }
 
 function applyEditorUndoCommand(
@@ -2406,13 +2557,14 @@ function applyEditorUndoCommand(
   onSelectionFontSizeChange: (fontSize: number) => void,
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void,
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void,
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void,
 ): boolean {
   const currentHTML = serializeEditorDocumentHTML(root);
   const snapshot = direction === "undo"
     ? undoEditorDocument(history, currentHTML)
     : redoEditorDocument(history, currentHTML);
   if (!snapshot) return false;
-  restoreEditorDocumentUndoSnapshot(root, snapshot, scheduleDocumentSave, scheduleIndentGuideUpdate, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+  restoreEditorDocumentUndoSnapshot(root, snapshot, scheduleDocumentSave, scheduleIndentGuideUpdate, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
   return true;
 }
 
@@ -2700,9 +2852,9 @@ function readSelectionHighlightColor(root: HTMLElement, element: Element): Edito
 
 function tagNameIndicatesInlineFormat(element: Element, command: EditorInlineStyleCommand): boolean {
   const tagName = element.tagName.toLowerCase();
-  return command === "bold"
-    ? tagName === "b" || tagName === "strong"
-    : tagName === "u";
+  if (command === "bold") return tagName === "b" || tagName === "strong";
+  if (command === "underline") return tagName === "u";
+  return tagName === "i" || tagName === "em";
 }
 
 function computedStyleIndicatesInlineFormat(element: Element, command: EditorInlineStyleCommand): boolean {
@@ -2713,6 +2865,7 @@ function computedStyleIndicatesInlineFormat(element: Element, command: EditorInl
     const weight = Number.parseInt(style.fontWeight, 10);
     return Number.isFinite(weight) ? weight >= 600 : style.fontWeight === "bold" || style.fontWeight === "bolder";
   }
+  if (command === "italic") return style.fontStyle === "italic" || style.fontStyle === "oblique";
   return style.textDecorationLine.split(/\s+/).includes("underline")
     || style.textDecoration.includes("underline");
 }
@@ -2735,6 +2888,23 @@ function readDocumentCommandState(root: HTMLElement, command: EditorInlineStyleC
   }
 }
 
+
+function readSelectionTextAlignment(root: HTMLElement, element: Element): EditorTextAlignment {
+  const cell = getClosestEditorTableCell(root, element);
+  const table = getEditorTableForCell(root, cell);
+  const tableAlignment = table ? readEditorTableTextAlign(table) : null;
+  if (cell && tableAlignment) return tableAlignment;
+  let current: Element | null = element;
+  while (current && current !== root) {
+    if (current instanceof HTMLElement) {
+      const alignment = readEditorTextAlign(current);
+      if (alignment) return alignment;
+    }
+    current = current.parentElement;
+  }
+  const computed = root.ownerDocument.defaultView?.getComputedStyle(element).textAlign;
+  return computed === "center" || computed === "right" ? computed : "left";
+}
 export function readEditorSelectionFormatState(root: HTMLElement, fallbackFontSize = EDITOR_DOCUMENT_FONT_SIZE_PX): EditorSelectionFormatState | null {
   const range = getEditorSelectionRange(root);
   if (!range) return null;
@@ -2744,25 +2914,30 @@ export function readEditorSelectionFormatState(root: HTMLElement, fallbackFontSi
   const parsed = Number.parseFloat(view.getComputedStyle(element).fontSize);
   const boldCommandState = readDocumentCommandState(root, "bold");
   const underlineCommandState = readDocumentCommandState(root, "underline");
+  const italicCommandState = readDocumentCommandState(root, "italic");
   return {
     fontSize: Number.isFinite(parsed) ? clampEditorFontSize(parsed) : clampEditorFontSize(fallbackFontSize),
     bold: boldCommandState ?? readElementInlineFormat(root, element, "bold"),
     underline: underlineCommandState ?? readElementInlineFormat(root, element, "underline"),
+    italic: italicCommandState ?? readElementInlineFormat(root, element, "italic"),
     highlightColor: readSelectionHighlightColor(root, element),
+    textAlignment: readSelectionTextAlignment(root, element),
   };
 }
 
-function syncSelectionFontSize(
+function syncSelectionFormatState(
   root: HTMLElement,
   onSelectionFontSizeChange: (fontSize: number) => void,
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void,
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void,
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void,
 ) {
   const state = readEditorSelectionFormatState(root);
   if (!state) return;
   onSelectionFontSizeChange(state.fontSize);
-  onSelectionInlineFormatChange?.({ bold: state.bold, underline: state.underline });
+  onSelectionInlineFormatChange?.({ bold: state.bold, underline: state.underline, italic: state.italic });
   onSelectionHighlightColorChange?.(state.highlightColor);
+  onSelectionTextAlignmentChange?.(state.textAlignment);
 }
 
 export function applyEditorInlineFormatToRoot(
@@ -2789,7 +2964,44 @@ export function applyEditorInlineFormatToRoot(
   recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
   commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
   const nextState = readEditorSelectionFormatState(root);
-  if (nextState) options.onSelectionInlineFormatChange?.({ bold: nextState.bold, underline: nextState.underline });
+  if (nextState) options.onSelectionInlineFormatChange?.({ bold: nextState.bold, underline: nextState.underline, italic: nextState.italic });
+  return true;
+}
+
+export function applyEditorTextAlignmentToRoot(
+  root: HTMLElement,
+  alignment: EditorTextAlignment,
+  options: {
+    documentUndoHistory: EditorDocumentUndoHistory;
+    scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
+    scheduleIndentGuideUpdate: (text: string) => void;
+    onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
+  },
+): boolean {
+  const range = getEditorSelectionRange(root);
+  if (!range) return false;
+  root.focus({ preventScroll: true });
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const selectionOffsets = getEditorSelectionOffsets(root);
+  const table = getEditorTableForCell(root, getCurrentEditorTableCell(root));
+  let applied = false;
+  if (table) {
+    normalizeEditorTable(table);
+    applyEditorTableTextAlign(table, alignment);
+    applied = true;
+  } else {
+    const command = alignment === "center" ? "justifyCenter" : alignment === "right" ? "justifyRight" : "justifyLeft";
+    try {
+      applied = root.ownerDocument.execCommand(command, false);
+    } catch {
+      applied = false;
+    }
+  }
+  if (!applied) return false;
+  if (selectionOffsets) setEditorSelectionByOffsets(root, selectionOffsets.start, selectionOffsets.end);
+  recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate, Boolean(table));
+  options.onSelectionTextAlignmentChange?.(alignment);
   return true;
 }
 
@@ -3358,6 +3570,7 @@ export function useEditorDocumentFormattingController({
   outlineStyle,
   documentUndoHistoryRef,
   pendingEditorFontSizeRef,
+  pendingEditorHighlightColorRef,
   restoreSelection,
   insertTable,
   scheduleDocumentSave,
@@ -3365,6 +3578,7 @@ export function useEditorDocumentFormattingController({
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
 }: UseEditorDocumentFormattingControllerOptions): EditorDocumentFormattingController {
   const restoreFormattingRange = useCallback(() => {
     const editor = editorRef.current;
@@ -3383,17 +3597,22 @@ export function useEditorDocumentFormattingController({
   const readCurrentFormatState = useCallback((editor: HTMLElement): EditorSelectionFormatState | null => {
     const state = readEditorSelectionFormatState(editor);
     if (!state) {
-      return pendingEditorFontSizeRef.current === null ? null : {
-        fontSize: pendingEditorFontSizeRef.current,
+      if (pendingEditorFontSizeRef.current === null && pendingEditorHighlightColorRef.current === undefined) return null;
+      return {
+        fontSize: pendingEditorFontSizeRef.current ?? EDITOR_DOCUMENT_FONT_SIZE_PX,
         bold: false,
         underline: false,
-        highlightColor: null,
+        italic: false,
+        highlightColor: pendingEditorHighlightColorRef.current ?? null,
+        textAlignment: "left",
       };
     }
-    return pendingEditorFontSizeRef.current === null
-      ? state
-      : { ...state, fontSize: pendingEditorFontSizeRef.current };
-  }, [pendingEditorFontSizeRef]);
+    return {
+      ...state,
+      fontSize: pendingEditorFontSizeRef.current ?? state.fontSize,
+      highlightColor: pendingEditorHighlightColorRef.current === undefined ? state.highlightColor : pendingEditorHighlightColorRef.current,
+    };
+  }, [pendingEditorFontSizeRef, pendingEditorHighlightColorRef]);
 
   return useMemo<EditorDocumentFormattingController>(() => ({
     applyFontSizeValue: (fontSize) => {
@@ -3435,9 +3654,20 @@ export function useEditorDocumentFormattingController({
       if (!editable || !editor) return false;
       return applyEditorHighlightColorToRoot(editor, color, {
         documentUndoHistory: documentUndoHistoryRef.current,
+        pendingEditorHighlightColorRef,
         scheduleDocumentSave,
         scheduleIndentGuideUpdate,
         onSelectionHighlightColorChange,
+      });
+    },
+    applyTextAlignment: (alignment) => {
+      const editor = restoreFormattingSelection();
+      if (!editable || !editor) return false;
+      return applyEditorTextAlignmentToRoot(editor, alignment, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave,
+        scheduleIndentGuideUpdate,
+        onSelectionTextAlignmentChange,
       });
     },
     insertLink: (href) => {
@@ -3473,7 +3703,7 @@ export function useEditorDocumentFormattingController({
       if (!editable || !editor) return false;
       return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, { documentUndoHistory: documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate });
     },
-    insertTable: () => editable && insertTable(restoreFormattingSelection()),
+    insertTable: () => editable && insertTable(editorRef.current),
     readFormatState: () => {
       const editor = restoreFormattingRange();
       return editor ? readCurrentFormatState(editor) : null;
@@ -3481,12 +3711,15 @@ export function useEditorDocumentFormattingController({
   }), [
     documentUndoHistoryRef,
     editable,
+    editorRef,
     insertTable,
     onSelectionFontSizeChange,
     onSelectionHighlightColorChange,
     onSelectionInlineFormatChange,
+    onSelectionTextAlignmentChange,
     outlineStyle,
     pendingEditorFontSizeRef,
+    pendingEditorHighlightColorRef,
     readCurrentFormatState,
     restoreFormattingRange,
     restoreFormattingSelection,
@@ -3505,6 +3738,7 @@ export function useEditorDocumentSurfaceHandlers({
   scrollMemoryRef,
   documentUndoHistoryRef,
   pendingEditorFontSizeRef,
+  pendingEditorHighlightColorRef,
   outlineStyle,
   setDocumentScrollTop,
   scheduleDocumentSave,
@@ -3514,6 +3748,7 @@ export function useEditorDocumentSurfaceHandlers({
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
   mentionUsers = [],
   mentionAccent = "#334155",
   mentionSurfaceText = "#111827",
@@ -3523,6 +3758,7 @@ export function useEditorDocumentSurfaceHandlers({
   onEditorImageAttachmentError,
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
+  const pendingNativeStyledInsertionRef = useRef<{ text: string; style: EditorPendingTypingStyle } | null>(null);
   const pendingCompositionUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
   const lastEditorSelectionRangeRef = useRef<Range | null>(null);
@@ -3541,6 +3777,11 @@ export function useEditorDocumentSurfaceHandlers({
     activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
   ), [activeMentionDraft?.query, mentionUsers]);
   const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
+
+  const clearPendingTypingStyle = useCallback(() => {
+    pendingEditorFontSizeRef.current = null;
+    pendingEditorHighlightColorRef.current = undefined;
+  }, [pendingEditorFontSizeRef, pendingEditorHighlightColorRef]);
 
   const rememberEditorSelectionRange = useCallback((root: HTMLElement) => {
     const range = getEditorSelectionRange(root);
@@ -3583,13 +3824,18 @@ export function useEditorDocumentSurfaceHandlers({
     const ownerDocument = root.ownerDocument;
     const onPointerDown = () => setActiveTableContextMenu(null);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setActiveTableContextMenu(null);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      setActiveTableContextMenu(null);
+      root.focus({ preventScroll: true });
     };
     ownerDocument.addEventListener("pointerdown", onPointerDown);
-    ownerDocument.addEventListener("keydown", onKeyDown);
+    ownerDocument.addEventListener("keydown", onKeyDown, true);
     return () => {
       ownerDocument.removeEventListener("pointerdown", onPointerDown);
-      ownerDocument.removeEventListener("keydown", onKeyDown);
+      ownerDocument.removeEventListener("keydown", onKeyDown, true);
     };
   }, [activeTableContextMenu?.root]);
 
@@ -3634,6 +3880,15 @@ export function useEditorDocumentSurfaceHandlers({
     setActiveMentionDraft(draft);
   }, [mentionMenuPosition, mentionUsers.length]);
 
+  const syncActiveSelectionFormat = useCallback((root: HTMLElement) => {
+    const pendingFontSize = pendingEditorFontSizeRef.current;
+    const pendingHighlightColor = pendingEditorHighlightColorRef.current;
+    if (pendingFontSize !== null) onSelectionFontSizeChange(pendingFontSize);
+    if (pendingHighlightColor !== undefined) onSelectionHighlightColorChange?.(pendingHighlightColor);
+    if (pendingFontSize !== null || pendingHighlightColor !== undefined) return;
+    syncSelectionFormatState(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
+  }, [onSelectionFontSizeChange, onSelectionHighlightColorChange, onSelectionInlineFormatChange, onSelectionTextAlignmentChange, pendingEditorFontSizeRef, pendingEditorHighlightColorRef]);
+
   const insertMention = useCallback((root: HTMLElement, mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
     replaceEditorMentionDraft(root, mention, user, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
     activeMentionRootRef.current = null;
@@ -3644,7 +3899,7 @@ export function useEditorDocumentSurfaceHandlers({
     event.preventDefault();
     event.stopPropagation();
     root.focus({ preventScroll: true });
-    pendingEditorFontSizeRef.current = null;
+    clearPendingTypingStyle();
     clearEditorImageSelection(root);
     activeMentionRootRef.current = null;
     setActiveMentionDraft(null);
@@ -3676,7 +3931,7 @@ export function useEditorDocumentSurfaceHandlers({
       rows: 0,
       columns: 0,
     });
-  }, [mentionMenuPosition, pendingEditorFontSizeRef]);
+  }, [clearPendingTypingStyle, mentionMenuPosition]);
 
   const runTableContextCommand = useCallback((command: EditorTableCommand) => {
     const root = activeTableContextMenu?.root;
@@ -3691,20 +3946,16 @@ export function useEditorDocumentSurfaceHandlers({
     if (!root) return;
     setActiveTableContextMenu(null);
     root.focus({ preventScroll: true });
-    pendingEditorFontSizeRef.current = null;
+    clearPendingTypingStyle();
     clearEditorImageSelection(root);
     activeMentionRootRef.current = null;
     setActiveMentionDraft(null);
     insertEditorTable(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
-  }, [activeTableContextMenu?.root, documentUndoHistoryRef, pendingEditorFontSizeRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+  }, [activeTableContextMenu?.root, clearPendingTypingStyle, documentUndoHistoryRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
   useEffect(() => {
     if (!activeImagePreview) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setActiveImagePreview(null);
-        return;
-      }
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "c") return;
       if (writeImageToSystemClipboard(activeImagePreview.src, activeImagePreview.html)) {
         event.preventDefault();
@@ -3860,7 +4111,7 @@ export function useEditorDocumentSurfaceHandlers({
         style: {
           position: "fixed",
           inset: 0,
-          zIndex: 2400,
+          zIndex: 1,
           background: "rgba(15,23,42,0.98)",
           display: "grid",
           placeItems: "center",
@@ -4047,9 +4298,12 @@ export function useEditorDocumentSurfaceHandlers({
       rememberEditorSelectionRange(root);
       const inputEvent = event.nativeEvent as InputEvent;
       const pendingFontSize = pendingEditorFontSizeRef.current;
+      const pendingHighlightColor = pendingEditorHighlightColorRef.current;
 
       if (inputEvent.inputType === "historyUndo" || inputEvent.inputType === "historyRedo") {
+        clearPendingTypingStyle();
         pendingNativeUndoSnapshotRef.current = null;
+        pendingNativeStyledInsertionRef.current = null;
         const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
@@ -4059,6 +4313,7 @@ export function useEditorDocumentSurfaceHandlers({
           onSelectionFontSizeChange,
           onSelectionInlineFormatChange,
           onSelectionHighlightColorChange,
+          onSelectionTextAlignmentChange,
         );
         if (applied) event.preventDefault();
         return;
@@ -4075,16 +4330,28 @@ export function useEditorDocumentSurfaceHandlers({
         typeof inputEvent.data === "string" &&
         inputEvent.data.length > 0
       ) {
-        if (pendingFontSize !== null) {
-          event.preventDefault();
-          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
-          if (replaceSelectionWithStyledText(root, inputEvent.data, pendingFontSize)) {
-            onSelectionFontSizeChange(pendingFontSize);
-            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
-            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        const selectionFormat = readEditorSelectionFormatState(root);
+        const pendingStyle: EditorPendingTypingStyle | null = pendingFontSize !== null || pendingHighlightColor !== undefined ? {} : null;
+        if (pendingStyle && pendingFontSize !== null) pendingStyle.fontSize = pendingFontSize;
+        if (pendingStyle && pendingHighlightColor !== undefined) pendingStyle.highlightColor = pendingHighlightColor;
+        const applyScriptedTypingStyle = (includeInlineFormat = true) => {
+          const scriptedTypingStyle: EditorPendingTypingStyle = pendingStyle ? { ...pendingStyle } : {};
+          if (includeInlineFormat && selectionFormat) {
+            scriptedTypingStyle.inlineFormat = {
+              bold: selectionFormat.bold,
+              underline: selectionFormat.underline,
+              italic: selectionFormat.italic,
+            };
           }
-          return;
-        }
+          if (!scriptedTypingStyle.inlineFormat && pendingStyle === null) return;
+          applyEditorTypingStyleToRecentlyInsertedText(
+            root,
+            inputEvent.data!,
+            includeInlineFormat ? scriptedTypingStyle : pendingStyle!,
+          );
+          if (pendingFontSize !== null) onSelectionFontSizeChange(pendingFontSize);
+          if (pendingHighlightColor !== undefined) onSelectionHighlightColorChange?.(pendingHighlightColor);
+        };
 
         const activeTableCell = getCurrentEditorTableCell(root);
         const tableEditorListKind = activeTableCell ? editorListKindForOutlineStyle(outlineStyle) : null;
@@ -4092,7 +4359,7 @@ export function useEditorDocumentSurfaceHandlers({
           const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           if (startEditorTableCellListFromText(root, activeTableCell, tableEditorListKind, inputEvent.data)) {
             event.preventDefault();
-            pendingEditorFontSizeRef.current = null;
+            applyScriptedTypingStyle();
             recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
             commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
             return;
@@ -4102,9 +4369,9 @@ export function useEditorDocumentSurfaceHandlers({
         const activeEditorListItem = getCurrentEditorListItem(root);
         if (activeEditorListItem && editorListItemContentIsEmpty(activeEditorListItem)) {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
           const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           if (insertTextIntoEmptyEditorListItem(root, activeEditorListItem, inputEvent.data)) {
+            applyScriptedTypingStyle();
             recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
             commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
@@ -4118,13 +4385,13 @@ export function useEditorDocumentSurfaceHandlers({
             const edit = insertAutomaticOutlineFirstText(currentText, offsets.start, offsets.end, inputEvent.data);
             if (edit) {
               event.preventDefault();
-              pendingEditorFontSizeRef.current = null;
               const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
               const appliedLocalEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
               if (!appliedLocalEdit) {
                 if (documentHasEditorImages(root)) return;
                 replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
               }
+              applyScriptedTypingStyle();
               recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
               commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
               return;
@@ -4140,7 +4407,7 @@ export function useEditorDocumentSurfaceHandlers({
             const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
             if (startEditorListFromBlankLine(root, editorListKind, currentText, offsets.start, offsets.end, inputEvent.data)) {
               event.preventDefault();
-              pendingEditorFontSizeRef.current = null;
+              applyScriptedTypingStyle();
               recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
               commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
               return;
@@ -4151,15 +4418,20 @@ export function useEditorDocumentSurfaceHandlers({
         const anchor = getCollapsedAnchorAtSelectionEnd(root);
         if (anchor) {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
           const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           const inserted = isHyperlinkDividerText(inputEvent.data)
             ? insertPlainTextAfterAnchor(root, anchor, inputEvent.data)
             : appendTextToAnchorEnd(root, anchor, inputEvent.data);
           if (inserted) {
+            applyScriptedTypingStyle();
             recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
             commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
+          return;
+        }
+        if (pendingStyle) {
+          pendingNativeStyledInsertionRef.current = { text: inputEvent.data, style: pendingStyle };
+          pendingNativeUndoSnapshotRef.current = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           return;
         }
       }
@@ -4178,7 +4450,7 @@ export function useEditorDocumentSurfaceHandlers({
       const imageFile = getImageFileFromDataTransfer(event.clipboardData);
       if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
         const canCommit = createAsyncImageCommitGuard(root, savedRange);
         void insertEditorImageFile(root, imageFile, savedRange, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext, canCommit)
@@ -4189,7 +4461,7 @@ export function useEditorDocumentSurfaceHandlers({
       const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
         const canCommit = createAsyncImageCommitGuard(root, savedRange);
         void insertEditorClipboardImageData(root, clipboardImageData, savedRange, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext, canCommit)
@@ -4200,7 +4472,7 @@ export function useEditorDocumentSurfaceHandlers({
       const sanitizedHTML = sanitizeEditorDocumentHTML(html);
       if (sanitizedHTML.trim()) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(root);
         const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
         if (mentionUndoBefore) {
@@ -4218,7 +4490,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (!text) return;
       event.preventDefault();
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       clearEditorImageSelection(root);
       const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
       if (mentionUndoBefore) {
@@ -4243,7 +4515,7 @@ export function useEditorDocumentSurfaceHandlers({
       const undoBefore = snapshotEditorDocumentRoot(root);
       if (!copySelectedEditorImage(root, event.clipboardData)) return;
       if (!removeSelectedEditorImage(root)) return;
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
       commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
     },
@@ -4257,7 +4529,7 @@ export function useEditorDocumentSurfaceHandlers({
       const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
       if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         root.focus({ preventScroll: true });
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
         const canCommit = createAsyncImageCommitGuard(root, savedRange);
@@ -4269,7 +4541,7 @@ export function useEditorDocumentSurfaceHandlers({
       const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         root.focus({ preventScroll: true });
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
         const canCommit = createAsyncImageCommitGuard(root, savedRange);
@@ -4281,7 +4553,7 @@ export function useEditorDocumentSurfaceHandlers({
       const sanitizedHTML = sanitizeEditorDocumentHTML(html);
       if (sanitizedHTML.trim()) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(root);
         root.focus({ preventScroll: true });
         const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
@@ -4300,7 +4572,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (!text) return;
       event.preventDefault();
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       clearEditorImageSelection(root);
       root.focus({ preventScroll: true });
       const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
@@ -4314,61 +4586,61 @@ export function useEditorDocumentSurfaceHandlers({
       }
     },
     onInput(event) {
+      const root = event.currentTarget;
+      const pendingStyledInsertion = pendingNativeStyledInsertionRef.current;
       const undoBefore = pendingNativeUndoSnapshotRef.current;
       pendingNativeUndoSnapshotRef.current = null;
+      pendingNativeStyledInsertionRef.current = null;
+      if (pendingStyledInsertion) applyEditorTypingStyleToRecentlyInsertedText(root, pendingStyledInsertion.text, pendingStyledInsertion.style);
       recordEditorDocumentMutation(documentUndoHistoryRef.current, event.currentTarget, undoBefore, "typing");
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       rememberEditorSelectionRange(event.currentTarget);
-      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+      syncSelectionFormatState(event.currentTarget, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
       refreshMentionDraft(event.currentTarget);
       setActiveTableContextMenu(null);
       clearEditorTableCellSelections(event.currentTarget);
     },
     onCompositionStart(event) {
-      pendingCompositionUndoSnapshotRef.current = pendingEditorFontSizeRef.current === null
+      pendingCompositionUndoSnapshotRef.current = (
+        pendingEditorFontSizeRef.current === null
+        && pendingEditorHighlightColorRef.current === undefined
+      )
         ? null
         : snapshotEditorDocumentRoot(event.currentTarget);
     },
     onCompositionEnd(event) {
       const root = event.currentTarget;
       const pendingFontSize = pendingEditorFontSizeRef.current;
+      const pendingHighlightColor = pendingEditorHighlightColorRef.current;
       const composedText = event.data;
       const undoBefore = pendingCompositionUndoSnapshotRef.current;
       pendingCompositionUndoSnapshotRef.current = null;
-      if (pendingFontSize === null || !composedText) return;
-      const offsets = getEditorSelectionOffsets(root);
-      if (!offsets) return;
-      const endOffset = offsets.end;
-      const startOffset = Math.max(0, endOffset - composedText.length);
-      if (startOffset >= endOffset) return;
-      setEditorSelectionByOffsets(root, startOffset, endOffset);
-      const applied = applyEditorSelectionFontSizeToRoot(root, pendingFontSize, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        pendingEditorFontSizeRef,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-        onSelectionFontSizeChange,
-        undoBefore: undoBefore ?? undefined,
-      });
-      if (!applied) return;
-      setEditorSelectionByOffsets(root, endOffset, endOffset);
+      if ((pendingFontSize === null && pendingHighlightColor === undefined) || !composedText) return;
+      const mutationUndoBefore = undoBefore ?? snapshotEditorDocumentRoot(root);
+      const pendingStyle: EditorPendingTypingStyle = {};
+      if (pendingFontSize !== null) pendingStyle.fontSize = pendingFontSize;
+      if (pendingHighlightColor !== undefined) pendingStyle.highlightColor = pendingHighlightColor;
+      applyEditorTypingStyleToRecentlyInsertedText(root, composedText, pendingStyle);
+      if (pendingFontSize !== null) onSelectionFontSizeChange(pendingFontSize);
+      if (pendingHighlightColor !== undefined) onSelectionHighlightColorChange?.(pendingHighlightColor);
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mutationUndoBefore, "typing");
+      commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
       rememberEditorSelectionRange(root);
+      refreshMentionDraft(root);
     },
     onSelect(event) {
-      const range = getEditorSelectionRange(event.currentTarget);
-      rememberEditorSelectionRange(event.currentTarget);
+      const root = event.currentTarget;
+      const range = getEditorSelectionRange(root);
+      rememberEditorSelectionRange(root);
       if (range && !range.collapsed) {
         setActiveMentionDraft(null);
         setActiveTableContextMenu(null);
-        pendingEditorFontSizeRef.current = null;
-        syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+        clearPendingTypingStyle();
+        syncActiveSelectionFormat(root);
         return;
       }
-      if (pendingEditorFontSizeRef.current !== null) {
-        onSelectionFontSizeChange(pendingEditorFontSizeRef.current);
-        return;
-      }
-      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+      refreshMentionDraft(root);
+      syncActiveSelectionFormat(root);
     },
     onClick(event) {
       const root = event.currentTarget;
@@ -4377,8 +4649,8 @@ export function useEditorDocumentSurfaceHandlers({
       if (!findEditorImageFrame(root, event.target)) {
         clearEditorImageSelection(root);
       }
-      pendingEditorFontSizeRef.current = null;
-      syncSelectionFontSize(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+      clearPendingTypingStyle();
+      syncSelectionFormatState(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
       const tableAlignmentAction = getEditorTableAlignmentAction(root, event.target);
       if (tableAlignmentAction) {
         event.preventDefault();
@@ -4428,7 +4700,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (!frame) return;
       event.preventDefault();
       event.stopPropagation();
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       setActiveTableContextMenu(null);
       root.focus({ preventScroll: true });
       selectEditorImageFrame(root, frame);
@@ -4442,7 +4714,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (tableAlignmentAction) {
         event.preventDefault();
         event.stopPropagation();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(event.currentTarget);
         event.currentTarget.focus({ preventScroll: true });
         return;
@@ -4454,7 +4726,7 @@ export function useEditorDocumentSurfaceHandlers({
         if (!tableInteraction || event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(event.currentTarget);
         event.currentTarget.focus({ preventScroll: true });
         startEditorTablePointerInteraction(
@@ -4469,7 +4741,7 @@ export function useEditorDocumentSurfaceHandlers({
       }
       event.preventDefault();
       event.stopPropagation();
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       setActiveTableContextMenu(null);
       event.currentTarget.focus({ preventScroll: true });
       selectEditorImageFrame(event.currentTarget, frame);
@@ -4491,19 +4763,16 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onKeyUp(event) {
       rememberEditorSelectionRange(event.currentTarget);
-      if (pendingEditorFontSizeRef.current !== null) {
-        onSelectionFontSizeChange(pendingEditorFontSizeRef.current);
-        return;
-      }
-      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
       refreshMentionDraft(event.currentTarget);
+      syncActiveSelectionFormat(event.currentTarget);
     },
     onBlur(event) {
       rememberEditorSelectionRange(event.currentTarget);
       setActiveMentionDraft(null);
       setActiveTableContextMenu(null);
       activeMentionRootRef.current = null;
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
+      pendingNativeStyledInsertionRef.current = null;
       rememberCurrentDocumentScroll();
       flushPendingDocumentSave(serializeEditorDocumentHTML(event.currentTarget));
     },
@@ -4546,8 +4815,9 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (isEditorUndoShortcut(event) || isEditorRedoShortcut(event)) {
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         pendingNativeUndoSnapshotRef.current = null;
+        pendingNativeStyledInsertionRef.current = null;
         const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
@@ -4557,6 +4827,7 @@ export function useEditorDocumentSurfaceHandlers({
           onSelectionFontSizeChange,
           onSelectionInlineFormatChange,
           onSelectionHighlightColorChange,
+          onSelectionTextAlignmentChange,
         );
         if (applied) event.preventDefault();
         return;
@@ -4573,12 +4844,12 @@ export function useEditorDocumentSurfaceHandlers({
         scheduleIndentGuideUpdate,
       )) {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         pendingNativeUndoSnapshotRef.current = null;
         clearEditorImageSelection(root);
         activeMentionRootRef.current = null;
         setActiveMentionDraft(null);
-        syncSelectionFontSize(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange);
+        syncSelectionFormatState(root, onSelectionFontSizeChange, onSelectionInlineFormatChange, onSelectionHighlightColorChange, onSelectionTextAlignmentChange);
         return;
       }
 
@@ -4586,7 +4857,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (activeTableCell) {
         if (event.key === "Tab" && !activeTableCell.contains(getCurrentEditorListItem(root))) {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           pendingNativeUndoSnapshotRef.current = null;
           clearEditorImageSelection(root);
           moveEditorTableSelection(
@@ -4602,7 +4873,7 @@ export function useEditorDocumentSurfaceHandlers({
         }
         if (event.key === "Enter") {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           pendingNativeUndoSnapshotRef.current = null;
           clearEditorImageSelection(root);
           const tableListItem = getCurrentEditorListItem(root);
@@ -4642,7 +4913,7 @@ export function useEditorDocumentSurfaceHandlers({
           return;
         }
         if (event.key === "Backspace" || event.key === "Delete") {
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           clearEditorImageSelection(root);
           if (deleteSelectedEditorTableDimension(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate)) {
             event.preventDefault();
@@ -4656,14 +4927,16 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (event.key === "Escape") {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(root);
         setActiveTableContextMenu(null);
         root.blur();
         return;
       }
 
-      if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
+      if (PENDING_TYPING_STYLE_CANCEL_KEYS.has(event.key)) {
+        clearPendingTypingStyle();
+      }
 
       if (event.key === "Backspace" || event.key === "Delete") {
         const undoBefore = snapshotEditorDocumentRoot(root);
@@ -4681,7 +4954,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (activeEditorListItem) {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           clearEditorImageSelection(root);
           const mentionUndoBefore = breakEditorMentionsForInput(root, "insertParagraph");
           if (mentionUndoBefore) {
@@ -4701,7 +4974,7 @@ export function useEditorDocumentSurfaceHandlers({
 
         if (event.key === "Tab") {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           clearEditorImageSelection(root);
           const mentionUndoBefore = breakEditorMentionsForInput(root, "insertText");
           if (mentionUndoBefore) {
@@ -4721,7 +4994,7 @@ export function useEditorDocumentSurfaceHandlers({
 
         if (event.key === "Backspace" && editorListItemContentIsEmpty(activeEditorListItem)) {
           event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
+          clearPendingTypingStyle();
           clearEditorImageSelection(root);
           const undoBefore = snapshotEditorDocumentRoot(root);
           if (exitEditorListItem(root, activeEditorListItem)) {
@@ -4734,7 +5007,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (event.key === "Enter") {
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(root);
         const offsets = getEditorSelectionOffsets(root);
         if (!offsets) return;
@@ -4789,7 +5062,7 @@ export function useEditorDocumentSurfaceHandlers({
         const edit = deleteEditorBackspaceText(currentText, offsets.start, offsets.end, outlineStyle);
         if (!edit) return;
         event.preventDefault();
-        pendingEditorFontSizeRef.current = null;
+        clearPendingTypingStyle();
         clearEditorImageSelection(root);
         if (deleteTextByOffsets(root, edit.selectionStart, offsets.start, { preserveTrailingNewline: edit.value.endsWith("\n") })) {
           recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "delete");
@@ -4800,7 +5073,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (event.key !== "Tab") return;
       event.preventDefault();
-      pendingEditorFontSizeRef.current = null;
+      clearPendingTypingStyle();
       clearEditorImageSelection(root);
       const offsets = getEditorSelectionOffsets(root);
       if (!offsets) return;
@@ -4850,6 +5123,7 @@ export function useEditorDocumentSurfaceHandlers({
   }), [
     activeMentionDraft,
     activeMentionIndex,
+    clearPendingTypingStyle,
     createAsyncImageCommitGuard,
     currentDocumentTargetKeyRef,
     documentUndoHistoryRef,
@@ -4861,10 +5135,12 @@ export function useEditorDocumentSurfaceHandlers({
     onSelectionFontSizeChange,
     onSelectionHighlightColorChange,
     onSelectionInlineFormatChange,
+    onSelectionTextAlignmentChange,
     onEditorImageAttachmentError,
     openTableContextMenu,
     outlineStyle,
     pendingEditorFontSizeRef,
+    pendingEditorHighlightColorRef,
     rememberCurrentDocumentScroll,
     rememberEditorSelectionRange,
     refreshMentionDraft,
@@ -4873,12 +5149,13 @@ export function useEditorDocumentSurfaceHandlers({
     scheduleIndentGuideUpdate,
     scrollMemoryRef,
     setDocumentScrollTop,
+    syncActiveSelectionFormat,
   ]);
   const insertTable = useCallback((root?: HTMLElement | null) => {
     if (!root) return false;
-    root.focus({ preventScroll: true });
     restoreEditorSelectionRange(root);
-    pendingEditorFontSizeRef.current = null;
+    root.focus({ preventScroll: true });
+    clearPendingTypingStyle();
     clearEditorImageSelection(root);
     setActiveTableContextMenu(null);
     activeMentionRootRef.current = null;
@@ -4886,8 +5163,11 @@ export function useEditorDocumentSurfaceHandlers({
     const inserted = insertEditorTable(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
     if (inserted) rememberEditorSelectionRange(root);
     return inserted;
-  }, [documentUndoHistoryRef, pendingEditorFontSizeRef, rememberEditorSelectionRange, restoreEditorSelectionRange, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+  }, [clearPendingTypingStyle, documentUndoHistoryRef, rememberEditorSelectionRange, restoreEditorSelectionRange, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
-  const overlay = React.createElement(React.Fragment, null, mentionMenu, tableContextMenu, imagePreviewModal);
+  const blockingImagePreview = imagePreviewModal
+    ? React.createElement(AppModalPortal, { onRequestClose: () => setActiveImagePreview(null) }, imagePreviewModal)
+    : null;
+  const overlay = React.createElement(React.Fragment, null, mentionMenu, tableContextMenu, blockingImagePreview);
   return { ...handlers, mentionMenu: overlay, insertTable, restoreSelection: restoreEditorSelectionRange };
 }

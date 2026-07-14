@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Projects Tests
 
@@ -22,7 +22,7 @@ P11 - A fresh Project work-panel entry, or a history entry without a valid marke
 P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
-P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, text highlight color, clear highlight, and table semantics must apply to project text boxes.
+P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
 P16 - Project text-box persistence remains project-owned: project text boxes save to project information/projection state, not node information/projection state.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
@@ -36,8 +36,8 @@ P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic G
 P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
 P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
 P28 - Successful project email drops open the created node in the normal node popup.
-P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, bold, underline, text highlight color, automatic numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, or text-labeled `New Text Box` controls.
-P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, text-highlight picker and clear action, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
+P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, Bold, Underline, Italic, Highlight, left/center/right alignment, table insertion, Automatic Numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, text-labeled `New Text Box`, or per-text-box table controls.
+P30 - Project text-box toolbar controls must use the shared compact editor toolbar inventory and formatting controller path. Font-size minus/value/plus, Bold, Underline, Italic, Highlight with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node, Logic Gate, and mail editor surfaces in selected-range and collapsed-caret behavior. Hover/focus/active styling applies only to the individual control.
 P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and personal email-drop conversions store the active `account_email`, while shared-inbox conversions retain both `shared_inbox_id` and `account_email`; the project reader uses that scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
 P33 - The Project Logic Gates / Nodes tab renders visible Logic Gates and nodes as one recursive row list, not as a multi-column set of Logic Gate cards with embedded node lists.
@@ -52,6 +52,8 @@ P41 - Project text-block saves are project-scoped, serialized, and latest-conten
 P42 - Project reloads and text-block deletion cannot race project text-block edits. A reload started before a local revision or pending save must not overwrite that local content, deletion waits for any in-progress save, and changing project or unmounting drains changed blocks from the old project scope.
 P43 - Focused project text blocks use the shared deferred external-hydration and conflict behavior: untouched local content accepts the deferred remote value on blur without a stale flush, while a locally edited conflict keeps and saves the local value and reports the conflict.
 P44 - Replies to email attached to a project text block use the project as attachment resource owner, retain the originating project information ID, and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer project text-block formatting controller so only the reply toolbar can format text.
+P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
+P46 - Project dialogs/previews and the Logic Gates / Nodes embedded node panel mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking dialogs/previews trap and restore focus; the embedded panel remains modeless while anchored and becomes a focus-trapping modal in fullscreen. Moving it into or out of fullscreen preserves its live editor and Project grouping/selection state.
 
 ## Scenarios
 
@@ -141,6 +143,7 @@ Business logic covered:
 - P18
 - P29
 - P30
+- P45
 
 Given:
 - A user edits a project text box.
@@ -148,10 +151,13 @@ Given:
 
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
-- The project text-box toolbar exposes the shared node-style font-size, bold, underline, text-highlight picker and clear action, automatic numbering, bullet, checklist, and outline-style controls.
-- Those toolbar controls come from the shared compact editor toolbar inventory and route through the shared formatting controller for selected text and sticky collapsed-caret formatting.
-- Applying a highlight color changes selected text, Clear highlight removes it, and a collapsed caret does not create sticky highlight state.
-- Creating a project text box uses the compact plus control in the left timeline gutter; project-only `Indent`, `A1`, and text-labeled `New Text Box` controls are not part of the target UI.
+- The project text-box toolbar exposes shared font-size, Bold, Underline, Italic, Highlight/**No highlight**, left/center/right alignment, table insertion, Automatic Numbering, bullet, checklist, and outline-style controls.
+- Those toolbar controls come from the shared compact editor toolbar inventory and route through the shared formatting controller for selected text and collapsed-caret typing; hover/focus/active styling applies only to the individual control.
+- Applying a highlight color changes selected text or the active collapsed-caret typing style. **No highlight** removes selected highlighting or clears the pending highlight typing style.
+- Highlighting one line/list item does not mark the following sibling, while intentional multi-line selections remain supported.
+- Alignment operates on the active paragraph/selected block or active-table context, and table insertion uses the preserved caret/selection.
+- Creating a project text box uses the compact plus control in the left timeline gutter; project-only `Indent`, `A1`, text-labeled `New Text Box`, and duplicate text-box table controls are not part of the target UI.
+- The primary header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering visible; Assignments and available open/minimize actions remain in **More editor actions**.
 - Project text-box edits save to project information/projection state.
 - Project text-box edits do not write node information/projection state.
 - The project email picker allows attaching existing email where permitted.
@@ -184,6 +190,7 @@ Business logic covered:
 - P22
 - P23
 - P38
+- P46
 
 Given:
 - A project has at least one related Logic Gate and at least one related node visible in the Logic Gates / Nodes tab.
@@ -195,7 +202,7 @@ Expected:
 - Text boxes inside that window use the unified node editor semantics.
 - Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
 - Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.
-- Activating fullscreen expands that same live panel across the browser viewport; activating it again restores the panel to the right-hand Project region without resetting grouping or selection state.
+- The panel mounts in the shared body-level modal layer above Key Views/Explorer/Search Explorer. Activating fullscreen changes that same live panel to viewport geometry; activating it again restores the panel to the right-hand Project region without remounting the editor or resetting grouping/selection state.
 
 ### Scenario P-S8: Email Drop Creates Project Node
 

@@ -131,7 +131,7 @@ KB96 - Direct email-created Kanban cards can originate from My Triage or from a 
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
 KB98 - When a local email-to-Logic-Gate conversion has updated the board from the POST response, local command-result reconciliation updates Home once; no communications/workspace WebSocket event or broad cache invalidation is emitted, and the source mail row remains visible with patched Logic Gate icon state.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
-KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen uses a browser-viewport-fixed overlay that escapes normal Kanban board-relative bounds while preserving a way to restore the previous board-relative popup size and position.
+KB100 - Node editor popups opened from Kanban mount through the shared body-level modal layer above Key Views, Explorer, Search Explorer, and board-local stacking contexts. They expose a fullscreen toggle in the popup header; fullscreen changes the same mounted editor to browser-viewport geometry while preserving the previous board-relative popup size and position for restoration.
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
 KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
 KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
@@ -140,7 +140,7 @@ KB104 - After a direct email-to-Kanban column drop succeeds, the created node op
 ### New node insertion
 KB105 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 KB106 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
-KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible; while a node editor is fullscreen, the Explorer search box is hidden without clearing the user's current search query.
+KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible. The shared modal layer keeps the popup interactive above sidebar chrome and traps focus while it is topmost; while fullscreen, the Explorer search box is hidden without clearing the user's current search query.
 KB108 - Direct email-to-Kanban conversion and later email-card transfer preserve mailbox provenance in the attached-email projection: personal mail retains `account_email`, and Shared Triage mail retains both `shared_inbox_id` and `account_email`, so later node email operations use the originating grant.
 KB109 - Forced Logic Gate props and the current Logic Gate selection must converge on one guarded board loader; one logical selection must not issue duplicate `/work` requests or apply the same snapshot twice.
 KB110 - Concurrent loads for the same company and Logic Gate board share one in-flight promise, while changing to a different Logic Gate aborts the obsolete request and prevents its late response from rendering.
@@ -426,8 +426,10 @@ Given:
 
 Expected:
 - A fullscreen toggle appears in the header immediately to the left of the close action.
-- Activating fullscreen expands the popup to the browser viewport instead of only filling the Kanban board area, without hiding the header actions.
+- The popup mounts through the shared body-level modal layer and remains visually/interaction-wise above Key Views, Explorer, Search Explorer, and Kanban-local stacking contexts.
+- Activating fullscreen changes the same live popup to browser-viewport geometry instead of only filling the Kanban board area, without hiding the header actions or remounting the editor.
 - The fullscreen popup keeps a small visible gap at the viewport edges instead of touching the browser edges exactly.
+- While fullscreen, the popup is the topmost blocking modal, traps focus, and restores prior focus when closed; its normal board-anchored mode remains modeless.
 - The Explorer search box is hidden while the fullscreen node editor is active, and the previous search query is still present after fullscreen is restored.
 - Deactivating fullscreen restores the previous popup size and position.
 - Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.

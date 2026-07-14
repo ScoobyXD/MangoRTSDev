@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorHighlightColor, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, mapEditorSelectedTextRunOffsets, normalizeEditorHighlightColor, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource, resolveEditorImageFrameSource, shouldUseEditorImageFileTransferShortcut, writeImageClipboardData } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -57,6 +57,15 @@ test("email serialization preserves rich lists and indented blocks", () => {
   assert.match(html, /<div style="margin-left: 40px;">Indented<\/div>/);
 });
 
+
+test("editor sanitizer preserves text alignment together with block indentation", () => {
+  const once = sanitizeEditorDocumentHTML('<div style="margin-left: 40px; text-align: center;">Indented centered</div>');
+  const twice = sanitizeEditorDocumentHTML(once);
+
+  assert.match(once, /text-align: center/);
+  assert.match(once, /margin-left: 40px/);
+  assert.equal(twice, once);
+});
 test("editor link href normalization supports appended URL characters", () => {
   assert.equal(getEditorLinkHrefForText("www.example.test/path"), "https://www.example.test/path");
   assert.equal(getEditorLinkHrefForText("not a link"), null);
@@ -108,7 +117,30 @@ test("highlight clearing normalizes nested wrappers while retaining intermediate
   assert.match(source, /removeEditorElementHighlight\(span\)/);
   assert.match(source, /normalizeEditorHighlightSpans\(clean\)/);
   assert.match(handlers, /const spans = wrapEditorSelectedTextRuns\([\s\S]*normalizeEditorHighlightSpans\(root\);[\s\S]*spans\.forEach\(\(span\) =>/);
-  assert.match(handlers, /function unwrapEditorHighlightClearSpan[\s\S]*span\.replaceWith\(\.\.\.children\)[\s\S]*selection\?\.addRange\(range\)/);
+  assert.match(handlers, /function unwrapEditorHighlightClearSpan\(span: HTMLSpanElement\) \{\s*const children = Array\.from\(span\.childNodes\);\s*span\.replaceWith\(\.\.\.children\);\s*\}/);
+});
+
+test("highlight selection runs stop exactly at line and list-item boundaries", () => {
+  assert.deepEqual(mapEditorSelectedTextRunOffsets([{ text: "first\nsecond" }], 0, 6), [
+    { nodeIndex: 0, startOffset: 0, endOffset: 5 },
+  ]);
+  assert.deepEqual(mapEditorSelectedTextRunOffsets([{ text: "first\nsecond" }], 0, 7), [
+    { nodeIndex: 0, startOffset: 0, endOffset: 5 },
+    { nodeIndex: 0, startOffset: 6, endOffset: 7 },
+  ]);
+  assert.deepEqual(mapEditorSelectedTextRunOffsets([{ text: "one\r\ntwo" }], 0, 5), [
+    { nodeIndex: 0, startOffset: 0, endOffset: 3 },
+  ]);
+  assert.deepEqual(mapEditorSelectedTextRunOffsets([
+    { text: "first" },
+    { text: "second" },
+  ], 0, 5), [
+    { nodeIndex: 0, startOffset: 0, endOffset: 5 },
+  ]);
+  assert.deepEqual(mapEditorSelectedTextRunOffsets([{ text: "first" }, { text: "second" }], 0, 6), [
+    { nodeIndex: 0, startOffset: 0, endOffset: 5 },
+    { nodeIndex: 1, startOffset: 0, endOffset: 1 },
+  ]);
 });
 
 test("editor sanitizer preserves image clear breaks", () => {

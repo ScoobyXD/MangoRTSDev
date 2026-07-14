@@ -99,6 +99,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
+  const allBoardsTriggerRef = useRef<HTMLButtonElement>(null);
   const boardPickerOpen = allBoardsOpen;
 
   useEffect(() => {
@@ -110,7 +111,12 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       onCloseAllBoards();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseAllBoards();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onCloseAllBoards();
+      window.requestAnimationFrame(() => allBoardsTriggerRef.current?.focus({ preventScroll: true }));
     };
     const timer = window.setTimeout(() => window.addEventListener("mousedown", onPointerDown, true), 0);
     window.addEventListener("keydown", onKeyDown, true);
@@ -235,8 +241,11 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         </svg>
       </label>
       <button
+        ref={allBoardsTriggerRef}
         className="mango-elevated-action"
         type="button"
+        aria-haspopup="menu"
+        aria-expanded={boardPickerOpen}
         onClick={onToggleAllBoards}
         style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: allBoardsOpen && !isDark ? "1px solid transparent" : `1px solid ${allBoardsOpen ? accent : (isDark ? line : KANBAN_SOFT_BORDER)}`, background: allBoardsOpen && !isDark ? `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box` : (isDark ? (allBoardsOpen ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.08)") : KANBAN_SURFACE), color: text, fontSize: 10, fontWeight: 700, letterSpacing: 0, padding: "0 9px", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
       >

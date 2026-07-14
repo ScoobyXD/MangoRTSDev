@@ -38,39 +38,6 @@ export type CompanyExplorerDeleteBatchResponse = {
   targets?: Array<{ kind: string; id: string }>;
 };
 
-export type CompanyExplorerFolderShare = {
-  company_id: string;
-  folder_id: string;
-  email: string;
-  user_id?: string;
-  status: string;
-  invited_by_user_id: string;
-  created_timestamp: string;
-  updated_timestamp: string;
-};
-
-export type CompanyExplorerFolderSharesResponse = {
-  shares?: CompanyExplorerFolderShare[];
-};
-
-export type CompanyExplorerFolderShareInviteResponse = {
-  share?: CompanyExplorerFolderShare;
-  invitation?: { token?: string; email?: string };
-  cognito_invite_status?: string;
-};
-
-export type CompanyExplorerFolderShareDialog = {
-  folderID: string;
-  label: string;
-  email: string;
-  shares: CompanyExplorerFolderShare[];
-  loading: boolean;
-  busy: boolean;
-  error: string;
-  message: string;
-  invitationToken: string;
-};
-
 export type CompanyExplorerDeleteConfirmationSummary = {
   title: string;
   detail: string;

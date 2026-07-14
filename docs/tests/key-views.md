@@ -1,6 +1,6 @@
 # Key Views
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 Business Logic Covered By Automated Tests: My Work and Updates saved grouping views are represented in their own surface-specific docs. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` and backend saved-view tests cover shared Status availability and precedence. This file records the shared Key Views placement and ownership contract.
 
@@ -25,3 +25,5 @@ KV9 - Reloading the app or returning to a surface restores the user's last selec
 KV10 - My Work and Updates consume the selected saved grouping row and refresh when the Key Views sidebar changes it, but they do not render their own saved-view management panels.
 
 KV11 - Status is an available saved grouping field for both My Work and Updates. Both surfaces consume the same canonical order: In Progress, Review, Pending, Requested, Backlog, Done in ascending direction, with Done kept last in both directions. Verify aliases join Review, Request/Requests join Requested, and Backlogs/Back Logs/Backlogged aliases join Backlog instead of creating separate saved-view groups.
+
+KV12 - Key Views and its floating grouping editor remain app/sidebar chrome beneath the shared body-level blocking modal layer. A node/editor popup, dialog, preview, or expanded/fullscreen panel must paint and receive interaction above Key Views, while closing that surface leaves the saved-view selection and grouping draft unchanged.

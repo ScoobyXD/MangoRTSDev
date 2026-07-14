@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
+import { AppModalPortal, useAppViewportAnchorRect, type AppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
-import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls.js";
 import {
   projectWorkPanelTabFromHistoryState,
   replaceProjectWorkPanelHistoryState,
@@ -47,7 +47,7 @@ import {
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
 import { EditorTabBar } from "../editor/EditorTabBar.js";
-import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS } from "../editor/editorTabs.js";
+import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "../editor/editorTypes.js";
@@ -58,7 +58,7 @@ import {
   setNodeEditorFullscreenChromeActive,
 } from "../editor/nodeEditorFullscreenChrome.js";
 import type { EditorHighlightColor } from "../editor/richTextEditing.js";
-import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "../editor/useEditorDocumentSurfaceHandlers.js";
+import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
   AttachedEmailOrganizerPane,
   ChatPane,
@@ -77,7 +77,6 @@ import {
   MailIcon,
   messageAttachmentPayload,
   PaperclipIcon,
-  TableIcon,
   ChatIcon,
   TEXT_BLOCK_FONT_SIZE,
   uploadEditorAttachment,
@@ -241,6 +240,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const relationshipsColumnRef = useRef<HTMLElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
   const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
   const relationshipGroupingSignatureRef = useRef("");
@@ -269,7 +269,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
-  const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
   const [activePaneTabs, setActivePaneTabs] = useState<Record<string, "chat" | "email">>({});
@@ -314,8 +313,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
   const [selectedRelationshipNodePanel, setSelectedRelationshipNodePanel] = useState<ProjectRelationshipNodePanelSelection | null>(null);
   const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
-  const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
   const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
+  const [projectTextAlignment, setProjectTextAlignment] = useState<EditorTextAlignment>("left");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
 
@@ -341,8 +341,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const state = projectFormattingControllerRef.current?.readFormatState();
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
-    setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
     setProjectHighlightColor(state.highlightColor);
+    setProjectTextAlignment(state.textAlignment);
   }, []);
 
   const runProjectFormatCommand = useCallback((command: (controller: EditorDocumentFormattingController) => boolean) => {
@@ -352,8 +353,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const state = controller.readFormatState();
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
-    setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
     setProjectHighlightColor(state.highlightColor);
+    setProjectTextAlignment(state.textAlignment);
   }, []);
 
   useEffect(() => {
@@ -1680,28 +1682,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           )}
         </div>
         <div style={summaryMetaPillsStyle}>
-          {onCollapseToTab && (
-            <button
-              type="button"
-              style={summaryMinimizeButtonStyle}
-              title="Minimize project"
-              aria-label="Minimize project"
-              onClick={() => onCollapseToTab({ projectID, label: project?.name || projectID })}
-            >
-              <MinimizeToLineIcon />
-            </button>
-          )}
-          {onOpenInNewTab && (
-            <button type="button" style={summaryPermissionButtonStyle} onClick={onOpenInNewTab}>
-              Open in new tab
-            </button>
-          )}
-          <button type="button" style={summaryPermissionButtonStyle} onClick={() => setAssignmentsOpen(true)}>
-            Assignments
-          </button>
-          <button type="button" style={summaryPermissionButtonStyle} onClick={() => setPermissionsOpen(true)}>
-            Permissions
-          </button>
           <span style={statusPillStyle(accent)}>{project?.status || "Active"}</span>
           <select
             aria-label="Project health"
@@ -1752,7 +1732,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             <div style={columnTitleStyle}>Timeline</div>
             <div style={toolbarActionsStyle}>
               <EditorTabBar
-                activeTab="format"
+                activeTab={permissionsOpen ? "permissions" : "editor"}
                 outlineStyle={outlineStyle}
                 accent={accent}
                 outlineMenuAccent={accent}
@@ -1760,26 +1740,41 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
                 tabBackground={EDITOR_NEU_SURFACE}
                 tabSelectedBackground={EDITOR_NEU_ACTIVE_SURFACE}
-                onSelectTab={() => undefined}
+                onSelectTab={(tabID) => {
+                  if (tabID === "permissions") setPermissionsOpen(true);
+                }}
                 onAdjustSelectionFontSize={(delta) => runProjectFormatCommand((controller) => controller.adjustFontSize(delta))}
                 documentFontSize={projectSelectionFontSize}
                 onSetSelectionFontSize={(fontSize) => runProjectFormatCommand((controller) => controller.applyFontSizeValue(fontSize))}
                 boldActive={projectInlineFormat.bold}
                 underlineActive={projectInlineFormat.underline}
+                italicActive={projectInlineFormat.italic}
                 highlightColor={projectHighlightColor}
+                textAlignment={projectTextAlignment}
                 onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
                 onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
+                onToggleItalic={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("italic"))}
                 onSetSelectionHighlightColor={(color) => runProjectFormatCommand((controller) => controller.applyHighlightColor(color))}
+                onSetTextAlignment={(alignment) => runProjectFormatCommand((controller) => controller.applyTextAlignment(alignment))}
                 onOutlineStyleFocus={refreshProjectSelectionFormat}
                 onOutlineStyleChange={setOutlineStyle}
-                onInsertTable={() => {
-                  const targetBlockID = activeRichTextBlockID;
-                  if (!targetBlockID) return;
-                  setTableInsertRequests((current) => ({ ...current, [targetBlockID]: (current[targetBlockID] ?? 0) + 1 }));
-                }}
+                onInsertTable={() => runProjectFormatCommand((controller) => controller.insertTable())}
                 reserveHeaderOffset={false}
-                visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
-                disabled={!activeRichTextBlockID || !blocks.some((block) => block.id === activeRichTextBlockID)}
+                visibleTabIDs={EDITOR_PRIMARY_HEADER_TAB_IDS}
+                secondaryActions={[
+                  { id: "assignments", label: "Assignments", onSelect: () => setAssignmentsOpen(true) },
+                  ...(onOpenInNewTab
+                    ? [{ id: "open-project-tab", label: "Open project in new tab", onSelect: () => onOpenInNewTab() }]
+                    : []),
+                  ...(onCollapseToTab
+                    ? [{
+                        id: "minimize-project",
+                        label: "Minimize project",
+                        onSelect: () => onCollapseToTab({ projectID, label: project?.name || projectID }),
+                      }]
+                    : []),
+                ]}
+                formattingDisabled={!activeRichTextBlockID || !blocks.some((block) => block.id === activeRichTextBlockID)}
               />
             </div>
           </div>
@@ -1830,15 +1825,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       </label>
                       <button
                         type="button"
-                        title="Insert table"
-                        aria-label="Insert table"
-                        onClick={() => setTableInsertRequests((current) => ({ ...current, [block.id]: (current[block.id] ?? 0) + 1 }))}
-                        style={projectTextBlockIconButtonStyle(accent, false)}
-                      >
-                        <TableIcon color={accent} />
-                      </button>
-                      <button
-                        type="button"
                         title={openEmailBlockIDs.has(block.id) ? "Hide email" : "Open email"}
                         aria-label={openEmailBlockIDs.has(block.id) ? "Hide email" : "Open email"}
                         onClick={() => {
@@ -1887,7 +1873,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
                       activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
                       chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
-                      tableInsertRequestID={tableInsertRequests[block.id] ?? 0}
                       surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
                       accent={accent}
                       outlineStyle={outlineStyle}
@@ -2008,7 +1993,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           </div>
         </section>
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
-        <aside style={relationshipsColumnStyle(summarySplitPct)}>
+        <aside ref={relationshipsColumnRef} style={relationshipsColumnStyle(summarySplitPct)}>
           <div style={projectWorkPanelToolbarStyle}>
             <div role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
               <button
@@ -2170,6 +2155,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               key={`${selectedRelationshipNodePanel.projectID}:${selectedRelationshipNodePanel.nodeID}`}
               accent={accent}
               selection={selectedRelationshipNodePanel}
+              containerRef={relationshipsColumnRef}
               onClose={() => setSelectedRelationshipNodePanel(null)}
             />
           ) : null}
@@ -2662,22 +2648,30 @@ function ProjectCriticalPathNodeWindow({
 function ProjectRelationshipNodePanel({
   accent,
   selection,
+  containerRef,
   onClose,
 }: {
   accent: string;
   selection: ProjectRelationshipNodePanelSelection;
   onClose: () => void;
+  containerRef: React.RefObject<HTMLElement | null>;
 }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const containerRect = useAppViewportAnchorRect(containerRef);
 
   useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
 
+
   return (
-    <UnifiedNodeShell
+    <AppModalPortal ownerDocument={containerRef.current?.ownerDocument} trapFocus={fullscreen} onRequestClose={onClose}>
+      <div data-mango-editor-overlay-backdrop={fullscreen ? "modal" : "modeless"} style={{ position: "fixed", inset: 0, zIndex: 1, background: fullscreen ? "rgba(15, 23, 42, 0.18)" : "transparent", pointerEvents: fullscreen ? "auto" : "none" }}>
+      <UnifiedNodeShell
       className="project-relationships-node-panel"
       surfaceID="project-relationships-node-panel"
       title={selection.title}
-      style={projectRelationshipNodePanelStyle(accent, fullscreen)}
+      role="dialog"
+      ariaModal={fullscreen}
+      style={{ ...projectRelationshipNodePanelStyle(accent, fullscreen, containerRect), zIndex: 2, pointerEvents: "auto" }}
       bodyStyle={projectRelationshipNodePanelBodyStyle}
       actionButtonStyle={criticalPathNodePreviewActionButtonStyle}
       closeButtonStyle={criticalPathNodePreviewActionButtonStyle}
@@ -2713,7 +2707,9 @@ function ProjectRelationshipNodePanel({
         forcedEmptyMessage="Select a project node."
         compactLinkedDocumentHeader
       />
-    </UnifiedNodeShell>
+      </UnifiedNodeShell>
+      </div>
+    </AppModalPortal>
   );
 }
 
@@ -2967,8 +2963,10 @@ function ProjectAssignmentsDialog({
   const toggleTeam = (teamID: string) => {
     onSetTeamIDs(toggleStringIDList(selectedTeamIDs, teamID));
   };
+
   return (
-    <div style={assignmentDialogBackdropStyle} onPointerDown={onClose}>
+    <AppModalPortal onRequestClose={saving ? undefined : onClose}>
+    <div style={assignmentDialogBackdropStyle} onPointerDown={() => { if (!saving) onClose(); }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -2978,7 +2976,7 @@ function ProjectAssignmentsDialog({
       >
         <div style={assignmentDialogHeaderStyle}>
           <h3 id="project-assignments-title" style={assignmentDialogTitleStyle}>Project Assignments</h3>
-          <button type="button" style={assignmentCloseButtonStyle} onClick={onClose}>Close</button>
+          <button type="button" style={assignmentCloseButtonStyle} disabled={saving} onClick={onClose}>Close</button>
         </div>
         <div style={assignmentDialogColumnsStyle}>
           <div style={assignmentSectionStyle}>
@@ -2988,6 +2986,7 @@ function ProjectAssignmentsDialog({
                 <label key={account.account_id} style={assignmentOptionStyle}>
                   <input
                     type="checkbox"
+                    disabled={saving}
                     checked={selectedAccounts.has(account.account_id)}
                     onChange={() => toggleAccount(account.account_id)}
                   />
@@ -3004,6 +3003,7 @@ function ProjectAssignmentsDialog({
                 <label key={group.group_id} style={assignmentOptionStyle}>
                   <input
                     type="checkbox"
+                    disabled={saving}
                     checked={selectedTeams.has(group.group_id)}
                     onChange={() => toggleTeam(group.group_id)}
                   />
@@ -3015,13 +3015,14 @@ function ProjectAssignmentsDialog({
           </div>
         </div>
         <div style={assignmentDialogActionsStyle}>
-          <button type="button" style={assignmentCancelButtonStyle} onClick={onClose}>Cancel</button>
+          <button type="button" style={assignmentCancelButtonStyle} disabled={saving} onClick={onClose}>Cancel</button>
           <button type="button" style={assignmentSaveButtonStyle} disabled={saving} onClick={onSave}>
             {saving ? "Saving" : "Save Assignments"}
           </button>
         </div>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -3215,27 +3216,6 @@ const summaryMetaPillsStyle: React.CSSProperties = {
   justifyContent: "flex-end",
 };
 
-const summaryPermissionButtonStyle: React.CSSProperties = {
-  minHeight: 30,
-  border: "1px solid rgba(91, 141, 239, 0.34)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#1d4ed8",
-  fontSize: 12,
-  fontWeight: 850,
-  cursor: "pointer",
-  padding: "0 12px",
-};
-
-const summaryMinimizeButtonStyle: React.CSSProperties = {
-  ...summaryPermissionButtonStyle,
-  width: 32,
-  minWidth: 32,
-  padding: 0,
-  display: "grid",
-  placeItems: "center",
-};
-
 const statusPillStyle = (accent: string): React.CSSProperties => ({
   minHeight: 28,
   display: "inline-flex",
@@ -3263,7 +3243,7 @@ const plainPillStyle: React.CSSProperties = {
 const assignmentDialogBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 18,
@@ -3456,6 +3436,8 @@ const columnToolbarStyle: React.CSSProperties = {
   minHeight: 40,
   display: "flex",
   alignItems: "center",
+  flexWrap: "wrap",
+  alignContent: "center",
   justifyContent: "space-between",
   gap: 10,
   flexShrink: 0,
@@ -3476,6 +3458,8 @@ const columnTitleStyle: React.CSSProperties = {
 
 const toolbarActionsStyle: React.CSSProperties = {
   display: "flex",
+  minWidth: 0,
+  flex: "1 1 520px",
   alignItems: "center",
   gap: 8,
   flexWrap: "wrap",
@@ -3897,14 +3881,21 @@ const criticalPathNodePreviewActionButtonStyle: React.CSSProperties = {
   boxShadow: EDITOR_NEU_SHADOW,
 };
 
-function projectRelationshipNodePanelStyle(accent: string, fullscreen: boolean): React.CSSProperties {
+function projectRelationshipNodePanelStyle(
+  accent: string,
+  fullscreen: boolean,
+  containerRect: AppViewportAnchorRect | null,
+): React.CSSProperties {
   return {
-    position: fullscreen ? "fixed" : "absolute",
-    zIndex: fullscreen ? 240 : 70,
-    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : 0,
-    right: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : 0,
-    bottom: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : 0,
-    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : 0,
+    position: "fixed",
+    zIndex: 1,
+    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : containerRect?.top ?? 0,
+    right: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : undefined,
+    bottom: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : undefined,
+    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : containerRect?.left ?? 0,
+    width: fullscreen ? undefined : containerRect?.width ?? 0,
+    height: fullscreen ? undefined : containerRect?.height ?? 0,
+    visibility: !fullscreen && !containerRect ? "hidden" : "visible",
     minWidth: 0,
     minHeight: 0,
     border: "1px solid transparent",

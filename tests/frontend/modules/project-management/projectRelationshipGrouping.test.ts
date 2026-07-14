@@ -263,7 +263,9 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /projectWorkPanelToolbarStyle/);
   assert.match(source, /ProjectRelationshipNodePanel/);
   assert.match(source, /surfaceID="project-relationships-node-panel"/);
-  assert.match(source, /position: fullscreen \? "fixed" : "absolute"/);
+  assert.match(source, /<AppModalPortal ownerDocument=\{containerRef\.current\?\.ownerDocument\} trapFocus=\{fullscreen\} onRequestClose=\{onClose\}>/);
+  assert.match(source, /position: "fixed"/);
+  assert.match(source, /top: fullscreen \? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : containerRect\?\.top \?\? 0/);
   assert.match(source, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
   assert.match(source, /setSelectedRelationshipNodePanel/);
   assert.match(source, /selectedRelationshipNodePanel\?\.projectID === projectID/);

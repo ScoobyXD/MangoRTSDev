@@ -41,7 +41,12 @@ export type UnifiedRichEditorControlID =
   | "font-size"
   | "bold"
   | "underline"
+  | "italic"
   | "highlight"
+  | "align-left"
+  | "align-center"
+  | "align-right"
+  | "table"
   | "outline-style";
 
 export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSurfaceContract[] = [
@@ -58,6 +63,11 @@ export const UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS: readonly UnifiedRichEditorCon
   "font-size",
   "bold",
   "underline",
+  "italic",
   "highlight",
+  "align-left",
+  "align-center",
+  "align-right",
+  "table",
   "outline-style",
 ] as const;

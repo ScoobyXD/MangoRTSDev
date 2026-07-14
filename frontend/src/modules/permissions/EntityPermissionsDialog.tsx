@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import type { BoundRequestJSON } from "../api/requestJSON";
 import { listCompanyUsers } from "../communications/communicationsApi";
 
@@ -44,18 +45,6 @@ type EntityEffectiveAccess = {
 
 type PermissionSelectionKey = `${PermissionSubjectType}:${string}`;
 
-type EntityPermissionsDialogProps = {
-  requestJSON: BoundRequestJSON;
-  companyID: string;
-  entityType: PermissionEntityType;
-  entityID: string;
-  title: string;
-  onClose: () => void;
-  onSaved?: () => void;
-  readOnly?: boolean;
-  permissionsPath?: string;
-};
-
 type EntityPermissionsPanelProps = {
   requestJSON: BoundRequestJSON;
   companyID: string;
@@ -67,6 +56,10 @@ type EntityPermissionsPanelProps = {
   variant?: "dialog" | "embedded";
   readOnly?: boolean;
   permissionsPath?: string;
+};
+
+type EntityPermissionsDialogProps = Omit<EntityPermissionsPanelProps, "onClose" | "variant"> & {
+  onClose: () => void;
 };
 
 type PermissionPayload = {
@@ -564,8 +557,8 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     </div>
   );
 
-  return (
-    <div className="mango-editor-hover-highlight" style={containerStyle}>
+  const panel = (
+    <div className="mango-editor-hover-highlight" role={dialogMode ? "dialog" : undefined} aria-modal={dialogMode ? true : undefined} aria-label={dialogMode ? `Permissions for ${title}` : undefined} style={containerStyle}>
       <div style={permissionHeaderStyle}>
         <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
           <h2 style={permissionTitleStyle}>Permissions</h2>
@@ -616,28 +609,20 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       </div>
     </div>
   );
-};
 
-export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (props) => {
+  if (!dialogMode) return panel;
   return (
-    <div style={permissionBackdropStyle}>
-      <div onPointerDown={(event) => event.stopPropagation()}>
-        <EntityPermissionsPanel
-          requestJSON={props.requestJSON}
-          companyID={props.companyID}
-          entityType={props.entityType}
-          entityID={props.entityID}
-          title={props.title}
-          onClose={props.onClose}
-          onSaved={props.onSaved}
-          variant="dialog"
-          readOnly={props.readOnly}
-          permissionsPath={props.permissionsPath}
-        />
+    <AppModalPortal onRequestClose={busy ? undefined : closeWithSave}>
+      <div style={permissionBackdropStyle}>
+        <div onPointerDown={(event) => event.stopPropagation()}>{panel}</div>
       </div>
-    </div>
+    </AppModalPortal>
   );
 };
+
+export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (props) => (
+  <EntityPermissionsPanel {...props} variant="dialog" />
+);
 
 function permissionsPathFor(entityType: PermissionEntityType, entityID: string): string {
   switch (entityType) {
@@ -781,7 +766,7 @@ const PERMISSION_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inse
 const permissionBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 180,
+  zIndex: 1,
   background: "rgba(241, 245, 249, 0.66)",
   backdropFilter: "blur(14px) saturate(1.18)",
   WebkitBackdropFilter: "blur(14px) saturate(1.18)",

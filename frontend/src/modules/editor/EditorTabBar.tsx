@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { EDITOR_TAB_ITEMS, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
+import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal";
+import { EDITOR_OVERFLOW_HEADER_TAB_IDS, EDITOR_PRIMARY_HEADER_TAB_IDS, EDITOR_TAB_ITEMS, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import { EDITOR_HIGHLIGHT_COLOR_ITEMS, normalizeEditorHighlightColor, type EditorHighlightColor } from "./richTextEditing";
 import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
+import type { EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
 
 const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
@@ -20,6 +22,16 @@ const EditorTableIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="13" height="13" viewBox="0 0 18 18" style={{ display: "block" }}>
     <rect x="3" y="4" width="12" height="10" rx="1.3" fill="none" stroke={color} strokeWidth="1.45" />
     <path d="M3 7.4h12M7 4v10M11 4v10" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
+const EditorAlignmentIcon: React.FC<{ alignment: EditorTextAlignment; color: string }> = ({ alignment, color }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    {[3, 6, 9, 12].map((y, index) => {
+      const width = index % 2 === 0 ? 11 : 8;
+      const x = alignment === "center" ? (16 - width) / 2 : alignment === "right" ? 14 - width : 2;
+      return <path key={y} d={`M${x} ${y}h${width}`} fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" />;
+    })}
   </svg>
 );
 
@@ -91,6 +103,13 @@ function colorWithAlpha(color: string, alpha: number): string {
 
   return `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
 }
+type EditorHeaderOverflowAction = {
+  id: string;
+  label: string;
+  onSelect: () => void;
+  disabled?: boolean;
+};
+
 
 type EditorTabBarProps = {
   activeTab: EditorTabID;
@@ -107,10 +126,14 @@ type EditorTabBarProps = {
   onSetSelectionFontSize: (fontSize: number) => void;
   boldActive: boolean;
   underlineActive: boolean;
+  italicActive: boolean;
   highlightColor: EditorHighlightColor | null;
+  textAlignment: EditorTextAlignment;
   onToggleBold: () => void;
   onToggleUnderline: () => void;
+  onToggleItalic: () => void;
   onSetSelectionHighlightColor: (color: EditorHighlightColor | null) => void;
+  onSetTextAlignment: (alignment: EditorTextAlignment) => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
@@ -119,13 +142,23 @@ type EditorTabBarProps = {
   saveCurrentVersionDisabled?: boolean;
   saveCurrentVersionBusy?: boolean;
   onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
+  secondaryActions?: readonly EditorHeaderOverflowAction[];
   reserveHeaderOffset?: boolean;
   visibleTabIDs?: readonly EditorTabID[];
   disabled?: boolean;
   formattingDisabled?: boolean;
 };
 
-type EditorFormatControlID = "decrease-font" | "font-size" | "increase-font" | "bold" | "underline" | "highlight";
+type EditorFormatControlID =
+  | "decrease-font"
+  | "font-size"
+  | "increase-font"
+  | "bold"
+  | "underline"
+  | "italic"
+  | "highlight"
+  | `align-${EditorTextAlignment}`
+  | "table";
 
 export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   activeTab,
@@ -142,10 +175,14 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onSetSelectionFontSize,
   boldActive,
   underlineActive,
+  italicActive,
   highlightColor,
+  textAlignment,
   onToggleBold,
   onToggleUnderline,
+  onToggleItalic,
   onSetSelectionHighlightColor,
+  onSetTextAlignment,
   onOutlineStyleFocus,
   onOutlineStyleChange,
   onCreateRelatedNode,
@@ -154,6 +191,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   saveCurrentVersionDisabled = false,
   saveCurrentVersionBusy = false,
   onRelationshipTabAnchorChange,
+  secondaryActions = [],
   reserveHeaderOffset = true,
   visibleTabIDs,
   disabled = false,
@@ -161,18 +199,17 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
-  const [createMenuOpen, setCreateMenuOpen] = useState(false);
-  const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "create" | null>(null);
+  const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+  const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "overflow" | null>(null);
   const [hoveredFormatControl, setHoveredFormatControl] = useState<EditorFormatControlID | null>(null);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const [customHighlightColor, setCustomHighlightColor] = useState<EditorHighlightColor>(highlightColor ?? EDITOR_HIGHLIGHT_COLOR_ITEMS[0].color);
   const cancelFontSizeCommitRef = useRef(false);
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
-  const outlineTriggerRef = useRef<HTMLButtonElement | null>(null);
   const highlightMenuRef = useRef<HTMLDivElement | null>(null);
-  const highlightTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const createMenuRef = useRef<HTMLDivElement | null>(null);
+  const overflowMenuRef = useRef<HTMLDivElement | null>(null);
+  const overflowTriggerRef = useRef<HTMLButtonElement | null>(null);
   const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
   const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
   const outlineMenuSurface = "linear-gradient(145deg, rgba(248, 251, 255, 0.98), rgba(230, 236, 246, 0.96))";
@@ -182,6 +219,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
   const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
   const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
+  const primaryTabs = visibleTabs.filter((tab) => EDITOR_PRIMARY_HEADER_TAB_IDS.includes(tab.id));
+  const overflowTabs = visibleTabs.filter((tab) => EDITOR_OVERFLOW_HEADER_TAB_IDS.includes(tab.id));
+  const hasOverflowActions = overflowTabs.length > 0 || secondaryActions.length > 0 || Boolean(onSaveCurrentVersion) || Boolean(onCreateRelatedNode);
   const formatControlsDisabled = disabled || formattingDisabled;
 
   useEffect(() => {
@@ -196,6 +236,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     if (formatControlsDisabled) setHighlightMenuOpen(false);
   }, [formatControlsDisabled]);
 
+  useAppFloatingMenuDismissal(outlineMenuOpen, outlineMenuRef, () => setOutlineMenuOpen(false));
+  useAppFloatingMenuDismissal(highlightMenuOpen, highlightMenuRef, () => setHighlightMenuOpen(false));
+  useAppFloatingMenuDismissal(overflowMenuOpen, overflowMenuRef, () => setOverflowMenuOpen(false));
+
   const commitFontSizeDraft = () => {
     const parsed = Number.parseInt(fontSizeDraft, 10);
     if (!Number.isFinite(parsed)) {
@@ -206,65 +250,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     setFontSizeDraft(String(nextFontSize));
     onSetSelectionFontSize(nextFontSize);
   };
-
-  useEffect(() => {
-    if (!outlineMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (outlineMenuRef.current?.contains(event.target as Node)) return;
-      setOutlineMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOutlineMenuOpen(false);
-      window.requestAnimationFrame(() => outlineTriggerRef.current?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [outlineMenuOpen]);
-
-  useEffect(() => {
-    if (!highlightMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (highlightMenuRef.current?.contains(event.target as Node)) return;
-      setHighlightMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setHighlightMenuOpen(false);
-      window.requestAnimationFrame(() => highlightTriggerRef.current?.focus({ preventScroll: true }));
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [highlightMenuOpen]);
-
-  useEffect(() => {
-    if (!createMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (createMenuRef.current?.contains(event.target as Node)) return;
-      setCreateMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCreateMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", closeOnPointerDown);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointerDown);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [createMenuOpen]);
 
   useEffect(() => {
     if (!onRelationshipTabAnchorChange) return;
@@ -337,19 +322,36 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     onMouseEnter: () => setHoveredFormatControl(id),
     onMouseLeave: () => setHoveredFormatControl((current) => (current === id ? null : current)),
   });
-  const inlineFormatButtonStyle = (id: EditorFormatControlID, active: boolean, withRightBorder = true): React.CSSProperties => ({
-    ...formatControlStyle(id, { active, withRightBorder }),
-    height: 24,
-    textDecoration: active && !withRightBorder ? "underline" : undefined,
-  });
+  const inlineFormatButtonStyle = (id: EditorFormatControlID, active: boolean): React.CSSProperties => (
+    formatControlStyle(id, { active })
+  );
+  const preserveEditorSelection: React.PointerEventHandler<HTMLElement> = (event) => event.preventDefault();
+  const toggleHeaderMenu = (menu: "outline" | "highlight" | "overflow") => {
+    const opening = menu === "outline" ? !outlineMenuOpen : menu === "highlight" ? !highlightMenuOpen : !overflowMenuOpen;
+    setOutlineMenuOpen(menu === "outline" && opening);
+    setHighlightMenuOpen(menu === "highlight" && opening);
+    setOverflowMenuOpen(menu === "overflow" && opening);
+    if (menu === "overflow" && opening) {
+      window.requestAnimationFrame(() => overflowMenuRef.current?.querySelector<HTMLButtonElement>('[data-mango-editor-header-overflow-menu] button:not(:disabled)')?.focus({ preventScroll: true }));
+    }
+  };
+  const runOverflowAction = (action: () => void) => {
+    setOverflowMenuOpen(false);
+    overflowTriggerRef.current?.focus({ preventScroll: true });
+    action();
+  };
 
   return (
     <div
+      role="toolbar"
+      aria-label="Editor header controls"
+      data-mango-editor-header="true"
+      data-mango-editor-header-primary={primaryTabs.map((tab) => tab.id).join(" ")}
       data-mango-unified-editor-toolbar="true"
       data-mango-unified-editor-toolbar-tabs={visibleTabs.map((tab) => tab.id).join(" ")}
-      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
+      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
     >
-      {visibleTabs.map((tab) => {
+      {primaryTabs.map((tab) => {
         const selected = activeTab === tab.id;
         const hovered = hoveredTabID === tab.id;
         const tabStyle = tabStyleFor(selected, hovered);
@@ -359,10 +361,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
             <div
               key={tab.id}
               ref={highlightMenuRef}
+              role="group"
               aria-label="Format controls"
-              onMouseEnter={() => setHoveredTabID(tab.id)}
-              onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
-              style={{ ...tabStyle, position: "relative", display: "inline-flex", alignItems: "center", gap: 0, padding: 0, overflow: "visible" }}
+              data-mango-editor-format-group="true"
+              style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0, padding: 0, overflow: "visible", flex: "0 0 auto", border: `1px solid ${strokeColor}`, borderRadius: 8, background: tabBackground }}
             >
               <button
                 type="button"
@@ -371,7 +373,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="decrease-font"
                 {...formatControlHoverHandlers("decrease-font")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -421,7 +423,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     event.currentTarget.select();
                   }
                 }}
-                style={{ ...formatControlStyle("font-size", { width: 34 }), cursor: formatControlsDisabled ? "default" : "text", textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
+                style={{ ...formatControlStyle("font-size", { width: 34 }), cursor: formatControlsDisabled ? "default" : "text", textAlign: "center", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
               />
               <button
                 type="button"
@@ -430,7 +432,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="increase-font"
                 {...formatControlHoverHandlers("increase-font")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -448,7 +450,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="bold"
                 {...formatControlHoverHandlers("bold")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -466,7 +468,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="underline"
                 {...formatControlHoverHandlers("underline")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (formatControlsDisabled) return;
@@ -477,7 +479,24 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 <span style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>U</span>
               </button>
               <button
-                ref={highlightTriggerRef}
+                type="button"
+                aria-label="Italic"
+                title="Italic"
+                aria-pressed={italicActive}
+                disabled={formatControlsDisabled}
+                data-mango-editor-format-control="italic"
+                {...formatControlHoverHandlers("italic")}
+                onPointerDown={preserveEditorSelection}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (formatControlsDisabled) return;
+                  onToggleItalic();
+                }}
+                style={inlineFormatButtonStyle("italic", italicActive)}
+              >
+                <span style={{ fontStyle: "italic" }}>I</span>
+              </button>
+              <button
                 type="button"
                 aria-label="Text highlight"
                 title="Text highlight"
@@ -487,19 +506,18 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 disabled={formatControlsDisabled}
                 data-mango-editor-format-control="highlight"
                 {...formatControlHoverHandlers("highlight")}
-                onPointerDown={(event) => event.preventDefault()}
+                onPointerDown={preserveEditorSelection}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (!formatControlsDisabled) setHighlightMenuOpen((open) => !open);
+                  if (!formatControlsDisabled) toggleHeaderMenu("highlight");
                 }}
                 style={{
-                  ...formatControlStyle("highlight", { active: Boolean(highlightColor), withRightBorder: false, width: 40 }),
+                  ...formatControlStyle("highlight", { active: Boolean(highlightColor), width: 40 }),
                   display: "inline-flex",
                   gridAutoFlow: undefined,
                   alignItems: "center",
                   justifyContent: "center",
                   gap: 3,
-                  borderRadius: "0 8px 8px 0",
                 }}
               >
                 <span aria-hidden="true" style={{ width: 13, height: 13, display: "grid", placeItems: "center", borderBottom: `4px solid ${highlightColor ?? "#fef08a"}`, fontSize: 10, lineHeight: 1 }}>A</span>
@@ -536,7 +554,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                           aria-label={`${item.label} highlight`}
                           aria-checked={colorSelected}
                           title={item.label}
-                          onPointerDown={(event) => event.preventDefault()}
+                          onPointerDown={preserveEditorSelection}
                           onClick={() => {
                             onSetSelectionHighlightColor(item.color);
                             setCustomHighlightColor(item.color);
@@ -574,18 +592,62 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     <button
                       type="button"
                       role="menuitem"
-                      aria-label="Clear highlight"
-                      onPointerDown={(event) => event.preventDefault()}
+                      aria-label="No highlight"
+                      title="No highlight"
+                      onPointerDown={preserveEditorSelection}
                       onClick={() => {
                         onSetSelectionHighlightColor(null);
                         setHighlightMenuOpen(false);
                       }}
                       style={{ minHeight: 27, border: `1px solid ${strokeColor}`, borderRadius: 7, background: "rgba(255,255,255,0.78)", color: surfaceText, padding: "0 8px", cursor: "pointer", fontSize: 10, fontWeight: 800 }}
                     >
-                      Clear
+                      No highlight
                     </button>
                   </div>
                 </div>
+              )}
+              {(["left", "center", "right"] as const).map((alignment) => {
+                const controlID = `align-${alignment}` as const;
+                const label = `Align ${alignment}`;
+                const active = textAlignment === alignment;
+                return (
+                  <button
+                    key={alignment}
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    aria-pressed={active}
+                    disabled={formatControlsDisabled}
+                    data-mango-editor-format-control={controlID}
+                    {...formatControlHoverHandlers(controlID)}
+                    onPointerDown={preserveEditorSelection}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!formatControlsDisabled) onSetTextAlignment(alignment);
+                    }}
+                    style={inlineFormatButtonStyle(controlID, active)}
+                  >
+                    <EditorAlignmentIcon alignment={alignment} color={active ? outlineMenuAccent : surfaceText} />
+                  </button>
+                );
+              })}
+              {onInsertTable && (
+                <button
+                  type="button"
+                  aria-label="Insert table"
+                  title="Insert table"
+                  disabled={formatControlsDisabled}
+                  data-mango-editor-format-control="table"
+                  {...formatControlHoverHandlers("table")}
+                  onPointerDown={preserveEditorSelection}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!formatControlsDisabled) onInsertTable();
+                  }}
+                  style={{ ...formatControlStyle("table", { withRightBorder: false }), borderRadius: "0 8px 8px 0" }}
+                >
+                  <EditorTableIcon color={surfaceText} />
+                </button>
               )}
             </div>
           );
@@ -601,7 +663,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               style={{ position: "relative", flex: "0 0 auto" }}
             >
               <button
-                ref={outlineTriggerRef}
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={outlineMenuOpen}
@@ -610,7 +671,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 onClick={() => {
                   if (disabled) return;
                   onOutlineStyleFocus();
-                  setOutlineMenuOpen((open) => !open);
+                  toggleHeaderMenu("outline");
                 }}
                 style={{ ...tabStyle, display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 7 }}
               >
@@ -713,7 +774,6 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         return (
           <button
             key={tab.id}
-            ref={tab.id === "relationships" ? relationshipTabRef : undefined}
             type="button"
             onMouseEnter={() => setHoveredTabID(tab.id)}
             onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
@@ -727,89 +787,74 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           </button>
         );
       })}
-      {onInsertTable && (
-        <button
-          type="button"
-          aria-label="Insert table"
-          title="Insert table"
-          disabled={formatControlsDisabled}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            if (!formatControlsDisabled) onInsertTable();
-          }}
-          style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0, cursor: formatControlsDisabled ? "default" : "pointer", opacity: formatControlsDisabled ? 0.54 : 1 }}
-        >
-          <EditorTableIcon color={surfaceText} />
-        </button>
-      )}
-      {onSaveCurrentVersion && (
-        <button
-          type="button"
-          aria-label="Save version"
-          title="Save version"
-          disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={onSaveCurrentVersion}
-          style={{
-            ...tabStyleFor(false, false),
-            minWidth: 58,
-            height: 26,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "0 10px",
-            color: saveCurrentVersionDisabled || saveCurrentVersionBusy ? colorWithAlpha(surfaceText, 0.46) : accent,
-            cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer",
-          }}
-        >
-          {saveCurrentVersionBusy ? "Saving" : "Save"}
-        </button>
-      )}
-      {onCreateRelatedNode && (
-        <div ref={createMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
+      {hasOverflowActions && (
+        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: "auto" }}>
           <button
+            ref={(element) => {
+              overflowTriggerRef.current = element;
+              relationshipTabRef.current = overflowTabs.some((tab) => tab.id === "relationships") ? element : null;
+            }}
             type="button"
-            aria-label="Create related node"
+            aria-label="More editor actions"
             aria-haspopup="menu"
-            aria-expanded={createMenuOpen}
-            title="Create related node"
-            onMouseEnter={() => setHoveredTabID("create")}
-            onMouseLeave={() => setHoveredTabID((current) => (current === "create" ? null : current))}
-            onClick={() => setCreateMenuOpen((open) => !open)}
+            aria-expanded={overflowMenuOpen}
+            title="More editor actions"
+            data-mango-editor-header-overflow-trigger="true"
+            onMouseEnter={() => setHoveredTabID("overflow")}
+            onMouseLeave={() => setHoveredTabID((current) => (current === "overflow" ? null : current))}
+            onClick={() => toggleHeaderMenu("overflow")}
             style={{
-              width: 26,
+              minWidth: 58,
               height: 24,
-              border: `1px solid ${createMenuOpen || hoveredTabID === "create" ? "transparent" : strokeColor}`,
+              border: `1px solid ${overflowMenuOpen || hoveredTabID === "overflow" ? "transparent" : strokeColor}`,
               borderRadius: 8,
-              background: createMenuOpen
+              background: overflowMenuOpen
                 ? `${tabSelectedBackground} padding-box, ${tabFrameBackground} border-box`
-                : hoveredTabID === "create"
+                : hoveredTabID === "overflow"
                   ? `${tabHoverBackground} padding-box, ${tabFrameBackground} border-box`
                   : tabBackground,
               color: accent,
               cursor: "pointer",
-              fontSize: 17,
-              fontWeight: 500,
+              fontSize: 10,
+              fontWeight: 750,
               lineHeight: 1,
-              display: "grid",
-              placeItems: "center",
-              padding: 0,
-              boxShadow: createMenuOpen || hoveredTabID === "create" ? tabHoverShadow : "none",
-              transform: hoveredTabID === "create" && !createMenuOpen ? "translateY(-1px)" : "translateY(0)",
-              transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              padding: "0 8px",
+              boxShadow: overflowMenuOpen || hoveredTabID === "overflow" ? tabHoverShadow : "none",
+              transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease",
             }}
           >
-            +
+            <span>More</span>
+            <EditorDisclosureIcon color={surfaceText} />
           </button>
-          {createMenuOpen && (
+          {overflowMenuOpen && (
             <div
               role="menu"
-              aria-label="Create related node"
+              aria-label="More editor actions"
+              data-mango-editor-header-overflow-menu="true"
+              onKeyDown={(event) => {
+                if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+                if (items.length === 0) return;
+                const currentIndex = items.indexOf(event.target as HTMLButtonElement);
+                const nextIndex = event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? items.length - 1
+                    : event.key === "ArrowUp"
+                      ? (currentIndex <= 0 ? items.length - 1 : currentIndex - 1)
+                      : (currentIndex + 1) % items.length;
+                items[nextIndex]?.focus();
+              }}
               style={{
                 position: "absolute",
                 top: "calc(100% + 5px)",
-                left: 0,
-                width: 178,
+                right: 0,
+                width: 220,
                 padding: 5,
                 border: `1px solid ${strokeColor}`,
                 borderRadius: 6,
@@ -819,6 +864,57 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 gap: 3,
               }}
             >
+              {overflowTabs.map((tab) => {
+                const selected = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    disabled={disabled}
+                    data-mango-editor-header-overflow-action={tab.id}
+                    onClick={() => {
+                      if (disabled) return;
+                      runOverflowAction(() => onSelectTab(tab.id));
+                    }}
+                    style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: selected ? colorWithAlpha(outlineMenuAccent, 0.14) : "transparent", color: surfaceText, cursor: disabled ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: selected ? 800 : 700 }}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+              {secondaryActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={action.disabled}
+                  data-mango-editor-header-overflow-action={action.id}
+                  onClick={() => {
+                    if (action.disabled) return;
+                    runOverflowAction(action.onSelect);
+                  }}
+                  style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: "transparent", color: action.disabled ? colorWithAlpha(surfaceText, 0.46) : surfaceText, cursor: action.disabled ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: 700 }}
+                >
+                  {action.label}
+                </button>
+              ))}
+              {onSaveCurrentVersion && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
+                  data-mango-editor-header-overflow-action="save-version"
+                  onClick={() => runOverflowAction(onSaveCurrentVersion)}
+                  style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: "transparent", color: saveCurrentVersionDisabled || saveCurrentVersionBusy ? colorWithAlpha(surfaceText, 0.46) : accent, cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: 750 }}
+                >
+                  {saveCurrentVersionBusy ? "Saving version" : "Save version"}
+                </button>
+              )}
+              {onCreateRelatedNode && (
+                <>
+                  {(overflowTabs.length > 0 || secondaryActions.length > 0 || onSaveCurrentVersion) && <div role="separator" style={{ height: 1, margin: "3px 5px", background: colorWithAlpha(strokeColor, 0.72) }} />}
               {[
                 ["parent", "Create parent node"],
                 ["peer", "Create peer node"],
@@ -828,10 +924,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   key={kind}
                   type="button"
                   role="menuitem"
-                  onClick={() => {
-                    setCreateMenuOpen(false);
-                    onCreateRelatedNode(kind as EditorRelatedNodeCreationKind);
-                  }}
+                  onClick={() => runOverflowAction(() => onCreateRelatedNode(kind as EditorRelatedNodeCreationKind))}
                   style={{
                     width: "100%",
                     minHeight: 28,
@@ -850,6 +943,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   {label}
                 </button>
               ))}
+                </>
+              )}
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
@@ -350,47 +351,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     onSetIsEditingTitle(false);
   }, [canEdit, onSetIsEditingTitle]);
 
-  useEffect(() => {
-    if (!statusMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (statusMenuRef.current?.contains(event.target as Node)) return;
-      setStatusMenuOpen(false);
-      setHoveredStatusValue("");
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setStatusMenuOpen(false);
-        setHoveredStatusValue("");
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [statusMenuOpen]);
-
-  useEffect(() => {
-    if (!priorityMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (priorityMenuRef.current?.contains(event.target as Node)) return;
-      setPriorityMenuOpen(false);
-      setHoveredPriorityValue("");
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPriorityMenuOpen(false);
-        setHoveredPriorityValue("");
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [priorityMenuOpen]);
+  useAppFloatingMenuDismissal(statusMenuOpen, statusMenuRef, () => {
+    setStatusMenuOpen(false);
+    setHoveredStatusValue("");
+  });
+  useAppFloatingMenuDismissal(priorityMenuOpen, priorityMenuRef, () => {
+    setPriorityMenuOpen(false);
+    setHoveredPriorityValue("");
+  });
 
   const beginTitleEditAtEnd = () => {
     if (!canEdit) return;
@@ -1007,6 +975,7 @@ function GVICRoleEditor({
   onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 }) {
+  const floatingPortalTarget = useAppOverlayPortalTarget();
   const inputID = useId();
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
@@ -1207,8 +1176,15 @@ function GVICRoleEditor({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        const trigger = open
+          ? inputAnchorRef.current?.querySelector<HTMLButtonElement>(":scope > button")
+          : assignedAnchorRef.current?.querySelector<HTMLButtonElement>(":scope > button");
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setOpen(false);
         setAssignedOpen(false);
+        window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
       }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -1299,7 +1275,7 @@ function GVICRoleEditor({
               {assignmentChipLabel}
             </span>
           )}
-          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && typeof document !== "undefined" && createPortal(
+          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && floatingPortalTarget && createPortal(
           <div
             ref={assignedListRef}
             id={`${inputID}-assigned-users`}
@@ -1343,7 +1319,7 @@ function GVICRoleEditor({
               );
             })}
           </div>,
-          document.body,
+          floatingPortalTarget,
           )}
         </div>
         <div
@@ -1403,7 +1379,7 @@ function GVICRoleEditor({
             {disabledReason}
           </div>
         )}
-        {canEdit && open && pickerListPosition && typeof document !== "undefined" && createPortal(
+        {canEdit && open && pickerListPosition && floatingPortalTarget && createPortal(
           <div
             ref={pickerListRef}
             id={`${inputID}-options`}
@@ -1481,7 +1457,7 @@ function GVICRoleEditor({
               })}
             </div>
           </div>,
-          document.body,
+          floatingPortalTarget,
         )}
         </div>
       </div>

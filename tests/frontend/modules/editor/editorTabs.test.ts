@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState } from "../../../../frontend/src/modules/editor/editorTabs.js";
+import { EDITOR_OVERFLOW_HEADER_TAB_IDS, EDITOR_PRIMARY_HEADER_TAB_IDS, EDITOR_TAB_ITEMS, getEditorDocumentIsolationState } from "../../../../frontend/src/modules/editor/editorTabs.js";
 
 test("editor exposes the document, permissions, relationships, format, outline style, metadata, history, and save settings tabs", () => {
   assert.deepEqual(EDITOR_TAB_ITEMS.map((tab) => tab.id), [
@@ -13,6 +13,22 @@ test("editor exposes the document, permissions, relationships, format, outline s
     "history",
     "save-settings",
   ]);
+});
+
+test("editor header keeps primary editing controls ordered before secondary overflow actions", () => {
+  assert.deepEqual(EDITOR_PRIMARY_HEADER_TAB_IDS, [
+    "editor",
+    "permissions",
+    "format",
+    "outline-styles",
+  ]);
+  assert.deepEqual(EDITOR_OVERFLOW_HEADER_TAB_IDS, [
+    "relationships",
+    "metadata",
+    "history",
+    "save-settings",
+  ]);
+  assert.deepEqual(new Set([...EDITOR_PRIMARY_HEADER_TAB_IDS, ...EDITOR_OVERFLOW_HEADER_TAB_IDS]), new Set(EDITOR_TAB_ITEMS.map((tab) => tab.id)));
 });
 
 test("editor document is visible and interactive on editing tabs", () => {

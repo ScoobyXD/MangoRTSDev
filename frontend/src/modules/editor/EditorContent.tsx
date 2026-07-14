@@ -87,6 +87,7 @@ import {
   type EditorDocumentFormattingController,
   type EditorInlineStyleCommand,
   type EditorSelectionInlineFormatState,
+  type EditorTextAlignment,
 } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -619,8 +620,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
   const [selectionHighlightColor, setSelectionHighlightColor] = useState<EditorHighlightColor | null>(null);
+  const [selectionTextAlignment, setSelectionTextAlignment] = useState<EditorTextAlignment>("left");
   const [nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable] = useState(false);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
@@ -655,6 +657,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
   const restoreDocumentSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
+  const pendingEditorHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
   const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const logicFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
@@ -971,9 +974,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setSelectionInlineFormat({ bold: false, underline: false });
+    setSelectionInlineFormat({ bold: false, underline: false, italic: false });
     setSelectionHighlightColor(null);
     pendingEditorFontSizeRef.current = null;
+    pendingEditorHighlightColorRef.current = undefined;
+    setSelectionTextAlignment("left");
     restoringScrollRef.current = true;
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
     if (element) {
@@ -1116,8 +1121,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     setDocumentInformationID("");
     pendingEditorFontSizeRef.current = null;
+    pendingEditorHighlightColorRef.current = undefined;
+    setSelectionTextAlignment("left");
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setSelectionInlineFormat({ bold: false, underline: false });
+    setSelectionInlineFormat({ bold: false, underline: false, italic: false });
     setSelectionHighlightColor(null);
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
@@ -1819,6 +1826,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (linkedEntityCanEdit) return;
     updateIsEditingTitle(false);
     pendingEditorFontSizeRef.current = null;
+    pendingEditorHighlightColorRef.current = undefined;
     editorDocumentRef.current?.blur();
     window.getSelection()?.removeAllRanges();
   }, [linkedEntityCanEdit, linkedNodeID, updateIsEditingTitle]);
@@ -2277,8 +2285,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
       setDocumentInformationID("");
       pendingEditorFontSizeRef.current = null;
+      pendingEditorHighlightColorRef.current = undefined;
+      setSelectionTextAlignment("left");
       setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-      setSelectionInlineFormat({ bold: false, underline: false });
+      setSelectionInlineFormat({ bold: false, underline: false, italic: false });
       setSelectionHighlightColor(null);
       if (editorDocumentRef.current) {
         attachmentHydrationCleanupRef.current?.();
@@ -2473,6 +2483,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     scrollMemoryRef,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef,
+    pendingEditorHighlightColorRef,
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: scheduleDocumentSave,
@@ -2482,6 +2493,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     onSelectionFontSizeChange: updateSelectionFontSize,
     onSelectionInlineFormatChange: updateSelectionInlineFormat,
     onSelectionHighlightColorChange: setSelectionHighlightColor,
+    onSelectionTextAlignmentChange: setSelectionTextAlignment,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
@@ -2501,6 +2513,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     outlineStyle,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef,
+    pendingEditorHighlightColorRef,
     restoreSelection: restoreDocumentSelection,
     insertTable: insertDocumentTable,
     scheduleDocumentSave: scheduleDocumentSave,
@@ -2508,6 +2521,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     onSelectionFontSizeChange: updateSelectionFontSize,
     onSelectionInlineFormatChange: updateSelectionInlineFormat,
     onSelectionHighlightColorChange: setSelectionHighlightColor,
+    onSelectionTextAlignmentChange: setSelectionTextAlignment,
   });
   useEffect(() => {
     logicFormattingControllerRef.current = logicFormattingController;
@@ -2602,10 +2616,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSetSelectionFontSize={applyEditorSelectionFontSizeValue}
             boldActive={selectionInlineFormat.bold}
             underlineActive={selectionInlineFormat.underline}
+            italicActive={selectionInlineFormat.italic}
             highlightColor={selectionHighlightColor}
+            textAlignment={selectionTextAlignment}
             onToggleBold={() => toggleEditorInlineFormat("bold")}
             onToggleUnderline={() => toggleEditorInlineFormat("underline")}
+            onToggleItalic={() => toggleEditorInlineFormat("italic")}
             onSetSelectionHighlightColor={applyEditorSelectionHighlightColor}
+            onSetTextAlignment={(alignment) => currentFormattingController()?.applyTextAlignment(alignment)}
             formattingDisabled={documentIsolation.pointerEvents !== "auto" || !linkedEntityCanEdit || (linkedEntityKind === "node" && !nodeFormattingControllerAvailable)}
             onOutlineStyleFocus={() => setActiveTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
@@ -2613,9 +2631,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               setActiveTab("outline-styles");
             }}
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
-            onInsertTable={linkedEntityKind !== "node" && linkedEntityCanEdit ? () => logicFormattingControllerRef.current?.insertTable() : undefined}
+            onInsertTable={linkedEntityCanEdit ? () => currentFormattingController()?.insertTable() : undefined}
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
-            saveCurrentVersionDisabled={!linkedEntityCanEdit || saveVersionRestoring}
+            saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
@@ -2786,6 +2804,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSelectionFontSizeChange={updateSelectionFontSize}
             onSelectionInlineFormatChange={updateSelectionInlineFormat}
             onSelectionHighlightColorChange={setSelectionHighlightColor}
+            onSelectionTextAlignmentChange={setSelectionTextAlignment}
             onFormattingControllerAvailabilityChange={setNodeFormattingControllerAvailable}
             onRegisterSaveController={(controller) => {
               nodeWorkspaceSaveControllerRef.current = controller;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
@@ -31,7 +31,7 @@ import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } 
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
-import type { EditorSelectionInlineFormatState } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
+import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -778,16 +778,6 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   useEffect(() => setNodeEditorFullscreenChromeActive(popupFullscreen), [popupFullscreen]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  useEffect(() => {
     const onResize = () => setPopupRect((current) => (popupFullscreen ? fullscreenNodeEditorPopupRect() : clampNodeEditorPopupRect(current)));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -874,7 +864,8 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   }, [deleteBusy, nodeID, onClose, onDeleteNode]);
 
   return (
-    <div
+    <AppModalPortal onRequestClose={onClose}>
+      <div
       style={nodeEditorPopupBackdropStyle}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -960,7 +951,8 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
           />
         )}
       </UnifiedNodeShell>
-    </div>
+      </div>
+    </AppModalPortal>
   );
 }
 
@@ -1117,6 +1109,7 @@ export function SharedInboxGVICSettingsModal({
   };
 
   return (
+    <AppModalPortal onRequestClose={busy ? undefined : onClose}>
     <div style={sharedGVICBackdropStyle}>
       <section style={sharedGVICModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
         <div style={panelHeaderStyle}>
@@ -1226,13 +1219,14 @@ export function SharedInboxGVICSettingsModal({
         </div>
       </section>
     </div>
+    </AppModalPortal>
   );
 }
 
 const sharedGVICBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 80,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 20,
@@ -5027,13 +5021,15 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const [bodyOutlineStyle, setBodyOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
   const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
   const [bodyHighlightColor, setBodyHighlightColor] = React.useState<EditorHighlightColor | null>(null);
+  const [bodyTextAlignment, setBodyTextAlignment] = React.useState<EditorTextAlignment>("left");
   const [signatureOutlineStyle, setSignatureOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [signatureToolbarTab, setSignatureToolbarTab] = React.useState<EditorTabID>("format");
   const [signatureSelectionFontSize, setSignatureSelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
-  const [signatureSelectionInlineFormat, setSignatureSelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [signatureSelectionInlineFormat, setSignatureSelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false });
   const [signatureHighlightColor, setSignatureHighlightColor] = React.useState<EditorHighlightColor | null>(null);
+  const [signatureTextAlignment, setSignatureTextAlignment] = React.useState<EditorTextAlignment>("left");
   const apiBase = readAuthConfig().apiBase;
   const attachmentRequestJSON = React.useMemo(() => defaultAttachmentRequestJSON(apiBase), [apiBase]);
   const update = (patch: Partial<ComposeState> | ((current: ComposeState) => Partial<ComposeState>)) => {
@@ -5262,8 +5258,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const state = bodyEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setBodySelectionFontSize(state.fontSize);
-    setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
     setBodyHighlightColor(state.highlightColor);
+    setBodyTextAlignment(state.textAlignment);
   };
   const adjustBodyFontSize = (delta: number) => {
     bodyEditorControllerRef.current?.adjustFontSize(delta);
@@ -5273,7 +5270,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     bodyEditorControllerRef.current?.applyFontSizeValue(fontSize);
     syncBodyToolbarFormatState();
   };
-  const toggleBodyInlineFormat = (command: "bold" | "underline") => {
+  const toggleBodyInlineFormat = (command: EditorInlineStyleCommand) => {
     bodyEditorControllerRef.current?.toggleInlineFormat(command);
     syncBodyToolbarFormatState();
   };
@@ -5281,12 +5278,17 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     bodyEditorControllerRef.current?.applyHighlightColor(color);
     syncBodyToolbarFormatState();
   };
+  const setBodySelectionTextAlignment = (alignment: EditorTextAlignment) => {
+    bodyEditorControllerRef.current?.applyTextAlignment(alignment);
+    syncBodyToolbarFormatState();
+  };
   const syncSignatureToolbarFormatState = () => {
     const state = signatureEditorControllerRef.current?.readFormatState();
     if (!state) return;
     setSignatureSelectionFontSize(state.fontSize);
-    setSignatureSelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setSignatureSelectionInlineFormat({ bold: state.bold, underline: state.underline, italic: state.italic });
     setSignatureHighlightColor(state.highlightColor);
+    setSignatureTextAlignment(state.textAlignment);
   };
   const adjustSignatureFontSize = (delta: number) => {
     signatureEditorControllerRef.current?.adjustFontSize(delta);
@@ -5296,7 +5298,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     signatureEditorControllerRef.current?.applyFontSizeValue(fontSize);
     syncSignatureToolbarFormatState();
   };
-  const toggleSignatureInlineFormat = (command: "bold" | "underline") => {
+  const toggleSignatureInlineFormat = (command: EditorInlineStyleCommand) => {
     signatureEditorControllerRef.current?.toggleInlineFormat(command);
     syncSignatureToolbarFormatState();
   };
@@ -5305,6 +5307,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     syncSignatureToolbarFormatState();
   };
   const isReplyMode = !!replyMessage;
+  const setSignatureSelectionTextAlignment = (alignment: EditorTextAlignment) => {
+    signatureEditorControllerRef.current?.applyTextAlignment(alignment);
+    syncSignatureToolbarFormatState();
+  };
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -5477,10 +5483,15 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
             onSetSelectionFontSize={setBodyFontSize}
             boldActive={bodySelectionInlineFormat.bold}
             underlineActive={bodySelectionInlineFormat.underline}
+            italicActive={bodySelectionInlineFormat.italic}
             highlightColor={bodyHighlightColor}
+            textAlignment={bodyTextAlignment}
             onToggleBold={() => toggleBodyInlineFormat("bold")}
             onToggleUnderline={() => toggleBodyInlineFormat("underline")}
+            onToggleItalic={() => toggleBodyInlineFormat("italic")}
             onSetSelectionHighlightColor={setBodySelectionHighlightColor}
+            onSetTextAlignment={setBodySelectionTextAlignment}
+            onInsertTable={() => bodyEditorControllerRef.current?.insertTable()}
             onOutlineStyleFocus={() => setBodyToolbarTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
               setBodyOutlineStyle(nextOutlineStyle);
@@ -5505,6 +5516,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           onSelectionFontSizeChange={setBodySelectionFontSize}
           onSelectionInlineFormatChange={setBodySelectionInlineFormat}
           onSelectionHighlightColorChange={setBodyHighlightColor}
+          onSelectionTextAlignmentChange={setBodyTextAlignment}
           editorImageAttachmentContext={composeEditorImageAttachmentContext}
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
@@ -5561,10 +5573,15 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               onSetSelectionFontSize={setSignatureFontSize}
               boldActive={signatureSelectionInlineFormat.bold}
               underlineActive={signatureSelectionInlineFormat.underline}
+              italicActive={signatureSelectionInlineFormat.italic}
               highlightColor={signatureHighlightColor}
+              textAlignment={signatureTextAlignment}
               onToggleBold={() => toggleSignatureInlineFormat("bold")}
               onToggleUnderline={() => toggleSignatureInlineFormat("underline")}
+              onToggleItalic={() => toggleSignatureInlineFormat("italic")}
               onSetSelectionHighlightColor={setSignatureSelectionHighlightColor}
+              onSetTextAlignment={setSignatureSelectionTextAlignment}
+              onInsertTable={() => signatureEditorControllerRef.current?.insertTable()}
               onOutlineStyleFocus={() => setSignatureToolbarTab("outline-styles")}
               onOutlineStyleChange={(nextOutlineStyle) => {
                 setSignatureOutlineStyle(nextOutlineStyle);
@@ -5588,6 +5605,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               onSelectionFontSizeChange={setSignatureSelectionFontSize}
               onSelectionInlineFormatChange={setSignatureSelectionInlineFormat}
               onSelectionHighlightColorChange={setSignatureHighlightColor}
+              onSelectionTextAlignmentChange={setSignatureTextAlignment}
               editorImageAttachmentContext={signatureEditorImageAttachmentContext}
               onEditorImageAttachmentError={setAttachmentError}
               onChange={onEmailSignatureChange}
@@ -5762,15 +5780,16 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
           style={{ ...iframeStyle, ...style, ...availableHeightStyle, height: frameInitialHeight, overflow: "hidden" }}
         />
       </div>
-      {previewImage && typeof document !== "undefined" && createPortal(
-        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+      {previewImage && (
+        <AppModalPortal onRequestClose={() => setPreviewImage(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Email image preview" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
           <img src={previewImage.src} alt={previewImage.filename} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
             <button type="button" style={mailPanelSmallButtonStyle} onClick={() => downloadURL(previewImage.src, previewImage.filename)}>Download</button>
             <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setPreviewImage(null)}>Close</button>
           </div>
-        </div>,
-        document.body,
+        </div>
+        </AppModalPortal>
       )}
     </>
   );
@@ -6186,4 +6205,3 @@ export function DeleteHomeEntitiesConfirmationModal({ targets, busy, position, o
     />
   );
 }
-

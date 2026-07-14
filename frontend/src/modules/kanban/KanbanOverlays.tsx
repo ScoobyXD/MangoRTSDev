@@ -1,6 +1,7 @@
 import React from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { AppModalPortal, useAppViewportAnchorRect } from "../../app/AppModalPortal";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../editor/UnifiedNodeShell";
 import {
@@ -144,9 +145,11 @@ export function KanbanAccountAssignmentModal({
   onSave: () => void;
   onCancel: () => void;
 }) {
+
   return (
-    <div style={modalBackdropStyle}>
-      <div style={modalPanelStyle}>
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={modalBackdropStyle} onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+      <div role="dialog" aria-modal="true" aria-label={`Accounts for ${title}`} style={modalPanelStyle}>
         <div style={{ fontSize: 12, fontWeight: 760, color: "#111111", overflowWrap: "anywhere" }}>
           Accounts for {title}
         </div>
@@ -163,6 +166,7 @@ export function KanbanAccountAssignmentModal({
         </div>
       </div>
     </div>
+    </AppModalPortal>
   );
 }
 
@@ -201,7 +205,9 @@ export function KanbanNodeEditorOverlay({
   onOpenInNewTab?: () => void;
   onRequestDelete?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
 }) {
-  const boardWidth = boardRootRef.current?.getBoundingClientRect().width ?? 0;
+  const boardRect = useAppViewportAnchorRect(boardRootRef);
+  const boardWidth = boardRect?.width ?? 0;
+  const boardHeight = boardRect?.height ?? 0;
   const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow);
   const renderedLeft = boardWidth > 0
     ? Math.max(ratio.left, minLeftPx / boardWidth)
@@ -209,24 +215,23 @@ export function KanbanNodeEditorOverlay({
   const renderedLeftPx = boardWidth * renderedLeft;
   const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - 22) : 0;
   const renderedWidth = boardWidth > 0 ? Math.min(ratio.width, availableWidthPx / boardWidth) : ratio.width;
+  const normalTopPx = (boardRect?.top ?? 0) + boardHeight * ratio.top;
+  const normalLeftPx = (boardRect?.left ?? 0) + renderedLeftPx;
+  const normalHeightPx = boardHeight * ratio.height;
+  const normalMaxHeightPx = Math.max(1, boardHeight - 64);
 
   React.useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
 
-  React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   return (
-    <UnifiedNodeShell
+    <AppModalPortal ownerDocument={boardRootRef.current?.ownerDocument} trapFocus={fullscreen} onRequestClose={onClose}>
+      <div data-mango-editor-overlay-backdrop={fullscreen ? "modal" : "modeless"} style={{ position: "fixed", inset: 0, zIndex: 1, background: fullscreen ? "rgba(15, 23, 42, 0.18)" : "transparent", pointerEvents: fullscreen ? "auto" : "none" }}>
+      <UnifiedNodeShell
       surfaceID="kanban-my-work-node-overlay"
       title={overlay.nodeTitle}
       actionButtonClassName="mango-elevated-action"
+      role="dialog"
+      ariaModal={fullscreen}
       actionButtonStyle={overlayHeaderButtonStyle}
       closeButtonStyle={overlayHeaderButtonStyle}
       onMouseDown={(event) => event.stopPropagation()}
@@ -262,22 +267,24 @@ export function KanbanNodeEditorOverlay({
         },
       ].filter(Boolean) as UnifiedNodeShellAction[])}
       style={{
-        position: fullscreen ? "fixed" : "absolute",
-        zIndex: fullscreen ? 240 : 40,
-        top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : `${Math.round(ratio.top * 1000) / 10}%`,
-        left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : `${Math.round(renderedLeft * 1000) / 10}%`,
-        width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : `${Math.round(renderedWidth * 1000) / 10}%`,
-        height: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : `${Math.round(ratio.height * 1000) / 10}%`,
-        maxWidth: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : boardWidth > 0 ? availableWidthPx : allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
-        maxHeight: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : "calc(100% - 64px)",
-        minWidth: fullscreen ? 0 : boardWidth > 0 ? Math.min(420, availableWidthPx) : allowHorizontalOverflow ? 420 : "min(420px, calc(100% - 44px))",
-        minHeight: fullscreen ? 0 : "min(320px, calc(100% - 64px))",
+        position: "fixed",
+        zIndex: 2,
+        top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : normalTopPx,
+        left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : normalLeftPx,
+        width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : renderedWidth * boardWidth,
+        height: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : normalHeightPx,
+        maxWidth: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : availableWidthPx,
+        maxHeight: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : normalMaxHeightPx,
+        minWidth: fullscreen ? 0 : Math.min(420, Math.max(1, availableWidthPx)),
+        minHeight: fullscreen ? 0 : Math.min(320, normalMaxHeightPx),
+        visibility: !fullscreen && !boardRect ? "hidden" : "visible",
         border: "1px solid transparent",
         borderRadius: fullscreen ? 14 : 18,
         background: `${KANBAN_PANEL_BACKGROUND} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
         boxShadow: KANBAN_PANEL_SHADOW,
         overflow: "hidden",
         cursor: "default",
+        pointerEvents: "auto",
       }}
       chrome={nodeEditorOverlayResizeHandles.map((handle) => (
         <span
@@ -324,7 +331,9 @@ export function KanbanNodeEditorOverlay({
           forcedLabel={overlay.nodeTitle}
         />
       </React.Suspense>
-    </UnifiedNodeShell>
+      </UnifiedNodeShell>
+      </div>
+    </AppModalPortal>
   );
 }
 
@@ -350,7 +359,7 @@ const modalBackdropStyle: React.CSSProperties = {
   background: "rgba(241, 245, 249, 0.66)",
   backdropFilter: "blur(14px) saturate(1.18)",
   WebkitBackdropFilter: "blur(14px) saturate(1.18)",
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
 };

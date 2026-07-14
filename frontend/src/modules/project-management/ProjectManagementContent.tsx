@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
 import type { ProjectLogicGateReturnContext } from "../../app/projectRouteHistory.js";
@@ -1401,6 +1402,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
       ) : null}
       {projectRenameTarget ? (
+        <AppModalPortal onRequestClose={projectRenameSaving ? undefined : () => setProjectRenameTarget(null)}>
         <div
           role="presentation"
           style={projectDeleteBackdropStyle}
@@ -1426,10 +1428,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
                   event.preventDefault();
                   void saveProjectRename();
                 }
-                if (event.key === "Escape" && !projectRenameSaving) {
-                  event.preventDefault();
-                  setProjectRenameTarget(null);
-                }
               }}
             />
             <div style={projectDeleteActionsStyle}>
@@ -1440,6 +1438,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             </div>
           </div>
         </div>
+        </AppModalPortal>
       ) : null}
       {projectDeleteConfirmation ? (
         <ConfirmActionMenu
@@ -2704,7 +2703,7 @@ const projectContextMenuButtonStyle: React.CSSProperties = {
 const projectDeleteBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  zIndex: 120,
+  zIndex: 1,
   display: "grid",
   placeItems: "center",
   padding: 18,

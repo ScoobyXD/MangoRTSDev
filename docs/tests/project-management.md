@@ -56,13 +56,14 @@ PM45 - Project relationship grouping supports Logic Gate, Type, Status, Date Add
 PM46 - Empty visible Logic Gates remain in the grouped row tree. A node may group under a Logic Gate only when that Logic Gate relationship is itself visible; otherwise it appears under No logic gate.
 PM47 - Logic Gate group/resource rows retain Logic Gate open, context-menu, create-node, node-move, and email-drop behavior; node rows retain selection, standard node opening, context menus, and status/critical/email-origin indicators.
 PM48 - Collapsed grouping branches are excluded from the rendered node selection order, so Shift/Ctrl/Command selection operates on the exact currently visible node rows.
-PM49 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Fullscreen expands the same live node editor across the browser viewport, and toggling it off restores the editor to the right-hand Project region without resetting grouping, collapse, or selected-node state.
+PM49 - The Project Logic Gates / Nodes node panel mounts through the shared body-level modal layer above app/sidebar stacking contexts and exposes the shared fullscreen action. Fullscreen changes the same live node editor to browser-viewport geometry, and toggling it off restores the editor to the right-hand Project region without remounting it or resetting grouping, collapse, or selected-node state.
 PM50 - Opening a related Logic Gate from the Project detail work panel canonicalizes the current history entry to `/projects/{project_id}`, records the current Critical Path or Logic Gates / Nodes tab on that Project-matched entry, and then pushes `/logic-gates/{logic_gate_id}`. Changing the Project detail toggle updates that entry so later history returns restore the latest selection. Browser Back and unmodified Backspace outside editable content return to that exact Project with the recorded tab restored; fresh or mismatched Project entries retain the PM36 Critical Path default, and editable Backspace remains native.
 PM51 - Status grouping uses one shared contract across Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done; Verify aliases join Review, Request/Requests join Requested, Backlogs/Back Logs/Backlogged join Backlog, and completed/closed/archived aliases join Done. Descending reverses recognized nonterminal groups while Done remains last. Unknown nonblank and No status groups have distinct identities and remain before Done.
 PM52 - Project information text-block persistence uses the project-scoped latest-content save controller. Title, document, and attachment references are saved as one coherent envelope; saves do not overlap, later edits coalesce, deletion waits for an in-progress save, stale reloads cannot replace dirty local content, and project-scope teardown drains changed blocks.
 PM53 - An attached-email reply opened from Project Management keeps project attachment ownership and the originating information ID for files and inline images, while mailbox provenance continues to determine the provider thread, reply, draft, and send scope.
 PM54 - Node-open project-relationship reads use a company/resource-scoped shared singleflight/cache. Creating, updating, or deleting a project relationship invalidates that exact cache before any local refresh signal, so React StrictMode and multiple node windows do not duplicate the same canonical relationship request or restore a stale result.
 PM55 - A successful same-window Node or Logic Gate rename patches matching Project Management timeline `display_title`, workspace Node/Logic Gate labels, Project detail relationship/critical-path `display_title`, and active selected/context entity labels from the concrete committed-title event. It does not create a Project Management realtime scope or canonical reload and must not replace generic multi-resource delete-confirmation labels.
+PM56 - The Project editor header uses the shared primary order Editor, Permissions, formatting toolbar, and Outline Styles/Automatic Numbering. Assignments and available open/minimize commands remain in one accessible **More editor actions** menu. Project assignment/permission dialogs, previews, and embedded node panels use the shared body-level overlay layer above Key Views, Explorer, and Search Explorer; blocking modes trap/restore focus, while the anchored embedded panel remains modeless until fullscreen.
 
 ## Scenarios
 
@@ -223,6 +224,7 @@ Business logic covered:
 - PM49
 - PM50
 - PM51
+- PM56
 
 Given:
 - A project has related Logic Gates and nodes.
@@ -236,7 +238,8 @@ Expected:
 - The embedded node panel applies node access and saves node edits through node information/projection persistence.
 - Project Management owns only the panel selection; it does not own node text-box edits, attached-email edits, or node chat messages.
 - Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
-- Fullscreen expands the same node editor across the browser viewport, and toggling fullscreen off restores it to the right-hand region with grouping and selection state intact.
+- The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area; Assignments and available open/minimize commands remain in **More editor actions**.
+- The embedded panel mounts through the shared body-level modal layer above Key Views/Explorer/Search Explorer. Fullscreen changes the same mounted node editor to viewport geometry, and toggling fullscreen off restores it to the right-hand region with grouping and selection state intact.
 - Logic Gates and nodes render as recursive indented rows rather than Logic Gate cards, with Logic Gate ascending as the default grouping.
 - The grouping stack can be reordered, changed, or emptied without changing the underlying relationships; empty Logic Gates and nodes without a visible gate remain visible in the appropriate row path.
 - Collapse state controls the visible node ordering used by multi-selection, while group/resource rows preserve their existing open, context-menu, and drop behavior.
