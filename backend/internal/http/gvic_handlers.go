@@ -180,6 +180,10 @@ func decodeGVICAssignmentsRequest(w http.ResponseWriter, r *http.Request) (resou
 }
 
 func writeGVICMutationResult(w http.ResponseWriter, err error, result store.ResourceGVICAssignmentMutationResult) {
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "resource_not_found")
 		return

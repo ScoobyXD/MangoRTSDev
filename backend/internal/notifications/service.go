@@ -405,13 +405,17 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		if entityTitle != "" {
 			if urgent {
-				if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
+				if payloadString(payload, "email_collaboration_id") != "" {
+					title = fmt.Sprintf("URGENT %s mentioned you on email %s", actorLabel, entityTitle)
+				} else if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
 					title = fmt.Sprintf("URGENT %s mentioned you in chat on %s", actorLabel, entityTitle)
 				} else {
 					title = fmt.Sprintf("URGENT %s mentioned you in %s", actorLabel, entityTitle)
 				}
 			} else {
-				if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
+				if payloadString(payload, "email_collaboration_id") != "" {
+					title = fmt.Sprintf("%s mentioned you on email %s", actorLabel, entityTitle)
+				} else if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
 					title = fmt.Sprintf("%s mentioned you in chat on %s", actorLabel, entityTitle)
 				} else {
 					title = fmt.Sprintf("%s mentioned you in %s", actorLabel, entityTitle)

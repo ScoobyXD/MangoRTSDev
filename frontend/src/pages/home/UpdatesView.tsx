@@ -1047,6 +1047,14 @@ function UpdateContextMenu({
 }
 
 function updateRowIcon(item: NotificationItem): React.ReactNode {
+  if (updateItemIsEmailMention(item)) {
+    return (
+      <svg aria-label="Email mention" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block" }}>
+        <rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.45" />
+        <path d="m2.7 4.4 5.3 4 5.3-4" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
   const tone = updateRowTone(item);
   if (tone === "urgent") return "!";
   if (tone === "mention") return "@";
@@ -1099,6 +1107,16 @@ function UpdateCanonicalRowCopy({
   const logicGateEntity = <UpdateInlineEntity kind="logic_gate" label={logicGateLabel} />;
 
   if (tone === "urgent" || tone === "mention") {
+    if (updateItemIsEmailMention(item)) {
+      const subject = extractEmailMentionSubject(item);
+      return (
+        <span style={updateRowCopyStyle}>
+          <span>{actor}</span>
+          <span>{tone === "urgent" ? "urgently mentioned you on an email" : "mentioned you on an email"}</span>
+          {subject && <span>{subject}</span>}
+        </span>
+      );
+    }
     if (item.entity_type === "logic_gate") {
       return (
         <span style={updateRowCopyStyle}>
@@ -1315,6 +1333,16 @@ function updateRowShowsPreview(row: UpdateFeedRow): boolean {
 function updateRowIsChatMention(row: UpdateFeedRow): boolean {
   if (row.item.type !== NOTIFICATION_TYPE_MENTION && row.item.type !== NOTIFICATION_TYPE_URGENT_MENTION) return false;
   return /\bmentioned you in chat on\b/i.test(row.item.title);
+}
+
+function updateItemIsEmailMention(item: NotificationItem): boolean {
+  if (item.type !== NOTIFICATION_TYPE_MENTION && item.type !== NOTIFICATION_TYPE_URGENT_MENTION) return false;
+  return /\bmentioned you (?:in chat )?on (?:an )?email\b/i.test(item.title);
+}
+
+function extractEmailMentionSubject(item: NotificationItem): string {
+  const match = item.title.trim().match(/\bmentioned you (?:in chat )?on (?:an )?email(?::|\s+-)?\s*(.*)$/i);
+  return match?.[1]?.trim() ?? "";
 }
 
 function updateRowNodeID(row: UpdateFeedRow): string {

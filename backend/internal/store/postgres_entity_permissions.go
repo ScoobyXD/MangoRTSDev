@@ -607,6 +607,11 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			return nil, err
 		}
 		defer tx.Rollback()
+		if entityType == EntityTypeNode {
+			if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, entityID); err != nil {
+				return nil, err
+			}
+		}
 		var beforeDefaultAccess string
 		var beforeAssignments []resourcePermissionAssignment
 		if input.ApplyToDescendants {

@@ -244,6 +244,9 @@ func TestNylasRESTClientSendMessageIncludesTrackingOptions(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
 		}
+		if got := r.Header.Get("Idempotency-Key"); got != "json-logical-send" {
+			t.Fatalf("idempotency key = %q, want json-logical-send", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
@@ -258,6 +261,7 @@ func TestNylasRESTClientSendMessageIncludesTrackingOptions(t *testing.T) {
 		Subject:         "Hello",
 		Body:            "<p>Hello</p>",
 		TrackingOptions: &NylasTrackingOptions{Opens: true},
+		IdempotencyKey:  "json-logical-send",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,6 +285,9 @@ func TestNylasRESTClientSendMessageWithAttachmentsUsesMultipart(t *testing.T) {
 		}
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got != "multipart-logical-send" {
+			t.Fatalf("idempotency key = %q, want multipart-logical-send", got)
 		}
 		if r.ContentLength <= 0 {
 			t.Fatalf("content length = %d, want positive deterministic length", r.ContentLength)
@@ -349,6 +356,7 @@ func TestNylasRESTClientSendMessageWithAttachmentsUsesMultipart(t *testing.T) {
 			},
 		}},
 		TrackingOptions: &NylasTrackingOptions{Opens: true},
+		IdempotencyKey:  "multipart-logical-send",
 	}); err != nil {
 		t.Fatal(err)
 	}

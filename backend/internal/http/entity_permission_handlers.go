@@ -700,6 +700,10 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, "permission_user_not_in_company")
 		return
 	}
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_permissions_managed")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, notFoundCode)
 		return

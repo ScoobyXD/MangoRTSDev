@@ -100,11 +100,12 @@ test("unified rich editor contract lists every declared target surface", () => {
     "project-text-block",
     "my-triage-compose",
     "shared-triage-compose",
+    "email-collaboration-shared-draft",
     "attached-email-reply",
     "email-signature",
   ]);
   assert.ok(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.every((surface) => surface.chatSurface === false));
-  assert.equal(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.length, 7);
+  assert.equal(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.length, 8);
   assert.equal(
     UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.find((surface) => surface.id === "email-signature")?.persistenceBoundary,
     "mailbox-signature",

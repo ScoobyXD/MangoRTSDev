@@ -598,6 +598,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
 		return domain.KanbanCard{}, ErrNotFound
 	}
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return domain.KanbanCard{}, ErrProtectedEmailCollaborationResource
+	}
 	k := boardKey(input.CompanyID, input.BoardID)
 	board := r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
 	nodeKey := key(input.CompanyID, input.NodeID)
@@ -710,6 +713,9 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return LogicGateNodeAssignmentResult{}, ErrProtectedEmailCollaborationResource
+	}
 
 	snapshot := r.snapshotWorkItemAssignmentEventStateLocked()
 
@@ -884,6 +890,9 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return LogicGateNodeAssignmentResult{}, ErrProtectedEmailCollaborationResource
+	}
 
 	snapshot := r.snapshotWorkItemAssignmentEventStateLocked()
 
@@ -1051,6 +1060,9 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return LogicGateNodeAssignmentRemoveResult{}, ErrProtectedEmailCollaborationResource
+	}
 
 	snapshot := r.snapshotWorkItemAssignmentEventStateLocked()
 
@@ -1099,6 +1111,9 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return LogicGateNodeAssignmentResult{}, ErrProtectedEmailCollaborationResource
+	}
 
 	snapshot := r.snapshotWorkItemAssignmentEventStateLocked()
 

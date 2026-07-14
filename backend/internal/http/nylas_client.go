@@ -158,13 +158,15 @@ type NylasRESTClient struct {
 	client   *http.Client
 }
 
+const nylasOutboundRequestTimeout = 20 * time.Second
+
 func NewNylasRESTClient(apiBase, apiKey, clientID string) *NylasRESTClient {
 	return &NylasRESTClient{
 		apiBase:  strings.TrimRight(strings.TrimSpace(apiBase), "/"),
 		apiKey:   strings.TrimSpace(apiKey),
 		clientID: strings.TrimSpace(clientID),
 		client: &http.Client{
-			Timeout: 20 * time.Second,
+			Timeout: nylasOutboundRequestTimeout,
 		},
 	}
 }
@@ -325,6 +327,7 @@ type NylasSendMessageRequest struct {
 	OutboundAttachments []NylasOutboundAttachment `json:"-"`
 	ReplyToMessageID    string                    `json:"reply_to_message_id,omitempty"`
 	TrackingOptions     *NylasTrackingOptions     `json:"tracking_options,omitempty"`
+	IdempotencyKey      string                    `json:"-"`
 }
 
 type NylasTrackingOptions struct {
@@ -600,7 +603,7 @@ func (c *NylasRESTClient) sendMessageMultipart(ctx context.Context, grantID stri
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
-	if err := c.doMultipart(ctx, grantPath(grantID, "messages", "send"), plan, &response); err != nil {
+	if err := c.doMultipart(ctx, grantPath(grantID, "messages", "send"), plan, &response, request.IdempotencyKey); err != nil {
 		return NylasMessage{}, err
 	}
 	return response.Data, nil
@@ -950,7 +953,7 @@ func isNylasOutboundAttachmentFailure(err error) bool {
 		errors.Is(err, errNylasOutboundAttachmentRead)
 }
 
-func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nylasMultipartPlan, out any) error {
+func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nylasMultipartPlan, out any, idempotencyKey string) error {
 	if c == nil || c.apiBase == "" {
 		return NylasAPIError{StatusCode: http.StatusServiceUnavailable, Code: "nylas_not_configured"}
 	}
@@ -963,6 +966,9 @@ func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nyl
 	req.ContentLength = plan.contentLength
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", plan.contentType)
+	if idempotencyKey = strings.TrimSpace(idempotencyKey); idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
 	resp, requestErr := c.client.Do(req)
 	_ = body.Close()
 	streamErr := body.Err()
@@ -1018,6 +1024,11 @@ func (c *NylasRESTClient) do(ctx context.Context, method, path string, query url
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+		if sendRequest, ok := body.(NylasSendMessageRequest); ok {
+			if idempotencyKey := strings.TrimSpace(sendRequest.IdempotencyKey); idempotencyKey != "" {
+				req.Header.Set("Idempotency-Key", idempotencyKey)
+			}
+		}
 	}
 	if authorize {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)

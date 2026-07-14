@@ -38,6 +38,8 @@ export type EditorTextBlockChatMessage = {
   message: string;
   createdTimestamp: string;
   attachments: EditorChatAttachment[];
+  mentionedUserIDs?: string[];
+  mentionedGroupIDs?: string[];
 };
 
 export function canDeleteEditorTextBlockChatMessage(message: Pick<EditorTextBlockChatMessage, "authorID">, currentUserID: string): boolean {
@@ -49,6 +51,7 @@ export function canDeleteEditorTextBlockChatMessage(message: Pick<EditorTextBloc
 export type EditorAttachedEmail = {
   id: string;
   blockID?: string;
+  collaborationID?: string;
   messageID: string;
   threadID?: string;
   sharedInboxID?: string;
@@ -129,6 +132,8 @@ export function buildEditorTextBlockChatPayload(input: {
   message: string;
   createdTimestamp: string;
   attachments?: EditorChatAttachment[];
+  mentionedUserIDs?: string[];
+  mentionedGroupIDs?: string[];
 }): string {
   return JSON.stringify({
     block_id: input.blockID,
@@ -143,11 +148,14 @@ export function buildEditorTextBlockChatPayload(input: {
     message: input.message,
     created_timestamp: input.createdTimestamp,
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
+    mentioned_user_ids: uniqueStringList(input.mentionedUserIDs ?? []),
+    mentioned_group_ids: uniqueStringList(input.mentionedGroupIDs ?? []),
   });
 }
 
 export function buildEditorAttachedEmailPayload(input: {
   blockID?: string;
+  collaborationID?: string;
   messageID: string;
   threadID?: string;
   sharedInboxID?: string;
@@ -160,6 +168,7 @@ export function buildEditorAttachedEmailPayload(input: {
 }): string {
   return JSON.stringify({
     block_id: input.blockID?.trim() ?? "",
+    collaboration_id: input.collaborationID?.trim() ?? "",
     message_id: input.messageID,
     thread_id: input.threadID ?? "",
     shared_inbox_id: input.sharedInboxID?.trim() ?? "",
@@ -212,6 +221,15 @@ function stringValue(payload: Record<string, unknown>, key: string): string {
 function rawStringValue(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === "string" ? value : "";
+}
+
+function stringListValue(payload: Record<string, unknown>, key: string): string[] {
+  const value = payload[key];
+  return Array.isArray(value) ? uniqueStringList(value.filter((item): item is string => typeof item === "string")) : [];
+}
+
+function uniqueStringList(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function numberValue(payload: Record<string, unknown>, key: string): number | undefined {
@@ -309,6 +327,8 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     message,
     createdTimestamp: stringValue(record, "created_timestamp") || item.created_timestamp || "",
     attachments,
+    mentionedUserIDs: stringListValue(record, "mentioned_user_ids"),
+    mentionedGroupIDs: stringListValue(record, "mentioned_group_ids"),
   };
 }
 
@@ -319,6 +339,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   const messageID = stringValue(record, "message_id");
   if (!messageID) return null;
   const blockID = stringValue(record, "block_id");
+  const collaborationID = stringValue(record, "collaboration_id");
   const threadID = stringValue(record, "thread_id");
   const sharedInboxID = stringValue(record, "shared_inbox_id");
   const accountEmail = stringValue(record, "account_email");
@@ -327,6 +348,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   return {
     id: item.information_id,
     blockID: blockID || undefined,
+    collaborationID: collaborationID || undefined,
     messageID,
     threadID: threadID || undefined,
     sharedInboxID: sharedInboxID || undefined,

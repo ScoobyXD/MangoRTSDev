@@ -981,6 +981,11 @@ func (r *PostgresRepo) UpsertProjectRelationship(input ProjectRelationshipInput)
 		return ProjectRelationshipMutationResult{}, err
 	}
 	defer tx.Rollback()
+	if input.ResourceType == EntityTypeNode {
+		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.ResourceID); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+	}
 	var returnedID string
 	err = tx.QueryRowContext(ctx, `
 insert into project_relationships (

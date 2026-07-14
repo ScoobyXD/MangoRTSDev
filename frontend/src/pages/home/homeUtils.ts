@@ -149,10 +149,15 @@ export function resizeHomeInboxMatrixColumnsWithoutSidebar(startWidths: HomeColu
   return normalizeHomeColumnWidths(next);
 }
 
-export function emailThreadKey(message: Pick<EmailMessage, "id" | "thread_id">): string {
+export function emailMessageRowKey(message: Pick<EmailMessage, "id" | "client_source_scope_key">): string {
+  return JSON.stringify([message.client_source_scope_key?.trim() || "mailbox", message.id.trim()]);
+}
+
+export function emailThreadKey(message: Pick<EmailMessage, "id" | "thread_id" | "client_source_scope_key">): string {
+  const sourceScopeKey = message.client_source_scope_key?.trim() || "mailbox";
   const threadID = (message.thread_id ?? "").trim();
-  if (threadID) return `thread:${threadID}`;
-  return `message:${message.id.trim()}`;
+  if (threadID) return JSON.stringify([sourceScopeKey, "thread", threadID]);
+  return JSON.stringify([sourceScopeKey, "message", message.id.trim()]);
 }
 
 export function emailThreadMessageCount(message: Pick<EmailMessage, "thread_message_count">): number {
@@ -230,12 +235,10 @@ export function unreadEmailThreadMessagesForSelection(
   selected: EmailMessage,
 ): EmailMessage[] {
   if (!selected.id.trim() || !selected.unread) return [];
-  const threadID = selected.thread_id?.trim() ?? "";
+  const selectedThreadKey = emailThreadKey(selected);
   const matches = messages.filter((message) => (
     message.unread
-    && (threadID
-      ? (message.thread_id?.trim() ?? "") === threadID
-      : message.id === selected.id)
+    && emailThreadKey(message) === selectedThreadKey
   ));
   return matches.length > 0 ? matches : [selected];
 }

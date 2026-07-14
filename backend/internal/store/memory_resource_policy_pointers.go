@@ -89,6 +89,11 @@ type resourcePolicyAncestor struct {
 }
 
 func (r *MemoryRepo) resourcePermissionAncestorsLocked(companyID, resourceType, resourceID string) []resourcePolicyAncestor {
+	if resourceType == EntityTypeNode {
+		if _, protected := r.emailCollaborationForNodeLocked(companyID, resourceID); protected {
+			return []resourcePolicyAncestor{}
+		}
+	}
 	seen := map[string]bool{}
 	out := []resourcePolicyAncestor{}
 	add := func(resourceType, resourceID string) {

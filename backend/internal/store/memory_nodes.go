@@ -154,6 +154,9 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return domain.Node{}, ErrProtectedEmailCollaborationResource
+	}
 	if input.TitleSet {
 		node.Title = input.Title
 		for boardKey, cards := range r.kanbanCards {
@@ -310,6 +313,9 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	k := key(companyID, nodeID)
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
+	}
+	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
+		return ErrProtectedEmailCollaborationResource
 	}
 	r.deleteGVICMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
@@ -515,6 +521,9 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeInformation{}, ErrNotFound
 	}
+	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
+		return domain.NodeInformation{}, ErrProtectedEmailCollaborationResource
+	}
 	now := time.Now().UTC()
 	k := key(companyID, nodeID)
 	item := domain.NodeInformation{
@@ -610,6 +619,9 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	informationID := strings.TrimSpace(input.InformationID)
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return ErrNotFound
+	}
+	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
+		return ErrProtectedEmailCollaborationResource
 	}
 	k := key(companyID, nodeID)
 	if existing, ok := r.nodeText[k][informationID]; ok && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {

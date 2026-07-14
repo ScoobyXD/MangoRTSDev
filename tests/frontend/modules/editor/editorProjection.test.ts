@@ -53,6 +53,8 @@ test("parses node text block chat projection payloads", () => {
     selectionQuote: "selected text",
     selectionStart: 12,
     selectionEnd: 25,
+    mentionedUserIDs: ["user-2", "user-2", ""],
+    mentionedGroupIDs: ["group-1"],
     attachments: [{ id: "local-draft-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42 }],
   });
   assert.equal(payload.includes("attachment_id"), true);
@@ -70,6 +72,8 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages[0].selectionEnd, 25);
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
+  assert.deepEqual(messages[0].mentionedUserIDs, ["user-2"]);
+  assert.deepEqual(messages[0].mentionedGroupIDs, ["group-1"]);
   assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: undefined }]);
 });
 
@@ -161,6 +165,7 @@ test("parses titled node text block content payloads with legacy fallback", () =
 
 test("parses attached email projection payloads", () => {
   const payload = buildEditorAttachedEmailPayload({
+    collaborationID: "collaboration-1",
     messageID: "message-1",
     threadID: "thread-1",
     sharedInboxID: "shared-1",
@@ -175,6 +180,7 @@ test("parses attached email projection payloads", () => {
 
   assert.equal(emails.length, 1);
   assert.equal(emails[0].messageID, "message-1");
+  assert.equal(emails[0].collaborationID, "collaboration-1");
   assert.equal(emails[0].sharedInboxID, "shared-1");
   assert.equal(emails[0].accountEmail, "shared@example.test");
   assert.equal(emails[0].subject, "Contract terms");

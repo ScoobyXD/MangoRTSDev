@@ -334,6 +334,11 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if entityType == EntityTypeNode {
+		if _, protected := r.emailCollaborationForNodeLocked(companyID, entityID); protected {
+			return nil, ErrProtectedEmailCollaborationResource
+		}
+	}
 
 	if usesDefaultResourceAccessPolicy(entityType) {
 		return r.setDefaultResourceAccessPolicyLocked(input, companyID, entityType, entityID)
@@ -1159,6 +1164,11 @@ func (r *MemoryRepo) resourcePermissionDescendantTargetsLocked(companyID, resour
 		targetID = strings.TrimSpace(targetID)
 		if !ok || targetID == "" || !usesDefaultResourceAccessPolicy(targetType) {
 			return
+		}
+		if targetType == EntityTypeNode {
+			if _, protected := r.emailCollaborationForNodeLocked(companyID, targetID); protected {
+				return
+			}
 		}
 		keyValue := targetType + ":" + targetID
 		if seen[keyValue] {

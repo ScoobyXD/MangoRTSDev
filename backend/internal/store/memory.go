@@ -80,6 +80,8 @@ type MemoryRepo struct {
 	communicationsArchiveJobs      map[string]CommunicationsArchiveJob
 	communicationsArchiveJobItems  map[string]CommunicationsArchiveJobItem
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
+	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
+	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	logicGateShortcuts             map[string]domain.UserLogicGateShortcut
 	domainEvents                   map[string]domain.DomainEvent
 	effectiveAccessErr             error
@@ -162,6 +164,8 @@ func NewMemoryRepo() *MemoryRepo {
 		communicationsArchiveJobs:      map[string]CommunicationsArchiveJob{},
 		communicationsArchiveJobItems:  map[string]CommunicationsArchiveJobItem{},
 		emailNodeLinks:                 map[string]communicationsEmailNodeLink{},
+		emailCollaborations:            map[string]domain.CommunicationsEmailCollaboration{},
+		emailCollaborationParticipants: map[string]domain.CommunicationsEmailCollaborationParticipant{},
 		logicGateShortcuts:             map[string]domain.UserLogicGateShortcut{},
 		domainEvents:                   map[string]domain.DomainEvent{},
 		workspaceReadVersions:          map[string]int64{},
@@ -233,6 +237,10 @@ func emailNodeLinkKey(companyID, boardID, cardID string) string {
 
 func emailNodeAttachmentLinkKey(companyID, userID, messageID, nodeID string) string {
 	return companyID + ":" + userID + ":" + messageID + ":" + nodeID
+}
+
+func emailCollaborationParticipantKey(companyID, collaborationID, userID string) string {
+	return companyID + ":" + collaborationID + ":" + userID
 }
 
 func logicGateShortcutKey(userID, companyID, logicGateID string) string {

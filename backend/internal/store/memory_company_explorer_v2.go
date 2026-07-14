@@ -114,7 +114,7 @@ func (r *MemoryRepo) listCompanyExplorerV2RootRowsLocked(query CompanyExplorerV2
 
 func companyExplorerV2EntityIsFinalTreeRow(entityType string) bool {
 	switch entityType {
-	case CompanyExplorerV2EntityFolder, CompanyExplorerV2EntityProject, CompanyExplorerV2EntityLogicGate:
+	case CompanyExplorerV2EntityFolder, CompanyExplorerV2EntityProject, CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityNode:
 		return true
 	default:
 		return false
@@ -425,6 +425,9 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	if !ok {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	if err := r.rejectEmailCollaborationExplorerNodeMutationLocked(input.CompanyID, child); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
 		return CompanyExplorerV2Row{}, ErrNotFound
@@ -476,8 +479,14 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []st
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, edgeID := range edgeIDs {
-		if _, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]; !ok {
+		edge, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]
+		if !ok {
 			return ErrNotFound
+		}
+		if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
+			if err := r.rejectEmailCollaborationExplorerNodeMutationLocked(companyID, child); err != nil {
+				return err
+			}
 		}
 	}
 	for _, edgeID := range edgeIDs {
@@ -770,7 +779,7 @@ func (r *MemoryRepo) ensureCompanyExplorerV2CompanyGraphLocked(companyID string)
 		r.companyExplorerV2Edges[key(companyID, edge.EdgeID)] = edge
 	}
 	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || item.ItemType == "kanban" || item.ItemType == EntityTypeNode {
+		if item.CompanyID != companyID || item.ItemType == "kanban" {
 			continue
 		}
 		child, ok := r.companyExplorerV2EntityForNativeLocked(companyID, item.ItemType, item.ItemID)
@@ -1095,7 +1104,7 @@ func (r *MemoryRepo) shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child mem
 		r.folders[key(child.CompanyID, child.EntityID)] = folder
 		return
 	}
-	if child.EntityType != CompanyExplorerV2EntityLogicGate && child.EntityType != CompanyExplorerV2EntityProject {
+	if child.EntityType != CompanyExplorerV2EntityLogicGate && child.EntityType != CompanyExplorerV2EntityProject && child.EntityType != CompanyExplorerV2EntityNode {
 		return
 	}
 	item := domain.CompanyExplorerFolderItem{

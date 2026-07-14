@@ -48,6 +48,9 @@ RW37 - The realtime handshake rejects unauthenticated clients and token-bearing 
 RW38 - Backend WebSocket writes use a bounded deadline. A send failure removes and closes the dead connection so later mutations cannot block on it; healthy subscribers continue receiving messages, and delivery-failure metrics are distinct from no-subscriber metrics.
 RW39 - Notification create, delete, and clear operations publish only to the matching authenticated user's notification scope. First acceptance/reconnect reconcile canonical state. A local delete/clear marker records HTTP and socket observers separately. HTTP-first keeps the local optimistic source, while socket-first uses a canonical non-local source so open Updates reloads even if the HTTP response is lost; the matching second observer emits nothing, and after both claim the marker is removed so a distinct later clear is not suppressed. Duplicate socket frames remain suppressed while a lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
 RW40 - Ordinary `node_updated` processing does not query Kanban projection rows when there are no relevant local board subscribers; a mounted local board preserves exact affected-board lookup and delivery.
+RW41 - My Triage and Shared Triage email collaboration chat retain only the collaboration Node's existing `chat:node:{node_id}` scope. Email and Node mounts perform the same canonical Node projection/chat read on first acceptance, reconnect, and compact chat hints; no `chat:email`, collaboration-document, draft-body, presence, cursor, replay, or broad communications scope is added.
+RW42 - Email-collaboration ensure/create, participant expansion, chat writes, shared-draft create/update/send/discard, source-thread reads, and attachment authorization are authenticated HTTP operations. A durable chat commit may publish the existing Node chat hint and mention notifications; a shared-draft revision remains canonical HTTP state and never travels as editable body content over WebSocket.
+RW43 - Shared-draft optimistic concurrency is not CRDT/OT collaboration. Every update/send/discard supplies the expected revision, stale HTTP commands return conflict plus canonical metadata, and another participant observes the newer body through an authorized canonical draft read rather than WebSocket document deltas.
 
 ## Scenarios
 
@@ -365,3 +368,26 @@ Expected:
 - HTTP-first plus its matching echo causes at most one summary request and, subject to the local optimistic source filter, at most one open-feed request.
 - Socket-first plus a lost/rejected HTTP response performs exactly one summary reconciliation and one mounted Updates feed reconciliation; the later HTTP failure emits no second update.
 - No-subscriber `node_updated` performs no Kanban projection lookup; a mounted board preserves correct lookup and board-scoped delivery.
+
+### Scenario RW-S16: Email Chat Reuses Node Scope And Shared Drafts Stay HTTP
+
+Business logic covered:
+- RW1
+- RW2
+- RW10
+- RW11
+- RW20
+- RW41
+- RW42
+- RW43
+
+Given:
+- The same email collaboration chat is mounted from email detail and its standalone Node.
+- Two participants edit one shared draft at different revisions.
+
+Expected:
+- Both chat mounts retain the same `chat:node:{node_id}` subscription and coalesce canonical Node chat reads on acceptance/reconnect/hints.
+- No email-chat, document, draft, presence, cursor, replay, or broad communications scope is introduced.
+- Ensure/create, mentions, source reads, chat writes, shared-draft commands, and attachment checks remain authenticated HTTP operations.
+- Chat commit publishes only the existing Node chat hint plus applicable notification hints; WebSocket carries no durable message/draft body or attachment bytes.
+- A stale shared-draft command conflicts by expected revision and the participant reloads canonical HTTP state; no CRDT/OT or draft-body socket path is implied.

@@ -329,6 +329,7 @@ The declared unified surface IDs and persistence boundaries live in `frontend/sr
 | Project text box | Project Summary directly reuses `NodeTextBlockEditor` | Same rich behavior as a node block, plus project-specific saving; its chat and attached-email panes stay separate | Project information/projection, inside the same text-block envelope |
 | My Triage compose/reply | `ComposePanel` mounts `UnifiedRichEditorSurface` with `my-triage-compose` | Compact Format + Outline toolbar, no company mention users, email-draft attachment ownership | Personal mailbox draft/send |
 | Shared Triage compose/reply | The same `ComposePanel` selects `shared-triage-compose` when a shared inbox is active | Same editing behavior as My Triage; mailbox and attachment ownership differ | Shared mailbox draft/send |
+| Email collaboration shared draft | The same `ComposePanel` selects `email-collaboration-shared-draft` for a revisioned participant draft | Same editor, selection, toolbar, inline-image, and flush behavior; collaboration participation and revision replace mailbox ownership | Collaboration-scoped shared draft/send |
 | Attached-email reply | The attached-email pane mounts `UnifiedRichEditorSurface` with `attached-email-reply` | Compact Format + Outline toolbar, no company mentions; inline and file attachments use the attached-email resource | Component-local reply body until direct send |
 
 There are three separate rich-editor DOM wrappers even though they share the same handler:

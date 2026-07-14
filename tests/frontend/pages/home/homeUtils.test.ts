@@ -16,9 +16,11 @@ import {
   emailAttachmentIsInlineContent,
   emailMessageHasMultipleThreadMessages,
   emailMessageRowAriaLabel,
+  emailMessageRowKey,
   emailMailboxMessageKey,
   emailMailboxScopeKey,
   emailThreadMessageCount,
+  emailThreadKey,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -46,7 +48,15 @@ import {
   unreadEmailThreadMessagesForSelection,
   visibleEmailAttachmentsForBody,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
-import { messageUnreadDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
+import {
+  messageUnreadDotStyle,
+  triageMessageMetaStyle,
+  triageMessageRowStyle,
+  triageMessageStarButtonStyle,
+  triageMessageTimestampStyle,
+  triageSnippetStyle,
+  triageSubjectStyle,
+} from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
 import { GVIC_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
@@ -67,9 +77,9 @@ function sharedInbox(id: string, name: string, position: number, parentID?: stri
 test("triage email bodies render before cancellable inline-image hydration completes", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded\)/);
+  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, collaborationID, expanded && bodyLoaded\)/);
   assert.match(homeParts, /if \(!enabled \|\| !body\.trim\(\) \|\| inlineAttachments\.length === 0\) return undefined/);
-  assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal \}\)/);
+  assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal, collaborationID \}\)/);
   assert.match(homeParts, /const item = await loadInlineAttachment\(attachment\);[\s\S]{0,300}setDownloadedSourceByContentID/);
   assert.match(homeParts, /controller\.abort\(\)/);
   assert.doesNotMatch(homeParts, /bodyDocument\.loading/);
@@ -226,6 +236,43 @@ test("unread dot and frame stay distinct from the full-card selected surface", (
   assert.match(String(selectedUnreadRow.background), /#38bdf8/);
 });
 
+test("triage mail rows reserve only top-right metadata space and let snippets use the card width", () => {
+  const row = triageMessageRowStyle(false, false, true);
+  assert.equal(row.gridTemplateColumns, "20px minmax(0, 1fr) auto");
+  assert.equal(row.gridTemplateRows, "auto auto minmax(0, 1fr) auto");
+  assert.equal(row.columnGap, 4);
+  assert.equal(row.rowGap, 2);
+  assert.equal(row.padding, "7px 5px 6px");
+
+  assert.equal(triageMessageMetaStyle.display, "contents");
+  assert.equal(triageMessageTimestampStyle.gridColumn, 3);
+  assert.equal(triageMessageTimestampStyle.gridRow, 1);
+  assert.equal(triageSubjectStyle.gridColumn, "2 / -1");
+  assert.equal(triageSubjectStyle.paddingRight, 34);
+  assert.equal(triageMessageStarButtonStyle.width, 22);
+  assert.equal(triageMessageStarButtonStyle.height, 22);
+  assert.equal(triageSnippetStyle.gridColumn, "2 / -1");
+  assert.equal(triageSnippetStyle.gridRow, 3);
+});
+
+test("browser tab uses the Mango orange hexagon mark", () => {
+  const indexHTML = readFileSync(resolve(process.cwd(), "frontend/index.html"), "utf8");
+  const faviconSVG = readFileSync(resolve(process.cwd(), "frontend/public/favicon.svg"), "utf8");
+
+  assert.match(indexHTML, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg" \/>/);
+  assert.match(indexHTML, /<title>MangoRTS<\/title>/);
+  assert.match(faviconSVG, /#ff8820/);
+  assert.match(faviconSVG, /points="32,5\.5 55,18\.75 55,45\.25 32,58\.5 9,45\.25 9,18\.75"/);
+});
+
+test("collaboration shared drafts are immediate-only and stay out of the browser scheduler", () => {
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+
+  assert.match(homePage, /return !draft\.sharedDraft && Number\.isFinite\(scheduledAtMs\)/);
+  assert.match(homeParts, /!compose\.sharedDraft && \(\s*<input\s+type="datetime-local"\s+aria-label="Schedule send"/s);
+});
+
 test("mail row thread indicators and accessible activation use explicit message counts", () => {
   assert.equal(emailThreadMessageCount({}), 0);
   assert.equal(emailThreadMessageCount({ thread_message_count: Number.NaN }), 0);
@@ -295,6 +342,29 @@ test("triage email list condenses messages from the same Nylas thread into one v
   ]);
   assert.equal(partiallyLoadedAuthoritativeThread[0]?.thread_message_count, 4);
   assert.equal(emailMessageHasMultipleThreadMessages(partiallyLoadedAuthoritativeThread[0] ?? {}), true);
+});
+
+test("triage row and thread identity isolate identical provider ids across mailbox sources", () => {
+  const personal = emailMessage("same-message", "same-thread", 300, {
+    unread: true,
+    client_source_scope_key: "personal-source",
+  });
+  const shared = emailMessage("same-message", "same-thread", 200, {
+    unread: true,
+    client_source_scope_key: "shared-source",
+  });
+  const olderPersonal = emailMessage("older-personal", "same-thread", 100, {
+    unread: true,
+    client_source_scope_key: "personal-source",
+  });
+
+  assert.notEqual(emailMessageRowKey(personal), emailMessageRowKey(shared));
+  assert.notEqual(emailThreadKey(personal), emailThreadKey(shared));
+  assert.equal(condenseEmailThreadMessages([personal, shared, olderPersonal]).length, 2);
+  assert.deepEqual(
+    unreadEmailThreadMessagesForSelection([personal, shared, olderPersonal], personal).map((message) => message.id),
+    ["same-message", "older-personal"],
+  );
 });
 
 test("selecting an aggregated unread thread targets every loaded unread member and leaves unrelated threads alone", () => {

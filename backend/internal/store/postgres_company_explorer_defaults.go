@@ -34,7 +34,7 @@ func ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, comp
 		return companyExplorerDefaultFolders{}, ErrInvalid
 	}
 	folders := companyExplorerDefaultFolderIDs(companyID)
-	if folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" {
+	if folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" || folders.NodesFolderID == "" {
 		return companyExplorerDefaultFolders{}, ErrInvalid
 	}
 	upsert := func(folderID string, parentFolderID any, name string, position int) error {
@@ -66,15 +66,29 @@ on conflict (company_id, folder_id) do update set
 	if err := upsert(folders.LogicGatesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultLogicGatesFolderName, 2000); err != nil {
 		return companyExplorerDefaultFolders{}, err
 	}
+	if err := upsert(folders.NodesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultNodesFolderName, 3000); err != nil {
+		return companyExplorerDefaultFolders{}, err
+	}
 	return folders, nil
 }
 
 func placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string, snapshotPolicy bool) (domain.CompanyExplorerFolderItem, bool, error) {
+	return placeCompanyExplorerItemInDefaultFolderInternalTx(ctx, tx, companyID, targetType, targetID, actorUserID, snapshotPolicy, false)
+}
+
+func placeEmailCollaborationNodeInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, actorUserID string) (domain.CompanyExplorerFolderItem, bool, error) {
+	return placeCompanyExplorerItemInDefaultFolderInternalTx(ctx, tx, companyID, EntityTypeNode, nodeID, actorUserID, false, true)
+}
+
+func placeCompanyExplorerItemInDefaultFolderInternalTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string, snapshotPolicy, allowEmailCollaborationNode bool) (domain.CompanyExplorerFolderItem, bool, error) {
 	companyID = cleanUUIDText(companyID)
 	targetID = cleanUUIDText(targetID)
 	actorUserID = cleanUUIDText(actorUserID)
 	folderID, ok := companyExplorerDefaultFolderIDForTargetType(companyID, targetType)
 	if companyID == "" || targetID == "" || !ok {
+		return domain.CompanyExplorerFolderItem{}, false, ErrInvalid
+	}
+	if targetType == EntityTypeNode && !allowEmailCollaborationNode {
 		return domain.CompanyExplorerFolderItem{}, false, ErrInvalid
 	}
 	if _, err := ensureCompanyExplorerDefaultFoldersTx(ctx, tx, companyID, actorUserID); err != nil {

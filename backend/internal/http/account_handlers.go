@@ -294,6 +294,10 @@ func (s *Server) handleNodeAccounts(w http.ResponseWriter, r *http.Request, node
 }
 
 func writeAccountError(w http.ResponseWriter, err error, fallback string) {
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_account_request")
 		return

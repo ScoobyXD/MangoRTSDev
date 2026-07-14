@@ -13,6 +13,10 @@ var (
 	ErrNotFound                      = errors.New("not found")
 	ErrInvalid                       = errors.New("invalid")
 	ErrAlreadyExists                 = errors.New("already exists")
+	ErrVersionConflict               = errors.New("version conflict")
+	ErrSendInProgress                = errors.New("send in progress")
+	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
+	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
 	ErrPriorityRequired              = errors.New("priority required")
 	ErrInvitationBadToken            = errors.New("invitation bad token")
 	ErrInvitationExpired             = errors.New("invitation expired")
@@ -121,10 +125,24 @@ type CommunicationsRepository interface {
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
+	EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
+	ResolveCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationResolveInput) (domain.CommunicationsEmailCollaboration, error)
+	GetCommunicationsEmailCollaboration(companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error)
+	GetCommunicationsEmailCollaborationByNode(companyID, nodeID string) (domain.CommunicationsEmailCollaboration, error)
+	ListCommunicationsEmailCollaborations(companyID, participantUserID string) ([]domain.CommunicationsEmailCollaboration, error)
+	AddCommunicationsEmailCollaborationParticipants(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error)
+	AddCommunicationsEmailCollaborationParticipantsForNode(input CommunicationsEmailCollaborationNodeParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error)
+	AddEmailCollaborationNodeInformationWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationInformationWriteResult, error)
+	UpsertEmailCollaborationNodeProjectionWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationProjectionWriteResult, error)
+	UpdateCommunicationsEmailCollaborationMessage(input CommunicationsEmailCollaborationMessageInput) ([]string, error)
 	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
 	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
+	ClaimCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendClaimInput) (CommunicationsEmailDraftSendClaim, error)
+	ReleaseCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendReleaseInput) error
+	FinalizeCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendFinalizeInput) error
+	CompleteCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendCompleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
 	UpsertCommunicationsEmailSignature(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error)
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
@@ -2236,6 +2254,7 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
+	ParticipantUserID    string
 }
 
 type CommunicationsEmailDraftGetInput struct {
@@ -2244,6 +2263,7 @@ type CommunicationsEmailDraftGetInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
+	ParticipantUserID    string
 }
 
 type CommunicationsEmailDraftInput struct {
@@ -2253,6 +2273,10 @@ type CommunicationsEmailDraftInput struct {
 	PersonalAccountEmail   string
 	SharedInboxID          string
 	CreatedByUserID        string
+	ParticipantUserID      string
+	CollaborationID        string
+	IsShared               bool
+	ExpectedRevision       int64
 	UpdatedByUserID        string
 	Kind                   string
 	SourceMessageID        string
@@ -2273,6 +2297,64 @@ type CommunicationsEmailDraftDeleteInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	UpdatedByUserID      string
+	ParticipantUserID    string
+	ExpectedRevision     int64
+	// Now is an internal clock override used by deterministic recovery tests.
+	Now time.Time
+}
+type VersionConflictError struct {
+	CurrentRevision int64
+}
+
+func (e *VersionConflictError) Error() string { return ErrVersionConflict.Error() }
+func (e *VersionConflictError) Unwrap() error { return ErrVersionConflict }
+
+type CommunicationsEmailDraftSendClaimInput struct {
+	CompanyID         string
+	DraftID           string
+	CollaborationID   string
+	ParticipantUserID string
+	ExpectedRevision  int64
+	ProviderGrantID   string
+	// Now is an internal clock override used by deterministic repository and
+	// handler tests. Production callers leave it zero.
+	Now time.Time
+}
+
+type CommunicationsEmailDraftSendClaim struct {
+	Draft          domain.CommunicationsEmailDraft
+	ClaimToken     string
+	IdempotencyKey string
+	// Recovered is true when this claim took over an expired repository lease
+	// for a send whose provider outcome is still uncertain. Callers must not
+	// release such a claim merely because a pre-provider retry check fails.
+	Recovered bool
+}
+
+type CommunicationsEmailDraftSendReleaseInput struct {
+	CompanyID  string
+	DraftID    string
+	ClaimToken string
+}
+
+type CommunicationsEmailDraftSendFinalizeInput struct {
+	CompanyID       string
+	DraftID         string
+	ClaimToken      string
+	SentMessageID   string
+	UpdatedByUserID string
+}
+
+// CommunicationsEmailDraftSendCompleteInput commits the two durable effects of
+// a successful provider send together: advance the collaboration snapshot and
+// tombstone the claimed shared draft. Implementations must be atomic.
+type CommunicationsEmailDraftSendCompleteInput struct {
+	CompanyID       string
+	DraftID         string
+	CollaborationID string
+	ClaimToken      string
+	UpdatedByUserID string
+	Message         domain.EmailMessageSnapshot
 }
 
 type CommunicationsEmailSignatureScopeInput struct {

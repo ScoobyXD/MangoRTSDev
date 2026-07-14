@@ -29,7 +29,7 @@ EMAIL2 - Browser `localStorage` may be used only as a company/user-keyed fallbac
 EMAIL3 - Personal draft and signature rows are scoped to the actor's personal `user_email_connections` tuple of `user_id` plus `account_email`.
 EMAIL4 - Shared draft and signature rows are scoped to `shared_inbox_id`; `shared_inboxes` remains the Mango permission/resource wrapper and points to `company_email_connections` for provider grant plumbing.
 EMAIL5 - A draft or signature row must be either personal or shared, never both and never neither.
-EMAIL6 - Personal draft list/get/create/update/delete and draft-attachment access are owner-only in the exact personal account scope; company manager status does not bypass ownership. Shared draft list/get/attachment reads require view access to the exact inbox, while create/update/delete and attachment mutation require edit access.
+EMAIL6 - Ordinary personal draft list/get/create/update/delete and draft-attachment access are owner-only in the exact personal account scope; company manager status does not bypass ownership. Ordinary shared-inbox draft list/get/attachment reads require view access to the exact inbox, while create/update/delete and attachment mutation require edit access. Collaboration shared drafts use the participant/revision exception in EMAIL65 through EMAIL69.
 EMAIL7 - Draft IDs remain client-stable text IDs so reply/forward resume behavior and existing `email_draft` attachment resource IDs do not break; new personal reply/forward IDs include the connected personal mailbox scope to avoid cross-account collisions.
 EMAIL8 - Reply drafts are unique per company, mailbox scope, and source message ID; reopening Reply resumes the existing draft and preserves the original message context.
 EMAIL9 - Forward drafts are unique per company, mailbox scope, and source message ID; reopening Forward resumes the existing draft.
@@ -76,6 +76,24 @@ EMAIL48 - An email-card thread icon appears on the left only when the sanitized 
 EMAIL49 - Locally persisted sent-reply fallback data is keyed by company, authenticated user, personal account/shared inbox, source message, and thread. When a provider send response omits thread ID, exact reply-target metadata supplies it before the enriched reply is persisted under the thread key; no local reply cache crosses users or mailboxes.
 EMAIL50 - Google Primary always means `in:inbox -category:social -category:promotions`. User search is grouped and unread-only is folded into that same native expression so advanced `OR` searches cannot widen the mailbox bucket. The backend response boundary plus backend/frontend cache reconciliation apply the same Primary exclusion, so fresh, refreshed, cached, and optimistic star/read paths cannot leak Social or Promotions into Primary. The messages remain eligible for All and, when starred, Starred.
 EMAIL51 - Nylas message-list serialization has mutually exclusive query modes. A Gmail-native mailbox request sends only `search_query_native`, `limit`, and optional `page_token`; it omits `select`, `thread_id`, `q`, `in`, `unread`, `starred`, and every other structured filter. A thread-history request uses structured `thread_id` mode without `search_query_native`, while ordinary non-native lists retain the selected-field projection. Native response supersets are normalized back to Mango's preview-only list shape so body/detail hydration, mailbox membership, ordering, pagination, and account/shared-inbox scope do not change.
+EMAIL52 - Merely listing, selecting, reading, replying to, highlighting, or abandoning an empty chat composer must not create a Node. Mango lazily and idempotently ensures the email-collaboration record and Node only when the user submits the first nonempty chat/attachment or explicitly creates a shared draft. Before that durable sharing transaction, the backend authorizes the exact source mailbox, fetches the requested message directly from the provider, validates the returned message/thread identity, and persists only the provider-derived snapshot; browser-supplied sender, recipients, subject, body, folders, and metadata are never authoritative. Provider failure or an identity mismatch creates nothing; if ensure commits but the following chat write fails, retry reuses that empty collaboration instead of creating another Node.
+EMAIL53 - One collaboration identity represents one provider conversation in one immutable source mailbox scope: company plus personal user/account or shared inbox plus provider `thread_id`, falling back to the exact source `message_id` only when no thread ID exists. Concurrent create requests for that identity converge on the same collaboration and Node instead of producing duplicates, and a later-known thread ID is attached without merging data across mailbox scopes.
+EMAIL54 - An email-collaboration Node is standalone and private: it has no Logic Gate/card, project relationship, status, priority, GVIC assignment, account assignment, or inherited work policy. Its default access is `no_access`; the creator and every collaboration participant receive durable direct edit access for collaboration chat, subject to the existing company-admin/dev-admin shell-view bypass contract. Generic Node information, saved-version, Logic Gate/status, project-relationship attach/upsert, GVIC, and account-assignment commands are rejected for this system-managed Node even for a participant or bypass administrator. Project-relationship delete remains allowed so an administrator can remove a legacy or erroneous relationship without weakening the attach guard.
+EMAIL55 - Creation writes one canonical `Attached email` projection to the collaboration Node with the collaboration ID, source provider message/thread identity, subject/snapshot, `account_email`, and `shared_inbox_id` when applicable. It stores provider/Mango attachment references rather than raw bytes and preserves the originating mailbox for every later thread, attachment, reply, and send operation. Generic information/projection commands cannot replace, delete, or supplement that canonical block.
+EMAIL56 - Email detail and Node detail are two surfaces over the same Node information rows. Both mount the shared `ChatPane`, parse and write the same `Text block chat` payloads, use the same `chat:node:{node_id}` reconciliation scope, and expose the same ordering, reply threading/indentation, collapse, deletion ownership, mention, attachment, link, and composer semantics; neither surface copies or translates chat messages into a second table. The Node attached-email viewer reads the participant-authorized collaboration thread/attachment APIs; direct provider mutation controls are disabled there, while shared-draft creation and sending remain on the Triage surface so they use the immutable source mailbox and revision claim.
+EMAIL57 - A chat may be created with no selection or from selected text in any message card in the provider thread. A selection-backed chat stores `selection_source=email`, the exact provider message ID, the trimmed quote, and nonnegative start/end text offsets with `end > start`; opening or activating the chat navigates to that message and highlights the best exact quote/offset match without changing the underlying email body.
+EMAIL58 - Chat replies store the existing parent-message ID and render beneath that parent with the shared Node chat indentation. The selection anchor belongs to the root/comment that captured it; replying does not silently retarget the anchor to the currently newest email or another message card.
+EMAIL59 - A committed `@` mention of a company user adds that user exactly once as a permanent collaboration participant. A committed user-group mention resolves the group's current same-company user membership and snapshots each distinct resolved user as an individual participant in the same transaction as the chat write; invalid, deleted, or cross-company principals are rejected rather than partially shared.
+EMAIL60 - Collaboration participation is append-only for the collaboration lifetime. Later group membership or hierarchy changes neither add nor remove participants, deleting a mention message does not revoke access, and repeatedly mentioning the same user directly or through overlapping groups is idempotent.
+EMAIL61 - Every participant may open the complete collaboration thread and its provider-backed file/CID attachments from either the Triage or Node surface even when the participant was not To/Cc/Bcc and has no connection to the source mailbox. The backend authorizes permanent participation first, performs provider reads through the collaboration's immutable authorized source mailbox, revalidates exact message/thread membership before attachment bytes are returned, and never exposes its grant or credentials to participants.
+EMAIL62 - Future messages that join the authoritative provider thread become visible to every participant as the same ordinary grouped email conversation. A personal-source collaboration appears in every participant's My Triage. A shared-source collaboration appears in its source Shared Triage for participants who can navigate that mailbox and appears in My Triage as the guaranteed fallback for permanent participants who cannot. Mango shares a permissioned virtual projection of the source thread; it does not send an auto-forward or create duplicate provider messages, and subject similarity never expands the collaboration.
+EMAIL63 - A virtual collaboration row is deduplicated against a provider-owned row by immutable source mailbox plus provider thread/message identity. One conversation renders one card even when the participant is also a provider recipient or shared-inbox viewer; loaded messages, unread/starred/attachment state, and the collaboration badge/node identity merge without crossing scopes.
+EMAIL64 - A nonparticipant cannot discover/list a collaboration row, perform source-mailbox provider reads, chat, draft, or obtain collaboration attachments by guessing a collaboration, Node, message, or draft ID. Participant authorization is checked before source-mailbox reads and participant operations. The existing company-admin/dev-admin bypass may still open the Node shell under the general resource contract, but it does not create participation, a triage row, source-mailbox access, mention delivery, or My Drafts visibility.
+EMAIL65 - `Create Shared Draft` is an explicit action associated with Reply All on an exact source message. It lazily creates/reuses the collaboration, initializes recipients through the normal Reply All deduplication and active-mailbox exclusion rules, and creates at most one active shared draft for that collaboration/source-message pair.
+EMAIL66 - A collaboration shared draft is a Mango application record, never a Nylas/Gmail provider Draft. Every permanent participant sees the same active draft in the Drafts/My Drafts view of either My Triage or Shared Triage, with source-mailbox context shown explicitly. Its immutable source identifiers, content, attachments, revision, and any uncertain send claim/idempotency state survive source-mailbox disconnect or deletion so participants can inspect and safely discard it under EMAIL68; source loss never silently converts it to another mailbox. Ordinary private personal and selected-shared-inbox drafts keep their existing scope and source-deletion behavior: removing their personal connection or shared inbox deletes those non-collaboration drafts.
+EMAIL67 - Shared-draft reads and writes require current collaboration participation and carry a monotonically increasing revision. Update, send, and discard commands compare the expected revision; a stale command returns a conflict with the canonical current revision and must preserve the caller's unsent local content in the open composer for review/retry instead of overwriting another participant's change. When local and remote mirrors reconcile, the higher shared revision is canonical even if the rejected optimistic local edit has a newer browser timestamp, so stale content cannot hide the current shared version indefinitely.
+EMAIL68 - Any permanent participant may edit, send, or discard the shared draft. Send is immediate-only in V1: the shared surface does not expose scheduled send and the browser scheduler never submits a shared draft. The backend atomically claims the exact expected revision, re-fetches the immutable exact source message, validates its provider message/thread identity, recomputes Reply All recipients from provider truth, and assigns one stable provider idempotency key plus its first-claim timestamp and exact source Nylas grant ID to that logical send. A claim is exclusive for five minutes. While `send_state` is `sending`, body/recipient edits and all collaboration-draft attachment upload-finalize, link, unlink, and other mutation paths are frozen; authorized reads remain available, ensuring every recovery attempt has the byte-equivalent body and attachment set. If the handler loses the provider response, receives a response without a message ID, or cannot durably complete after possible provider success, it does not release that uncertain claim; after five minutes, a retry takes a new repository claim token but may replay only the byte-equivalent send with the same provider idempotency key through the exact same grant, then atomically reconcile the sent message plus shared-draft tombstone. Any validation, provider-source read, or attachment-resolution failure before a recovered retry reaches Nylas leaves that recovered claim in `sending` and preserves the original key, grant binding, and first-claim timestamp; only a fresh claim may be released safely on those pre-provider failures. Because Nylas idempotency is grant-scoped, a reconnected/replaced source grant returns `email_draft_send_recovery_source_changed` with canonical inspect-then-discard guidance and performs no provider retry. An explicit non-409 provider `4xx` may release the claim because that request was rejected, and release clears the rejected key, grant binding, and origin timestamp so the corrected attempt uses a fresh key; transport errors, provider `5xx`, and idempotency `409` remain uncertain and recover through the stable key. Automatic replay is allowed only inside Nylas's fixed one-hour idempotency window measured conservatively from the first claim. Immediately before a recovered `SendMessage`, the backend performs a final deadline check and reserves the full configured Nylas outbound-request timeout as a safety margin; entering that margin returns `email_draft_send_recovery_window_expired`, keeps the exact uncertain claim/key/grant/origin, and makes no provider call. Because that check happens after renewing the five-minute claim, its response truthfully sets `can_discard=false`; discard becomes available only when the renewed lease ends. This final check applies only to recovered claims, never to a first attempt. Once that hour expires, the API returns the same canonical draft/revision guidance and must never generate a new key or automatically resend. After the five-minute active lease ends, a participant must inspect the provider thread first and may revision-check/discard the uncertain local draft whether the original source is unchanged, reconnected, or currently unavailable; local discard cannot send or duplicate provider mail. A new shared draft can then be created deliberately only after confirming no reply was sent. Discard removes only the draft for everyone and never deletes the collaboration, Node, chat, or provider thread.
+EMAIL69 - Shared-draft attachments and inline images use the existing Mango attachment-reference and send-boundary rules. Durable chat/draft JSON contains no raw file bytes, data URLs, provider credentials, presigned URLs, or object-storage keys, and every participant read/mutation is reauthorized against the collaboration before attachment access.
 
 ## Scenarios
 
@@ -104,7 +122,7 @@ Expected:
 - Clicking an email in the left list while compose is open quietly saves eligible draft content, closes compose, and renders the clicked email immediately.
 - Saving or sending flushes the mounted editor first and persists or submits the exact returned sanitized HTML.
 
-### Scenario EMAIL-S2: Shared Draft Durability
+### Scenario EMAIL-S2: Shared-Inbox Draft Durability
 
 Business logic covered:
 - EMAIL1
@@ -346,4 +364,80 @@ Expected:
 - All remains `in:anywhere`, Starred remains `is:starred`, and Archive/Spam retain their existing Gmail-native expressions. Search text is grouped and unread-only is folded into the one native expression, so user operators cannot widen the selected bucket.
 - Every native provider request contains only `search_query_native`, `limit`, and optional `page_token`; the returned Mango list remains preview-only even if the provider returns extra body/content fields.
 - Thread previews use `thread_id`, `select`, `limit`, and optional `page_token` without native mailbox search. Authoritative thread `message_ids` remain the source of truth: members absent from bounded previews are recovered immediately by exact ID, while preview-resolved older bodies hydrate through per-card detail reads on expand or Expand all.
-- Opening Drafts makes no provider message-list request. Personal Drafts shows only the authenticated user and active account; Shared Drafts shows only the selected shared inbox according to its view/edit permissions.
+- Opening Drafts makes no provider message-list request. Its ordinary private branch shows only the authenticated personal user/account or selected shared inbox according to view/edit permissions; the explicit collaboration branch adds only active drafts for which the current user is a permanent participant and labels the immutable source mailbox.
+
+### Scenario EMAIL-S13: Lazy Email Collaboration And One Shared Chat
+
+Business logic covered:
+- EMAIL52
+- EMAIL53
+- EMAIL54
+- EMAIL55
+- EMAIL56
+- EMAIL57
+- EMAIL58
+- EMAIL64
+
+Given:
+- A user opens and highlights text in a personal or shared email that has no collaboration.
+- The user may abandon the chat, submit a root chat, reply to a chat, or race another create request for the same source conversation.
+- The same collaboration is later opened from its standalone Node.
+
+Expected:
+- Listing, opening, selecting, and an abandoned empty chat composer create no collaboration or Node.
+- The first nonempty chat submit converges on one private standalone Node keyed by exact mailbox scope and provider thread/message identity; a later chat-write failure leaves that idempotent collaboration reusable rather than duplicating it on retry.
+- The Node has one source-scoped attached-email projection and no Logic Gate, project, status, priority, GVIC, or other work assignment.
+- Email detail and Node detail render the same durable chat IDs through the shared ChatPane and Node chat scope, including identical reply indentation, attachment, mention, link, delete, and refresh behavior.
+- A selection-backed root chat stores and later navigates to the exact message, quote, and offsets; an unanchored root chat is valid, and replies retain the root's anchor instead of following the newest message.
+- A guessed collaboration or Node ID is denied before provider content is read.
+
+### Scenario EMAIL-S14: Permanent Mention Participants And Future Thread Mail
+
+Business logic covered:
+- EMAIL59
+- EMAIL60
+- EMAIL61
+- EMAIL62
+- EMAIL63
+- EMAIL64
+
+Given:
+- A chat mentions one user directly and a group whose resolved membership overlaps that user.
+- A mentioned user is not a provider recipient and cannot navigate the source shared mailbox.
+- Group membership changes and a new provider message later joins the same thread.
+
+Expected:
+- The accepted chat write snapshots each distinct current same-company user once and grants permanent collaboration participation/edit access.
+- Later group changes, mention deletion, and duplicate mentions neither revoke nor duplicate participants.
+- Every participant can read the complete canonical source thread without receiving provider credentials or an auto-forwarded provider copy.
+- Personal-source collaboration appears in each participant's My Triage. Shared-source collaboration appears in its Shared Triage where navigable and in My Triage for a participant who cannot navigate that shared mailbox.
+- A participant who is also a provider recipient sees one row, because the virtual and provider-owned representations dedupe by exact source scope plus provider thread/message identity.
+- The later authoritative thread member appears for all participants; similar subject text in another thread or mailbox does not join the collaboration.
+
+### Scenario EMAIL-S15: Shared Reply-All Draft Concurrency, Send, And Discard
+
+Business logic covered:
+- EMAIL65
+- EMAIL66
+- EMAIL67
+- EMAIL68
+- EMAIL69
+
+Given:
+- A permanent participant chooses Create Shared Draft from Reply All on an exact message.
+- Two participants open the resulting draft, one saves a newer revision, and the other attempts a stale update, send, or discard.
+- The source connection/shared inbox is deleted while a collaboration draft (possibly an uncertain send claim) and an ordinary private draft exist in that source.
+- A current participant later sends successfully or confirms discard.
+
+Expected:
+- Creation reuses the collaboration, applies normal Reply All recipient rules, and yields one active collaboration/source-message draft.
+- The same Mango draft appears in My Drafts/Drafts for every participant on either triage surface with its real source mailbox identified; it never appears through a provider Drafts request.
+- The stale command conflicts, returns the canonical revision, preserves unsent local content, and cannot overwrite, send, or discard the newer revision.
+- The shared-draft surface offers immediate send only, and the ordinary browser scheduler excludes shared drafts.
+- An authorized current-revision send claims that revision, revalidates the immutable exact source message/thread, recomputes Reply All from provider truth, and uses one stable idempotency key. A concurrent retry during the five-minute lease is rejected without another provider call. A stale retry inside one hour gets a new claim token, replays the same key, and completes the same logical send after a missing provider message ID or transient durable-completion failure.
+- A fresh claim releases its key after a pre-provider source/validation/attachment failure, while the same failure on a recovered uncertain claim preserves `sending` plus its exact key, grant binding, and first-claim timestamp without another provider call.
+- A retry at or beyond the one-hour provider-idempotency boundary returns the canonical `email_draft_send_recovery_window_expired` conflict without another provider send. The final check runs after all preflight work and reserves the full outbound Nylas timeout before the boundary; entering that safety margin preserves the uncertain identity, blocks dispatch, and reports `can_discard=false` until its newly renewed five-minute lease ends. After inspecting the provider thread, a participant can revision-check and discard the expired inactive claim; no automatic new-key resend is permitted.
+- Replacing/reconnecting the source mailbox grant before stale recovery returns canonical `email_draft_send_recovery_source_changed` guidance without a provider call, because the original key is not valid duplicate protection in another grant scope. Once the five-minute lease is inactive, revision-checked local discard remains available even if the source connection is unavailable.
+- Source deletion preserves the collaboration draft's immutable scope, content, revision, attachments, and exact recovery identity without rebinding it; the same deletion still removes ordinary non-collaboration drafts from that source.
+- Confirmed current-revision discard removes only the shared draft for all participants and leaves the collaboration, Node, chat, provider thread, and ordinary private drafts intact.
+- Attachments remain authorized Mango references and no durable payload contains file bytes, provider credentials, presigned URLs, or storage keys.

@@ -1903,8 +1903,10 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     : `${HOME_KEY_SURFACE} padding-box`;
   return {
     display: "grid",
-    gridTemplateColumns: "28px minmax(0, 1fr) 108px",
-    gap: 9,
+    gridTemplateColumns: "20px minmax(0, 1fr) auto",
+    gridTemplateRows: "auto auto minmax(0, 1fr) auto",
+    columnGap: 4,
+    rowGap: 2,
     alignItems: "start",
     minHeight: 82,
     boxSizing: "border-box",
@@ -1917,7 +1919,7 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     color: "#111827",
     font: "inherit",
     fontSize: 12,
-    padding: "10px 10px 9px",
+    padding: "7px 5px 6px",
     textAlign: "left",
     minWidth: 0,
     boxShadow: pendingStarred
@@ -1933,11 +1935,13 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
 }
 
 export const messageLeadingIndicatorsStyle: React.CSSProperties = {
+  gridColumn: 1,
+  gridRow: "1 / span 4",
   minWidth: 0,
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  alignItems: "center",
+  alignItems: "flex-start",
   gap: 5,
 };
 
@@ -1983,12 +1987,13 @@ export function messagePlacementIconStyle(active: boolean): React.CSSProperties 
 }
 
 export const triageMessageContentStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gap: 3,
+  display: "contents",
 };
 
 export const triageSenderStyle: React.CSSProperties = {
+  gridColumn: 2,
+  gridRow: 1,
+  alignSelf: "center",
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -1997,6 +2002,10 @@ export const triageSenderStyle: React.CSSProperties = {
 };
 
 export const triageSubjectStyle: React.CSSProperties = {
+  gridColumn: "2 / -1",
+  gridRow: 2,
+  boxSizing: "border-box",
+  paddingRight: 34,
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -2033,28 +2042,46 @@ export const messageTimestampStatusRowStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+export const triageMessageTimestampStyle: React.CSSProperties = {
+  gridColumn: 3,
+  gridRow: 1,
+  alignSelf: "center",
+  justifySelf: "end",
+};
+
 export const triageMessageMetaStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
-  justifyItems: "end",
-  alignContent: "stretch",
-  alignSelf: "stretch",
-  gap: 6,
-  height: "100%",
-  minWidth: 104,
+  display: "contents",
 };
 
 export const triageMessageActionRowStyle: React.CSSProperties = {
+  gridColumn: 3,
+  gridRow: 2,
+  alignSelf: "center",
+  justifySelf: "end",
   display: "flex",
   alignItems: "center",
   justifyContent: "flex-end",
   gap: 6,
 };
 
+export const triageMessageStarButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  minHeight: 22,
+};
+
 export const triageMessageReadStatusSlotStyle: React.CSSProperties = {
+  gridColumn: 3,
+  gridRow: 4,
   alignSelf: "end",
   justifySelf: "end",
   maxWidth: "100%",
+};
+
+export const triageSnippetStyle: React.CSSProperties = {
+  gridColumn: "2 / -1",
+  gridRow: 3,
+  minWidth: 0,
 };
 
 export function messageStarButtonStyle(highlighted: boolean, hovered = false, flaring = false): React.CSSProperties {

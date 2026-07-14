@@ -560,6 +560,9 @@ func (r *PostgresRepo) SetNodeAccountAssignments(input NodeAccountAssignmentUpda
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
 	defer tx.Rollback()
+	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return NodeAccountAssignmentUpdateResult{}, err
+	}
 	beforeNode, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n

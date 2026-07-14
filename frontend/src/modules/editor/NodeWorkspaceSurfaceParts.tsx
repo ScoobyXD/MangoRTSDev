@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
@@ -1461,6 +1461,7 @@ type ChatPaneProps = {
   onFocus: () => void;
   onActiveTabChange?: (tab: "chat" | "email") => void;
   onDraftChange: (draft: string) => void;
+  onMentionPrincipal?: (principal: MentionableCompanyUser) => void;
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
   onReply: (messageID: string) => void;
@@ -1500,6 +1501,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onFocus,
   onActiveTabChange,
   onDraftChange,
+  onMentionPrincipal,
   onActivateMessage,
   onNavigateToMessage,
   onReply,
@@ -1628,6 +1630,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const insert = `${mention.trigger}${mentionUserDisplayName(user)} `;
     const nextDraft = `${draft.slice(0, mention.start)}${insert}${draft.slice(mention.end)}`;
     onDraftChange(nextDraft);
+    onMentionPrincipal?.(user);
     setActiveMentionDraft(null);
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
@@ -3508,6 +3511,16 @@ function createAttachedEmailFolderID(): string {
 }
 
 async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string): Promise<EmailMessage[]> {
+  const collaborationID = email.collaborationID?.trim() ?? "";
+  if (collaborationID) {
+    const collaborationThread = await getEmailCollaborationThread(companyID, collaborationID);
+    const primary = collaborationThread.messages.find((message) => message.id === email.messageID)
+      ?? collaborationThread.messages[0]
+      ?? null;
+    return primary
+      ? mergeEmailThreadMessages(primary, collaborationThread.messages, primary.local_replies ?? [])
+      : [];
+  }
   const primary = await getEmailMessage(email.messageID, companyID, email.sharedInboxID);
   const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
   if (!threadID) return mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []);
@@ -3607,6 +3620,7 @@ const AttachedEmailThreadCard: React.FC<{
     boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
   });
   const replyComposerOpen = Boolean(replyTargetMessageID.trim());
+  const replyAvailable = editable && !email.collaborationID?.trim();
 
   return (
     <div
@@ -3666,28 +3680,28 @@ const AttachedEmailThreadCard: React.FC<{
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
             <button
               type="button"
-              disabled={!editable}
-              title="Reply"
+              disabled={!replyAvailable}
+              title={replyAvailable ? "Reply" : "Open this collaboration in Triage to create or send a shared draft"}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (editable) onReply(email.messageID, false);
+                if (replyAvailable) onReply(email.messageID, false);
               }}
-              style={replyButtonStyle(editable)}
+              style={replyButtonStyle(replyAvailable)}
             >
               <ChatIcon color={accent} />
               Reply
             </button>
             <button
               type="button"
-              disabled={!editable}
-              title="Reply all"
+              disabled={!replyAvailable}
+              title={replyAvailable ? "Reply all" : "Open this collaboration in Triage to create or send a shared draft"}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (editable) onReply(email.messageID, true);
+                if (replyAvailable) onReply(email.messageID, true);
               }}
-              style={replyButtonStyle(editable)}
+              style={replyButtonStyle(replyAvailable)}
             >
               Reply all
             </button>
@@ -3729,6 +3743,7 @@ const AttachedEmailThreadCard: React.FC<{
           >
             <EmailConversationPane
               messageID={email.messageID}
+              collaborationID={email.collaborationID}
               nodeID={nodeID}
               apiBase={apiBase}
               companyID={companyID}
@@ -4375,6 +4390,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
 
 type EmailConversationPaneProps = {
   messageID: string;
+  collaborationID?: string;
   nodeID?: string;
   apiBase?: string;
   companyID: string;
@@ -4526,11 +4542,12 @@ const EmailBodyFrame: React.FC<{
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  collaborationID?: string;
   compact: boolean;
   strokeColor: string;
   accent: string;
   onSelectionChange?: (selection: EmailFrameSelection | null) => void;
-}> = ({ message, apiBase, companyID, sharedInboxID, compact, strokeColor, accent, onSelectionChange }) => {
+}> = ({ message, apiBase, companyID, sharedInboxID, collaborationID, compact, strokeColor, accent, onSelectionChange }) => {
   const body = message.body || message.snippet || "";
   const attachments = useMemo(() => message.attachments ?? [], [message.attachments]);
   const [srcDoc, setSrcDoc] = useState(() => messageDocument(body, compact));
@@ -4563,7 +4580,7 @@ const EmailBodyFrame: React.FC<{
         const sourceURL = mangoAttachmentID
           ? await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
           : providerAttachmentID
-            ? URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID))
+            ? URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, collaborationID }))
             : "";
         if (cancelled) {
           if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
@@ -4584,7 +4601,7 @@ const EmailBodyFrame: React.FC<{
       controller.abort();
       objectURLs.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [apiBase, attachments, body, compact, companyID, message.id, sharedInboxID]);
+  }, [apiBase, attachments, body, collaborationID, compact, companyID, message.id, sharedInboxID]);
 
   useEffect(() => () => frameCleanupRef.current(), []);
 
@@ -4720,12 +4737,13 @@ const EmailMessageAttachments: React.FC<{
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  collaborationID?: string;
   respondable: boolean;
   accent: string;
   surfaceText: string;
   strokeColor: string;
   onError: (message: string) => void;
-}> = ({ message, apiBase, companyID, sharedInboxID, respondable, accent, surfaceText, strokeColor, onError }) => {
+}> = ({ message, apiBase, companyID, sharedInboxID, collaborationID, respondable, accent, surfaceText, strokeColor, onError }) => {
   const attachments = (message.attachments ?? []).filter((attachment) => !attachment.is_inline && !attachment.content_id?.trim());
   const hasCalendarInvite = (message.attachments ?? []).some(emailAttachmentIsCalendarInvite);
   const [previewAttachment, setPreviewAttachment] = useState<EmailAttachment | null>(null);
@@ -4752,8 +4770,8 @@ const EmailMessageAttachments: React.FC<{
     }
     const providerAttachmentID = attachment.id?.trim() ?? "";
     if (!providerAttachmentID) throw new Error("attachment_unavailable");
-    return { url: URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID)), revoke: true };
-  }, [apiBase, companyID, message.id, sharedInboxID]);
+    return { url: URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID, { collaborationID })), revoke: true };
+  }, [apiBase, collaborationID, companyID, message.id, sharedInboxID]);
 
   const downloadAttachment = useCallback(async (attachment: EmailAttachment) => {
     const filename = emailAttachmentFilename(attachment);
@@ -5137,6 +5155,7 @@ function estimateEditorBodyLineCount(value: string): number {
 
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
+  collaborationID,
   nodeID = "",
   apiBase = "",
   companyID,
@@ -5216,16 +5235,25 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     void (async () => {
-      const payload = await getEmailMessage(messageID, companyID, sharedInboxID);
+      const cleanCollaborationID = collaborationID?.trim() ?? "";
+      const collaborationThread = cleanCollaborationID
+        ? await getEmailCollaborationThread(companyID, cleanCollaborationID)
+        : null;
+      const payload = collaborationThread
+        ? collaborationThread.messages.find((item) => item.id === messageID) ?? collaborationThread.messages[0]
+        : await getEmailMessage(messageID, companyID, sharedInboxID);
+      if (!payload) throw new Error("email_collaboration_thread_unavailable");
       if (cancelled) return;
       setMessage(payload);
-      setThreadMessages([payload]);
+      setThreadMessages(collaborationThread?.messages.length ? collaborationThread.messages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setCcDraft("");
       setBccDraft("");
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
+
+      if (collaborationThread) return;
 
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
@@ -5274,7 +5302,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, messageID, sharedInboxID]);
+  }, [collaborationID, companyID, messageID, sharedInboxID]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;
@@ -5291,7 +5319,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const recipients = parseEmailAddressDraft(toDraft);
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
-  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const providerReplyAvailable = editable && !collaborationID?.trim();
+  const canSend = providerReplyAvailable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
@@ -5502,7 +5531,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, []);
 
   const selectReplyTarget = useCallback((target: EmailMessage, replyAll = false) => {
-    if (!editable) return;
+    if (!providerReplyAvailable) return;
     if (replyTargetMessageID === target.id && replyAllMode === replyAll) {
       setReplyTargetMessageID("");
       setReplyAllMode(false);
@@ -5516,7 +5545,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, editable, message?.subject, replyAllMode, replyTargetMessageID]);
+  }, [accountEmail, message?.subject, providerReplyAvailable, replyAllMode, replyTargetMessageID]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
@@ -5684,7 +5713,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         </div>
                         <button
                           type="button"
-                          disabled={!editable}
+                          disabled={!providerReplyAvailable}
                           onClick={() => selectReplyTarget(threadMessage, false)}
                           style={{
                             minHeight: 22,
@@ -5692,8 +5721,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: editable ? "pointer" : "default",
-                            opacity: editable ? 1 : 0.46,
+                            cursor: providerReplyAvailable ? "pointer" : "default",
+                            opacity: providerReplyAvailable ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -5705,7 +5734,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={!editable}
+                          disabled={!providerReplyAvailable}
                           onClick={() => selectReplyTarget(threadMessage, true)}
                           style={{
                             minHeight: 22,
@@ -5713,8 +5742,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: editable ? "pointer" : "default",
-                            opacity: editable ? 1 : 0.46,
+                            cursor: providerReplyAvailable ? "pointer" : "default",
+                            opacity: providerReplyAvailable ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -5746,6 +5775,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       apiBase={apiBase}
                       companyID={companyID}
                       sharedInboxID={sharedInboxID}
+                      collaborationID={collaborationID}
                       compact={inlineExpansion}
                       strokeColor={strokeColor}
                       accent={accent}
@@ -5778,7 +5808,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     apiBase={apiBase}
                     companyID={companyID}
                     sharedInboxID={sharedInboxID}
-                    respondable={editable}
+                    collaborationID={collaborationID}
+                    respondable={providerReplyAvailable}
                     accent={accent}
                     surfaceText={surfaceText}
                     strokeColor={strokeColor}

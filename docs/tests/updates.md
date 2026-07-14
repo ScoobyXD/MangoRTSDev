@@ -82,6 +82,11 @@ U71 - Seeing an individual update activates the next remaining visible row below
 U72 - Updates Status grouping consumes the shared universal status contract also used by My Work and Project Logic Gates / Nodes. A real status carried by a status-bearing notification is authoritative for that event row; arbitrary comment/mention prose and backend placeholders such as `a new status` or `a new state` are never status values. When no real event status exists, Updates falls back to the currently resolved node status, then the distinct No status group. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify aliases normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and completed/closed/archived aliases normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and No status remain before Done.
 U73 - A pending local notification delete/clear marker tracks whether HTTP and socket observers have claimed it. HTTP-first success emits once with its local optimistic source and a matching socket echo emits nothing; after both observers claim, the marker is removed so a distinct later clear is not suppressed. Socket-first commit emits once with a canonical non-local source so mounted Updates fetches even if the HTTP response is lost/rejected; duplicate socket frames remain suppressed while that lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
 U74 - A successful same-window Node or Logic Gate rename creates no notification under U45 and never rewrites the historical `NotificationItem.title` or `body_preview`. Mounted Updates resolves the current Node or Logic Gate label from Home's locally converged entity cache for the row's current-entity label, selected-panel entity label, and open action. For Logic Gate rows only, the current title also supplies saved Logic Gate grouping headers and alphabetical sort values.
+U75 - Email-collaboration chat uses the existing Node chat trigger canon rather than a parallel notification subsystem. A new chat may create the normal chat-message update for already authorized participants under U34; the newly mentioned user's row is a normal or urgent mention update and mention tone overrides the underlying chat tone under U53.
+U76 - A normal email-chat mention uses `mention.created` and canonical copy `{User} mentioned you on <email icon> {Email subject}`; an urgent email-chat mention uses `mention.urgent_created` and `{User} urgently mentioned you on <email icon> {Email subject}`. It must not describe the private collaboration Node as a Logic Gate work Node.
+U77 - One accepted user-group mention creates at most one mention notification for each newly snapshotted member, excluding the actor and deduplicating overlap with direct/other-group mentions. Retrying the same committed chat write or later changing group membership does not duplicate, add, or retract those historical notifications.
+U78 - Email-collaboration notification metadata may include collaboration ID, Node ID, provider message/thread ID, source mailbox discriminator, chat information ID, and selection-anchor metadata needed for authorized navigation, but never provider credentials, message/attachment bytes, presigned URLs, or storage keys.
+U79 - Email collaboration mention/chat rows use the shared email icon token required by U55. Activating an authorized row opens the email collaboration at the referenced message/chat anchor with the same underlying Node chat; a revoked/deleted/inaccessible target fails closed instead of falling back to an unrelated Node or mailbox.
 
 ## Update Row Copy And Visual Language
 
@@ -132,6 +137,9 @@ Entity icons in Updates must also be shared tokens. At minimum, the shared icon 
 | Normal mention in node chat | Orange @ | `{User} mentioned you in chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
 | Urgent mention in node chat | Red ! | `{User} urgently mentioned you in chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
 | New node chat message | Blue | `{User} sent chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
+| Normal mention in email collaboration chat | Orange @ | `{User} mentioned you on <email icon> {Email subject}` |
+| Urgent mention in email collaboration chat | Red ! | `{User} urgently mentioned you on <email icon> {Email subject}` |
+| New email collaboration chat message | Blue | `{User} sent chat on <email icon> {Email subject}` |
 | Normal mention in Logic Gate text editor | Orange @ | `{User} mentioned you in <logic gate icon> {Logic Gate}` |
 | Urgent mention in Logic Gate text editor | Red ! | `{User} urgently mentioned you in <logic gate icon> {Logic Gate}` |
 | Email attached directly to node | Blue | `{User} attached <email icon> email to <node icon> {Node} in <logic gate icon> {Logic Gate}` |
@@ -420,3 +428,31 @@ Expected:
 - The mounted row's current-entity label, selected preview panel entity label, and open-Node or open-Logic-Gate action immediately use the current committed title.
 - For the Logic Gate case, the saved Logic Gate grouping header and alphabetical grouping order use the current committed title and sort value.
 - No feed reload, cross-user title socket, or generalized fan-out plane is required for this same-window convergence.
+
+### Scenario U-S10: Email Chat Mention Notification And Navigation
+
+Business logic covered:
+- U32
+- U33
+- U34
+- U53
+- U55
+- U69
+- U75
+- U76
+- U77
+- U78
+- U79
+
+Given:
+- An email collaboration chat mentions one user directly and a group with overlapping current members.
+- The chat may be normal or urgent, and existing participants may also receive the ordinary chat update.
+- A mentioned participant opens Updates and activates the row.
+
+Expected:
+- Each distinct newly snapshotted mentioned user receives at most one normal or urgent mention notification; the actor is excluded and request retry/group changes create no duplicate.
+- Mention tone overrides chat tone and contributes to the existing @ or ! badge.
+- Canonical text says the actor mentioned the user on the email subject and uses the shared email icon, not a Logic Gate/Node-work sentence.
+- Existing participant chat updates may use the blue email-chat row.
+- The payload contains only the authorized IDs/anchor metadata needed to open the same email/Node chat and contains no credentials or file/object bytes.
+- Activation opens the referenced collaboration message/chat anchor after authorization; missing or inaccessible targets fail closed.
