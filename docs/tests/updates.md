@@ -4,7 +4,7 @@ Last updated: 2026-07-14
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain and U82's shared GVIC/Priority group-title presentation. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -89,6 +89,7 @@ U78 - Email-collaboration notification metadata may include collaboration ID, No
 U79 - Email collaboration mention/chat rows use the shared email icon token required by U55. Activating an authorized row opens the email collaboration at the referenced message/chat anchor with the same underlying Node chat; a revoked/deleted/inaccessible target fails closed instead of falling back to an unrelated Node or mailbox.
 U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
 U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> GVIC -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
+U82 - GVIC and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. GVIC titles reuse the shared Generated cyan, Verified pink, Consulted purple, and Informed green editor palette; Other, No GVIC, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
 
 ## Update Row Copy And Visual Language
 
@@ -259,6 +260,7 @@ Business logic covered:
 - U25
 - U67
 - U72
+- U82
 
 Given:
 - The user opens the built-in Updates tab, then saves a custom Updates view grouped by Project, Logic Gate, and Status and separately saves an explicitly empty grouping stack.
@@ -268,6 +270,7 @@ Given:
 
 Expected:
 - The built-in tab defaults exactly to Date, GVIC, Priority, then Logic Gate, and Priority is available in the grouping picker.
+- GVIC and Priority grouping titles are raised rectangular entity surfaces: GVIC uses its shared editor role palette (with neutral slate for Other or unassigned values), and Priority uses the exact shared node-priority palette for that number rather than generic plain text.
 - Project, Logic Gate, Priority, and Status grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
 - The status-changing row groups by the status recorded on that event; rows without an event status use the current resolved node status and otherwise No status.

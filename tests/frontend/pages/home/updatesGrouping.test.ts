@@ -8,6 +8,8 @@ import {
   normalizeUpdateGroupingStack,
   withBuiltInUpdateGroupingSetting,
 } from "../../../../frontend/src/pages/home/updatesGrouping.js";
+import { logicGateGVICRolePresentation } from "../../../../frontend/src/modules/logic-gate-map/gvicPresentation.js";
+import { resolveUpdateGroupSemanticPresentation } from "../../../../frontend/src/pages/home/updatesGroupPresentation.js";
 
 test("the built-in Updates grouping chain is Date, GVIC, Priority, then Logic Gate", () => {
   assert.deepEqual(DEFAULT_UPDATE_GROUPINGS.map((grouping) => grouping.field), [
@@ -38,6 +40,30 @@ test("the built-in Updates setting remains first without rewriting custom settin
   const settings = withBuiltInUpdateGroupingSetting(builtIn, [custom]);
   assert.deepEqual(settings.map((setting) => setting.setting_id), ["built-in", "custom"]);
   assert.deepEqual(settings[1], custom);
+});
+
+test("GVIC and Priority group titles reuse their semantic raised surfaces", () => {
+  assert.deepEqual([
+    logicGateGVICRolePresentation("generated").accent,
+    logicGateGVICRolePresentation("verified").accent,
+    logicGateGVICRolePresentation("consulted").accent,
+    logicGateGVICRolePresentation("informed").accent,
+  ], ["#0891b2", "#db2777", "#7c3aed", "#059669"]);
+
+  const other = resolveUpdateGroupSemanticPresentation({ field: "gvic", key: "gvic:other", label: "Other" });
+  assert.equal(other?.kind, "gvic");
+  assert.equal(other?.iconLabel, "O");
+  assert.equal(other?.iconColor, "#64748b");
+  assert.match(String(other?.surfaceStyle.background), /padding-box[\s\S]*border-box/);
+  assert.match(String(other?.surfaceStyle.boxShadow), /4px 4px 12px/);
+
+  const priority = resolveUpdateGroupSemanticPresentation({ field: "priority", key: "priority:2", label: "2 By end of day" });
+  assert.equal(priority?.kind, "priority");
+  assert.equal(priority?.iconLabel, "P");
+  assert.equal(priority?.iconColor, "#7c2d12");
+  assert.equal(priority?.surfaceStyle.background, "linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 240, 138, 0.68))");
+  assert.match(String(priority?.surfaceStyle.boxShadow), /rgba\(234, 88, 12, 0\.11\)/);
+  assert.equal(resolveUpdateGroupSemanticPresentation({ field: "date", key: "date:2026-07-14", label: "2026-07-14" }), null);
 });
 
 test("individual Updates rows omit Logic Gate presentation without removing Logic Gate grouping or navigation", () => {

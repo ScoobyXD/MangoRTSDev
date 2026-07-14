@@ -33,6 +33,7 @@ import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNes
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
+import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
 import {
   DEFAULT_UPDATE_GROUPINGS,
@@ -799,6 +800,7 @@ function UpdateGroupList({
         const branchLoading = branchLoadingIDs.has(group.id);
         const rows = group.rows ?? [];
         const canOpenResource = updateGroupCanOpenResource(group);
+        const semanticPresentation = resolveUpdateGroupSemanticPresentation(group);
         return (
           <div key={group.id} style={updateGroupBlockStyle}>
             <div style={updateGroupHeaderStyle(group.depth)}>
@@ -811,13 +813,21 @@ function UpdateGroupList({
                 <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
               </button>
               {canOpenResource ? (
-                <button type="button" style={updateGroupResourceButtonStyle} onClick={() => onOpenGroupResource(group)}>
-                  <UpdateGroupIcon group={group} />
+                <button
+                  type="button"
+                  data-mango-updates-group-surface={semanticPresentation?.kind}
+                  style={{ ...updateGroupResourceButtonStyle, ...semanticPresentation?.surfaceStyle }}
+                  onClick={() => onOpenGroupResource(group)}
+                >
+                  <UpdateGroupIcon group={group} semanticPresentation={semanticPresentation} />
                   <span style={updateGroupLabelStyle}>{group.label}</span>
                 </button>
               ) : (
-                <span style={updateGroupStaticContentStyle}>
-                  <UpdateGroupIcon group={group} />
+                <span
+                  data-mango-updates-group-surface={semanticPresentation?.kind}
+                  style={{ ...updateGroupStaticContentStyle, ...semanticPresentation?.surfaceStyle }}
+                >
+                  <UpdateGroupIcon group={group} semanticPresentation={semanticPresentation} />
                   <span style={updateGroupLabelStyle}>{group.label}</span>
                 </span>
               )}
@@ -872,7 +882,14 @@ function updateGroupCanOpenResource(group: UpdateGroup): boolean {
   );
 }
 
-function UpdateGroupIcon({ group }: { group: UpdateGroup }) {
+function UpdateGroupIcon({ group, semanticPresentation }: { group: UpdateGroup; semanticPresentation: UpdateGroupSemanticPresentation | null }) {
+  if (semanticPresentation) {
+    return (
+      <span aria-hidden="true" style={updateSemanticGroupIconStyle(semanticPresentation)}>
+        {semanticPresentation.iconLabel}
+      </span>
+    );
+  }
   if (group.resource_type === "project" || group.resource_type === "logic_gate" || group.resource_type === "node") {
     return <ExplorerRowIcon kind={group.resource_type} />;
   }
@@ -880,7 +897,7 @@ function UpdateGroupIcon({ group }: { group: UpdateGroup }) {
     return <span aria-hidden="true" style={updateStatusGroupDotStyle(group.label)} />;
   }
   const icon = updateGroupIconBadge(group);
-  return <span style={updateGroupBadgeStyle(icon.tone)}>{icon.label}</span>;
+  return <span aria-hidden="true" style={updateGroupBadgeStyle(icon.tone)}>{icon.label}</span>;
 }
 
 function updateStatusGroupDotStyle(status: string): React.CSSProperties {
@@ -895,14 +912,10 @@ function updateStatusGroupDotStyle(status: string): React.CSSProperties {
   };
 }
 
-function updateGroupIconBadge(group: UpdateGroup): { label: string; tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date" } {
+function updateGroupIconBadge(group: UpdateGroup): { label: string; tone: "urgent" | "mention" | "update" | "other" | "date" } {
   if (group.key === "type:urgent" || /urgent/i.test(group.label)) return { label: "!", tone: "urgent" };
   if (group.key === "type:mention" || group.field === "type" && /mention/i.test(group.label)) return { label: "@", tone: "mention" };
   if (group.key === "type:update" || group.field === "type") return { label: "U", tone: "update" };
-  if (group.key === "gvic:generated" || /^generated$/i.test(group.label)) return { label: "G", tone: "generated" };
-  if (group.key === "gvic:verified" || /^verified$/i.test(group.label)) return { label: "V", tone: "verified" };
-  if (group.key === "gvic:consulted" || /^consulted$/i.test(group.label)) return { label: "C", tone: "consulted" };
-  if (group.key === "gvic:informed" || /^informed$/i.test(group.label)) return { label: "I", tone: "informed" };
   if (group.field === "date") return { label: "D", tone: "date" };
   return { label: "O", tone: "other" };
 }
@@ -1858,15 +1871,28 @@ const updateGroupStaticContentStyle: React.CSSProperties = {
   gap: 5,
 };
 
-function updateGroupBadgeStyle(tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date"): React.CSSProperties {
+function updateSemanticGroupIconStyle(presentation: UpdateGroupSemanticPresentation): React.CSSProperties {
+  return {
+    width: 18,
+    height: 18,
+    border: `1px solid ${presentation.iconBorderColor}`,
+    borderRadius: 5,
+    display: "grid",
+    placeItems: "center",
+    background: "rgba(255, 255, 255, 0.78)",
+    color: presentation.iconColor,
+    fontSize: 10,
+    fontWeight: 900,
+    lineHeight: 1,
+    boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.88), 0 3px 8px rgba(15,23,42,0.08)",
+  };
+}
+
+function updateGroupBadgeStyle(tone: "urgent" | "mention" | "update" | "other" | "date"): React.CSSProperties {
   const colors: Record<typeof tone, { color: string; background: string }> = {
     urgent: { color: "#b91c1c", background: "rgba(248, 113, 113, 0.14)" },
     mention: { color: "#c2410c", background: "rgba(251, 146, 60, 0.16)" },
     update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
-    generated: { color: "#047857", background: "rgba(52, 211, 153, 0.14)" },
-    verified: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
-    consulted: { color: "#b45309", background: "rgba(251, 191, 36, 0.16)" },
-    informed: { color: "#0891b2", background: "rgba(34, 211, 238, 0.14)" },
     other: { color: "#64748b", background: "rgba(148, 163, 184, 0.12)" },
     date: { color: "#334155", background: "rgba(148, 163, 184, 0.14)" },
   };

@@ -8,6 +8,11 @@ import type { Account } from "../accounts/accountsApi";
 import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gate-map/shared";
 import {
+  LOGIC_GATE_GVIC_ROLE_PRESENTATIONS,
+  logicGateGVICRaisedSurfaceStyle,
+  logicGateGVICRolePresentation,
+} from "../logic-gate-map/gvicPresentation.js";
+import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
@@ -87,22 +92,10 @@ const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string
   { value: "done", label: "Done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
 ];
 
-const GVIC_ROLES: ReadonlyArray<{ role: LogicGateGVICRole; label: string }> = [
-  { role: "generated", label: "Generated" },
-  { role: "verified", label: "Verified" },
-  { role: "consulted", label: "Consulted" },
-  { role: "informed", label: "Informed" },
-];
-
-const GVIC_ROLE_ACCENTS: Record<LogicGateGVICRole, string> = {
-  generated: "#0891b2",
-  verified: "#db2777",
-  consulted: "#7c3aed",
-  informed: "#059669",
-};
+const GVIC_ROLES = LOGIC_GATE_GVIC_ROLE_PRESENTATIONS;
 
 function GVICRoleDisplayLabel(role: LogicGateGVICRole): string {
-  return GVIC_ROLES.find((item) => item.role === role)?.label ?? role;
+  return logicGateGVICRolePresentation(role).label;
 }
 
 const GVIC_FLOATING_LAYER_Z_INDEX = 10060;
@@ -951,7 +944,7 @@ function GVICRoleEditor({
     }
     return out;
   }, [allAssignments]);
-  const roleAccent = GVIC_ROLE_ACCENTS[role];
+  const roleAccent = logicGateGVICRolePresentation(role).accent;
   const singleUserOnly = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
   const inputPlaceholder = disabledReason ? "Inherited" : singleUserOnly ? "Add user" : "Add user or team";
@@ -1183,15 +1176,13 @@ function GVICRoleEditor({
     <div
       ref={containerRef}
       style={{
+        ...logicGateGVICRaisedSurfaceStyle(role),
         position: "relative",
         minWidth: 0,
         display: "grid",
         gap: 4,
         alignContent: "start",
-        border: "1px solid transparent",
         borderRadius: 9,
-        background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
-        boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
         padding: "5px 6px 6px",
       }}
     >

@@ -807,6 +807,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
+  const gvicPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gate-map/gvicPresentation.ts"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
 
   assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
@@ -827,7 +828,8 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorContent, /onSaveCurrentVersion=/);
   assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "apply-gvic-to-assigned-nodes"[\s\S]*disabled: !linkedEntityCanEdit \|\| logicGateGVICApplyToAssignedNodesBusy[\s\S]*onSelect: \(\) => setLogicGateGVICApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
   assert.match(editorContent, /logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Apply GVIC to assigned nodes\?"[\s\S]*confirmLabel="Yes"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateGVICApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateGVICToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateGVICApplyConfirmationOpen\(false\)\}/);
-  assert.match(linkedDocumentPanels, /const GVIC_ROLES:[\s\S]*role: "generated"[\s\S]*role: "verified"[\s\S]*role: "consulted"[\s\S]*role: "informed"[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{GVIC_ROLES\.map/);
+  assert.match(gvicPresentation, /LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*role: "generated"[\s\S]*accent: "#0891b2"[\s\S]*role: "verified"[\s\S]*accent: "#db2777"[\s\S]*role: "consulted"[\s\S]*accent: "#7c3aed"[\s\S]*role: "informed"[\s\S]*accent: "#059669"/);
+  assert.match(linkedDocumentPanels, /const GVIC_ROLES = LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{GVIC_ROLES\.map/);
   assert.doesNotMatch(linkedDocumentPanels, /Apply GVIC to assigned nodes|Current GVIC|Apply GVIC to all descendants/);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
