@@ -1,15 +1,59 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
+
+func TestEmailCollaborationSharedDraftAttachmentMutationsFreezeWhileSending(t *testing.T) {
+	const companyID = "11111111-1111-4111-8111-701300000317"
+	repo, owner, collaboration, draft, _ := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "attachment-freeze")
+	server := NewServer(repo)
+	resourceID := communicationsEmailDraftResourceID(draft)
+	listPath := "/v1/resources/email_draft/" + resourceID + "/attachments?company_id=" + url.QueryEscape(companyID)
+	listRequest := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, listPath, nil), owner, companyID, domain.RoleCompanyUser)
+	listBefore := httptest.NewRecorder()
+	server.Routes().ServeHTTP(listBefore, listRequest)
+	if listBefore.Code != http.StatusOK {
+		t.Fatalf("pre-send attachment read status=%d body=%s", listBefore.Code, listBefore.Body.String())
+	}
+	if _, err := repo.ClaimCommunicationsEmailDraftSend(store.CommunicationsEmailDraftSendClaimInput{
+		CompanyID: companyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		ParticipantUserID: owner.UserID, ExpectedRevision: draft.Revision, ProviderGrantID: "shared-send-recovery-grant-attachment-freeze",
+	}); err != nil {
+		t.Fatalf("claim shared draft send: %v", err)
+	}
+
+	linkBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID, "attachment_id": "must-not-link", "relationship_kind": "file_attachment",
+	})
+	linkRequest := attachmentRequestWithActor(httptest.NewRequest(http.MethodPost, listPath, bytes.NewReader(linkBody)), owner, companyID, domain.RoleCompanyUser)
+	linkRecorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(linkRecorder, linkRequest)
+	if linkRecorder.Code != http.StatusConflict || !strings.Contains(linkRecorder.Body.String(), "email_draft_send_in_progress") {
+		t.Fatalf("sending attachment link status=%d body=%s", linkRecorder.Code, linkRecorder.Body.String())
+	}
+	unlinkRequest := attachmentRequestWithActor(httptest.NewRequest(http.MethodDelete, "/v1/resources/email_draft/"+resourceID+"/attachments/must-not-unlink?company_id="+url.QueryEscape(companyID), nil), owner, companyID, domain.RoleCompanyUser)
+	unlinkRecorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(unlinkRecorder, unlinkRequest)
+	if unlinkRecorder.Code != http.StatusConflict || !strings.Contains(unlinkRecorder.Body.String(), "email_draft_send_in_progress") {
+		t.Fatalf("sending attachment unlink status=%d body=%s", unlinkRecorder.Code, unlinkRecorder.Body.String())
+	}
+	listAfter := httptest.NewRecorder()
+	server.Routes().ServeHTTP(listAfter, listRequest)
+	if listAfter.Code != http.StatusOK {
+		t.Fatalf("sending attachment read status=%d body=%s", listAfter.Code, listAfter.Body.String())
+	}
+}
 
 func TestPersonalEmailDraftAttachmentsAreOwnerOnlyEvenForCompanyManagers(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)

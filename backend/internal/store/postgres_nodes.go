@@ -343,6 +343,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) updateNodeTx(ctx context.Context, tx *sql.Tx, input UpdateNodeInput) (domain.Node, error) {
+	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	dueDate := (*string)(nil)
 	if input.DueDate != nil {
 		value := strings.TrimSpace(*input.DueDate)
@@ -1008,6 +1011,9 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	if !exists {
 		return domain.NodeInformation{}, ErrNotFound
 	}
+	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, nodeID); err != nil {
+		return domain.NodeInformation{}, err
+	}
 
 	item := domain.NodeInformation{
 		CompanyID:     companyID,
@@ -1233,6 +1239,11 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	}
 	if !exists {
 		return ErrNotFound
+	}
+	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
+		return ErrProtectedEmailCollaborationResource
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
 	}
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {

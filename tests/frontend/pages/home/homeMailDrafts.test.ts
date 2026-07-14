@@ -4,6 +4,7 @@ import {
   deleteHomeMailDraft,
   deleteHomeMailDraftRemote,
   ensureHomeMailDraftAttachmentTarget,
+  createHomeMailSharedReplyDraftID,
   homeMailDraftMatchesScope,
   homeMailDraftToCompose,
   loadHomeMailDrafts,
@@ -14,6 +15,7 @@ import {
   syncHomeMailDraftFromCompose,
   type HomeMailDraft,
 } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
+import type { ComposeState } from "../../../../frontend/src/pages/home/homeTypes.js";
 
 function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
   return {
@@ -31,6 +33,9 @@ function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
     body: "",
     attachments: [],
     scheduledAt: "",
+    collaborationID: "",
+    sharedDraft: false,
+    revision: 0,
     createdAt: "2026-07-10T10:00:00.000Z",
     updatedAt: "2026-07-10T10:00:00.000Z",
     ...overrides,
@@ -57,6 +62,71 @@ test("reply drafts remain separate across shared inbox scopes", () => {
   assert.deepEqual(drafts.map((item) => item.id).sort(), ["shared-a", "shared-b"]);
 });
 
+test("shared reply drafts use one collaboration-scoped identity across participants", () => {
+  assert.equal(
+    createHomeMailSharedReplyDraftID("collaboration-1", "message-1"),
+    "draft:shared-reply:collaboration-1:message-1",
+  );
+  const drafts = mergeHomeMailDrafts([
+    draft({
+      id: "first-client-id",
+      userID: "user-a",
+      collaborationID: "collaboration-1",
+      sharedDraft: true,
+      replyToMessageID: "message-1",
+      body: "earlier",
+    }),
+    draft({
+      id: "second-client-id",
+      userID: "user-b",
+      collaborationID: "collaboration-1",
+      sharedDraft: true,
+      replyToMessageID: "message-1",
+      body: "latest",
+      revision: 2,
+      updatedAt: "2026-07-10T12:00:00.000Z",
+    }),
+  ], []);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.body, "latest");
+  assert.equal(drafts[0]?.revision, 2);
+});
+
+test("canonical shared revision beats a newer local timestamp after an optimistic conflict", () => {
+  const drafts = mergeHomeMailDrafts([
+    draft({
+      id: "draft:shared-reply:collaboration-1:message-1",
+      collaborationID: "collaboration-1",
+      sharedDraft: true,
+      replyToMessageID: "message-1",
+      body: "canonical revision",
+      revision: 4,
+      updatedAt: "2026-07-10T12:00:00.000Z",
+    }),
+  ], [
+    draft({
+      id: "draft:shared-reply:collaboration-1:message-1",
+      collaborationID: "collaboration-1",
+      sharedDraft: true,
+      replyToMessageID: "message-1",
+      body: "unsent local edit",
+      revision: 3,
+      updatedAt: "2026-07-10T13:00:00.000Z",
+      pendingRemoteSync: true,
+    }),
+  ]);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.revision, 4);
+  assert.equal(drafts[0]?.body, "canonical revision");
+});
+
+test("legacy scheduled timestamps are cleared when a shared draft opens", () => {
+  assert.equal(homeMailDraftToCompose(draft({ sharedDraft: true, scheduledAt: "2026-07-14T10:00" })).scheduledAt, "");
+  assert.equal(homeMailDraftToCompose(draft({ sharedDraft: false, scheduledAt: "2026-07-14T10:00" })).scheduledAt, "2026-07-14T10:00");
+});
+
 test("personal drafts remain separate across account scopes", () => {
   const drafts = mergeHomeMailDrafts([
     draft({ id: "personal-a", accountEmail: "a@example.test", replyToMessageID: "message-1" }),
@@ -77,6 +147,16 @@ test("active draft scope never mixes personal and shared inbox rows", () => {
   assert.equal(homeMailDraftMatchesScope(sharedA, "inbox-a", "a@example.test"), true);
   assert.equal(homeMailDraftMatchesScope(sharedB, "inbox-a", "a@example.test"), false);
   assert.equal(homeMailDraftMatchesScope(personal, "", ""), false);
+
+  const collaborationDraft = draft({
+    id: "shared-collaboration-draft",
+    sharedInboxID: "source-inbox",
+    accountEmail: "source@example.test",
+    collaborationID: "collaboration-1",
+    sharedDraft: true,
+  });
+  assert.equal(homeMailDraftMatchesScope(collaborationDraft, "", "me@example.test"), true);
+  assert.equal(homeMailDraftMatchesScope(collaborationDraft, "another-inbox", "other@example.test"), true);
 });
 
 test("remote reconciliation identifies only older semantic reply drafts for deletion", () => {
@@ -563,6 +643,66 @@ test("a delete queued behind a stalled load-time migration removes the remote dr
     assert.deepEqual(await deleting, []);
     assert.deepEqual(methods, ["GET", "PUT", "DELETE"]);
     assert.deepEqual(storedDrafts(), []);
+  });
+});
+
+test("shared-draft save reconciliation lists by participant instead of requiring the source mailbox", async () => {
+  const remoteDraft = {
+    company_id: "company-1",
+    draft_id: "draft:shared-reply:collaboration-1:message-1",
+    scope_type: "shared",
+    shared_inbox_id: "source-inbox",
+    account_email: "source@example.test",
+    kind: "reply",
+    source_message_id: "message-1",
+    collaboration_id: "collaboration-1",
+    is_shared: true,
+    revision: 2,
+    to_recipients: "recipient@example.test",
+    cc_recipients: "",
+    bcc_recipients: "",
+    subject: "Re: Source",
+    body_editor_html: "<div>Updated</div>",
+    created_timestamp: "2026-07-10T10:00:00.000Z",
+    updated_timestamp: "2026-07-10T12:00:00.000Z",
+    attachments: [],
+  };
+  const requests: string[] = [];
+  await withDraftBrowserState([], async () => {
+    globalThis.fetch = async (input) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify(requests.length === 1 ? { draft: remoteDraft } : { drafts: [remoteDraft] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const compose: ComposeState = {
+      open: true,
+      draftID: remoteDraft.draft_id,
+      sharedInboxID: remoteDraft.shared_inbox_id,
+      accountEmail: remoteDraft.account_email,
+      replyToMessageID: remoteDraft.source_message_id,
+      replyToMessage: null,
+      focusRequestID: 0,
+      to: remoteDraft.to_recipients,
+      cc: "",
+      bcc: "",
+      subject: remoteDraft.subject,
+      body: remoteDraft.body_editor_html,
+      attachments: [],
+      scheduledAt: "",
+      collaborationID: remoteDraft.collaboration_id,
+      sharedDraft: true,
+      draftRevision: 1,
+    };
+
+    const reconciled = await syncHomeMailDraftFromCompose("company-1", "user-1", compose, "");
+
+    assert.equal(reconciled[0]?.revision, 2);
+    const listURL = new URL(requests[1]!, "https://mango.test");
+    assert.equal(listURL.searchParams.get("company_id"), "company-1");
+    assert.equal(listURL.searchParams.has("shared_inbox_id"), false);
+    assert.equal(listURL.searchParams.has("account_email"), false);
   });
 });
 

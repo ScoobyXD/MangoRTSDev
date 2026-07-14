@@ -3290,6 +3290,24 @@ func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
 	}
 }
 
+func TestParseNylasWebhookChangesCapturesRenderableMessageSnapshot(t *testing.T) {
+	t.Parallel()
+
+	changes, err := parseNylasWebhookChanges([]byte("{\"type\":\"message.created\",\"data\":{\"object\":{\"id\":\"message-renderable\",\"thread_id\":\"thread-renderable\",\"grant_id\":\"grant-renderable\",\"subject\":\"Renderable update\",\"snippet\":\"A complete webhook snapshot\",\"body\":\"<p>Complete body</p>\",\"date\":1783989000,\"from\":[{\"name\":\"Sender\",\"email\":\"sender@example.com\"}],\"to\":[{\"email\":\"recipient@example.com\"}],\"unread\":true}}}"))
+	if err != nil {
+		t.Fatalf("parseNylasWebhookChanges: %v", err)
+	}
+	if len(changes) != 1 || !changes[0].MessageHydrated {
+		t.Fatalf("changes = %+v, want one hydrated message", changes)
+	}
+	message := changes[0].Message
+	if message.ID != "message-renderable" || message.ThreadID != "thread-renderable" ||
+		message.Subject != "Renderable update" || message.Body != "<p>Complete body</p>" ||
+		len(message.From) != 1 || message.From[0].Email != "sender@example.com" {
+		t.Fatalf("message snapshot = %+v", message)
+	}
+}
+
 func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	t.Parallel()
 
@@ -4393,6 +4411,99 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	}
 }
 
+func TestNylasWebhookAdvancesPersonalEmailCollaborationForPermanentParticipants(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "71717171-7171-4171-8171-717171717171"
+	repo.EnsureCompany(companyID, "Personal collaboration live arrival")
+	creator := mustRealtimeAuthUser(t, repo, companyID, "collaboration-webhook-creator", domain.RoleCompanyUser)
+	participant := mustRealtimeAuthUser(t, repo, companyID, "collaboration-webhook-participant", domain.RoleCompanyUser)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: participant.UserID, Provider: "google", AccountEmail: participant.Email,
+		GrantID: "collaboration-participant-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: creator.UserID, Provider: "google", AccountEmail: creator.Email,
+		GrantID: "collaboration-webhook-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
+		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		Message: domain.EmailMessageSnapshot{
+			ID: "collaboration-root-message", ThreadID: "collaboration-thread",
+			Subject: "Original subject", Snippet: "Original snippet", Body: "<p>Original body</p>",
+			Date: 1783988000, From: []domain.EmailAddressSnapshot{{Email: "sender@example.com"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCommunicationsEmailCollaborationParticipants(store.CommunicationsEmailCollaborationParticipantInput{
+		CompanyID: companyID, CollaborationID: created.Collaboration.CollaborationID,
+		ActorUserID: creator.UserID, MentionedUserIDs: []string{participant.UserID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	nylas := &fakeNylasClient{message: NylasMessage{
+		ID: "collaboration-future-message", ThreadID: "collaboration-thread",
+		Subject: "Future thread reply", Snippet: "New reply preview", Body: "<p>New reply body</p>",
+		Date: 1783989000, Unread: true,
+		From: []NylasEmailAddress{{Name: "Sender", Email: "sender@example.com"}},
+		To:   []NylasEmailAddress{{Email: creator.Email}},
+	}}
+	participantToken := "collaboration-webhook-participant-token"
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			participantToken: {Subject: participant.CognitoSubject, Email: participant.Email, Name: participant.DisplayName},
+		}},
+	})
+	defer server.Close()
+	handler := server.Routes()
+	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, participantToken)
+	defer client.close()
+	client.readJSON(t)
+	participantScope := realtimePersonalMailboxScope(participant.UserID, participant.Email)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": participantScope})
+	if subscribed := client.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted || subscribed["scope"] != participantScope {
+		t.Fatalf("participant mailbox subscription = %+v", subscribed)
+	}
+
+	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:30:00Z\",\"data\":{\"object\":{\"id\":\"collaboration-future-message\",\"thread_id\":\"collaboration-thread\",\"grant_id\":\"collaboration-webhook-grant\"}}}"
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	changed := client.readJSON(t)
+	if changed["type"] != realtimeMessageMailboxMessageChanged || changed["scope"] != participantScope ||
+		changed["trigger"] != "message.created" || changed["message_id"] != "collaboration-future-message" ||
+		changed["thread_id"] != "collaboration-thread" {
+		t.Fatalf("participant collaboration event = %+v", changed)
+	}
+	if nylas.detailCalls != 1 || nylas.lastDetailGrantID != "collaboration-webhook-grant" {
+		t.Fatalf("provider hydration calls=%d grant=%q, want one matched-thread detail read", nylas.detailCalls, nylas.lastDetailGrantID)
+	}
+	collaboration, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, participant.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collaboration.LatestMessageID != "collaboration-future-message" ||
+		collaboration.Message.Subject != "Future thread reply" ||
+		collaboration.Message.Body != "<p>New reply body</p>" {
+		t.Fatalf("advanced collaboration = %+v", collaboration)
+	}
+}
+
 func TestNylasWebhookStoresSharedReadStatusForSharedInbox(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "80808080-8080-4080-8080-808080808001"
@@ -4521,6 +4632,111 @@ func TestCommunicationsReadStatusEnrichmentUsesExactPersonalAccount(t *testing.T
 	}
 	if got := enrich("account-b@example.com"); got.ThreadID != "thread-b" || got.Status != "read" || got.SignalCount != 9 {
 		t.Fatalf("account B read status = %+v", got)
+	}
+}
+
+func TestNylasWebhookAdvancesSharedEmailCollaborationThroughPersonalFallback(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "82828282-8282-4282-8282-828282828282"
+	repo.EnsureCompany(companyID, "Shared collaboration live arrival")
+	creator := mustRealtimeAuthUser(t, repo, companyID, "shared-collaboration-creator", domain.RoleCompanyUser)
+	participant := mustRealtimeAuthUser(t, repo, companyID, "shared-collaboration-participant", domain.RoleCompanyUser)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: participant.UserID, Provider: "google", AccountEmail: participant.Email,
+		GrantID: "shared-collaboration-participant-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID: companyID, Provider: "google", AccountEmail: "support@example.com",
+		GrantID: "shared-collaboration-grant", Status: "connected", ConnectedByUserID: creator.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: folder.FolderID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: creator.UserID, AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: folder.FolderID, AccountEmail: "support@example.com",
+		CreatedByUserID: creator.UserID,
+		Message: domain.EmailMessageSnapshot{
+			ID: "shared-collaboration-root", ThreadID: "shared-collaboration-thread",
+			Subject: "Shared original", Snippet: "Original", Body: "<p>Original</p>", Date: 1783987000,
+			From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCommunicationsEmailCollaborationParticipants(store.CommunicationsEmailCollaborationParticipantInput{
+		CompanyID: companyID, CollaborationID: created.Collaboration.CollaborationID,
+		ActorUserID: creator.UserID, MentionedUserIDs: []string{participant.UserID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	nylas := &fakeNylasClient{message: NylasMessage{
+		ID: "shared-collaboration-future", ThreadID: "shared-collaboration-thread",
+		Subject: "Shared future reply", Snippet: "Customer answered", Body: "<p>Customer answer</p>",
+		Date: 1783989500, Unread: true,
+		From: []NylasEmailAddress{{Email: "customer@example.com"}},
+		To:   []NylasEmailAddress{{Email: "support@example.com"}},
+	}}
+	participantToken := "shared-collaboration-participant-token"
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			participantToken: {Subject: participant.CognitoSubject, Email: participant.Email, Name: participant.DisplayName},
+		}},
+	})
+	defer server.Close()
+	handler := server.Routes()
+	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, participantToken)
+	defer client.close()
+	client.readJSON(t)
+	participantScope := realtimePersonalMailboxScope(participant.UserID, participant.Email)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": participantScope})
+	if subscribed := client.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted {
+		t.Fatalf("participant personal mailbox subscription = %+v", subscribed)
+	}
+
+	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:40:00Z\",\"data\":{\"object\":{\"id\":\"shared-collaboration-future\",\"thread_id\":\"shared-collaboration-thread\",\"grant_id\":\"shared-collaboration-grant\"}}}"
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shared collaboration webhook status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	changed := client.readJSON(t)
+	if changed["type"] != realtimeMessageMailboxMessageChanged || changed["scope"] != participantScope ||
+		changed["trigger"] != "message.created" || changed["message_id"] != "shared-collaboration-future" {
+		t.Fatalf("shared collaboration personal fallback event = %+v", changed)
+	}
+	if _, present := changed["shared_inbox_id"]; present {
+		t.Fatalf("personal fallback leaked source shared inbox routing: %+v", changed)
+	}
+	collaboration, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, participant.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collaboration.LatestMessageID != "shared-collaboration-future" ||
+		collaboration.Message.Subject != "Shared future reply" ||
+		collaboration.Message.Body != "<p>Customer answer</p>" {
+		t.Fatalf("advanced shared collaboration = %+v", collaboration)
 	}
 }
 

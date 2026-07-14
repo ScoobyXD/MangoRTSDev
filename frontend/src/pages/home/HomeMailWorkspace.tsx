@@ -1,9 +1,11 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-import type { CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
-import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators } from "./HomeParts";
+import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
+import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
+import { emailMessageRowKey } from "./homeUtils";
 import {
   accountEmailStyle,
   accountRowStyle,
@@ -50,9 +52,12 @@ import {
   triageMessageContentStyle,
   triageMessageActionRowStyle,
   triageMessageMetaStyle,
+  triageMessageTimestampStyle,
   triageMessageReadStatusSlotStyle,
   triageMessageRowStyle,
   triageSenderStyle,
+  triageSnippetStyle,
+  triageMessageStarButtonStyle,
   triageSubjectStyle,
   mailUnreadFilterRowStyle,
   unreadCountInlineStyle,
@@ -210,12 +215,14 @@ export function HomeMailWorkspace({
   messageListRef,
   messages,
   companyUsers,
+  companyUserGroups,
+  companyUserGroupMembers,
   notice,
   noticeAction,
   pendingStarredMessageIDs,
   searchDraft,
   selectedMessage,
-  selectedMessageID,
+  selectedMessageRowKey,
   selectedMessageIDs,
   selectedThreadMessages,
   sharedInboxSettings,
@@ -242,6 +249,7 @@ export function HomeMailWorkspace({
   onOpenPendingMailbox,
   onOpenReply,
   onOpenReplyAll,
+  onCreateSharedDraft,
   onOpenSentMailbox,
   onOpenSpamMailbox,
   onOpenStarredMailbox,
@@ -260,6 +268,8 @@ export function HomeMailWorkspace({
   onToggleRead,
   onToggleStar,
   onToggleUnreadOnly,
+  onEmailCollaborationChange,
+  onEmailCollaborationError,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -285,12 +295,14 @@ export function HomeMailWorkspace({
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
   companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
   pendingStarredMessageIDs: Set<string>;
   searchDraft: string;
   selectedMessage: EmailMessage | null;
-  selectedMessageID: string;
+  selectedMessageRowKey: string;
   selectedMessageIDs: Set<string>;
   selectedThreadMessages: EmailMessage[];
   sharedInboxSettings?: { onOpen: () => void; onOpenGVIC?: () => void };
@@ -317,6 +329,7 @@ export function HomeMailWorkspace({
   onOpenPendingMailbox: () => void;
   onOpenReply: (message?: EmailMessage) => void;
   onOpenReplyAll: (message?: EmailMessage) => void;
+  onCreateSharedDraft: (message: EmailMessage) => void;
   onOpenSentMailbox: () => void;
   onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
@@ -335,10 +348,24 @@ export function HomeMailWorkspace({
   onToggleRead: () => void;
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
+  onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
+  onEmailCollaborationError: (message: string) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
   const [allMailboxMenuOpen, setAllMailboxMenuOpen] = React.useState(false);
+  const [emailSelection, setEmailSelection] = React.useState<EmailCollaborationSelection | null>(null);
+  const [emailNavigation, setEmailNavigation] = React.useState<EmailCollaborationNavigation | null>(null);
+  const emailNavigationSequenceRef = React.useRef(0);
+  const clearEmailSelection = React.useCallback(() => setEmailSelection(null), []);
+  const navigateToEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
+    emailNavigationSequenceRef.current += 1;
+    setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
+  }, []);
+  React.useEffect(() => {
+    setEmailSelection(null);
+    setEmailNavigation(null);
+  }, [selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
@@ -593,20 +620,26 @@ export function HomeMailWorkspace({
             {messages.length === 0 && !loadingMessages ? (
               <div style={emptyStateStyle}>{mailbox === "drafts" ? "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
             ) : messages.map((message) => {
-              const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
-              const hovered = hoveredMessageID === message.id;
+              const rowKey = emailMessageRowKey(message);
+              const active = selectedMessageIDs.has(rowKey) || selectedMessageRowKey === rowKey;
+              const hovered = hoveredMessageID === rowKey;
               const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
               const draftRow = mailbox === "drafts" || isDraftMessage(message);
               const draggable = triageView && !draftRow && canDragTriageMessageFromMailbox(mailbox);
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
-              const starHovered = hoveredStarMessageID === message.id;
+              const starHovered = hoveredStarMessageID === rowKey;
               const starHighlighted = pendingStarred || message.starred || starHovered;
-              const rowAddressLabel = draftRow ? (formatAddressList(message.to) || "Draft") : (formatAddressList(message.from) || "Unknown sender");
+              const sharedDraftSource = draftRow && message.collaboration_id?.trim()
+                ? message.collaboration_account_email?.trim() || "email collaboration"
+                : "";
+              const rowAddressLabel = draftRow
+                ? (sharedDraftSource ? `Shared draft · ${sharedDraftSource}` : (formatAddressList(message.to) || "Draft"))
+                : (formatAddressList(message.from) || "Unknown sender");
               const showReadStatus = mailbox === "sent" && !draftRow;
               return (
                 <div
-                  key={message.id}
-                  data-home-mail-message-id={message.id}
+                  key={rowKey}
+                  data-home-mail-message-id={rowKey}
                   role="button"
                   tabIndex={0}
                   aria-pressed={active}
@@ -615,8 +648,8 @@ export function HomeMailWorkspace({
                     ? triageMessageRowStyle(active, message.unread, draggable, hovered, false)
                     : messageRowStyle(active, message.unread, hovered, false)}
                   draggable={draggable}
-                  onPointerEnter={() => setHoveredMessageID(message.id)}
-                  onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
+                  onPointerEnter={() => setHoveredMessageID(rowKey)}
+                  onPointerLeave={() => setHoveredMessageID((current) => current === rowKey ? "" : current)}
                   onMouseDown={(event) => {
                     if (!event.shiftKey) return;
                     event.preventDefault();
@@ -640,10 +673,10 @@ export function HomeMailWorkspace({
                       <span style={triageMessageContentStyle}>
                         <strong style={triageSenderStyle}>{rowAddressLabel}</strong>
                         <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
-                        <span style={snippetStyle}>{message.snippet || ""}</span>
+                        <span style={{ ...snippetStyle, ...triageSnippetStyle }}>{message.snippet || ""}</span>
                       </span>
                       <span style={triageMessageMetaStyle}>
-                        <span style={messageTimestampStatusRowStyle}>
+                        <span style={{ ...messageTimestampStatusRowStyle, ...triageMessageTimestampStyle }}>
                           <MessageAttachmentCount message={message} />
                           <MessageThreadCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
@@ -655,10 +688,10 @@ export function HomeMailWorkspace({
                               aria-label={message.starred ? "Remove star" : "Star message"}
                               title={message.starred ? "Remove star" : "Star message"}
                               draggable={false}
-                              style={messageStarButtonStyle(starHighlighted, starHovered, false)}
+                              style={{ ...messageStarButtonStyle(starHighlighted, starHovered, false), ...triageMessageStarButtonStyle }}
                               disabled={busy === "message" || pendingStarred}
-                              onPointerEnter={() => setHoveredStarMessageID(message.id)}
-                              onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
+                              onPointerEnter={() => setHoveredStarMessageID(rowKey)}
+                              onPointerLeave={() => setHoveredStarMessageID((current) => current === rowKey ? "" : current)}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onToggleMessageStar(message);
@@ -725,26 +758,62 @@ export function HomeMailWorkspace({
             onDiscardEmptyDraft={onDiscardEmptyComposeDraft}
           />
         ) : selectedMessage ? (
-          <MessageDetail
-            message={selectedMessage}
-            threadMessages={selectedThreadMessages}
-            companyID={companyID}
-            sharedInboxID={activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined}
-            accountEmail={accountEmail}
-            loading={loadingDetail}
-            archiveAvailable={archiveAvailable}
-            archiveLabel={archiveLabel}
-            busy={!!busy}
-            onLoadMessageBody={onLoadMessageBody}
-            onReply={onOpenReply}
-            onReplyAll={onOpenReplyAll}
-            onForward={onOpenForward}
-            onArchive={onArchiveSelected}
-            onDelete={onDeleteSelected}
-            deleteAvailable={archiveAvailable}
-            onToggleRead={onToggleRead}
-            onToggleStar={onToggleStar}
-          />
+          <div
+            style={{
+              minWidth: 0,
+              minHeight: 0,
+              height: "100%",
+              display: "grid",
+              gridTemplateColumns: showDetailResizeHandle && (activeViewID === "my-triage" || activeViewID.startsWith("shared:"))
+                ? "minmax(0, 1fr) minmax(320px, 38%)"
+                : "minmax(0, 1fr)",
+              gridTemplateRows: !showDetailResizeHandle && (activeViewID === "my-triage" || activeViewID.startsWith("shared:"))
+                ? "auto auto"
+                : "minmax(0, 1fr)",
+              overflow: "hidden",
+            }}
+          >
+            <MessageDetail
+              message={selectedMessage}
+              threadMessages={selectedThreadMessages}
+              companyID={companyID}
+              sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
+              accountEmail={selectedMessage.collaboration_account_email || accountEmail}
+              loading={loadingDetail}
+              archiveAvailable={archiveAvailable}
+              archiveLabel={archiveLabel}
+              busy={!!busy}
+              onLoadMessageBody={onLoadMessageBody}
+              onReply={onOpenReply}
+              onReplyAll={onOpenReplyAll}
+              onCreateSharedDraft={onCreateSharedDraft}
+              onForward={onOpenForward}
+              onArchive={onArchiveSelected}
+              onDelete={onDeleteSelected}
+              deleteAvailable={archiveAvailable}
+              onToggleRead={onToggleRead}
+              onToggleStar={onToggleStar}
+              onEmailSelection={setEmailSelection}
+              selectionNavigation={emailNavigation}
+            />
+            {(activeViewID === "my-triage" || activeViewID.startsWith("shared:")) && (
+              <EmailCollaborationChatSurface
+                companyID={companyID}
+                currentUserID={currentUserID}
+                message={selectedMessage}
+                sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
+                accountEmail={selectedMessage.collaboration_account_email || accountEmail}
+                companyUsers={companyUsers}
+                companyUserGroups={companyUserGroups}
+                companyUserGroupMembers={companyUserGroupMembers}
+                selection={emailSelection}
+                onClearSelection={clearEmailSelection}
+                onNavigateToEmailSelection={navigateToEmailSelection}
+                onCollaborationChange={onEmailCollaborationChange}
+                onError={onEmailCollaborationError}
+              />
+            )}
+          </div>
         ) : (
           <div style={emptyStateStyle}>Select a message or compose a new one</div>
         )}

@@ -347,6 +347,9 @@ func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.R
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if handled, allowed := s.requireEmailCollaborationNodeAttachmentAccess(w, r, companyID, resourceType, resourceID); handled {
+		return allowed
+	}
 	switch resourceType {
 	case "email_draft", "email_message":
 		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionView)
@@ -365,6 +368,9 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if handled, allowed := s.requireEmailCollaborationNodeAttachmentAccess(w, r, companyID, resourceType, resourceID); handled {
+		return allowed
+	}
 	switch resourceType {
 	case "email_draft", "email_message":
 		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionEdit)
@@ -407,6 +413,9 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 		}
 		return s.canViewEmailDraftAttachmentResource(actor, companyID, resourceID)
 	}
+	if handled, allowed, err := s.canAccessEmailCollaborationNodeAttachment(r, companyID, resourceType, resourceID); handled {
+		return allowed, err
+	}
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
 		return true, nil
@@ -431,11 +440,12 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 }
 
 type emailScopedAttachmentResource struct {
-	scope         string
-	userID        string
-	accountEmail  string
-	sharedInboxID string
-	itemID        string
+	scope           string
+	userID          string
+	accountEmail    string
+	sharedInboxID   string
+	collaborationID string
+	itemID          string
 }
 
 func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID, accessLevel string) bool {
@@ -454,6 +464,26 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
 		return false
+	}
+	if parsed.scope == "collaboration" {
+		if actorRoleForCompany(actor, companyID) == "" {
+			writeError(w, http.StatusForbidden, "company_access_denied")
+			return false
+		}
+		draft, authorized, err := s.accessibleEmailCollaborationDraft(companyID, strings.TrimSpace(actor.User.UserID), parsed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_email_collaboration_draft")
+			return false
+		}
+		if !authorized {
+			writeAccessResourceNotFound(w)
+			return false
+		}
+		if accessLevel == store.EntityPermissionEdit && draft.SendState == "sending" {
+			writeError(w, http.StatusConflict, "email_draft_send_in_progress")
+			return false
+		}
+		return true
 	}
 	if resourceType == "email_draft" && accessLevel == store.EntityPermissionEdit && parsed.scope == "personal" && parsed.accountEmail == "" {
 		// Accountless personal draft IDs are read-only compatibility for links
@@ -510,6 +540,9 @@ func (s *Server) canViewEmailMessageAttachmentResource(companyID, userID, resour
 	if !ok {
 		return false, nil
 	}
+	if parsed.scope == "collaboration" {
+		return s.canAccessEmailCollaborationDraft(companyID, userID, parsed)
+	}
 	if parsed.scope == "personal" {
 		return userID == parsed.userID, nil
 	}
@@ -520,6 +553,11 @@ func (s *Server) canViewEmailDraftAttachmentResource(actor ActorContext, company
 	parsed, ok := parseEmailScopedAttachmentResourceID("email_draft", resourceID)
 	if !ok {
 		return false, nil
+	}
+	if parsed.scope == "collaboration" {
+		// Collaboration drafts are participant-private; generic company-admin
+		// resource access must not expose their attachment bytes.
+		return s.canAccessEmailCollaborationDraft(companyID, strings.TrimSpace(actor.User.UserID), parsed)
 	}
 	if parsed.scope == "personal" {
 		if strings.TrimSpace(actor.User.UserID) != parsed.userID {
@@ -710,6 +748,19 @@ func parseEmailScopedAttachmentResourceID(resourceType, resourceID string) (emai
 			return emailScopedAttachmentResource{}, false
 		}
 		return emailScopedAttachmentResource{scope: scope, sharedInboxID: sharedInboxID, itemID: itemID}, true
+	case "collaboration":
+		if resourceType != "email_draft" || len(parts) != 3 {
+			return emailScopedAttachmentResource{}, false
+		}
+		collaborationID, ok := unescapeEmailAttachmentResourcePart(parts[1])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		itemID, ok := unescapeEmailAttachmentResourcePart(parts[2])
+		if !ok {
+			return emailScopedAttachmentResource{}, false
+		}
+		return emailScopedAttachmentResource{scope: scope, collaborationID: collaborationID, itemID: itemID}, true
 	default:
 		return emailScopedAttachmentResource{}, false
 	}
@@ -812,4 +863,89 @@ func writeAttachmentStorageError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadGateway, "attachment_storage_failed")
+}
+
+func (s *Server) canAccessEmailCollaborationDraft(companyID, userID string, parsed emailScopedAttachmentResource) (bool, error) {
+	_, allowed, err := s.accessibleEmailCollaborationDraft(companyID, userID, parsed)
+	return allowed, err
+}
+
+func (s *Server) accessibleEmailCollaborationDraft(companyID, userID string, parsed emailScopedAttachmentResource) (domain.CommunicationsEmailDraft, bool, error) {
+	if parsed.scope != "collaboration" || parsed.collaborationID == "" || parsed.itemID == "" || strings.TrimSpace(userID) == "" {
+		return domain.CommunicationsEmailDraft{}, false, nil
+	}
+	_, err := s.repo.GetCommunicationsEmailCollaboration(companyID, parsed.collaborationID, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, false, nil
+	}
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	input := store.CommunicationsEmailDraftGetInput{
+		CompanyID:         companyID,
+		DraftID:           parsed.itemID,
+		ParticipantUserID: userID,
+	}
+	draft, err := s.repo.GetCommunicationsEmailDraft(input)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, false, nil
+	}
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	return draft, draft.IsShared && draft.CollaborationID == parsed.collaborationID, nil
+}
+
+func emailCollaborationAttachmentNodeID(resourceType, resourceID string) (string, bool) {
+	switch store.NormalizeAttachmentResourceType(resourceType) {
+	case "node":
+		nodeID := strings.TrimSpace(resourceID)
+		return nodeID, nodeID != ""
+	case "attached_email":
+		return parseAttachedEmailAttachmentResourceID(resourceID)
+	default:
+		return "", false
+	}
+}
+
+func (s *Server) canAccessEmailCollaborationNodeAttachment(r *http.Request, companyID, resourceType, resourceID string) (bool, bool, error) {
+	nodeID, ok := emailCollaborationAttachmentNodeID(resourceType, resourceID)
+	if !ok {
+		return false, false, nil
+	}
+	collaboration, err := s.repo.GetCommunicationsEmailCollaborationByNode(companyID, nodeID)
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
+		return false, false, nil
+	}
+	if err != nil {
+		return true, false, err
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok || actorRoleForCompany(actor, companyID) == "" {
+		return true, false, nil
+	}
+	_, err = s.repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, strings.TrimSpace(actor.User.UserID))
+	if errors.Is(err, store.ErrNotFound) {
+		return true, false, nil
+	}
+	if err != nil {
+		return true, false, err
+	}
+	return true, true, nil
+}
+
+func (s *Server) requireEmailCollaborationNodeAttachmentAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) (bool, bool) {
+	handled, allowed, err := s.canAccessEmailCollaborationNodeAttachment(r, companyID, resourceType, resourceID)
+	if !handled {
+		return false, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_email_collaboration_attachment")
+		return true, false
+	}
+	if !allowed {
+		writeAccessResourceNotFound(w)
+		return true, false
+	}
+	return true, true
 }

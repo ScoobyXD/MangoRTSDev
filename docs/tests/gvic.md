@@ -36,7 +36,7 @@ GVIC25 - Source-shaped assignment responses patch editable GVIC chips for the in
 GVIC26 - Stale in-flight reads or browser cache entries must not repopulate older Logic Gate GVIC data after a successful POST or PUT.
 GVIC27 - Logic Gate GVIC and Node GVIC must follow the same cache freshness contract; Logic Gate GVIC must not depend on stale broad Logic Gate payloads when Node GVIC uses fresh resource GVIC data.
 GVIC28 - Logic Gate GVIC is a template for nodes only at the moment a node enters that logic gate.
-GVIC29 - Standalone nodes and linked nodes both own editable node GVIC source assignments.
+GVIC29 - Ordinary standalone nodes and ordinary linked nodes both own editable node GVIC source assignments.
 GVIC30 - A node inside a logic gate displays and edits its node-level GVIC snapshot; it must not be read-only merely because it is linked to a logic gate.
 GVIC31 - Creating a node inside a logic gate, placing a standalone node into a logic gate, or moving a node between logic gates replaces the node's GVIC source assignments with a snapshot of the target logic gate's current GVIC template.
 GVIC32 - Detaching a node from a logic gate preserves the node-level GVIC snapshot.
@@ -62,7 +62,8 @@ GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic G
 GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
 GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
 GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_view`, `can_edit`, or `can_admin`.
-GVIC55 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
+GVIC55 - Email-collaboration Nodes are a system-managed exception to ordinary standalone-node GVIC editing: generic GVIC add, set/update, and remove commands reject them. Permanent collaboration participation grants are not GVIC assignments and must not create source or effective GVIC rows.
+GVIC56 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
 
 ## Scenarios
 
@@ -277,11 +278,26 @@ Expected:
 - The stale response cannot overwrite the newer request owner.
 - Request-owner metadata does not grant any resource permission flag.
 
-### Scenario GVIC-S9: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
+### Scenario GVIC-S9: Email-Collaboration Node GVIC Guard
+
+Business logic covered:
+- GVIC29
+- GVIC55
+
+Given:
+- An ordinary standalone Node and an email-collaboration Node both exist.
+- A participant joins the email collaboration through a direct or group mention.
+- A caller attempts generic GVIC add, set/update, and remove commands for both Nodes.
+
+Expected:
+- The ordinary standalone Node retains editable Node GVIC source assignments.
+- Every generic GVIC mutation rejects the email-collaboration Node because its standalone Node is system-managed collaboration infrastructure.
+- Mention participation remains a permanent collaboration grant and creates no source or effective GVIC assignment.
+### Scenario GVIC-S10: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
 
 Business logic covered:
 - GVIC38
-- GVIC55
+- GVIC56
 
 Given:
 - A Node or Logic Gate editor shows the four shared GVIC role cards.

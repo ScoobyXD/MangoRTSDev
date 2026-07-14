@@ -172,13 +172,22 @@ ST143 - Signed, deduplicated shared message/folder provider webhooks invalidate 
 ST144 - A shared mailbox hint received while another Home/shared view is selected issues no provider GET. Navigation cancels/discards the prior exact request key, and returning to that shared inbox performs its canonical load; Shared Inbox A cannot refresh, invalidate, display an error in, or reuse prefetched/detail state from Shared Inbox B. A delayed/queued hint for selected message or thread A rechecks that exact selection before detail reconciliation and cannot wake newly selected unrelated detail B.
 ST145 - Selecting an unread shared email by pointer, Enter, or Space immediately removes its unread dot/frame, updates the selected card and unread counter, and persists through the exact shared provider command. Stale responses cannot resurrect unread; failure rolls the row/counter back and surfaces the established error.
 ST146 - Shared conversation detail uses provider `thread.message_ids` to hydrate sent and received members missing from the bounded preview page, deduplicates IDs, and stays scoped to the exact shared inbox/company grant. Provider thread or exact reply metadata may establish membership; subject similarity never does, forwarded unrelated mail is not absorbed, and unresolved one-offs remain valid.
-ST147 - Shared durable draft list/get/create/update/delete operations require the exact `shared_inbox_id` plus effective view/edit permission. Scope is immutable, the stored account is canonicalized from the shared inbox, known IDs from personal/other shared scopes cannot be read, changed, reassigned, or deleted, and browser fallback is filtered to the active inbox with only explicit pending-sync migration. The Shared Triage Drafts tab is that exact shared inbox's database collection; it is shared according to view/edit permissions, is not creator-private, and never lists personal, other-inbox, or provider Drafts.
-ST148 - Personal drafts never appear in Shared Triage, and drafts for Shared Inbox A never appear in B. View permission permits list/get and draft-attachment reads; edit permission is required for create/update/delete and attachment mutation. Company manager status alone never grants another user's personal-draft attachment access.
+ST147 - Ordinary shared-inbox durable draft list/get/create/update/delete operations require the exact `shared_inbox_id` plus effective view/edit permission. Scope is immutable, the stored account is canonicalized from the shared inbox, known IDs from personal/other shared scopes cannot be read, changed, reassigned, or deleted, and browser fallback is filtered to the active inbox with only explicit pending-sync migration. The Shared Triage Drafts tab renders that collection plus active collaboration shared drafts for which the current user is a permanent participant under EMAIL65 through EMAIL69; it never lists a private personal draft, an unauthorized collaboration draft, or provider Drafts.
+ST148 - Private personal drafts never appear in Shared Triage, and ordinary drafts for Shared Inbox A never appear in B. Collaboration shared drafts are the explicit participant-authorized exception and must display their immutable source mailbox rather than masquerading as an ordinary draft in the selected inbox. Ordinary shared-inbox view permission permits list/get and draft-attachment reads, edit permission is required for create/update/delete and attachment mutation, and company manager status alone never grants another user's personal-draft attachment access.
 ST149 - A Shared Triage row shows the established accessible thread indicator on its left only when canonical/loaded conversation count is greater than one; a one-off or unproven count shows no icon.
 ST150 - Shared read-on-open timers, optimistic overlays, and mutation responses use the authenticated company/user/shared-inbox scope plus provider message ID. Identical provider IDs in personal or other shared scopes cannot cancel or overlay one another, and a completion may update only the exact captured mailbox/filter and selection generation; stale failures cannot clear, refresh, or display errors in the newly selected inbox.
-ST151 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
-ST152 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
-ST153 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
+ST151 - Shared Triage email cards use the same compact triage-row implementation as My Triage. Horizontal card padding is no more than 6 CSS pixels per side, and the left indicator rail is no more than 20 CSS pixels wide while retaining the approximately 9-pixel unread dot, thread indicator, keyboard focus, and drag hit behavior.
+ST152 - The top sender/subject line reserves only the actual width of its top-right timestamp/action metadata. The body/snippet line flows beneath that metadata across the remaining card width to within 8 CSS pixels of the right edge; no fixed empty right metadata column or decorative spacer may shorten every line.
+ST153 - Compact spacing preserves the shared-inbox card contract: unread dot/frame, selected pressed surface, conditional thread icon, ellipsis, scope-correct commands, and pointer/keyboard/drag affordances remain distinct and usable.
+ST154 - A shared-source collaboration appears as one ordinary conversation row in its source Shared Triage for a permanent participant who can navigate that mailbox. Mention participation alone does not grant navigation, listing, folder, or unrelated-message access to the shared inbox; a participant without that access receives only the collaboration thread through the guaranteed My Triage fallback.
+ST155 - A provider-owned source row and its virtual collaboration representation dedupe by exact shared inbox plus provider thread/message identity. The newest canonical message and rolled-up unread/starred/attachment/thread state remain authoritative, and no collaboration row crosses into another shared inbox.
+ST156 - Opening a collaboration-capable shared row mounts the shared Node ChatPane to the right of email detail. No Node is created for read/highlight/abandoned empty composer; the first nonempty chat submit or explicit shared-draft create ensures one collaboration Node whose successful chat rows are identical from email and Node perspectives.
+ST157 - Selected email text creates an exact message/quote/offset chat anchor, while an unanchored chat remains valid. Activating an anchor navigates to the correct card without adding a second conversation scrollbar or changing source content.
+ST158 - Reply All exposes Create Shared Draft for the exact selected source message. Every permanent participant can see the resulting revisioned shared draft in Drafts/My Drafts with its source shared inbox identified, but only collaboration participation authorizes that draft and no participant gains unrelated shared-inbox access.
+ST159 - Collaboration shared drafts are immediate-send only under EMAIL68. Their compose footer omits scheduled send and the ordinary Shared Triage browser scheduler excludes them; this does not change scheduled-send behavior for ordinary shared-inbox drafts.
+ST160 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
+ST161 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
+ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
 
 ## Scenarios
 
@@ -763,9 +772,9 @@ Business logic covered:
 - ST148
 - ST149
 - ST150
-- ST151
-- ST152
-- ST153
+- ST160
+- ST161
+- ST162
 
 Given:
 - An external sender starts a shared-mailbox conversation, an authorized Mango editor replies, and another message commits after the initial list but before first exact-inbox subscription acceptance.
@@ -779,6 +788,50 @@ Expected:
 - Conversation detail includes the original inbound, shared sent reply, and newest inbound even when a member was missing from the first preview page. Provider identity is authoritative; an unrelated forward/subject match is not merged and no data crosses shared inbox scopes.
 - Pointer, Enter, and Space open use the same optimistic read path, immediately clear unread styling/count, stay read after success, and accurately roll back with an error after failure.
 - The multi-message row shows the accessible thread icon; a one-message row does not.
-- A viewer may list/get only A's database drafts and attachments; only an editor may create/update/delete or mutate draft attachments. A cannot enumerate or take over B/personal IDs, personal/provider drafts never appear in Shared Triage, scope cannot be reassigned on conflict or soft-delete reuse, and a shared account-email spoof is replaced by the canonical inbox account.
+- For ordinary inbox drafts, a viewer may list/get only A's database drafts and attachments and only an editor may create/update/delete or mutate them. A cannot enumerate or take over B/private-personal IDs; only a permanent-participant collaboration draft is the explicit cross-surface exception and it labels its true source. Provider drafts never appear, scope cannot be reassigned on conflict or soft-delete reuse, and a shared account-email spoof is replaced by the canonical inbox account.
 - Recoverable auth/provider/service/network errors retain pending drafts; only explicit revocation, deleted inbox, or non-mail-bearing scope purges A. Out-of-order loads cannot overwrite saves, deletes, B, or personal storage.
 - Compose persists the live exact-inbox draft before attachment upload. Permission revocation denies the former viewer, and draft deletion denies every draft-scoped actor including manager/admin attempts while the independent sent-message link stays valid.
+
+### Scenario ST-S18: Compact Shared Triage Cards
+
+Business logic covered:
+- ST87
+- ST149
+- ST151
+- ST152
+- ST153
+
+Given:
+- Shared Triage renders unread/read, selected/unselected, one-message, multi-message, draggable, and long-subject/snippet cards.
+
+Expected:
+- Shared Triage uses the same compact row component and measurements as My Triage: no more than 6 CSS pixels of horizontal outer padding and no more than a 20-pixel left indicator rail.
+- The unread dot remains at the top left without creating a wide text gutter, while selection, thread, keyboard, and drag states remain distinct and operable.
+- Top-line text reserves only actual timestamp/action width.
+- Snippet/body preview continues beneath the timestamp to within 8 CSS pixels of the right edge and no fixed empty right column remains.
+
+### Scenario ST-S19: Shared-Source Collaboration And Draft Fallback
+
+Business logic covered:
+- ST147
+- ST148
+- ST154
+- ST155
+- ST156
+- ST157
+- ST158
+- ST159
+
+Given:
+- A source Shared Triage message gains a collaboration through chat or Create Shared Draft.
+- One permanent participant can navigate the source shared inbox; another cannot.
+- A participant is also a provider/shared-inbox viewer and therefore receives both canonical provider and virtual collaboration list inputs.
+
+Expected:
+- The navigable source Shared Triage shows one deduplicated ordinary conversation row; the participant without mailbox navigation sees the thread only through My Triage fallback.
+- Collaboration participation does not reveal the shared folder tree, unrelated messages, or another shared inbox.
+- Opening the source row mounts the same ChatPane and Node chat rows used by the standalone collaboration Node.
+- Selection anchors target the exact shared message, and reading/highlighting/abandoning a chat does not create a Node.
+- Create Shared Draft uses the exact Reply All source message and every permanent participant sees one revisioned draft with its source shared inbox labeled.
+- The collaboration shared draft cannot be scheduled and sends only after the server claims its current revision; ordinary shared-inbox drafts retain their existing scheduling behavior.
+- Private personal drafts and ordinary drafts from another shared inbox remain absent; guessed collaboration or draft IDs remain denied.

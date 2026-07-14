@@ -52,6 +52,9 @@ RW41 - Node chat and Logic Gate Kanban publication re-resolve the current exact 
 RW42 - Home retains at most one exact mailbox scope: the selected connected personal account for My Triage or the selected mail-bearing shared inbox for Shared Triage. Shared root/headings/group rows/plain folders, Drafts, non-mail views, inaccessible resources, and inactive mailboxes retain no fallback mailbox subscription and issue no provider GET because of a hint. Navigation loads and subscribes the destination mailbox and cancels timers, pending work, and the old subscription. Equivalent shared-inbox metadata/callback replacement retains the existing exact company/scope subscription lifetime; only an actual target or mail-bearing transition reinstalls it.
 RW43 - First mailbox acceptance and reconnect acceptance each coalesce one canonical exact-mailbox folder/list reconciliation, closing the initial-list-to-subscription race. `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active list and folder metadata; folder create/update/delete hints reconcile folder metadata; selected detail reloads only when its message/thread is identified and that captured selection is still active when delayed/queued work executes. Exact cache invalidation and delayed request keys include company plus personal account/shared inbox, and obsolete or off-view work issues no provider read. Realtime reconciliation uses authoritative exact-key refreshes: it bypasses reusable mail caches, coalesces with same-key in-flight work, and generation-fences provider reads begun before invalidation from repopulating folder, page, or detail caches.
 RW44 - `POST /v1/communications/triage/convert` resolves the provider connection from exactly one source mailbox key. A personal conversion sends normalized `account_email` in the query and the backend verifies that account belongs to the authenticated user; a shared conversion sends `shared_inbox_id`, ignores/suppresses personal identity, and performs exact inbox permission and company-connection resolution. The drag payload, every Explorer/Kanban/project/pin handoff, and the same-browser committed-result event retain that same key.
+RW45 - My Triage and Shared Triage email collaboration chat retain only the collaboration Node's existing `chat:node:{node_id}` scope. Email and Node mounts perform the same canonical Node projection/chat read on first acceptance, reconnect, and compact chat hints; no `chat:email`, collaboration-document, draft-body, presence, cursor, replay, or broad communications scope is added.
+RW46 - Email-collaboration ensure/create, participant expansion, chat writes, shared-draft create/update/send/discard, source-thread reads, and attachment authorization are authenticated HTTP operations. A durable chat commit may publish the existing Node chat hint and mention notifications; a shared-draft revision remains canonical HTTP state and never travels as editable body content over WebSocket.
+RW47 - Shared-draft optimistic concurrency is not CRDT/OT collaboration. Every update/send/discard supplies the expected revision, stale HTTP commands return conflict plus canonical metadata, and another participant observes the newer body through an authorized canonical draft read rather than WebSocket document deltas.
 
 ## Scenarios
 
@@ -399,3 +402,26 @@ Expected:
 - `message.created`, `message.updated` (including moves), and `message.deleted` reconcile only the active list/folders; folder events reconcile folders; selected detail reloads only for a directly named selected message/thread.
 - Payloads remain compact hints and canonical HTTP data remains authoritative.
 - Personal conversion requests retain normalized Account B `account_email` end to end and cannot fall back to Account A. Shared conversion requests retain only Shared Inbox A as the client request selector; the backend resolves its canonical company mailbox account after exact permission checks.
+
+### Scenario RW-S17: Email Chat Reuses Node Scope And Shared Drafts Stay HTTP
+
+Business logic covered:
+- RW1
+- RW2
+- RW10
+- RW11
+- RW20
+- RW45
+- RW46
+- RW47
+
+Given:
+- The same email collaboration chat is mounted from email detail and its standalone Node.
+- Two participants edit one shared draft at different revisions.
+
+Expected:
+- Both chat mounts retain the same `chat:node:{node_id}` subscription and coalesce canonical Node chat reads on acceptance/reconnect/hints.
+- No email-chat, document, draft, presence, cursor, replay, or broad communications scope is introduced.
+- Ensure/create, mentions, source reads, chat writes, shared-draft commands, and attachment checks remain authenticated HTTP operations.
+- Chat commit publishes only the existing Node chat hint plus applicable notification hints; WebSocket carries no durable message/draft body or attachment bytes.
+- A stale shared-draft command conflicts by expected revision and the participant reloads canonical HTTP state; no CRDT/OT or draft-body socket path is implied.

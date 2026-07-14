@@ -453,6 +453,11 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	if !r.entityExistsLocked(input.CompanyID, input.ResourceType, input.ResourceID) {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
+	if input.ResourceType == EntityTypeNode {
+		if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.ResourceID); protected {
+			return ProjectRelationshipMutationResult{}, ErrProtectedEmailCollaborationResource
+		}
+	}
 	relationshipKey := projectRelationshipKey(input.CompanyID, input.RelationshipID)
 	for keyValue, relationship := range r.projectRelationships {
 		if relationship.CompanyID == input.CompanyID &&

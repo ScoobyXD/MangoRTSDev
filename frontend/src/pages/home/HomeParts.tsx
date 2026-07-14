@@ -49,6 +49,9 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
+import type { EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
+
+export type EmailCollaborationNavigation = EmailCollaborationSelection & { requestID: number };
 import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
 import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
@@ -4376,12 +4379,13 @@ function AttachmentVisual({ filename, contentType, sourceURL, loading, failed }:
   );
 }
 
-function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, accountEmail }: {
+function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, accountEmail, collaborationID }: {
   messageID: string;
   attachment: EmailAttachment;
   companyID: string;
   sharedInboxID?: string;
   accountEmail?: string;
+  collaborationID?: string;
 }) {
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
@@ -4427,7 +4431,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, 
     const controller = new AbortController();
     const previewPromise = mangoAttachmentID
       ? loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
-      : downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail }).then((blob) => URL.createObjectURL(blob));
+      : downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail, collaborationID }).then((blob) => URL.createObjectURL(blob));
     void previewPromise
       .then((url) => {
         if (cancelled) {
@@ -4448,7 +4452,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, 
       controller.abort();
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [accountEmail, apiBase, attachment, companyID, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID, shouldLoadPreview]);
+  }, [accountEmail, apiBase, attachment, collaborationID, companyID, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID, shouldLoadPreview]);
 
   const handleDownload = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4461,12 +4465,12 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, 
       return;
     }
     if (!providerAttachmentID) return;
-    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail })
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail, collaborationID })
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         downloadURL(objectURL, filename, true);
       });
-  }, [accountEmail, apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
+  }, [accountEmail, apiBase, attachment, collaborationID, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   const handleOpen = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4482,12 +4486,12 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID, 
       return;
     }
     if (!providerAttachmentID) return;
-    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail })
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { accountEmail, collaborationID })
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         openAttachmentURL(objectURL, filename, true);
       });
-  }, [accountEmail, apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
+  }, [accountEmail, apiBase, attachment, collaborationID, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   return (
     <div
@@ -5200,7 +5204,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const cleanDraftID = compose.draftID.trim() || createHomeMailDraftID();
     const cleanSharedInboxID = compose.sharedInboxID.trim();
     const cleanAccountEmail = compose.accountEmail.trim().toLowerCase();
-    if (!cleanCompanyID || (!cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
+    const cleanCollaborationID = compose.sharedDraft ? compose.collaborationID.trim() : "";
+    if (!cleanCompanyID || (!cleanCollaborationID && !cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
       setAttachmentError("Email attachment context is unavailable.");
       return;
     }
@@ -5218,6 +5223,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
         userID: currentUserID,
         accountEmail: preparedAccountEmail,
         sharedInboxID: preparedSharedInboxID,
+        collaborationID: preparedCompose.sharedDraft ? preparedCompose.collaborationID.trim() : "",
       });
       const results = await Promise.allSettled(selectedFiles.map(async (file) => {
         const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
@@ -5228,7 +5234,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           sourceKind: "email_outgoing",
           relationshipKind: "email_attachment",
           messageID: preparedCompose.replyToMessageID.trim() || undefined,
-          editorSurface: preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
+          editorSurface: preparedCompose.sharedDraft && preparedCompose.collaborationID.trim()
+            ? "email-collaboration-shared-draft"
+            : preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
         });
         const attachment = uploaded.attachment;
         return {
@@ -5381,19 +5389,23 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
   );
   const richEditorStyle = isReplyMode ? composeReplyRichEditorStyle(replyEditorHeight) : composeRichEditorStyle;
-  const composeEditorSurfaceID = compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
+  const composeEditorSurfaceID = compose.sharedDraft
+    ? "email-collaboration-shared-draft"
+    : compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
   const composeAttachmentResourceID = React.useMemo(() => {
     const cleanDraftID = compose.draftID.trim();
     if (!cleanDraftID) return "";
+    const cleanCollaborationID = compose.sharedDraft ? compose.collaborationID.trim() : "";
     const cleanSharedInboxID = compose.sharedInboxID.trim();
-    if (!cleanSharedInboxID && !currentUserID.trim()) return "";
+    if (!cleanCollaborationID && !cleanSharedInboxID && !currentUserID.trim()) return "";
     return mangoEmailDraftResourceID({
       draftID: cleanDraftID,
       userID: currentUserID,
       accountEmail: compose.accountEmail,
       sharedInboxID: cleanSharedInboxID,
+      collaborationID: cleanCollaborationID,
     });
-  }, [compose.accountEmail, compose.draftID, compose.sharedInboxID, currentUserID]);
+  }, [compose.accountEmail, compose.collaborationID, compose.draftID, compose.sharedDraft, compose.sharedInboxID, currentUserID]);
   const composeEditorImageAttachmentContext = companyID.trim() && composeAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,
@@ -5451,7 +5463,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           </div>
         )}
         <div style={isReplyMode ? composeHeaderActionsStyle : { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button type="button" style={mailPanelSmallButtonStyle} onClick={handleSaveDraft}>Save to My Drafts</button>
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={handleSaveDraft}>
+            {compose.sharedDraft ? "Save shared draft" : "Save to My Drafts"}
+          </button>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
         </div>
       </div>
@@ -5554,15 +5568,17 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
             {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
           </button>
-          <input
-            type="datetime-local"
-            aria-label="Schedule send"
-            style={{ ...mailPanelInputStyle, width: 190, minHeight: 30, height: 30, padding: "0 8px" }}
-            value={compose.scheduledAt}
-            onChange={(event) => update({ scheduledAt: event.currentTarget.value })}
-          />
+          {!compose.sharedDraft && (
+            <input
+              type="datetime-local"
+              aria-label="Schedule send"
+              style={{ ...mailPanelInputStyle, width: 190, minHeight: 30, height: 30, padding: "0 8px" }}
+              value={compose.scheduledAt}
+              onChange={(event) => update({ scheduledAt: event.currentTarget.value })}
+            />
+          )}
           {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
-          {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
+          {compose.draftID && <span style={mutedSmallStyle}>{compose.sharedDraft ? "Shared draft - visible to all email participants" : "Saved in My Drafts"}</span>}
           {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
           <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
           <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
@@ -5699,11 +5715,57 @@ function emailBodyDocumentHeight(frameDocument: Document): number {
   );
 }
 
-function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = false, style }: {
+function emailBodySelectionRange(
+  frameDocument: Document,
+  selection: Pick<EmailCollaborationSelection, "quote" | "startOffset" | "endOffset">,
+): Range | null {
+  const view = frameDocument.defaultView;
+  if (!view || !frameDocument.body) return null;
+  const walker = frameDocument.createTreeWalker(frameDocument.body, view.NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let bodyText = "";
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    textNodes.push(node);
+    bodyText += node.data;
+  }
+  if (!bodyText || textNodes.length === 0) return null;
+  const quote = selection.quote.trim();
+  if (!quote) return null;
+  let start = Math.max(0, Math.min(bodyText.length, selection.startOffset));
+  let end = Math.max(start, Math.min(bodyText.length, selection.endOffset));
+  if (bodyText.slice(start, end) !== quote) {
+    const exactIndex = bodyText.indexOf(quote);
+    if (exactIndex < 0) return null;
+    start = exactIndex;
+    end = exactIndex + quote.length;
+  }
+  const boundary = (offset: number): { node: Text; offset: number } | null => {
+    let consumed = 0;
+    for (const node of textNodes) {
+      const next = consumed + node.data.length;
+      if (offset <= next) return { node, offset: Math.max(0, Math.min(node.data.length, offset - consumed)) };
+      consumed = next;
+    }
+    const last = textNodes[textNodes.length - 1];
+    return last ? { node: last, offset: last.data.length } : null;
+  };
+  const startBoundary = boundary(start);
+  const endBoundary = boundary(end);
+  if (!startBoundary || !endBoundary) return null;
+  const range = frameDocument.createRange();
+  range.setStart(startBoundary.node, startBoundary.offset);
+  range.setEnd(endBoundary.node, endBoundary.offset);
+  return range;
+}
+
+function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = false, style, onTextSelection, selectionNavigation }: {
   srcDoc: string;
   minHeight: number;
   fillAvailableHeight?: boolean;
   style?: React.CSSProperties;
+  onTextSelection?: (selection: Omit<EmailCollaborationSelection, "messageID">) => void;
+  selectionNavigation?: EmailCollaborationNavigation | null;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
   const cleanupRef = React.useRef<() => void>(() => undefined);
@@ -5715,6 +5777,34 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
     setSelectedImage(null);
     setPreviewImage(null);
   }, [srcDoc]);
+
+  const applySelectionNavigation = React.useCallback(() => {
+    if (!selectionNavigation) return;
+    const frame = frameRef.current;
+    const frameDocument = frame?.contentDocument;
+    const frameWindow = frame?.contentWindow;
+    if (!frame || !frameDocument?.body || !frameWindow) return;
+    const range = emailBodySelectionRange(frameDocument, selectionNavigation);
+    if (!range) return;
+    const browserSelection = frameWindow.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
+    const scrollContainer = frame.closest<HTMLElement>("[data-email-conversation-scroll]");
+    const targetRect = range.getBoundingClientRect();
+    if (scrollContainer && targetRect.height >= 0) {
+      const frameRect = frame.getBoundingClientRect();
+      const containerRect = scrollContainer.getBoundingClientRect();
+      scrollContainer.scrollBy({ top: frameRect.top + targetRect.top - containerRect.top - 64, behavior: "smooth" });
+    } else {
+      frame.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectionNavigation]);
+
+  React.useEffect(() => {
+    if (!selectionNavigation) return undefined;
+    const frameID = window.requestAnimationFrame(applySelectionNavigation);
+    return () => window.cancelAnimationFrame(frameID);
+  }, [applySelectionNavigation, selectionNavigation]);
 
   const handleLoad = () => {
     cleanupRef.current();
@@ -5731,6 +5821,22 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
       const documentHeight = emailBodyDocumentHeight(frameDocument);
       frame.style.minHeight = frameMinHeight;
       frame.style.height = `${Math.max(minHeight, Math.ceil(documentHeight) + 2)}px`;
+    };
+    const captureTextSelection = () => {
+      if (!onTextSelection) return;
+      const frameSelection = frame.contentWindow?.getSelection();
+      if (!frameSelection || frameSelection.rangeCount === 0 || frameSelection.isCollapsed) return;
+      const range = frameSelection.getRangeAt(0);
+      if (!frameDocument.body.contains(range.commonAncestorContainer)) return;
+      const rawQuote = frameSelection.toString();
+      const quote = rawQuote.trim();
+      if (!quote) return;
+      const prefixRange = frameDocument.createRange();
+      prefixRange.selectNodeContents(frameDocument.body);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      const leadingWhitespace = rawQuote.length - rawQuote.trimStart().length;
+      const startOffset = prefixRange.toString().length + leadingWhitespace;
+      onTextSelection({ quote, startOffset, endOffset: startOffset + quote.length });
     };
     const images = Array.from(frameDocument.images);
     const imageCleanups: Array<() => void> = [];
@@ -5762,9 +5868,12 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
       observer.observe(frameDocument.documentElement);
       observer.observe(frameDocument.body);
     }
+    frameDocument.addEventListener("pointerup", captureTextSelection);
     resize();
+    applySelectionNavigation();
     cleanupRef.current = () => {
       observer?.disconnect();
+      frameDocument.removeEventListener("pointerup", captureTextSelection);
       images.forEach((image) => {
         image.removeEventListener("load", resize);
         image.removeEventListener("error", resize);
@@ -5823,7 +5932,7 @@ function emailMessageBodyIsLoaded(message: EmailMessage): boolean {
   return message.detail_fetched === true || typeof message.body === "string";
 }
 
-function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, accountEmail: string | undefined, enabled: boolean): { srcDoc: string } {
+function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, accountEmail: string | undefined, collaborationID: string | undefined, enabled: boolean): { srcDoc: string } {
   const apiBase = readAuthConfig().apiBase;
   const inlineAttachments = React.useMemo(
     () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
@@ -5849,7 +5958,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     }
     return sources;
   }, [inlineAttachments]);
-  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${sharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
+  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${sharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? ""}\x1f${collaborationID ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
   const [downloadedCIDState, setDownloadedSourceByContentID] = React.useState<{
     hydrationKey: string;
     sources: Record<string, string>;
@@ -5872,7 +5981,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
         if (mangoAttachmentID) {
           sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
         } else if (providerAttachmentID) {
-          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail });
+          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail, collaborationID });
           if (cancelled) return { keys, sourceURL: "" };
           sourceURL = URL.createObjectURL(blob);
         }
@@ -5900,7 +6009,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
       controller.abort();
       objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
     };
-  }, [accountEmail, apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+  }, [accountEmail, apiBase, body, collaborationID, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
 
   const srcDoc = React.useMemo(() => {
     if (!enabled) return "";
@@ -5912,7 +6021,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onLoadBody, onReply, onReplyAll, onForward }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -5922,11 +6031,14 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   busy: boolean;
   calendarResponseAvailable: boolean;
   loadingBody?: boolean;
+  selectionNavigation?: EmailCollaborationNavigation | null;
   onToggleExpanded: () => void;
   onLoadBody: () => void;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
+  onCreateSharedDraft: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
+  onEmailSelection?: (selection: EmailCollaborationSelection) => void;
 }) {
   const allAttachments = React.useMemo(
     () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim()),
@@ -5938,7 +6050,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
   const hasAttachments = attachments.length > 0;
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
-  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, expanded && bodyLoaded);
+  const collaborationID = message.collaboration_id?.trim() || undefined;
+  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded);
   const showMessageMeta = !fill;
   const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
@@ -5982,6 +6095,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
           </div>
         </div>
@@ -5997,6 +6111,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
           minHeight={frameMinHeight}
           fillAvailableHeight={fill}
           style={frameStyle}
+          onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id }) : undefined}
+          selectionNavigation={selectionNavigation}
         />
       ))}
       {expanded && hasAttachments && (
@@ -6013,6 +6129,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
                 companyID={companyID}
                 sharedInboxID={sharedInboxID}
                 accountEmail={accountEmail}
+                collaborationID={collaborationID}
               />
             ))}
           </div>
@@ -6031,7 +6148,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   );
 }
 
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onLoadMessageBody, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6042,14 +6159,17 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   archiveLabel: string;
   busy: boolean;
   deleteAvailable: boolean;
+  selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
+  onCreateSharedDraft: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
   onToggleRead: () => void;
   onToggleStar: () => void;
+  onEmailSelection?: (selection: EmailCollaborationSelection) => void;
 }) {
   const messageDate = formatMessageDate(message.date);
   const conversationMessages = conversationMessagesForDetail(message, threadMessages);
@@ -6077,6 +6197,19 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
     messageBodyInflightRef.current.set(messageID, request);
     return request;
   }, [onLoadMessageBody]);
+  const navigationTargetMessage = selectionNavigation
+    ? conversationMessages.find((candidate) => candidate.id === selectionNavigation.messageID) ?? null
+    : null;
+  React.useLayoutEffect(() => {
+    if (!selectionNavigation || !navigationTargetMessage) return;
+    setExpandedMessageIDs((current) => {
+      if (current.has(navigationTargetMessage.id)) return current;
+      const next = new Set(current);
+      next.add(navigationTargetMessage.id);
+      return next;
+    });
+    if (!emailMessageBodyIsLoaded(navigationTargetMessage)) void loadConversationMessageBody(navigationTargetMessage);
+  }, [loadConversationMessageBody, navigationTargetMessage?.id, selectionNavigation?.requestID]);
   React.useLayoutEffect(() => {
     setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
     const newestMessage = conversationMessages[0];
@@ -6144,13 +6277,14 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         )}
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
         <button style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
-      <div style={bodyContainerStyle}>
+      <div data-email-conversation-scroll="true" style={bodyContainerStyle}>
         {conversationMessages.map((conversationMessage) => (
           <EmailConversationMessage
             key={conversationMessage.id}
@@ -6163,11 +6297,14 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             busy={busy}
             calendarResponseAvailable={!sharedInboxID || archiveAvailable}
             loadingBody={loadingMessageBodyIDs.has(conversationMessage.id) || (loading && conversationMessage.id === message.id && !emailMessageBodyIsLoaded(conversationMessage))}
+            selectionNavigation={selectionNavigation?.messageID === conversationMessage.id ? selectionNavigation : null}
             onToggleExpanded={() => toggleConversationMessage(conversationMessage)}
             onLoadBody={() => { void loadConversationMessageBody(conversationMessage); }}
             onReply={(replyMessage) => runMessageAction(replyMessage, onReply)}
             onReplyAll={(replyMessage) => runMessageAction(replyMessage, onReplyAll)}
+            onCreateSharedDraft={(replyMessage) => runMessageAction(replyMessage, onCreateSharedDraft)}
             onForward={(forwardMessage) => runMessageAction(forwardMessage, onForward)}
+            onEmailSelection={onEmailSelection}
           />
         ))}
       </div>

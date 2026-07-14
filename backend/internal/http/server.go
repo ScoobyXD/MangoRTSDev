@@ -246,6 +246,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/folders", s.handleCommunicationsFolders)
 	mux.HandleFunc("/v1/communications/drafts", s.handleCommunicationsEmailDrafts)
 	mux.HandleFunc("/v1/communications/drafts/", s.handleCommunicationsEmailDraftByID)
+	mux.HandleFunc("/v1/communications/email-collaborations", s.handleCommunicationsEmailCollaborations)
+	mux.HandleFunc("/v1/communications/email-collaborations/", s.handleCommunicationsEmailCollaborationByID)
 	mux.HandleFunc("/v1/communications/signature", s.handleCommunicationsEmailSignature)
 	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)
 	mux.HandleFunc("/v1/communications/messages/archive-batch", s.handleCommunicationsMessagesArchiveBatch)

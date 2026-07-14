@@ -86,6 +86,15 @@ export type EmailMessage = {
   thread_unread_count?: number;
   read_status?: EmailReadStatus;
   local_replies?: EmailMessage[];
+  collaboration_id?: string;
+  collaboration_node_id?: string;
+  collaboration_information_id?: string;
+  collaboration_scope_type?: string;
+  collaboration_personal_user_id?: string;
+  collaboration_shared_inbox_id?: string;
+  collaboration_account_email?: string;
+  /** Client-only immutable mailbox scope used to keep provider IDs isolated in mixed collaboration lists. */
+  client_source_scope_key?: string;
 };
 
 export type EmailThread = {
@@ -340,11 +349,16 @@ export type CommunicationsEmailDraft = {
   created_timestamp: string;
   updated_timestamp: string;
   attachments?: CommunicationsEmailDraftAttachment[];
+  collaboration_id?: string;
+  is_shared?: boolean;
+  revision?: number;
+  updated_by_user_id?: string;
 };
 
 export type CommunicationsEmailDraftScope = {
   sharedInboxID?: string;
   accountEmail?: string;
+  revision?: number;
 };
 
 export type CommunicationsEmailSignature = {
@@ -376,6 +390,68 @@ export type SaveCommunicationsEmailDraftInput = {
   bodyEditorHTML: string;
   replyToMessage?: EmailMessage | null;
   scheduledSendTimestamp?: string;
+  collaborationID?: string;
+  sharedDraft?: boolean;
+  revision?: number;
+};
+
+export type CommunicationsEmailCollaborationParticipant = {
+  company_id: string;
+  collaboration_id: string;
+  user_id: string;
+  added_by_user_id?: string;
+  added_via_type?: "creator" | "user" | "group" | string;
+  added_via_id?: string;
+  created_timestamp?: string;
+};
+
+export type CommunicationsEmailCollaboration = {
+  company_id: string;
+  collaboration_id: string;
+  node_id: string;
+  attached_email_information_id: string;
+  scope_type?: "personal" | "shared" | string;
+  personal_user_id?: string;
+  personal_account_email?: string;
+  personal_owner_user_id?: string;
+  shared_inbox_id?: string;
+  account_email?: string;
+  provider_thread_id?: string;
+  root_message_id?: string;
+  latest_message_id?: string;
+  message_snapshot?: EmailMessage | null;
+  message?: EmailMessage | null;
+  latest_message?: EmailMessage | null;
+  participants?: CommunicationsEmailCollaborationParticipant[];
+  created_timestamp?: string;
+  updated_timestamp?: string;
+};
+
+export type ResolveCommunicationsEmailCollaborationInput = {
+  companyID: string;
+  messageID?: string;
+  threadID?: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
+};
+
+export type EnsureCommunicationsEmailCollaborationInput = ResolveCommunicationsEmailCollaborationInput & {
+  message: EmailMessage;
+};
+
+export type CommunicationsEmailCollaborationThread = {
+  collaboration_id: string;
+  thread_id?: string;
+  messages: EmailMessage[];
+  history_complete: boolean;
+};
+
+export type SendCommunicationsEmailCollaborationDraftResult = {
+  message: EmailMessage;
+  collaboration_id: string;
+  draft_id: string;
+  draft_deleted: boolean;
+  draft_delete_error?: string;
 };
 
 type CacheEntry<T> = {
@@ -640,7 +716,13 @@ export async function getEmailThread(threadID: string, companyID?: string, share
   }
 }
 
-export async function downloadEmailAttachment(messageID: string, attachmentID: string, companyID?: string, sharedInboxID?: string, options: { signal?: AbortSignal; accountEmail?: string } = {}): Promise<Blob> {
+export async function downloadEmailAttachment(
+  messageID: string,
+  attachmentID: string,
+  companyID?: string,
+  sharedInboxID?: string,
+  options: { signal?: AbortSignal; accountEmail?: string; collaborationID?: string } = {},
+): Promise<Blob> {
   const cleanMessageID = messageID.trim();
   const cleanAttachmentID = attachmentID.trim();
   if (!cleanMessageID || !cleanAttachmentID) throw new Error("email_attachment_id_required");
@@ -648,6 +730,7 @@ export async function downloadEmailAttachment(messageID: string, attachmentID: s
   if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
   if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
   else if (options.accountEmail?.trim()) queryParams.set("account_email", options.accountEmail.trim().toLowerCase());
+  if (options.collaborationID?.trim()) queryParams.set("collaboration_id", options.collaborationID.trim());
   const query = queryParams.toString();
   const path = `/v1/communications/messages/${encodeURIComponent(cleanMessageID)}/attachments/${encodeURIComponent(cleanAttachmentID)}${query ? `?${query}` : ""}`;
   const headers = new Headers({ Accept: "application/octet-stream" });
@@ -793,8 +876,126 @@ export async function listEmailDrafts(companyID: string, scope: CommunicationsEm
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return [];
   const query = createEmailDraftScopeQuery(cleanCompanyID, scope);
+  if (Number.isFinite(scope.revision) && (scope.revision ?? 0) > 0) query.set("revision", String(Math.trunc(scope.revision!)));
   const payload = await apiFetchJSON<{ drafts?: CommunicationsEmailDraft[] }>(`/v1/communications/drafts?${query.toString()}`);
   return (payload.drafts ?? []).map(cloneCommunicationsEmailDraft);
+}
+
+function emailCollaborationQuery(input: ResolveCommunicationsEmailCollaborationInput): URLSearchParams {
+  const query = new URLSearchParams({ company_id: input.companyID.trim() });
+  if (input.messageID?.trim()) query.set("message_id", input.messageID.trim());
+  if (input.threadID?.trim()) query.set("thread_id", input.threadID.trim());
+  if (input.sharedInboxID?.trim()) query.set("shared_inbox_id", input.sharedInboxID.trim());
+  else if (input.accountEmail?.trim()) query.set("account_email", input.accountEmail.trim().toLowerCase());
+  return query;
+}
+
+export async function listEmailCollaborations(companyID: string): Promise<CommunicationsEmailCollaboration[]> {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return [];
+  const query = new URLSearchParams({ company_id: cleanCompanyID });
+  const payload = await apiFetchJSON<{ collaborations?: CommunicationsEmailCollaboration[] }>(
+    "/v1/communications/email-collaborations?" + query.toString(),
+  );
+  return (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration);
+}
+
+export async function resolveEmailCollaboration(input: ResolveCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration | null> {
+  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return null;
+  try {
+    const payload = await apiFetchJSON<{ collaboration?: CommunicationsEmailCollaboration | null }>(
+      "/v1/communications/email-collaborations?" + emailCollaborationQuery(input).toString(),
+    );
+    return payload.collaboration ? cloneCommunicationsEmailCollaboration(payload.collaboration) : null;
+  } catch (cause) {
+    if ((cause as { status?: unknown } | null)?.status === 404) return null;
+    throw cause;
+  }
+}
+
+export async function getEmailCollaboration(companyID: string, collaborationID: string): Promise<CommunicationsEmailCollaboration | null> {
+  const cleanCompanyID = companyID.trim();
+  const cleanCollaborationID = collaborationID.trim();
+  if (!cleanCompanyID || !cleanCollaborationID) return null;
+  try {
+    const query = new URLSearchParams({ company_id: cleanCompanyID });
+    const payload = await apiFetchJSON<{ collaboration?: CommunicationsEmailCollaboration | null }>(
+      "/v1/communications/email-collaborations/" + encodeURIComponent(cleanCollaborationID) + "?" + query.toString(),
+    );
+    return payload.collaboration ? cloneCommunicationsEmailCollaboration(payload.collaboration) : null;
+  } catch (cause) {
+    if ((cause as { status?: unknown } | null)?.status === 404) return null;
+    throw cause;
+  }
+}
+
+export async function getEmailCollaborationThread(companyID: string, collaborationID: string): Promise<CommunicationsEmailCollaborationThread> {
+  const cleanCompanyID = companyID.trim();
+  const cleanCollaborationID = collaborationID.trim();
+  if (!cleanCompanyID || !cleanCollaborationID) throw new Error("email_collaboration_id_required");
+  const query = new URLSearchParams({ company_id: cleanCompanyID });
+  const payload = await apiFetchJSON<CommunicationsEmailCollaborationThread>(
+    "/v1/communications/email-collaborations/" + encodeURIComponent(cleanCollaborationID) + "/thread?" + query.toString(),
+  );
+  return {
+    collaboration_id: payload.collaboration_id,
+    thread_id: payload.thread_id,
+    messages: (payload.messages ?? []).map((message) => ({
+      ...cloneMessage(message),
+      collaboration_id: cleanCollaborationID,
+    })),
+    history_complete: payload.history_complete === true,
+  };
+}
+
+export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration> {
+  const cleanCompanyID = input.companyID.trim();
+  if (!cleanCompanyID || !input.message.id.trim()) throw new Error("email_collaboration_source_required");
+  const payload = await apiFetchJSON<{ collaboration: CommunicationsEmailCollaboration }>(
+    "/v1/communications/email-collaborations",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: cleanCompanyID,
+        message_id: input.message.id.trim(),
+        thread_id: input.threadID?.trim() || input.message.thread_id?.trim() || undefined,
+        shared_inbox_id: input.sharedInboxID?.trim() || undefined,
+        account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim().toLowerCase() || undefined,
+        message: input.message,
+      }),
+    },
+  );
+  return cloneCommunicationsEmailCollaboration(payload.collaboration);
+}
+
+export async function sendEmailCollaborationDraft(input: {
+  companyID: string;
+  collaborationID: string;
+  draftID: string;
+  expectedRevision: number;
+}): Promise<SendCommunicationsEmailCollaborationDraftResult> {
+  const companyID = input.companyID.trim();
+  const collaborationID = input.collaborationID.trim();
+  const draftID = input.draftID.trim();
+  const expectedRevision = Math.trunc(input.expectedRevision);
+  if (!companyID || !collaborationID || !draftID || expectedRevision <= 0) {
+    throw new Error("email_collaboration_draft_send_input_required");
+  }
+  const query = new URLSearchParams({ company_id: companyID });
+  const payload = await apiFetchJSON<SendCommunicationsEmailCollaborationDraftResult>(
+    `/v1/communications/email-collaborations/${encodeURIComponent(collaborationID)}/drafts/${encodeURIComponent(draftID)}/send?${query.toString()}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
+  );
+  return {
+    ...payload,
+    message: cloneMessage(payload.message),
+    collaboration_id: payload.collaboration_id?.trim() || collaborationID,
+    draft_id: payload.draft_id?.trim() || draftID,
+    draft_deleted: payload.draft_deleted === true,
+  };
 }
 
 export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): Promise<CommunicationsEmailDraft> {
@@ -819,6 +1020,9 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       body_editor_html: input.bodyEditorHTML,
       reply_to_message: input.replyToMessage ?? null,
       scheduled_send_timestamp: scheduledSendTimestamp,
+      collaboration_id: input.collaborationID?.trim() || undefined,
+      is_shared: input.sharedDraft === true || undefined,
+      revision: Number.isFinite(input.revision) ? Math.max(0, Math.trunc(input.revision ?? 0)) : undefined,
     }),
   });
   return cloneCommunicationsEmailDraft(payload.draft);
@@ -829,6 +1033,7 @@ export async function deleteEmailDraft(companyID: string, draftID: string, scope
   const cleanDraftID = draftID.trim();
   if (!cleanCompanyID || !cleanDraftID) return;
   const query = createEmailDraftScopeQuery(cleanCompanyID, scope);
+  if (Number.isFinite(scope.revision) && (scope.revision ?? 0) > 0) query.set("revision", String(Math.trunc(scope.revision!)));
   await apiFetchJSON<{ status?: string }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}?${query.toString()}`, {
     method: "DELETE",
   });
@@ -2267,7 +2472,9 @@ function createEmailDraftScopeQuery(companyID: string, scope: CommunicationsEmai
   const accountEmail = scope.accountEmail?.trim().toLowerCase() ?? "";
   if (sharedInboxID) query.set("shared_inbox_id", sharedInboxID);
   else if (accountEmail) query.set("account_email", accountEmail);
-  else throw new Error("email_draft_scope_required");
+  // A company-only scope is the explicit collaboration branch: the backend
+  // returns/deletes only shared drafts for which the actor is a permanent
+  // participant. Ordinary private drafts still require an exact mailbox scope.
   return query;
 }
 
@@ -2340,6 +2547,16 @@ function cloneCommunicationsEmailDraft(draft: CommunicationsEmailDraft): Communi
       ...item,
       attachment: item.attachment ? { ...item.attachment } : undefined,
     })) : undefined,
+  };
+}
+
+function cloneCommunicationsEmailCollaboration(collaboration: CommunicationsEmailCollaboration): CommunicationsEmailCollaboration {
+  return {
+    ...collaboration,
+    message_snapshot: collaboration.message_snapshot ? cloneMessage(collaboration.message_snapshot) : collaboration.message_snapshot ?? undefined,
+    message: collaboration.message ? cloneMessage(collaboration.message) : collaboration.message ?? undefined,
+    latest_message: collaboration.latest_message ? cloneMessage(collaboration.latest_message) : collaboration.latest_message ?? undefined,
+    participants: collaboration.participants?.map((participant) => ({ ...participant })),
   };
 }
 

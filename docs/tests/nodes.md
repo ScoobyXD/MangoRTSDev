@@ -121,6 +121,13 @@ N92 - Mounted Node chat performs one single-flight canonical durable-chat refres
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban/Project editor panels may remain modeless until fullscreen. Fullscreen toggling preserves the live node editor instance and opener state.
 N95 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
+N96 - An email-collaboration Node is created only by the lazy EMAIL52 trigger. It is a standalone private Node with no Logic Gate/card, project relationship, status, priority, GVIC assignment, or placeholder work fields, and creation must not invoke the ordinary email-to-work conversion defaults. Generic project-relationship attach/upsert rejects this Node; project-relationship delete remains available only to clean up a legacy or erroneous link, while ordinary Nodes keep the existing attach and delete behavior.
+N97 - The collaboration Node contains exactly the canonical source-scoped `Attached email` projection and shared `Text block chat` information rows. Creation does not manufacture a placeholder text box merely to host the email or chat; the node-level attached-email viewer and ChatPane remain valid with zero text boxes. Store-authoritative guards reject generic information/projection writes, save-version create/restore, Logic Gate/status placement, GVIC mutation, and account assignment for this Node, including canonical-ID overwrite attempts and administrator bypass callers; only the dedicated atomic collaboration-chat path may add chat rows.
+N98 - The collaboration Node and its My/Shared Triage email detail are two mounts of the same chat controller and presentation component. Message IDs, block IDs, parent IDs, ordering, indentation, collapsed replies, deletion ownership, mention chips, links, attachment references, composer behavior, and `chat:node:{node_id}` refresh all remain identical.
+N99 - An email-selection chat persists `selection_source=email`, the exact provider message ID, trimmed quote, and valid start/end offsets. Activating it from either surface opens/highlights the matching message; a chat without an anchor and a reply to an anchored root remain valid without inventing a different anchor.
+N100 - The collaboration creator and snapshotted mention participants have permanent direct edit access to the Node while its default remains `no_access`. A permissions surface may explain those system-managed participants read-only, but it must not expose generic controls that add, remove, downgrade, or replace collaboration grants or change the default; new participant grants come only from accepted mentions under EMAIL59.
+N101 - Only email-collaboration Nodes receive the protected Unfiled/Nodes Company Explorer placement. Ordinary standalone Nodes, project-only Nodes, and Logic Gate/Kanban email conversions retain their existing non-Explorer behavior.
+N102 - Future provider messages do not create additional Nodes or attached-email projections for the same collaboration identity. They are read as newer members of the existing source thread and become visible from both the attached-email and triage surfaces.
 
 ## Scenarios
 
@@ -580,3 +587,27 @@ Expected:
 - Failed renames publish no committed-title event.
 - First/reconnect/late-handler acceptance and hints run one canonical durable-chat read at a time with at most one queued final read.
 - No replay log, gap protocol, recovery worker, or dirty editor-text replacement is introduced.
+
+### Scenario N-S19: Email Collaboration Node Has One Shared Chat
+
+Business logic covered:
+- N96
+- N97
+- N98
+- N99
+- N100
+- N101
+- N102
+
+Given:
+- An email with no existing collaboration is opened and highlighted without submitting a chat.
+- A user later submits an anchored chat and mentions another user.
+- Both participants open the resulting Node while the original email detail remains available, and a future provider message joins the thread.
+
+Expected:
+- Highlight/read alone creates no Node; the first nonempty chat submit ensures exactly one standalone private Node outside every Logic Gate/project/work-assignment path, and retry reuses it if the following chat write fails.
+- The Node has no placeholder text box, status, priority, GVIC, card, or inherited work policy.
+- Its canonical attached-email projection preserves source mailbox/thread provenance, and only this collaboration Node appears in protected Unfiled/Nodes.
+- The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
+- The creator and mentioned participant keep direct edit access while nonparticipants are denied.
+- The future thread member appears inside the existing attached-email conversation and does not create a second collaboration Node or projection.

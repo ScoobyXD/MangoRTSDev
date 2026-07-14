@@ -34,7 +34,7 @@ test("node-attached email viewer retains triage thread, recipient, attachment, a
   assert.match(nodeParts, /sharedInboxID=\{email\.sharedInboxID\}/);
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
   assert.match(nodeParts, /respondToCalendarInvite\(\{ messageID: message\.id, status, companyID, sharedInboxID, accountEmail \}\)/);
-  assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail \}\)/);
+  assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail, collaborationID \}\)/);
   assert.match(nodeParts, /getEmailMessage\(email\.messageID, companyID, mailboxScope\.sharedInboxID, \{ accountEmail: mailboxScope\.accountEmail \}\)/);
   assert.match(nodeParts, /getEmailThread\(threadID, companyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/);
   assert.match(nodeParts, /listEmailMessages\(\{ companyID, \.\.\.mailboxScope, mailbox: "all"/);

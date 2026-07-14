@@ -489,6 +489,10 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.AssignNodeToLogicGateStatus(input)
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment")
 		return
@@ -594,6 +598,10 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.MoveLogicGateNodeAssignment(input)
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_move")
 		return
@@ -672,6 +680,10 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.RemoveLogicGateNodeAssignment(input)
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_remove")
 		return
@@ -745,6 +757,10 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.SetLogicGateNodeAssignmentIssue(input)
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_issue")
 		return

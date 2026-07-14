@@ -52,7 +52,7 @@ func TestCommunicationsEmailDraftPersonalScopePreventsIDORAcrossUsersAndAccounts
 	}, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(ownerDraftA, "owner-a@example.com", ""), nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(ownerDraftA, "owner-a@example.com", ""), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
-	fixture.expectStatus(t, http.MethodGet, "/v1/communications/drafts?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusBadRequest)
+	assertHTTPDraftIDs(t, fixture.request(t, http.MethodGet, "/v1/communications/drafts?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser))
 }
 
 func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScope(t *testing.T) {

@@ -152,6 +152,11 @@ test("draft attachment resource IDs separate personal accounts and shared inboxe
     draftID: "draft:1",
     sharedInboxID: " shared-1 ",
   }), "shared:shared-1:draft%3A1");
+  assert.equal(mangoEmailDraftResourceID({
+    draftID: "draft:1",
+    collaborationID: " collaboration-1 ",
+    sharedInboxID: "shared-1",
+  }), "collaboration:collaboration-1:draft%3A1");
 });
 
 test("filters node text-block files without changing the source list", () => {

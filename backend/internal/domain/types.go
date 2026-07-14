@@ -441,27 +441,38 @@ type CommunicationsMessageReadStatus struct {
 }
 
 type CommunicationsEmailDraft struct {
-	CompanyID              string     `json:"company_id"`
-	DraftID                string     `json:"draft_id"`
-	ScopeType              string     `json:"scope_type"`
-	PersonalUserID         string     `json:"personal_user_id,omitempty"`
-	PersonalAccountEmail   string     `json:"personal_account_email,omitempty"`
-	SharedInboxID          string     `json:"shared_inbox_id,omitempty"`
-	CreatedByUserID        string     `json:"created_by_user_id,omitempty"`
-	UpdatedByUserID        string     `json:"updated_by_user_id,omitempty"`
-	Kind                   string     `json:"kind"`
-	SourceMessageID        string     `json:"source_message_id,omitempty"`
-	AccountEmail           string     `json:"account_email,omitempty"`
-	ToRecipients           string     `json:"to_recipients"`
-	CcRecipients           string     `json:"cc_recipients"`
-	BccRecipients          string     `json:"bcc_recipients"`
-	Subject                string     `json:"subject"`
-	BodyEditorHTML         string     `json:"body_editor_html"`
-	ReplyToMessageJSON     string     `json:"-"`
-	ScheduledSendTimestamp *time.Time `json:"scheduled_send_timestamp,omitempty"`
-	CreatedTimestamp       time.Time  `json:"created_timestamp"`
-	UpdatedTimestamp       time.Time  `json:"updated_timestamp"`
-	DeletedTimestamp       *time.Time `json:"deleted_timestamp,omitempty"`
+	CompanyID                string     `json:"company_id"`
+	DraftID                  string     `json:"draft_id"`
+	ScopeType                string     `json:"scope_type"`
+	PersonalUserID           string     `json:"personal_user_id,omitempty"`
+	PersonalAccountEmail     string     `json:"personal_account_email,omitempty"`
+	SharedInboxID            string     `json:"shared_inbox_id,omitempty"`
+	CollaborationID          string     `json:"collaboration_id,omitempty"`
+	IsShared                 bool       `json:"is_shared,omitempty"`
+	Revision                 int64      `json:"revision,omitempty"`
+	SendState                string     `json:"send_state,omitempty"`
+	SendClaimToken           string     `json:"-"`
+	SendIdempotencyKey       string     `json:"-"`
+	SendIdempotencyGrantID   string     `json:"-"`
+	SendIdempotencyTimestamp *time.Time `json:"-"`
+	SendClaimedRevision      int64      `json:"-"`
+	SendClaimedTimestamp     *time.Time `json:"-"`
+	SentMessageID            string     `json:"sent_message_id,omitempty"`
+	CreatedByUserID          string     `json:"created_by_user_id,omitempty"`
+	UpdatedByUserID          string     `json:"updated_by_user_id,omitempty"`
+	Kind                     string     `json:"kind"`
+	SourceMessageID          string     `json:"source_message_id,omitempty"`
+	AccountEmail             string     `json:"account_email,omitempty"`
+	ToRecipients             string     `json:"to_recipients"`
+	CcRecipients             string     `json:"cc_recipients"`
+	BccRecipients            string     `json:"bcc_recipients"`
+	Subject                  string     `json:"subject"`
+	BodyEditorHTML           string     `json:"body_editor_html"`
+	ReplyToMessageJSON       string     `json:"-"`
+	ScheduledSendTimestamp   *time.Time `json:"scheduled_send_timestamp,omitempty"`
+	CreatedTimestamp         time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp         time.Time  `json:"updated_timestamp"`
+	DeletedTimestamp         *time.Time `json:"deleted_timestamp,omitempty"`
 }
 
 type CommunicationsEmailSignature struct {
@@ -498,6 +509,40 @@ type CommunicationsEmailPlacement struct {
 	LogicGateID      string    `json:"logic_gate_id"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+// CommunicationsEmailCollaboration is the durable bridge between an email
+// provider thread and the standalone Mango node that owns its shared chat.
+// Message is a provider-independent snapshot so permanent participants can
+// render the shared card without access to the source mailbox credentials.
+type CommunicationsEmailCollaboration struct {
+	CompanyID                  string                                        `json:"company_id"`
+	CollaborationID            string                                        `json:"collaboration_id"`
+	NodeID                     string                                        `json:"node_id"`
+	AttachedEmailInformationID string                                        `json:"attached_email_information_id"`
+	ScopeType                  string                                        `json:"scope_type"`
+	PersonalUserID             string                                        `json:"personal_user_id,omitempty"`
+	PersonalAccountEmail       string                                        `json:"personal_account_email,omitempty"`
+	SharedInboxID              string                                        `json:"shared_inbox_id,omitempty"`
+	AccountEmail               string                                        `json:"account_email"`
+	ProviderThreadID           string                                        `json:"provider_thread_id,omitempty"`
+	RootMessageID              string                                        `json:"root_message_id"`
+	LatestMessageID            string                                        `json:"latest_message_id"`
+	Message                    EmailMessageSnapshot                          `json:"message"`
+	CreatedByUserID            string                                        `json:"created_by_user_id,omitempty"`
+	CreatedTimestamp           time.Time                                     `json:"created_timestamp"`
+	UpdatedTimestamp           time.Time                                     `json:"updated_timestamp"`
+	Participants               []CommunicationsEmailCollaborationParticipant `json:"participants,omitempty"`
+}
+
+type CommunicationsEmailCollaborationParticipant struct {
+	CompanyID        string    `json:"company_id"`
+	CollaborationID  string    `json:"collaboration_id"`
+	UserID           string    `json:"user_id"`
+	AddedByUserID    string    `json:"added_by_user_id,omitempty"`
+	AddedViaType     string    `json:"added_via_type"`
+	AddedViaID       string    `json:"added_via_id,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
 type UserLogicGateShortcut struct {
@@ -885,11 +930,11 @@ type LogicGateWorkCard struct {
 }
 
 type LogicGateWorkView struct {
-	LogicGate          LogicGateWorkHeader  `json:"logic_gate"`
-	Permissions        EffectiveAccessFlags `json:"permissions"`
-	Board              KanbanBoard          `json:"board"`
-	Columns            []KanbanColumn       `json:"columns"`
-	Cards              []LogicGateWorkCard  `json:"cards"`
+	LogicGate   LogicGateWorkHeader  `json:"logic_gate"`
+	Permissions EffectiveAccessFlags `json:"permissions"`
+	Board       KanbanBoard          `json:"board"`
+	Columns     []KanbanColumn       `json:"columns"`
+	Cards       []LogicGateWorkCard  `json:"cards"`
 }
 
 type CompanyExplorerFolder struct {
@@ -1078,16 +1123,16 @@ const (
 )
 
 type DomainEvent struct {
-	EventID            string         `json:"event_id"`
-	CompanyID          string         `json:"company_id"`
-	StreamType         string         `json:"stream_type"`
-	StreamID           string         `json:"stream_id"`
-	Sequence           int64          `json:"sequence"`
-	Type               string         `json:"type"`
-	ActorUserID        *string        `json:"actor_user_id,omitempty"`
-	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
-	Payload            map[string]any `json:"payload,omitempty"`
-	CreatedTimestamp   time.Time      `json:"created_timestamp"`
+	EventID          string         `json:"event_id"`
+	CompanyID        string         `json:"company_id"`
+	StreamType       string         `json:"stream_type"`
+	StreamID         string         `json:"stream_id"`
+	Sequence         int64          `json:"sequence"`
+	Type             string         `json:"type"`
+	ActorUserID      *string        `json:"actor_user_id,omitempty"`
+	IdempotencyKey   string         `json:"idempotency_key,omitempty"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	CreatedTimestamp time.Time      `json:"created_timestamp"`
 }
 
 type Notification struct {

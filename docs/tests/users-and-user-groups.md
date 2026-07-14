@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-13
 
 # Users And User Groups Tests
 
@@ -42,6 +42,10 @@ UG31 - Invitation delivery status is tracked separately from invitation acceptan
 UG32 - Company managers can invite company users and company managers; only company admins and dev admins can invite company admins.
 UG33 - Company managers can delete company users and company managers, but cannot delete company admins or dev admins.
 UG34 - Deleting a user group removes permission and GVIC source rows that reference the deleted group/subtree and refreshes affected effective/projection rows.
+UG35 - The email-collaboration chat mention picker may target an active same-company user or user group. The durable chat payload identifies selected principal IDs separately from display text so renamed users/groups and duplicate names cannot retarget a mention.
+UG36 - At the accepted chat transaction, a valid group mention resolves the selected group's current active same-company user closure through the existing group hierarchy plus membership source rows, deduplicates users across direct and overlapping group mentions, and snapshots those user IDs as collaboration participants. A valid empty group adds no participant; a missing, deleted, or cross-company group is rejected.
+UG37 - An email-collaboration group mention is deliberately different from the dynamic group pointers in UG23: later member/hierarchy changes do not add or remove collaboration participants, change Node access, or rewrite historical mention notifications.
+UG38 - Mentioning an already-participating user is idempotent. The actor remains a participant but receives no self-mention notification; every other newly mentioned resolved user receives at most one notification for the committed chat.
 
 ## Scenarios
 
@@ -161,3 +165,29 @@ Expected:
 - Validation checks status and expiration.
 - Acceptance checks token, email, status, and expiration before creating/updating membership.
 - Delivery status is tracked separately from acceptance status.
+
+### Scenario UG-S5: Email Collaboration User And Group Mentions
+
+Business logic covered:
+- UG15
+- UG19
+- UG20
+- UG21
+- UG22
+- UG23
+- UG35
+- UG36
+- UG37
+- UG38
+
+Given:
+- A collaboration chat selects one company user and one nested company group whose resolved members overlap that user.
+- Another selected group is valid but empty, and requests also try a deleted or cross-company group.
+- Group membership changes after the chat commits.
+
+Expected:
+- Selected principal IDs, not display labels, identify mentions.
+- The valid group resolves from current hierarchy/member source rows and each distinct current active same-company user is snapshotted once.
+- The empty valid group adds nobody without inventing a user; deleted/cross-company groups are rejected.
+- The actor receives no self-mention notification and retries/overlap produce no duplicate participant or notification.
+- Later group changes still affect dynamic resource permission/GVIC group pointers under UG23 but do not affect the collaboration snapshot.

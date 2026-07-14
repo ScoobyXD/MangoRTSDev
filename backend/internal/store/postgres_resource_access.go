@@ -576,6 +576,14 @@ direct_targets(resource_type, resource_id) as (
     on folder_scope.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
     and item.target_type in ('`+EntityTypeProject+`', '`+EntityTypeLogicGate+`', '`+EntityTypeNode+`')
+    and not (
+      item.target_type='`+EntityTypeNode+`'
+      and exists (
+        select 1 from communications_email_collaborations collaboration
+        where collaboration.company_id=item.company_id
+          and collaboration.node_id=item.target_id
+      )
+    )
 ),
 node_targets(resource_type, resource_id) as (
   select '`+EntityTypeNode+`'::text, assignment.node_id
@@ -584,6 +592,11 @@ node_targets(resource_type, resource_id) as (
     on target.resource_type='`+EntityTypeLogicGate+`'
    and target.resource_id=assignment.logic_gate_id
   where assignment.company_id=$1::uuid
+    and not exists (
+      select 1 from communications_email_collaborations collaboration
+      where collaboration.company_id=assignment.company_id
+        and collaboration.node_id=assignment.node_id
+    )
 )
 select distinct resource_type, resource_id::text
 from (
@@ -598,6 +611,11 @@ select distinct '`+EntityTypeNode+`'::text as resource_type, assignment.node_id:
 from node_logic_gate_assignments assignment
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$2::uuid
+  and not exists (
+    select 1 from communications_email_collaborations collaboration
+    where collaboration.company_id=assignment.company_id
+      and collaboration.node_id=assignment.node_id
+  )
 order by assignment.node_id::text`, companyID, resourceID)
 	default:
 		return []resourcePermissionTarget{}, nil

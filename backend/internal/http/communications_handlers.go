@@ -503,6 +503,32 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
+	collaborationID := strings.TrimSpace(r.URL.Query().Get("collaboration_id"))
+	if action == "attachment" && collaborationID != "" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		collaboration, err := s.repo.GetCommunicationsEmailCollaboration(companyID, collaborationID, actor.User.UserID)
+		if err != nil {
+			s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_collaboration")
+			return
+		}
+		connection, ok := s.emailCollaborationSourceConnection(w, collaboration, actor.User.UserID)
+		if !ok {
+			return
+		}
+		s.downloadEmailCollaborationAttachment(w, r, connection, collaboration, messageID, attachmentID)
+		return
+	}
+	if collaborationID != "" {
+		writeError(w, http.StatusBadRequest, "collaboration_id_only_supported_for_email_attachments")
+		return
+	}
 	requiredSharedInboxAccess := store.EntityPermissionView
 	if sharedInboxID != "" && (action == "archive" || action == "unarchive" || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
 		requiredSharedInboxAccess = store.EntityPermissionEdit

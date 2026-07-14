@@ -74,8 +74,12 @@ ATT40 - Collapsed historical email cards issue no attachment-content reads. Expa
 ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
 ATT42 - Outbound email has a separate aggregate limit of exactly 24,000,000 attachment bytes; it does not change the general direct-browser limit of 1 GiB per file. Recipient and nonempty-content-or-valid-reference checks run first, then every unique Mango attachment is resolved through one original-content metadata/link read and authorized before any S3 body is opened. Declared original sizes are nonnegative and summed without overflow; zero bytes and exactly 24,000,000 bytes are valid, while any larger aggregate fails before S3.
 ATT43 - After outbound preflight succeeds, S3 bodies open lazily inside the admitted provider send and stream directly into a deterministic-length Nylas multipart request. Each returned object length must match the authorized metadata before reading; the stream is bounded to that exact size, detects short, long, and failing readers, and closes on success, failure, provider rejection, or cancellation. Outbound send creates neither base64 attachment copies nor a complete multipart buffer, while incoming Nylas MIME recovery and calendar attachment content remain unchanged.
-ATT44 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
-ATT45 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
+ATT44 - Personal `email_draft` attachment reads and account-scoped link/unlink operations are owner-only; new personal draft resource IDs include the exact normalized account as well as user and draft. Legacy user/draft IDs remain owner-only and readable for compatibility but cannot create, link, upload, unlink, or otherwise mutate attachments. Company administrator or manager status is not an override. Shared-draft attachment reads require view access to the exact shared inbox and mutations require edit access. A cross-user/account/shared-inbox identifier cannot expose attachment content or change resource scope.
+ATT45 - The view/edit rules in ATT44 describe ordinary personal and shared-inbox drafts. An email-collaboration shared draft is the explicit exception: its new attachment resource identity includes the collaboration plus draft, and every read/link/upload/unlink/content request requires permanent collaboration participation and current draft revision rather than ownership of or navigation access to the source mailbox. The immutable collaboration still supplies the mailbox scope at send time. Once its revision is claimed with `send_state="sending"`, every attachment mutation gate (including direct-upload finalization, link, and unlink) returns `email_draft_send_in_progress` until a definitive rejection safely releases the claim or the draft is completed/discarded; participant attachment list/content reads remain allowed so a same-key recovery cannot change its provider payload.
+ATT46 - Email-collaboration chat attachments are ordinary Node `chat_attachment` references on the one collaboration Node and use the same upload, authorization, preview, deletion-ownership, and no-inline-bytes behavior from ATT8 and ATT15. The email surface must not clone attachment rows or provider/S3 bytes when it mounts the shared ChatPane.
+ATT47 - Provider-backed files and CID images in an email collaboration are downloaded with company plus collaboration identity. Permanent participation is checked before source-mailbox resolution, the fetched provider message must belong to the collaboration's immutable exact thread, and the same authorized path is used by Triage and Node attached-email viewers; source-mailbox navigation permission is neither granted nor required.
+ATT48 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
+ATT49 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
 
 ## Scenarios
 
@@ -181,8 +185,8 @@ Business logic covered:
 - ATT15
 - ATT42
 - ATT43
-- ATT44
-- ATT45
+- ATT48
+- ATT49
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
@@ -367,3 +371,31 @@ Expected:
 - Authorization runs on every content request. A matching validator returns `304` before S3/object storage, uses private cache semantics and `nosniff`, and never exposes storage identifiers.
 - A derivative row whose object is missing falls back to the original once.
 - Existing-image repair is human-only, dry-run by default, requires company plus limit, reports a deterministic next cursor, cannot apply without the explicit confirmation guard, and exits nonzero after its report when apply has failures.
+
+### Scenario ATT-S13: Collaboration Chat And Shared-Draft Attachments
+
+Business logic covered:
+- ATT2
+- ATT8
+- ATT13
+- ATT15
+- ATT42
+- ATT43
+- ATT44
+- ATT45
+- ATT46
+- ATT47
+
+Given:
+- A permanent participant attaches a file to email collaboration chat and files/inline images to its shared draft.
+- An incoming provider message in the collaboration's immutable exact thread contains an ordinary file and a CID image.
+- Another participant without source-mailbox navigation reads the chat, draft, provider-file, and CID content, while a nonparticipant guesses the IDs and a participant requests a message from another thread.
+- A participant sends the current shared-draft revision.
+
+Expected:
+- Chat uses the collaboration Node's existing chat-attachment links, and email/Node surfaces show the same references without cloning rows or bytes.
+- Shared-draft attachment resource identity includes collaboration plus draft and authorizes every operation through current permanent participation.
+- Lack of source-mailbox navigation does not block a participant, while a nonparticipant and cross-collaboration identifier are denied.
+- Incoming provider files and CID images authorize company plus permanent collaboration participation before resolving the immutable source mailbox, accept only a provider message in the collaboration's exact thread, reject cross-thread and nonparticipant requests, and use the same path from Triage and Node attached-email viewers.
+- Durable chat/draft payloads contain Mango references only.
+- Send reauthorizes references, applies the existing aggregate preflight and exact-length streaming rules, and uses the collaboration's immutable source mailbox without exposing credentials or object-storage identifiers.

@@ -83,6 +83,11 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if keyValue.resourceType == EntityTypeNode {
+		if _, protected := r.emailCollaborationForNodeLocked(keyValue.companyID, keyValue.resourceID); protected {
+			return ResourceGVICAssignmentMutationResult{}, ErrProtectedEmailCollaborationResource
+		}
+	}
 
 	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
 		return ResourceGVICAssignmentMutationResult{}, ErrNotFound

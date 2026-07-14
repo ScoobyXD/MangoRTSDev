@@ -294,6 +294,9 @@ func (r *MemoryRepo) SetNodeAccountAssignments(input NodeAccountAssignmentUpdate
 	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
 		return NodeAccountAssignmentUpdateResult{}, ErrNotFound
 	}
+	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
+		return NodeAccountAssignmentUpdateResult{}, ErrProtectedEmailCollaborationResource
+	}
 	for _, accountID := range input.AccountIDs {
 		if _, ok := r.accounts[accountKey(input.CompanyID, accountID)]; !ok {
 			return NodeAccountAssignmentUpdateResult{}, ErrNotFound

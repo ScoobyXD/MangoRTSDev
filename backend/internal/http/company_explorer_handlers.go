@@ -466,6 +466,10 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
 				return
 			}
+			if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+				writeError(w, http.StatusConflict, "email_collaboration_explorer_item_managed")
+				return
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				writeAccessResourceNotFound(w)
 				return
@@ -502,6 +506,10 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+		return
+	}
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_explorer_item_managed")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -556,6 +564,10 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item_move")
 			return
 		}
+		if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+			writeError(w, http.StatusConflict, "email_collaboration_explorer_item_managed")
+			return
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeAccessResourceNotFound(w)
 			return
@@ -574,6 +586,9 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 		}
 		if err := s.repo.DeleteCompanyExplorerV2Edge(companyID, itemID); errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+			return
+		} else if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+			writeError(w, http.StatusConflict, "email_collaboration_explorer_item_managed")
 			return
 		} else if errors.Is(err, store.ErrNotFound) {
 			writeAccessResourceNotFound(w)
@@ -651,6 +666,10 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 	result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets, deletedByUserID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+		return
+	}
+	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {

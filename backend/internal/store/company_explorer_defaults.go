@@ -9,12 +9,14 @@ const (
 	CompanyExplorerDefaultRootFolderName       = "Unfiled"
 	CompanyExplorerDefaultProjectsFolderName   = "Projects"
 	CompanyExplorerDefaultLogicGatesFolderName = "Logic Gates"
+	CompanyExplorerDefaultNodesFolderName      = "Nodes"
 
 	CompanyExplorerProtectedDefaultFolderNativeContextKey = "protected_default_folder"
 
 	companyExplorerDefaultRootKey       = "unfiled"
 	companyExplorerDefaultProjectsKey   = "unfiled_projects"
 	companyExplorerDefaultLogicGatesKey = "unfiled_logic_gates"
+	companyExplorerDefaultNodesKey      = "unfiled_nodes"
 
 	CompanyExplorerSearchDefaultLimit = 40
 	CompanyExplorerSearchMaxLimit     = 100
@@ -24,6 +26,7 @@ type companyExplorerDefaultFolders struct {
 	UnfiledFolderID    string
 	ProjectsFolderID   string
 	LogicGatesFolderID string
+	NodesFolderID      string
 }
 
 func companyExplorerDefaultFolderIDs(companyID string) companyExplorerDefaultFolders {
@@ -32,6 +35,7 @@ func companyExplorerDefaultFolderIDs(companyID string) companyExplorerDefaultFol
 		UnfiledFolderID:    companyExplorerDefaultFolderID(companyID, companyExplorerDefaultRootKey),
 		ProjectsFolderID:   companyExplorerDefaultFolderID(companyID, companyExplorerDefaultProjectsKey),
 		LogicGatesFolderID: companyExplorerDefaultFolderID(companyID, companyExplorerDefaultLogicGatesKey),
+		NodesFolderID:      companyExplorerDefaultFolderID(companyID, companyExplorerDefaultNodesKey),
 	}
 }
 
@@ -52,6 +56,8 @@ func companyExplorerDefaultFolderIDForTargetType(companyID, targetType string) (
 		return folders.ProjectsFolderID, folders.ProjectsFolderID != ""
 	case EntityTypeLogicGate:
 		return folders.LogicGatesFolderID, folders.LogicGatesFolderID != ""
+	case EntityTypeNode:
+		return folders.NodesFolderID, folders.NodesFolderID != ""
 	default:
 		return "", false
 	}
@@ -65,7 +71,8 @@ func isCompanyExplorerDefaultFolderID(companyID, folderID string) bool {
 	folders := companyExplorerDefaultFolderIDs(companyID)
 	return folderID == folders.UnfiledFolderID ||
 		folderID == folders.ProjectsFolderID ||
-		folderID == folders.LogicGatesFolderID
+		folderID == folders.LogicGatesFolderID ||
+		folderID == folders.NodesFolderID
 }
 
 func applyCompanyExplorerDefaultFolderNativeContext(row *CompanyExplorerV2Row) {

@@ -93,13 +93,47 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 		"querycompanyexplorerfinalprojectchildren",
 		"querycompanyexplorerfinallogicgatechildren",
 		"companyexplorernativechildren",
-		"item.target_type='node'",
 		"from project_relationship_projection projection",
 		"from node_logic_gate_assignments assignment",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("final company explorer rows kept removed V2 copy-graph marker %q", forbidden)
 		}
+	}
+}
+
+func TestPostgresCompanyExplorerV2NodeEdgeGuardsAreCollaborationScoped(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	source := string(raw)
+	moveBody := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) MoveCompanyExplorerV2Edge")), " "))
+	for _, want := range []string{
+		"if targettype == entitytypenode",
+		"postgresrejectemailcollaborationnodemutation(ctx, tx, input.companyid, targetid)",
+	} {
+		if !strings.Contains(moveBody, want) {
+			t.Fatalf("MoveCompanyExplorerV2Edge missing collaboration-scoped Node guard %q", want)
+		}
+	}
+	if strings.Contains(moveBody, "if targettype == entitytypenode { return companyexplorerv2row{}, errprotectedemailcollaborationresource") {
+		t.Fatal("MoveCompanyExplorerV2Edge still protects every Node edge by target type alone")
+	}
+
+	deleteBody := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) DeleteCompanyExplorerV2Edges")), " "))
+	for _, want := range []string{
+		"where item.target_type='node' and exists",
+		"from communications_email_collaborations collaboration",
+		"collaboration.company_id=item.company_id",
+		"collaboration.node_id=item.target_id",
+	} {
+		if !strings.Contains(deleteBody, want) {
+			t.Fatalf("DeleteCompanyExplorerV2Edges missing collaboration-scoped Node guard %q", want)
+		}
+	}
+	if strings.Contains(deleteBody, "count(*) filter (where target_type='node')") {
+		t.Fatal("DeleteCompanyExplorerV2Edges still protects every Node edge by target type alone")
 	}
 }
 

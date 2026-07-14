@@ -71,6 +71,10 @@ P59 - Company role, group membership, and group hierarchy changes that can alter
 P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
 P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set any of the work response permission flags.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
+P63 - A newly created email-collaboration Node has default access `no_access` and one system-managed direct edit binding for its creator. It never inherits the Unfiled/Nodes folder policy, source shared-inbox policy, Logic Gate policy, project policy, GVIC assignments, or broad company-member edit access.
+P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
+P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
+P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
 
 ## Scenarios
 
@@ -278,3 +282,26 @@ Expected:
 - Actor permission identity/flags prevent cross-user validator reuse.
 - Removing view access returns denial and does not expose cached card data.
 - GVIC assignment alone does not set view, edit, or admin permission.
+
+### Scenario P-S8: Email Collaboration Participant Policy
+
+Business logic covered:
+- P4
+- P26
+- P40
+- P63
+- P64
+- P65
+- P66
+
+Given:
+- An email collaboration is created by one user and a chat mentions one user plus an overlapping user group.
+- Group membership later changes, a mention message is deleted, and a manager attempts generic Node permission changes.
+
+Expected:
+- The collaboration Node starts at no access with one system-managed direct creator edit binding.
+- Each distinct resolved mentioned user receives one system-managed direct edit binding and participant row in the chat transaction.
+- The mention group is snapshotted to users rather than retained as a dynamic group permission pointer.
+- Group changes and mention deletion do not change existing participants.
+- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to email/thread/draft visibility.
+- Existing company-admin/dev-admin bypass remains intact but does not itself create a participant, triage card, notification, or shared draft listing.

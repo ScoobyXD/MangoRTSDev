@@ -236,6 +236,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "principal_user_not_in_company")
 				return
 			}
+			if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+				writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+				return
+			}
 			if errors.Is(err, store.ErrInvalid) {
 				writeError(w, http.StatusBadRequest, "invalid_node_update")
 				return
@@ -287,6 +291,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			stop()
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			} else if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+				writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 				return
 			} else if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
@@ -374,7 +381,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
-			item, err := s.repo.UpsertNodeProjectionWithActor(store.NodeInformationInput{
+			writeInput := store.NodeInformationInput{
 				CompanyID:        req.CompanyID,
 				NodeID:           nodeID,
 				Type:             req.Type,
@@ -382,18 +389,54 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				InformationID:    req.InformationID,
 				ActorUserID:      actorUserID,
 				ActorDisplayName: actorLabel,
-			})
+			}
+			var item domain.NodeProjection
+			var explicitMentionedUserIDs []string
+			var emailCollaborationID string
+			atomicCollaborationWrite := false
+			var err error
+			if strings.TrimSpace(req.Type) == store.CommunicationsEmailCollaborationChatInformationType {
+				atomicResult, atomicErr := s.repo.UpsertEmailCollaborationNodeProjectionWithActor(writeInput)
+				if atomicErr == nil {
+					item = atomicResult.Projection
+					explicitMentionedUserIDs = atomicResult.MentionedUserIDs
+					emailCollaborationID = atomicResult.CollaborationID
+					atomicCollaborationWrite = true
+				} else if errors.Is(atomicErr, store.ErrNotEmailCollaboration) {
+					item, err = s.repo.UpsertNodeProjectionWithActor(writeInput)
+				} else {
+					err = atomicErr
+					atomicCollaborationWrite = true
+				}
+			} else {
+				item, err = s.repo.UpsertNodeProjectionWithActor(writeInput)
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
 			}
 			if errors.Is(err, store.ErrInvalid) {
-				writeError(w, http.StatusBadRequest, "invalid_projection")
+				if atomicCollaborationWrite {
+					writeError(w, http.StatusBadRequest, "invalid_email_collaboration_mentions")
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_projection")
+				}
+				return
+			}
+			if errors.Is(err, store.ErrPrincipalNotInCompany) {
+				writeError(w, http.StatusBadRequest, "invalid_email_collaboration_mentions")
+				return
+			}
+			if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+				writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 				return
 			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_save_node_projection")
 				return
+			}
+			if emailCollaborationID != "" {
+				s.recordEmailCollaborationExplicitMentionNotifications(r, req.CompanyID, nodeID, req.InformationID, req.Type, req.Information, emailCollaborationID, explicitMentionedUserIDs)
 			}
 			s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, req.InformationID, req.Type, req.Information)
 			s.recordNodeChatNotification(r, req.CompanyID, nodeID, req.InformationID, req.Type, req.Information)
@@ -477,6 +520,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+				writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 				return
 			}
 			if err != nil {
@@ -569,6 +616,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "save_version_not_found")
 			return
 		}
+		if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+			writeError(w, http.StatusConflict, "email_collaboration_node_managed")
+			return
+		}
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_save_version")
 			return
@@ -617,6 +668,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
+		} else if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+			writeError(w, http.StatusConflict, "email_collaboration_attached_email_managed")
+			return
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_node_projection")
 			return
@@ -662,7 +716,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 
 		actorUserID, actorLabel := nodeChangeActorPayload(r)
-		item, err := s.repo.AddNodeInformationWithActor(store.NodeInformationInput{
+		writeInput := store.NodeInformationInput{
 			CompanyID:        req.CompanyID,
 			NodeID:           nodeID,
 			Type:             req.Type,
@@ -670,9 +724,42 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			InformationID:    req.InformationID,
 			ActorUserID:      actorUserID,
 			ActorDisplayName: actorLabel,
-		})
+		}
+		var item domain.NodeInformation
+		var explicitMentionedUserIDs []string
+		var emailCollaborationID string
+		atomicCollaborationWrite := false
+		var err error
+		if strings.TrimSpace(req.Type) == store.CommunicationsEmailCollaborationChatInformationType {
+			atomicResult, atomicErr := s.repo.AddEmailCollaborationNodeInformationWithActor(writeInput)
+			if atomicErr == nil {
+				item = atomicResult.Information
+				explicitMentionedUserIDs = atomicResult.MentionedUserIDs
+				emailCollaborationID = atomicResult.CollaborationID
+				atomicCollaborationWrite = true
+			} else if errors.Is(atomicErr, store.ErrNotEmailCollaboration) {
+				item, err = s.repo.AddNodeInformationWithActor(writeInput)
+			} else {
+				err = atomicErr
+				atomicCollaborationWrite = true
+			}
+		} else {
+			item, err = s.repo.AddNodeInformationWithActor(writeInput)
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) && atomicCollaborationWrite {
+			writeError(w, http.StatusBadRequest, "invalid_email_collaboration_mentions")
+			return
+		}
+		if errors.Is(err, store.ErrPrincipalNotInCompany) {
+			writeError(w, http.StatusBadRequest, "invalid_email_collaboration_mentions")
+			return
+		}
+		if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
+			writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 			return
 		}
 		if err != nil {
@@ -685,6 +772,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			mentionInformationID = item.InformationID
 		}
 		s.publishNodeChatCreated(req.CompanyID, nodeID, mentionInformationID, item)
+		if emailCollaborationID != "" {
+			s.recordEmailCollaborationExplicitMentionNotifications(r, req.CompanyID, nodeID, mentionInformationID, req.Type, req.Information, emailCollaborationID, explicitMentionedUserIDs)
+		}
 		s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, mentionInformationID, req.Type, req.Information)
 		s.recordNodeChatNotification(r, req.CompanyID, nodeID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)

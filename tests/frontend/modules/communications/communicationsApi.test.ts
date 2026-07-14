@@ -13,8 +13,10 @@ import {
   downloadEmailAttachment,
   deleteEmailDraft,
   emailMessageMatchesListFilters,
+  ensureEmailCollaboration,
   fetchCommunicationsStatus,
   getEmailMessage,
+  getEmailCollaborationThread,
   getEmailSignature,
   getEmailThread,
   invalidateCommunicationsCache,
@@ -27,6 +29,7 @@ import {
   listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
   listEmailDrafts,
+  listEmailCollaborations,
   listEmailFolders,
   listEmailMessages,
   listNodeFolderItems,
@@ -38,6 +41,7 @@ import {
   removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
   respondToCalendarInvite,
+  resolveEmailCollaboration,
   saveEmailSignature,
   saveEmailDraft,
   sendEmail,
@@ -72,6 +76,99 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("email collaboration reads are participant-scoped and clone stored message snapshots", async () => {
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    return jsonResponse({
+      collaborations: [{
+        company_id: "company-1",
+        collaboration_id: "collab-1",
+        node_id: "node-1",
+        attached_email_information_id: "email-info-1",
+        provider_thread_id: "thread-1",
+        message_snapshot: { id: "message-1", subject: "Review", unread: false, starred: false },
+        participants: [{ company_id: "company-1", collaboration_id: "collab-1", user_id: "user-1" }],
+      }],
+    });
+  };
+  try {
+    const collaborations = await listEmailCollaborations(" company-1 ");
+    assert.deepEqual(calls, ["/v1/communications/email-collaborations?company_id=company-1"]);
+    assert.equal(collaborations[0]?.message_snapshot?.subject, "Review");
+    collaborations[0]!.message_snapshot!.subject = "Changed locally";
+    assert.equal(collaborations[0]?.participants?.[0]?.user_id, "user-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("email collaboration resolve is read-only while ensure sends the complete source snapshot", async () => {
+  const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+    });
+    return jsonResponse({
+      collaboration: {
+        company_id: "company-1",
+        collaboration_id: "collab-1",
+        node_id: "node-1",
+        attached_email_information_id: "email-info-1",
+      },
+    });
+  };
+  try {
+    await resolveEmailCollaboration({
+      companyID: "company-1",
+      messageID: "message-1",
+      threadID: "thread-1",
+      accountEmail: "ME@Example.test",
+    });
+    await ensureEmailCollaboration({
+      companyID: "company-1",
+      messageID: "message-1",
+      threadID: "thread-1",
+      accountEmail: "ME@Example.test",
+      message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
+    });
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[0]?.path, "/v1/communications/email-collaborations?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
+    assert.equal(calls[1]?.method, "POST");
+    assert.equal(calls[1]?.path, "/v1/communications/email-collaborations");
+    assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("email collaboration thread reads durable participant-visible messages without mailbox scope", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    requested = input.toString();
+    return jsonResponse({
+      collaboration_id: "collab-1",
+      thread_id: "thread-1",
+      messages: [{ id: "message-2", thread_id: "thread-1", subject: "Latest", unread: false, starred: false }],
+      history_complete: false,
+    });
+  };
+  try {
+    const thread = await getEmailCollaborationThread(" company-1 ", " collab-1 ");
+    assert.equal(requested, "/v1/communications/email-collaborations/collab-1/thread?company_id=company-1");
+    assert.equal(thread.messages[0]?.subject, "Latest");
+    assert.equal(thread.messages[0]?.collaboration_id, "collab-1");
+    assert.equal(thread.history_complete, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("calendar RSVP uses message identity and shared mailbox scope", async () => {
@@ -1001,7 +1098,7 @@ test("sendEmail leaves reply-history persistence to the caller", async () => {
   }
 });
 
-test("durable draft API requires and preserves one exact personal or shared scope", async () => {
+test("durable draft API preserves mailbox scopes and exposes the participant collaboration branch", async () => {
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   const draft = {
@@ -1034,7 +1131,7 @@ test("durable draft API requires and preserves one exact personal or shared scop
     return jsonResponse({ drafts: [draft] });
   };
   try {
-    await assert.rejects(() => listEmailDrafts("company-1", {}), /email_draft_scope_required/);
+    await listEmailDrafts("company-1", {});
     await listEmailDrafts("company-1", { accountEmail: " Me@Example.Test " });
     await listEmailDrafts("company-1", { sharedInboxID: " shared-1 " });
     await saveEmailDraft({
@@ -1050,13 +1147,14 @@ test("durable draft API requires and preserves one exact personal or shared scop
     await deleteEmailDraft("company-1", "draft-1", { sharedInboxID: "shared-1" });
 
     assert.deepEqual(calls.map((call) => [call.method, call.path]), [
+      ["GET", "/v1/communications/drafts?company_id=company-1"],
       ["GET", "/v1/communications/drafts?company_id=company-1&account_email=me%40example.test"],
       ["GET", "/v1/communications/drafts?company_id=company-1&shared_inbox_id=shared-1"],
       ["PUT", "/v1/communications/drafts/draft-1"],
       ["DELETE", "/v1/communications/drafts/draft-1?company_id=company-1&shared_inbox_id=shared-1"],
     ]);
-    assert.equal(calls[2]?.body?.shared_inbox_id, "shared-1");
-    assert.equal(calls[2]?.body?.company_id, "company-1");
+    assert.equal(calls[3]?.body?.shared_inbox_id, "shared-1");
+    assert.equal(calls[3]?.body?.company_id, "company-1");
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -1534,18 +1632,20 @@ test("provider attachment downloads preserve exact personal and shared mailbox s
     const blob = await downloadEmailAttachment("message-1", "attachment-1", "company-1", undefined, {
       signal: controller.signal,
       accountEmail: " SECOND@Example.COM ",
+      collaborationID: "collab-1",
     });
     assert.equal(await blob.text(), "attachment-bytes");
     await downloadEmailAttachment("message-1", "attachment-1", "company-1", "shared-1", {
       accountEmail: "ignored@example.com",
+      collaborationID: "collab-1",
     });
     assert.deepEqual(calls, [
       {
-        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&account_email=second%40example.com",
+        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&account_email=second%40example.com&collaboration_id=collab-1",
         signal: controller.signal,
       },
       {
-        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&shared_inbox_id=shared-1",
+        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&shared_inbox_id=shared-1&collaboration_id=collab-1",
         signal: undefined,
       },
     ]);

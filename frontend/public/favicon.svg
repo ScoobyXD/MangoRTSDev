@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 68 68">
+  <defs>
+    <linearGradient id="mango-favicon-gradient" x1="11" y1="13" x2="52" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbb152" />
+      <stop offset="0.38" stop-color="#fea94e" />
+      <stop offset="0.68" stop-color="#fe9b46" />
+      <stop offset="1" stop-color="#ff8820" />
+    </linearGradient>
+    <clipPath id="mango-favicon-clip">
+      <polygon points="32,11 50,21.5 50,42.5 32,53 14,42.5 14,21.5" />
+    </clipPath>
+  </defs>
+  <polygon points="32,5.5 55,18.75 55,45.25 32,58.5 9,45.25 9,18.75" fill="none" stroke="url(#mango-favicon-gradient)" stroke-width="7" stroke-linejoin="round" />
+  <polygon points="32,11 50,21.5 50,42.5 32,53 14,42.5 14,21.5" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linejoin="round" />
+  <g clip-path="url(#mango-favicon-clip)" fill="url(#mango-favicon-gradient)">
+    <polygon points="18,44 25,19 31,16 24,47" />
+    <polygon points="27,48 35,15 41,16 33,51" />
+    <polygon points="36,50 44,18 49,21 42,47" />
+    <polygon points="14,42 20,23 25,20 19,45" />
+  </g>
+</svg>

@@ -1013,3 +1013,51 @@ func sharedInboxGVICFingerprint(assignments []domain.SharedInboxGVICAssignment) 
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
 }
+
+// recordEmailCollaborationExplicitMentionNotifications runs after participant
+// snapshots and node edit grants have committed, but before the legacy alias
+// resolver. It gives group-expanded users one deterministic mention event and
+// uses the legacy idempotency key so an explicit user is never notified twice.
+func (s *Server) recordEmailCollaborationExplicitMentionNotifications(r *http.Request, companyID, nodeID, informationID, infoType, information, collaborationID string, mentionedUserIDs []string) {
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	informationID = strings.TrimSpace(informationID)
+	collaborationID = strings.TrimSpace(collaborationID)
+	mentionedUserIDs = uniqueCleanStrings(mentionedUserIDs)
+	if companyID == "" || nodeID == "" || informationID == "" || collaborationID == "" || len(mentionedUserIDs) == 0 || !isMentionNotificationInformationType(infoType) {
+		return
+	}
+	actorUserID, actorLabel := notificationActorPayload(r)
+	comment := editorMentionCommentPreview(infoType, information)
+	events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
+	for _, userID := range mentionedUserIDs {
+		idempotencyKey := "mention:regular:node:" + nodeID + ":" + informationID + ":" + userID + ":1"
+		alreadyRecorded, err := s.mentionNotificationEventAlreadyRecorded(companyID, idempotencyKey)
+		if err != nil {
+			log.Printf("failed to check email mention notification idempotency company_id=%s node_id=%s information_id=%s user_id=%s: %v", companyID, nodeID, informationID, userID, err)
+			return
+		}
+		if alreadyRecorded {
+			continue
+		}
+		event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
+			CompanyID: companyID, StreamType: "notification", StreamID: "node:" + nodeID,
+			Type: store.NodeMentionCreatedEventType, ActorUserID: actorUserID, IdempotencyKey: idempotencyKey,
+			Payload: map[string]any{
+				"node_id": nodeID, "entity_type": store.EntityTypeNode, "entity_id": nodeID,
+				"comment": comment, "information_id": informationID,
+				"information_type": strings.TrimSpace(infoType), "mention_kind": "regular",
+				"mentioned_user_ids": []string{userID}, "actor_display_name": actorLabel,
+				"email_collaboration_id": collaborationID, "icon": "email",
+			},
+		})
+		if err != nil {
+			log.Printf("failed to append email mention notification company_id=%s node_id=%s information_id=%s user_id=%s: %v", companyID, nodeID, informationID, userID, err)
+			return
+		}
+		events = append(events, event)
+	}
+	if len(events) > 0 {
+		s.projectCommittedNotificationEvents(events)
+	}
+}

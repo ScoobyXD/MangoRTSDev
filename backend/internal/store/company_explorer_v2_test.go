@@ -683,7 +683,7 @@ func TestMemoryCompanyExplorerDefaultUnfiledFolders(t *testing.T) {
 		t.Fatalf("ListCompanyExplorerV2ChildRows unfiled: %v", err)
 	}
 	gotNames := companyExplorerV2RowNames(children.Rows)
-	wantNames := []string{CompanyExplorerDefaultProjectsFolderName, CompanyExplorerDefaultLogicGatesFolderName}
+	wantNames := []string{CompanyExplorerDefaultProjectsFolderName, CompanyExplorerDefaultLogicGatesFolderName, CompanyExplorerDefaultNodesFolderName}
 	if len(gotNames) != len(wantNames) {
 		t.Fatalf("default child names = %v, want %v", gotNames, wantNames)
 	}
@@ -730,12 +730,15 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 		t.Fatalf("MoveCompanyExplorerFolder Projects err = %v, want ErrInvalid", err)
 	}
 
+	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.NodesFolderID); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("DeleteCompanyExplorerV2Folder Nodes err = %v, want ErrInvalid", err)
+	}
 	children, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: defaults.UnfiledFolderID, PermissionUserID: user.UserID})
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows after blocked mutations: %v", err)
 	}
-	if gotNames := companyExplorerV2RowNames(children.Rows); len(gotNames) != 2 {
-		t.Fatalf("default child rows after blocked mutations = %v, want two child folders", gotNames)
+	if gotNames := companyExplorerV2RowNames(children.Rows); len(gotNames) != 3 {
+		t.Fatalf("default child rows after blocked mutations = %v, want three child folders", gotNames)
 	}
 }
 func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testing.T) {
