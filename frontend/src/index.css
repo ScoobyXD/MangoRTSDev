@@ -534,8 +534,9 @@ button, input, textarea, select {
 [data-mango-editor-format-control]:focus-visible,
 [data-mango-editor-header-overflow-trigger]:focus-visible,
 [data-mango-editor-header-overflow-action]:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.58);
+  outline: 2px solid rgba(34, 211, 238, 0.96);
   outline-offset: 2px;
+  filter: drop-shadow(0 0 5px rgba(168, 85, 247, 0.38));
 }
 
 .mango-editor-hover-highlight:hover,

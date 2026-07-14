@@ -241,6 +241,15 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       await flushAsyncWork();
     };
 
+    const boldButton = container.querySelector<HTMLButtonElement>('button[aria-label="Bold"]');
+    assert.ok(boldButton);
+    assert.equal(boldButton.style.background, "transparent");
+    await act(async () => Simulate.mouseEnter(boldButton));
+    assert.match(boldButton.style.background, /linear-gradient\(105deg/);
+    assert.match(boldButton.style.boxShadow, /34,\s*211,\s*238/);
+    await act(async () => Simulate.mouseLeave(boldButton));
+    assert.equal(boldButton.style.background, "transparent");
+
     await act(async () => editorRoot.focus());
     await setTextSelection("seed", 4);
     for (let index = 0; index < 6; index += 1) {
@@ -273,9 +282,13 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
     await setTextSelection("X", 0, 1);
     await act(async () => setToolbarHighlightContext(null));
-    await pressToolbarButton("Apply text highlight");
+    const activeHighlightButton = await pressToolbarButton("Apply text highlight");
     assert.deepEqual(highlightApplications, ["#fed7aa", "#fed7aa"]);
     assert.equal(container.querySelector('[aria-label="Text highlight colors"]'), null);
+    await act(async () => Simulate.mouseLeave(activeHighlightButton));
+    assert.equal(activeHighlightButton.getAttribute("aria-pressed"), "true");
+    assert.match(activeHighlightButton.style.background, /linear-gradient\(105deg/);
+    assert.match(activeHighlightButton.style.boxShadow, /34,\s*211,\s*238/);
     assert.ok(
       Array.from(editorRoot.querySelectorAll('[data-mango-editor-highlight="#fed7aa"]')).some((element) => element.textContent?.includes("X")),
       editorRoot.innerHTML,

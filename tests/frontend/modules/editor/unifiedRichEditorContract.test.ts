@@ -684,12 +684,14 @@ test("shared toolbar hover and focus styling is scoped to each clickable control
   assert.doesNotMatch(formatGroupOpening, /outlineMenuAccent|active/);
   assert.match(editorTabBar, /const hovered = hoveredFormatControl === id && !formatControlsDisabled/);
   assert.match(editorTabBar, /const formatControlHoverHandlers = \(id: EditorFormatControlID\) => \(\{/);
-  assert.match(editorTabBar, /const toolbarActiveBackground = [^;]*rgba\(92,238,255,0\.78\)[^;]*rgba\(183,124,255,0\.70\)/);
-  assert.match(editorTabBar, /const toolbarHoverBackground = "linear-gradient\(135deg, rgba\(255,255,255,0\.94\)[^"]*rgba\(92,238,255,0\.40\)[^"]*rgba\(183,124,255,0\.34\)/);
+  assert.match(editorTabBar, /const toolbarActiveBackground = "linear-gradient\(105deg, rgba\(87,238,255,0\.98\)[^"]*rgba\(159,128,255,0\.98\)[^"]*rgba\(218,190,255,0\.98\)/);
+  assert.match(editorTabBar, /const toolbarHoverBackground = "linear-gradient\(105deg, rgba\(226,253,255,0\.98\)[^"]*rgba\(178,239,255,0\.98\)[^"]*rgba\(229,211,255,0\.98\)/);
+  assert.match(editorTabBar, /const toolbarActiveShadow = "inset 0 0 0 2px rgba\(34,211,238,0\.96\)[^"]*rgba\(168,85,247,0\.34\)"/);
+  assert.match(editorTabBar, /const toolbarHoverShadow = "inset 0 0 0 1px rgba\(34,211,238,0\.92\)[^"]*rgba\(168,85,247,0\.22\)"/);
   assert.match(editorTabBar, /const tabSelectedBackgroundVibrant = toolbarActiveBackground/);
   assert.match(formatControlStyle, /background: active\s*\? toolbarActiveBackground/);
   assert.match(formatControlStyle, /color: active \? "#0f172a" : surfaceText/);
-  assert.match(formatControlStyle, /boxShadow: active\s*\? `inset 0 0 0 1px \$\{colorWithAlpha\(outlineMenuAccent, 0\.78\)\}[^\n]*rgba\(183,124,255,0\.32\)`/);
+  assert.match(formatControlStyle, /boxShadow: active \? toolbarActiveShadow : hovered \? toolbarHoverShadow : undefined/);
   for (const controlID of ["decrease-font", "increase-font", "bold", "underline", "italic", "strikethrough", "highlight", "highlight-menu", "table"]) {
     const controlIndex = editorTabBar.indexOf(`data-mango-editor-format-control="${controlID}"`);
     const hoverIndex = editorTabBar.indexOf(`formatControlHoverHandlers("${controlID}")`, controlIndex);
@@ -698,7 +700,7 @@ test("shared toolbar hover and focus styling is scoped to each clickable control
   }
   assert.match(editorTabBar, /data-mango-editor-format-control="font-size"[\s\S]*onMouseEnter=\{\(\) => setHoveredFormatControl\("font-size"\)\}/);
   assert.match(editorTabBar, /data-mango-editor-format-control=\{controlID\}[\s\S]*formatControlHoverHandlers\(controlID\)/);
-  assert.match(indexCSS, /\[data-mango-editor-format-control\]:focus-visible/);
+  assert.match(indexCSS, /\[data-mango-editor-format-control\]:focus-visible[\s\S]*outline: 2px solid rgba\(34, 211, 238, 0\.96\)[\s\S]*drop-shadow\(0 0 5px rgba\(168, 85, 247, 0\.38\)\)/);
 });
 
 test("collapsed-caret font size, highlight, italic, and strikethrough retain pending typing state at the saved caret", () => {
