@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -85,7 +86,8 @@ const componentTestSource = resolve(repoRoot, "tests/frontend/modules/editor/nod
 const componentTestFile = resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js");
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
-const esbuildEntrypoint = resolve(frontendRoot, "node_modules/esbuild/bin/esbuild");
+const frontendRequire = createRequire(resolve(frontendRoot, "package.json"));
+const { buildSync } = frontendRequire("esbuild");
 
 function run(command, extraEnv = {}) {
   execSync(command, {
@@ -128,9 +130,16 @@ for (const testFile of testFiles) {
 
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
-run(
-  `"${process.execPath}" "${esbuildEntrypoint}" "${componentTestSource}" --bundle --platform=node --format=esm --packages=external --define:import.meta.env={} --outfile="${componentTestFile}"`,
-);
+buildSync({
+  absWorkingDir: repoRoot,
+  entryPoints: [componentTestSource],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  define: { "import.meta.env": "{}" },
+  outfile: componentTestFile,
+});
 
 for (const testFile of [...testFiles, componentTestFile]) {
   console.log(`\n=== Frontend feature tests: ${testFile} ===`);
