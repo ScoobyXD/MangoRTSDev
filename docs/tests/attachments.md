@@ -375,15 +375,18 @@ Business logic covered:
 - ATT44
 - ATT45
 - ATT46
+- ATT47
 
 Given:
 - A permanent participant attaches a file to email collaboration chat and files/inline images to its shared draft.
-- Another participant without source-mailbox navigation reads the attachments, while a nonparticipant guesses the IDs.
+- An incoming provider message in the collaboration's immutable exact thread contains an ordinary file and a CID image.
+- Another participant without source-mailbox navigation reads the chat, draft, provider-file, and CID content, while a nonparticipant guesses the IDs and a participant requests a message from another thread.
 - A participant sends the current shared-draft revision.
 
 Expected:
 - Chat uses the collaboration Node's existing chat-attachment links, and email/Node surfaces show the same references without cloning rows or bytes.
 - Shared-draft attachment resource identity includes collaboration plus draft and authorizes every operation through current permanent participation.
 - Lack of source-mailbox navigation does not block a participant, while a nonparticipant and cross-collaboration identifier are denied.
+- Incoming provider files and CID images authorize company plus permanent collaboration participation before resolving the immutable source mailbox, accept only a provider message in the collaboration's exact thread, reject cross-thread and nonparticipant requests, and use the same path from Triage and Node attached-email viewers.
 - Durable chat/draft payloads contain Mango references only.
 - Send reauthorizes references, applies the existing aggregate preflight and exact-length streaming rules, and uses the collaboration's immutable source mailbox without exposing credentials or object-storage identifiers.

@@ -645,6 +645,7 @@ Business logic covered:
 - MT130
 - MT131
 - MT132
+- MT133
 
 Given:
 - A personal email owner creates an anchored or unanchored chat and mentions another user/group.

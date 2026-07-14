@@ -806,6 +806,7 @@ Business logic covered:
 - ST156
 - ST157
 - ST158
+- ST159
 
 Given:
 - A source Shared Triage message gains a collaboration through chat or Create Shared Draft.
