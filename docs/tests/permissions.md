@@ -1,4 +1,4 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 # Permissions Tests
 
@@ -70,6 +70,7 @@ P58 - Direct Logic Gate permission/default changes, gate policy revisions, inher
 P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags conservatively invalidate all Logic Gate work versions in that company.
 P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
 P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set any of the work response permission flags.
+P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
 
 ## Scenarios
 
@@ -159,6 +160,7 @@ Business logic covered:
 - P22
 - P23
 - P38
+- P62
 
 Given:
 - A viewer can access some nodes, logic gates, projects, Explorer rows, and Kanban boards, but not others.
@@ -176,6 +178,7 @@ Expected:
 - Effective access is recomputed after permission changes.
 - Canonical effective-access rows, affected projections, and read versions are current for the edited resource and descendants changed by an apply-to-descendants command.
 - The initiating client patches concrete mounted state from the committed response when applicable; other clients reconcile on a later canonical read, with no generic permission or workspace browser event.
+- If a later chat, board, or shared-mailbox event commits, publication rechecks current exact access and excludes the revoked subscriber without broadcasting a broad permission event.
 
 ### Scenario P-S4: Parent Template Permission Snapshots And Descendant Apply
 

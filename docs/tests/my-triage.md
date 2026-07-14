@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting, shared highlight controls, exact compose/signature flush submission, and unified signature editing for My Triage; `tests/frontend/pages/home/homeCommands.test.ts` covers personal compose attachment references without durable `content` plus mailbox-scoped signature load/save ordering; `backend/internal/http/communications_handlers_test.go` covers personal send-time Mango attachment resolution and raw-content rejection, while `backend/internal/http/communications_email_draft_handlers_test.go` covers durable draft/signature inline-byte rejection; Mango email body marking/display and highlight preservation are covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact personal/shared targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and obsolete-navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers the draft retention/purge matrix, scope generations/revisions, out-of-order loads, edits/deletes during load, multiple personal accounts, and durable draft preparation before attachment upload. Unified-editor, send-time attachment, draft API, body-marking, and cache tests cover the remaining named paths; rule IDs are not fully mapped to automated tests yet.)
 
 - Automatic personal signature insertion, rich-body deduplication, compose-scope wiring, unified signature mounting, exact flush behavior, and stale-load/save ordering are covered by `tests/frontend/pages/home/homeCommands.test.ts` and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
 
@@ -27,9 +27,9 @@ MT14 - Converting into a project requires project edit access and creates the pr
 MT15 - Conversion defaults the status to Pending and priority to 3 when those values are not provided.
 MT16 - Explicit conversion priority must be between 1 and 5.
 MT17 - Successful conversion returns converted/deleted triage message IDs for committed-response reconciliation; the source mailbox email row remains visible locally and shows its updated Logic Gate placement icon.
-MT18 - Successful conversion returns the canonical result needed for concrete same-browser surfaces to patch; it emits no communications, workspace, or generic projection WebSocket event.
+MT18 - Successful conversion returns the canonical result needed for concrete same-browser surfaces to patch; the conversion command emits no broad communications, workspace, or generic projection WebSocket event. A later exact-mailbox provider update is independent.
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
-MT20 - My Triage and Shared Triage consume narrow, authorization-checked mailbox WebSocket hints for provider mailbox changes. A `message.created` hint invalidates caches and schedules one coalesced canonical HTTP refresh; the event payload itself never inserts a row and no polling loop is used.
+MT20 - My Triage subscribes only to `mailbox:personal:account:{user_id}:{normalized_account_email}` for the exact selected connected personal account. Shared Triage uses its separate exact shared-inbox pattern. There is no user-wide personal mailbox scope or background subscription for other accounts/views; payloads are compact post-commit hints and canonical HTTP reads remain authoritative.
 MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 12 messages per page.
 MT22 - My Triage and Shared Triage primary inboxes automatically prefetch the next message page after the selected-detail foreground path settles, without waiting for scrolling or the archive/advance action.
 MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
@@ -49,15 +49,15 @@ MT36 - If folder metadata reconciliation is slow or fails after archive or unarc
 MT37 - Archive progress and completion are identified by durable archive job and job-item status returned from canonical archive-job reads, not by backend/provider browser events or generic mailbox updates.
 MT38 - Reconciling durable archive-job status for the frozen previous page must not trigger a full message-list reload or blank the currently visible prefetched page.
 MT39 - Star and unstar actions in My Triage must optimistically update the visible message state and Starred count before the committed HTTP response returns.
-MT40 - The committed HTTP response for a local My Triage star or unstar action reconciles the affected row, caches, and counts without triggering a full message-list reload or blanking the active Inbox or Starred tab. Provider change hints invalidate stale caches, but only brand-new-message hints replace the open list.
+MT40 - The committed HTTP response for a local My Triage star or unstar action reconciles the affected row, caches, and counts without triggering a full message-list reload or blanking the active Inbox or Starred tab. External `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active displayed list and folder metadata canonically; folder hints reconcile metadata; local command echoes still use the committed result.
 MT41 - My Triage mail activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
 MT42 - If an accepted background archive job item reaches failed state or remains incomplete, the source email must not be deleted and may remain or reappear on the next canonical inbox load.
 MT43 - Selecting another email, focusing the email body/detail pane, or returning focus from the detail pane to the list must not reload, blank, or replace the visible message list.
 MT44 - Browser focus and visibility-change events must not force a My Triage or Shared Triage message-list refresh.
-MT45 - The normal full-list replacement path for My Triage is initial page/list load, browser refresh, an explicit list identity change such as mailbox/search/unread/account/company/shared inbox, or one coalesced canonical refresh after an authorized `message.created` mailbox hint.
-MT46 - Mailbox WebSocket payloads are cache-invalidation hints only and never fetch or insert message data directly. A canonical page/list load returns newly created messages matching the active filters.
-MT47 - Local mail commands patch the affected visible or selected message from their committed response. Provider hints invalidate caches; a new-message hint refreshes the active list, while other changes reconcile through command results, folder metadata, detail reads, or the next canonical load.
-MT48 - Personal scope `mailbox:personal:user:<user_id>` is authorized only for that exact authenticated user. Shared mailbox scopes use their own resource permission checks; broad communications scopes are not supported.
+MT45 - The normal full-list replacement path for My Triage is initial page/list load, browser refresh, an explicit list identity change such as mailbox/search/unread/account/company/shared inbox, first subscription acceptance, reconnect acceptance, or one coalesced canonical reconciliation after a relevant active-mailbox message hint.
+MT46 - Mailbox WebSocket payloads carry only the exact scope, trigger, and compact message/thread identifiers. They never fetch, insert, or live-patch message bodies; canonical page/list/detail reads remain authoritative.
+MT47 - Local mail commands patch the affected visible or selected message from their committed response. External `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active displayed list/folders; a selected detail reload occurs only when the hint names that message or thread, so an unrelated new message never refetches it.
+MT48 - Personal scope `mailbox:personal:account:<user_id>:<normalized_account_email>` requires that exact authenticated user/account relationship. Multiple personal accounts cannot wake one another, the removed `mailbox:personal:user:<user_id>` shape is invalid, and broad communications scopes are unsupported.
 MT49 - A local triage conversion applies the committed response once and does not use a full message-list reload as the default reconciliation path.
 MT50 - A background archive response may return Accepted only after the backend has written a durable archive job and job-item rows for the accepted message IDs.
 MT51 - Accepted archive job items must survive API process restart and be claimable by a backend worker until each item reaches archived or failed.
@@ -70,15 +70,15 @@ MT57 - Accepted background archive job IDs are pending work, not confirmed archi
 MT58 - Transferring a direct email-created Kanban card into another node is not a revert; the email remains out of My Triage.
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
-MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty. The supported cross-window boundary for these email drag payloads is Chrome window/tab to Chrome window/tab; cross-browser application drag/drop is not a documented business requirement unless a separate compatibility rule and test are added.
-MT62 - Successful local email conversion into a Logic Gate, Company Explorer Logic Gate, Kanban column, or project keeps the source row visible and patches row/detail/cache state from the committed result. It must not invalidate all communications caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the list, or repeatedly issue mail GETs; no communications/workspace realtime echo exists.
+MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus one exact source mailbox scope. My Triage drags include normalized `account_email`; Shared Triage drags include `shared_inbox_id` and suppress personal account identity. Explorer, Kanban, project, and pin conversion handoffs must preserve that exact key through `POST /v1/communications/triage/convert` and the local committed-result event. The supported cross-window boundary is Chrome window/tab to Chrome window/tab; cross-browser application drag/drop is not a documented business requirement unless a separate compatibility rule and test are added.
+MT62 - Successful local email conversion into a Logic Gate, Company Explorer Logic Gate, Kanban column, or project keeps the source row visible and patches row/detail/cache state from the committed result. It must not invalidate all communications caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the list, or repeatedly issue mail GETs; it does not depend on a broad conversion/workspace realtime echo. A later exact-mailbox provider update may independently cause one canonical active-list reconciliation.
 MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, Kanban column, project, pinned Logic Gate, or non-Explorer eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
 MT65 - Every unread My Triage email row shows the small top-left unread dot and a visibly thicker highlighted outer frame. Selection is independent: the entire selected card uses the established Mango selection surface, is exposed with `aria-pressed`, and remains visually distinct from unread state.
 MT66 - Sent email read receipts use Nylas open tracking on outbound personal sends and replies by sending `tracking_options.opens = true`; inbound messages do not create read receipts.
 MT67 - The authoritative personal receipt signal is the Nylas `message.opened` webhook for the sender's personal grant; the signal is image/pixel based and can be blocked, proxied, delayed, or generated by privacy systems, so the product treats it as a `Seen` open-tracking signal rather than guaranteed human reading.
-MT68 - Personal mailbox receipts are stored in the sender user's personal receipt scope and are enriched onto Sent message list/detail responses for that same personal mailbox scope.
-MT69 - A later canonical personal Sent list/detail read enriches only the affected message with its stored `message.opened` receipt summary. The webhook does not trigger a browser message-list reload, top-up, prefetch, or communications publication.
+MT68 - Personal mailbox receipts are stored in the exact sender-user plus normalized personal-account scope and are enriched onto Sent message list/detail responses only for that same account. Two personal grants that happen to return the same provider message ID must not share receipt state, and there is no user-wide personal receipt fallback.
+MT69 - A `message.opened` webhook may publish one compact exact-mailbox hint. If its message or thread is currently selected, Home invalidates and canonically reloads only that detail so the stored receipt summary converges; unrelated selections and the message list, top-up, and prefetch paths remain untouched.
 MT70 - Sent messages without a stored personal receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
 MT71 - Nylas receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by outbound personal sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
 MT72 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current My Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate read-receipt state unless a future feature explicitly adds that behavior.
@@ -141,14 +141,17 @@ MT113 - Advance directly consumes the exact personal mailbox/filter/page-token p
 MT114 - Initial next-page prefetch and provider mark-read yield foreground priority to the selected detail request while preserving immediate optimistic unread UI.
 MT115 - Clicking a different personal thread replaces prior thread state immediately; stale results cannot reinsert old cards.
 MT116 - Personal thread history uses bounded preview pages and lazy per-card body/attachment hydration. Collapsed cards perform no attachment-content reads, while Expand all intentionally hydrates all cards.
-MT117 - A signed, deduplicated personal `message.created` provider webhook invalidates message, page, thread, and folder-count caches, publishes one personal mailbox hint, and makes the new message arrive in the open matching list in provider date order through one coalesced canonical refresh. If a just-completed local conversion temporarily suppresses mail reads, the pending arrival refresh is preserved and deferred until that bounded suppression expires rather than discarded, whether the hint arrives immediately before or during suppression.
-MT118 - A personal mailbox hint received while another Home view is selected invalidates the cached mailbox state without issuing a mail request from that non-mail view; returning to My Triage performs the canonical load and shows the new message once. If that return occurs during bounded local-conversion suppression, the view-entry load is deferred until expiry rather than dropped.
+MT117 - First personal-account subscription acceptance and reconnect acceptance each coalesce one canonical folder/list reconciliation, including mail committed after the initial list and before first acceptance. Signed `message.created`, `message.updated` (including moves), `message.deleted`, and folder hints use the same one-active/one-queued-final coordinator; burst signals never overlap the active read. Its folder leg is authoritative: when the initial same-account folder load is still active, acceptance queues exactly one final refresh, bypasses reusable cache state, and fences any pre-invalidation provider result from refilling that account cache. An unrelated Shared Triage inventory refresh or equivalent resource-object replacement does not recreate the unchanged personal subscription or produce another acceptance/provider read.
+MT118 - A personal mailbox hint received while another Home view/account is selected performs no provider GET. Navigation cancels/discards timers and pending work captured for the old exact request key, and opening the intended account performs its canonical load; Account A never invalidates or refreshes Account B. A hint that matched selected message/thread A is also discarded for detail purposes if selection B is active when its debounce or queued-final turn executes.
 MT119 - Selecting an unread personal email by pointer, Enter, or Space immediately removes its unread dot/frame, updates the selected card and unread counter, and persists read state through the scoped provider command. Stale list/detail refreshes cannot resurrect unread while that command is authoritative; failure rolls the row/counter back, invalidates detail cache, and surfaces the established error.
 MT120 - Selecting away from a successfully read personal message never marks it unread. A later provider or realtime refresh preserves the committed read state.
 MT121 - Personal conversation detail resolves provider thread membership through `thread.message_ids`, hydrates any sent or older members absent from the bounded preview page, deduplicates by message ID, and orders deterministically. It supports external-initiated, user-initiated, alternating, and forwarded mail only when the provider thread or exact supported reply metadata establishes membership; subject similarity never joins conversations and missing thread identity remains a one-off.
 MT122 - Personal durable draft list/get/create/update/delete operations require the authenticated user's exact personal account scope. Draft scope is immutable, known IDs in another user/account cannot be read, changed, reassigned, or deleted, and browser fallback data is keyed by company/user then filtered to the active account; only explicit pending-sync rows may migrate to the database. The My Triage Drafts tab renders only those database drafts for the authenticated user and exact active account; it never displays provider Drafts or another user/account's drafts.
 MT123 - A My Triage row shows the established accessible thread indicator on its left only when the canonical/loaded conversation count is greater than one; a one-off message or a message with an unproven thread count shows no thread icon.
 MT124 - Personal read-on-open timers, optimistic overlays, and mutation responses use the authenticated company/user/account plus provider message ID. A completion may update only the exact captured mailbox/filter and selection generation; switching search, unread filter, view, account, user, or selected thread cannot let a stale success, rollback, error, or reconnect recovery mutate the new context.
+MT125 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
+MT126 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
+MT127 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
 
 ## Scenarios
 
@@ -204,6 +207,7 @@ Business logic covered:
 - MT16
 - MT17
 - MT18
+- MT87
 
 Given:
 - A user has personal triage messages ready to convert.
@@ -218,7 +222,7 @@ Expected:
 - Conversion into an existing node succeeds only with edit access to the node and optional logic gate context.
 - Missing status defaults to Pending.
 - Missing priority defaults to 3, and priority outside 1 through 5 is rejected.
-- Successful conversion returns the canonical committed result and converted/deleted triage IDs so the initiating browser patches the affected local row and concrete workspace surfaces while keeping the source mailbox email row visible with updated Logic Gate placement state. No communications/workspace refresh event is emitted; if the conversion changes an affected mounted board, only that board's `kanban.changed` hint may publish.
+- Successful conversion returns the canonical committed result and converted/deleted triage IDs so the initiating browser patches the affected local row and concrete workspace surfaces while keeping the source mailbox email row visible with updated Logic Gate placement state. The conversion command emits no broad communications/workspace refresh event; if it changes an affected mounted board, only that board's `kanban.changed` hint may publish. A later exact-mailbox provider update remains independently eligible for canonical reconciliation.
 
 ### Scenario MT-S3: Convert To New Gate Or Project, Reject Folder Target
 
@@ -238,6 +242,7 @@ Business logic covered:
 Given:
 - A user has personal triage messages ready to convert.
 - The request targets a new logic gate, a folder/parent entity, or a project.
+- The drag may cross same-account Chrome windows/tabs into Company Explorer, Kanban, or a project surface.
 
 Expected:
 - A new logic gate conversion requires a title/header and creates the gate plus related work records together.
@@ -245,7 +250,8 @@ Expected:
 - Rejected folder conversion must not place a node in Company Explorer, create a folder item, or insert a node row into `company_explorer_items`.
 - A project conversion requires project edit access and creates the project relationship/projection records.
 - A project conversion may be project-only or project plus Logic Gate; project-only conversion creates a standalone project node relationship, while project plus Logic Gate also creates the Logic Gate node/card assignment.
-- Successful conversion returns the canonical committed result and converted/deleted source triage IDs so the initiating browser patches the affected local rows and concrete workspace surfaces while keeping source mailbox email rows visible with updated Logic Gate placement state. No communications/workspace refresh event is emitted; if the conversion creates an assignment on an affected mounted board, only that board's `kanban.changed` hint may publish.
+- Kanban and project drops open the committed node popup after conversion, while preserving the exact personal account source scope.
+- Successful conversion returns the canonical committed result and converted/deleted source triage IDs so the initiating browser patches the affected local rows and concrete workspace surfaces while keeping source mailbox email rows visible with updated Logic Gate placement state. The conversion command emits no broad communications/workspace refresh event; if it creates an assignment on an affected mounted board, only that board's `kanban.changed` hint may publish. A later exact-mailbox provider update remains independently eligible for canonical reconciliation.
 
 ### Scenario MT-S4: Revert Converted Email
 
@@ -343,22 +349,22 @@ Given:
 Expected:
 - The visible page contains no more than 12 messages.
 - After the selected detail request gets foreground priority, the next page is prefetched as a bounded logical page of at most 12 unique thread rows; filling stops on a repeated provider token or the configured request budget.
-- A signed, deduplicated `message.created` webhook publishes an exact personal mailbox hint; the open matching list performs one coalesced canonical refresh, shows the new row once in date order, and refreshes folder/unread metadata without polling.
+- First acceptance and reconnect acceptance each reconcile the exact personal account once; a signed message/folder webhook then uses the same coalescer without polling.
 - Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
 - Browser focus and visibility changes do not force a message-list refresh.
-- Newly received mail in the open personal Inbox appears after one coalesced canonical refresh; mail hinted while another view or mail tab is active appears on that scope's next canonical open, without background polling.
-- Local committed commands patch affected visible or selected rows. Provider hints invalidate stale caches, and brand-new mail refreshes the active matching list canonically.
+- Relevant `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the open personal list/folders; folder hints reconcile metadata; directly affected selected detail reloads, while unrelated new mail does not refetch it.
+- Mail hinted while another view/account is active issues no provider GET and appears on the intended account's next canonical open. Local committed commands still patch affected visible or selected rows.
 - Local conversion from the user's own email-to-Logic-Gate drop keeps source rows in place and patches Logic Gate icon state from the committed result without clearing caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
 - The backend sets converted source emails to unstarred after successful conversion, the response includes successfully updated IDs in `unstarred_message_ids`, and the visible Home list/Starred count reconciles locally without loading replacement Starred rows.
 - A successful local conversion shows a short green success notice.
 - Every unread row shows its top-left dot and thicker unread frame; the selected row instead/also uses the distinct full-card Mango selection surface and accessible pressed state.
 - Opening an unread row optimistically clears unread state and decrements the visible unread count; provider failure immediately rolls back and reports the error, while stale refreshes cannot resurrect unread after success.
-- Personal mailbox realtime is limited to the exact authenticated-user scope and carries invalidation hints, not message bodies. Only `message.created` schedules an active-list refresh; other provider changes do not disrupt the prefetched page.
-- Personal sends request Nylas open tracking, and Nylas `message.opened` webhooks store personal receipt summaries keyed by the sender mailbox scope and provider message ID.
+- Personal mailbox realtime is limited to the exact authenticated user/account scope and carries compact hints, not message bodies. Multiple personal accounts cannot wake one another.
+- Personal sends request Nylas open tracking, and Nylas `message.opened` webhooks store personal receipt summaries keyed by the sender user, normalized personal account identity, and provider message ID. Another personal account owned by that user cannot read or strengthen the receipt, even if its provider uses the same message ID.
 - The configured webhook secret matches `NYLAS_WEBHOOK_SECRET`; otherwise webhook POSTs are rejected and no personal receipt summary is written.
 - `message.link_clicked` and `thread.replied` webhook deliveries do not create or mutate read-receipt state under the current My Triage contract.
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
-- A later canonical sent/detail load reflects a stored `message.opened` receipt and preserves unrelated cached rows.
+- A selected affected Sent detail canonically reloads from its compact exact-mailbox `message.opened` hint; unrelated selections and cached list rows remain untouched.
 - Replying to the same source email never creates more than one reply draft for that source message and mailbox scope.
 - Reopening a reply draft shows the original email context above the compose editor.
 - Reply, Reply All, Forward, Cc, and Bcc compose paths send through the normal personal mailbox connection and preserve local sent/reply reconciliation.
@@ -384,7 +390,7 @@ Expected:
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
 - Canonical archive-job reconciliation updates pending bookkeeping without blanking, fully reloading, or removing rows from the currently visible prefetched page.
 - Accepted background archive IDs are not treated as already archived in the frontend list cache; the current page remains stable while earlier page jobs drain in the backend.
-- Starring or unstarring a message updates the row and Starred count locally, and the committed HTTP response reconciles that concrete state without blanking or fully reloading the active Inbox or Starred tab. An exact active-Inbox `message.created` hint schedules one canonical refresh; other external changes appear on the next canonical load.
+- Starring or unstarring a message updates the row and Starred count locally, and the committed HTTP response reconciles that concrete state without blanking or fully reloading the active Inbox or Starred tab. External active-mailbox changes reconcile through the exact scoped coalescer.
 - Opening or returning to My Triage does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
 - If the backend accepts the archive page but a durable job item later reaches failed state or remains incomplete, the source email is not deleted and can remain or reappear on the next canonical load.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
@@ -594,16 +600,24 @@ Business logic covered:
 - MT121
 - MT122
 - MT123
+- MT124
+- MT125
+- MT126
+- MT127
 
 Given:
-- An external sender starts a conversation, the Mango user replies, and the external sender replies again while My Triage is open or while another Home view is selected.
+- An external sender starts a conversation, the Mango user replies, and another message commits after the initial list but before first personal-account subscription acceptance.
 - The provider may return the sent reply in thread membership even when it was absent from the first message-list page, or the send response may initially omit its thread ID while the exact reply target supplies that thread identity.
 - The user selects the unread newest message and saves personal drafts in two authenticated user/account scopes.
+- A draft load fails with recoverable auth/provider/service/network errors, then separate requests prove explicit revocation/deletion; overlapping loads complete out of order while a local save/delete occurs.
+- The user attaches a file to a live draft, deletes the draft, and later opens an independently linked sent-message attachment.
 
 Expected:
-- The signed provider create webhook publishes one exact personal mailbox hint; the active list canonically refreshes once, inserts no event-body data, shows the new message/thread once in date order, and updates unread metadata without polling.
-- Returning from another Home view loads invalidated canonical state and shows the arrival without a duplicate.
+- First acceptance discovers the between-list-and-acceptance message through one canonical exact-account reconciliation; reconnect and later relevant hints use the same one-active/one-queued-final path.
+- Returning from another Home view/account loads canonical state for the intended account without a background GET or cross-account invalidation.
 - Conversation detail contains the external original, the Mango sent reply, and the newest inbound reply in deterministic order. Forwarded or subject-similar unrelated mail is not merged, and an unresolved one-off remains valid.
 - The unread dot/frame and visible unread count clear immediately on pointer or keyboard open; success remains read across selection/realtime refresh, while failure rolls state and count back and surfaces the error.
 - The multi-message row shows the thread icon; a one-message row does not.
 - Each personal draft API operation and Drafts-tab row requires the exact authenticated user/account database scope. User B cannot list, fetch, overwrite, move, delete, or access attachments for User A's draft even when the draft ID is known, the tab never lists provider Drafts, and a successful remote load cannot resurrect an unmarked stale browser draft.
+- Recoverable errors retain pending local drafts; only explicit revocation/deletion purges the exact scope. Out-of-order loads cannot overwrite newer loads, saves, deletes, or another personal account.
+- Compose persists the live exact-account draft before attachment upload. Deleting it denies draft-scoped attachment access to every actor, while the independent sent-message link stays valid.

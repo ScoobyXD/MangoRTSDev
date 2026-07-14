@@ -107,9 +107,7 @@ type IdentityRepository interface {
 }
 
 type CommunicationsRepository interface {
-	ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error)
 	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
-	DeleteCommunicationsTriageItem(userID, messageID string) error
 	UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
 	ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error)
 	CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
@@ -1684,6 +1682,7 @@ type CommunicationsTriageConversionTarget struct {
 type CommunicationsMessageReadStatusInput struct {
 	ScopeType                string
 	UserID                   string
+	PersonalAccountEmail     string
 	CompanyID                string
 	CompanyEmailConnectionID string
 	SharedInboxID            string
@@ -1697,6 +1696,7 @@ type CommunicationsMessageReadStatusInput struct {
 type CommunicationsMessageReadStatusListInput struct {
 	ScopeType                string
 	UserID                   string
+	PersonalAccountEmail     string
 	CompanyID                string
 	CompanyEmailConnectionID string
 	MessageIDs               []string

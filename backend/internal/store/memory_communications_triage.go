@@ -91,30 +91,6 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.companyExplorerV2Edges = snapshot.companyExplorerV2Edges
 }
 
-func (r *MemoryRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, ErrInvalid
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items := make([]domain.CommunicationsTriageItem, 0)
-	for _, item := range r.triageItems {
-		if item.UserID == userID {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.After(items[j].CreatedTimestamp)
-		}
-		return items[i].MessageID < items[j].MessageID
-	})
-	return items, nil
-}
-
 func (r *MemoryRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
 	userID = strings.TrimSpace(userID)
 	message = normalizeEmailMessageSnapshot(message)
@@ -143,24 +119,6 @@ func (r *MemoryRepo) UpsertCommunicationsTriageItem(userID string, message domai
 	}
 	r.triageItems[k] = item
 	return item, nil
-}
-
-func (r *MemoryRepo) DeleteCommunicationsTriageItem(userID, messageID string) error {
-	userID = strings.TrimSpace(userID)
-	messageID = strings.TrimSpace(messageID)
-	if userID == "" || messageID == "" {
-		return ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	k := triageItemKey(userID, messageID)
-	if _, ok := r.triageItems[k]; !ok {
-		return ErrNotFound
-	}
-	delete(r.triageItems, k)
-	return nil
 }
 
 func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {

@@ -16,6 +16,7 @@ import {
   UNIFIED_NODE_SHELL_SURFACE_CONTRACTS,
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
+import { withPreparedEditorAttachmentResource } from "../../../../frontend/src/modules/editor/editorAttachmentPreparation.js";
 
 const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Format controls",
@@ -29,6 +30,31 @@ const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Insert table",
   "Outline styles",
 ] as const;
+
+test("editor attachment mutations wait for resource preparation and stop when it fails", async () => {
+  const order: string[] = [];
+  const result = await withPreparedEditorAttachmentResource(
+    async () => { order.push("prepared"); },
+    async () => {
+      order.push("uploaded");
+      return "attachment";
+    },
+  );
+  assert.equal(result, "attachment");
+  assert.deepEqual(order, ["prepared", "uploaded"]);
+
+  let linked = false;
+  await assert.rejects(
+    withPreparedEditorAttachmentResource(
+      async () => { throw new Error("draft_not_durable"); },
+      async () => {
+        linked = true;
+      },
+    ),
+    /draft_not_durable/,
+  );
+  assert.equal(linked, false);
+});
 
 function assertSharedToolbarControls(editorTabBarSource: string, preferencesSource: string) {
   for (const label of SHARED_EDITOR_TAB_BAR_CONTROL_LABELS) {
@@ -355,14 +381,14 @@ test("shared editor clipboard routing keeps mixed content and copies images befo
   assert.match(editorSurfaceHandlers, /editorImageTransferHTMLKind\(root\.ownerDocument, html\)/);
   assert.match(editorSurfaceHandlers, /shouldUseEditorImageFileTransferShortcut\(true, htmlKind, text\)/);
   assert.match(editorSurfaceHandlers, /onCut\(event\)[\s\S]*copySelectedEditorImage\(root, event\.clipboardData\)[\s\S]*removeSelectedEditorImage\(root\)/);
-  assert.match(attachmentBackedPaste, /await linkMangoResourceAttachment\(editorImageAttachmentContext\.requestJSON, \{/);
+  assert.match(attachmentBackedPaste, /await withPreparedEditorAttachmentResource\(editorImageAttachmentContext\.prepareResource, \(\) => linkMangoResourceAttachment\(editorImageAttachmentContext\.requestJSON, \{/);
   assert.match(attachmentBackedPaste, /resourceType: editorImageAttachmentContext\.resourceType/);
   assert.match(attachmentBackedPaste, /resourceID: editorImageAttachmentContext\.resourceID/);
   assert.match(attachmentBackedPaste, /attachmentID: clipboardData\.attachmentID/);
   assert.match(attachmentBackedPaste, /relationshipKind: "inline_image"/);
   assert.ok(
-    attachmentBackedPaste.indexOf("await linkMangoResourceAttachment") < attachmentBackedPaste.indexOf("insertPreparedEditorImage"),
-    "the target resource link must exist before the attachment-backed image is inserted",
+    attachmentBackedPaste.indexOf("await withPreparedEditorAttachmentResource") < attachmentBackedPaste.indexOf("insertPreparedEditorImage"),
+    "resource preparation and linking must finish before the attachment-backed image is inserted",
   );
   assert.match(editorSurface, /onCut=/);
   assert.match(nodeWorkspaceParts, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceHandlers\}/);

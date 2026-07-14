@@ -867,6 +867,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   const result = await convertMessagesToLogicGateCommand({
     apiBase: "https://api.example.test",
     companyID: "company-1",
+    accountEmail: " OWNER@Example.TEST ",
     logicGateID: " gate-1 ",
     messageIDs: [" message-1 ", "message-2", "message-1"],
     priority: 2,
@@ -882,7 +883,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     upsertLogicGateFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => logicGateFolderItems.push(item.item_id),
   });
 
-  assert.deepEqual(convertCalls, [{ companyID: "company-1", logicGateID: "gate-1", messageIDs: ["message-1", "message-2"], priority: 2 }]);
+  assert.deepEqual(convertCalls, [{ companyID: "company-1", accountEmail: "owner@example.test", logicGateID: "gate-1", messageIDs: ["message-1", "message-2"], priority: 2 }]);
   assert.equal(result?.boardID, "logic-gate:gate-1");
   assert.equal(result?.logicGateID, "gate-1");
   assert.deepEqual(result?.convertedMessageIDs, ["message-1"]);
@@ -901,6 +902,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     apiBase: "https://api.example.test",
     companyID: "company-1",
     sharedInboxID: " shared-1 ",
+    accountEmail: "ignored@example.test",
     logicGateID: "gate-1",
     messageIDs: ["message-3"],
     priority: 4,
@@ -924,44 +926,52 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   });
 });
 
-test("Home mail message commands normalize ids and pass shared inbox context", async () => {
-  const calls: Array<{ action: string; companyID: string; messageID: string; sharedInboxID?: string; update?: unknown }> = [];
-  const archiveEmailMessage: HomeArchiveEmailMessage = async (messageID, sharedInboxID, companyID) => {
-    calls.push({ action: "archive", companyID: companyID ?? "", messageID, sharedInboxID });
+test("Home mail message commands normalize ids and preserve one exact personal or shared mailbox", async () => {
+  const calls: Array<{ action: string; companyID: string; messageID: string; sharedInboxID?: string; accountEmail?: string; update?: unknown }> = [];
+  const archiveEmailMessage: HomeArchiveEmailMessage = async (messageID, sharedInboxID, companyID, accountEmail) => {
+    calls.push({ action: "archive", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail });
     return emailMessage(messageID, { folders: ["archive"] });
   };
-  const unarchiveEmailMessage: HomeUnarchiveEmailMessage = async (messageID, sharedInboxID, companyID) => {
-    calls.push({ action: "unarchive", companyID: companyID ?? "", messageID, sharedInboxID });
+  const unarchiveEmailMessage: HomeUnarchiveEmailMessage = async (messageID, sharedInboxID, companyID, accountEmail) => {
+    calls.push({ action: "unarchive", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail });
     return emailMessage(messageID, { folders: ["inbox"] });
   };
-  const deleteEmailMessage: HomeDeleteEmailMessage = async (messageID, sharedInboxID, companyID) => {
-    calls.push({ action: "delete", companyID: companyID ?? "", messageID, sharedInboxID });
+  const deleteEmailMessage: HomeDeleteEmailMessage = async (messageID, sharedInboxID, companyID, accountEmail) => {
+    calls.push({ action: "delete", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail });
   };
-  const updateEmailMessage: HomeUpdateEmailMessage = async (messageID, update, sharedInboxID, companyID) => {
-    calls.push({ action: "update", companyID: companyID ?? "", messageID, sharedInboxID, update });
+  const updateEmailMessage: HomeUpdateEmailMessage = async (messageID, update, sharedInboxID, companyID, accountEmail) => {
+    calls.push({ action: "update", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail, update });
     return emailMessage(messageID, { unread: update.unread ?? true, starred: update.starred ?? false });
   };
 
-  await archiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: " shared-1 ", messageIDs: [" message-1 ", "message-2", "message-1"], archiveEmailMessage });
-  await unarchiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-3"], unarchiveEmailMessage });
-  await deleteHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-4"], deleteEmailMessage });
-  const updated = await updateHomeMailMessageCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageID: " message-5 ", update: { unread: false }, updateEmailMessage });
+  await archiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: " shared-1 ", accountEmail: "ignored@example.test", messageIDs: [" message-1 ", "message-2", "message-1"], archiveEmailMessage });
+  await unarchiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageIDs: ["message-3"], unarchiveEmailMessage });
+  await deleteHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageIDs: ["message-4"], deleteEmailMessage });
+  const updated = await updateHomeMailMessageCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageID: " message-5 ", update: { unread: false }, updateEmailMessage });
+  await archiveHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-6"], archiveEmailMessage });
+  await unarchiveHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-7"], unarchiveEmailMessage });
+  await deleteHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-8"], deleteEmailMessage });
+  await updateHomeMailMessageCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageID: "message-9", update: { starred: true }, updateEmailMessage });
 
   assert.deepEqual(calls, [
-    { action: "archive", companyID: "company-1", messageID: "message-1", sharedInboxID: "shared-1" },
-    { action: "archive", companyID: "company-1", messageID: "message-2", sharedInboxID: "shared-1" },
-    { action: "unarchive", companyID: "company-1", messageID: "message-3", sharedInboxID: "shared-1" },
-    { action: "delete", companyID: "company-1", messageID: "message-4", sharedInboxID: "shared-1" },
-    { action: "update", companyID: "company-1", messageID: "message-5", sharedInboxID: "shared-1", update: { unread: false } },
+    { action: "archive", companyID: "company-1", messageID: "message-1", sharedInboxID: "shared-1", accountEmail: undefined },
+    { action: "archive", companyID: "company-1", messageID: "message-2", sharedInboxID: "shared-1", accountEmail: undefined },
+    { action: "unarchive", companyID: "company-1", messageID: "message-3", sharedInboxID: "shared-1", accountEmail: undefined },
+    { action: "delete", companyID: "company-1", messageID: "message-4", sharedInboxID: "shared-1", accountEmail: undefined },
+    { action: "update", companyID: "company-1", messageID: "message-5", sharedInboxID: "shared-1", accountEmail: undefined, update: { unread: false } },
+    { action: "archive", companyID: "company-1", messageID: "message-6", sharedInboxID: undefined, accountEmail: "owner@example.test" },
+    { action: "unarchive", companyID: "company-1", messageID: "message-7", sharedInboxID: undefined, accountEmail: "owner@example.test" },
+    { action: "delete", companyID: "company-1", messageID: "message-8", sharedInboxID: undefined, accountEmail: "owner@example.test" },
+    { action: "update", companyID: "company-1", messageID: "message-9", sharedInboxID: undefined, accountEmail: "owner@example.test", update: { starred: true } },
   ]);
   assert.equal(updated?.message.id, "message-5");
   assert.equal(updated?.message.unread, false);
 });
 
-test("Home archive command sends message IDs in one background batch request by default", async () => {
-  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string; background?: boolean }> = [];
+test("Home archive command sends message IDs in one exact mailbox background batch", async () => {
+  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string; accountEmail?: string; background?: boolean }> = [];
   const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID, options) => {
-    calls.push({ messageIDs, sharedInboxID, companyID, background: options?.background });
+    calls.push({ messageIDs, sharedInboxID, companyID, accountEmail: options?.accountEmail, background: options?.background });
     return {
       accepted_ids: messageIDs,
       archived_ids: [],
@@ -972,16 +982,31 @@ test("Home archive command sends message IDs in one background batch request by 
   const result = await archiveHomeMailMessagesCommand({
     companyID: "company-1",
     sharedInboxID: " shared-1 ",
+    accountEmail: "ignored@example.test",
     messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"],
     archiveEmailMessagesBatch,
   });
 
   assert.deepEqual(calls, [
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"], background: true },
+    { companyID: "company-1", sharedInboxID: "shared-1", accountEmail: undefined, messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"], background: true },
   ]);
   assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"]);
   assert.equal(result?.accepted, true);
   assert.equal(result?.failed, undefined);
+
+  await archiveHomeMailMessagesCommand({
+    companyID: "company-1",
+    accountEmail: " SECOND@Example.TEST ",
+    messageIDs: ["message-7"],
+    archiveEmailMessagesBatch,
+  });
+  assert.deepEqual(calls[1], {
+    companyID: "company-1",
+    sharedInboxID: undefined,
+    accountEmail: "second@example.test",
+    messageIDs: ["message-7"],
+    background: true,
+  });
 });
 
 test("Home compose command validates send payloads and preserves body spacing", async () => {
@@ -1015,6 +1040,7 @@ test("Home compose command validates send payloads and preserves body spacing", 
     body: '<div data-mango-email-body="true" style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;overflow-wrap:anywhere;"> Body </div>',
     attachments: [],
     reply_to_message_id: "message-1",
+    account_email: "owner@example.test",
   }]);
   await sendHomeMailComposeCommand({
     companyID: " company-1 ",

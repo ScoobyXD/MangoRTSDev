@@ -2,23 +2,25 @@
 
 Last updated: 2026-07-13
 
-Status: implemented and complete on 2026-07-12. The body below is retained as the pre-implementation audit, deletion rationale, and acceptance history; it no longer describes the current runtime. The current architecture contract is `docs/v4-architecture-doc.md`.
+Status: historical audit plus current addendum. The 2026-07-12 broad-stream deletion remains complete, but its decision that mail was entirely non-live was superseded by the deliberately narrow active-mailbox contract on 2026-07-13. `docs/v4-architecture-doc.md` is the current source of truth. Everything from **Historical 2026-07-12 Audit** onward is preserved evidence, not an active implementation instruction.
 
 ## Implementation Completion Record
 
 The one-shot simplification is implemented on `codex/019f5860-1682-7782-92ae-081660f3b51d-implement-complete0000544`.
 
-Final product realtime scopes:
+Current four-surface product realtime contract:
 
 - `notifications:user:{user_id}` is owned once at app lifetime by `NotificationRealtimeBridge`; first subscription acceptance, reconnect acceptance, and notification hints share one canonical summary coalescer, plus bounded Updates reconciliation only while Updates is open.
 - `chat:node:{node_id}` publishes compact durable Node-chat create/delete hints while that Node chat is mounted and performs one coalesced canonical refresh on first acceptance and reconnect. Project chat is non-live.
 - `board:{board_id}` publishes compact `kanban.changed` hints for committed card/column-visible changes while that Logic Gate board is mounted; first acceptance, reconnect, and hints coalesce canonical `/work` reloads.
+- The actively viewed mailbox is live through one exact scope at a time: `mailbox:personal:account:{user_id}:{normalized_account_email}` for the selected personal My Triage account or `mailbox:shared:{shared_inbox_id}` for the exact selected mail-bearing Shared Triage inbox. First acceptance, reconnect, and relevant message/folder hints coalesce canonical exact-mailbox reads. Root/headings/plain folders/off-view mailboxes subscribe to nothing and issue no hint-triggered provider GET.
+- Same-browser Node/Logic Gate title convergence remains an immediate local command-result/cache event and is not a fifth backend cross-user stream.
 
 Deleted systems:
 
-- browser workspace/Explorer/graph/GVIC/My Work/Project Management/communications/permission/generic-editor scopes, replay, effective-user expansion, PostgreSQL workspace listener/notifications, broad authorization, and global freshness rebroadcasts;
+- browser workspace/Explorer/graph/GVIC/My Work/Project Management/broad-communications/permission/generic-editor scopes, replay, effective-user expansion, PostgreSQL workspace listener/notifications, broad authorization, and global freshness rebroadcasts;
 - transient whole-document collaboration endpoint/client/presence UI and generic editor projection delivery;
-- communications/mail WebSocket publication and subscriptions;
+- the former broad/user-wide communications publication/subscription path; it was not restored when the later exact active-mailbox scopes were added;
 - notification checkpoint initialization, company scan, catch-up, and `ReplayDomainEvents` recovery;
 - `event_rows`, every producer/type/repository implementation, event worker, lease/retry/affected-scope/sequence machinery, projection delta hubs/clients, and obsolete tests;
 - `company_projection_sequences`, dead `domain_events.published_timestamp`/pending index, and notification checkpoint storage.
@@ -28,7 +30,7 @@ Retained foundations:
 - the shared frontend socket and backend ticket/frame/registry/subscribe/unsubscribe/ping/pong/reconnect/error core;
 - immediate notification projection and durable notification rows;
 - canonical HTTP mutation/read APIs, projection/read tables, `workspace_read_versions`, workspace-derived processing, and independently required `domain_events` consumers;
-- direct process-local publisher boundary for the three explicit scopes.
+- direct process-local publisher boundary for the four approved surfaces, with two authorization-specific patterns inside the one mailbox surface.
 
 Repository schema change: `backend/db/migrations/20260712_realtime_simplification.sql` drops `event_rows`, `notification_domain_event_projection_checkpoints`, `company_projection_sequences`, `idx_domain_events_pending`, and `domain_events.published_timestamp`, plus the obsolete projection-sequence trigger function. Canonical `backend/db/schema.sql` no longer creates them. No dev/prod database or cloud resource was mutated by this task.
 
@@ -41,14 +43,17 @@ Verification recorded at completion:
 Follow-up hardening completed on 2026-07-13:
 
 - every successful Node or Logic Gate rename entry point publishes the concrete same-window committed-title event so mounted Explorer, Kanban, Editor, Node/Logic Gate Maps, Home/My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin labels, AppTimeline labels, and Project Management caches converge without a cross-user fan-out plane; Logic Gate titles also update Updates saved Logic Gate grouping headers and sort values, while notification prose remains historical and active title drafts/carets and passive dock/pin metadata are preserved;
-- backend WebSocket writes have a bounded deadline, failed connections are removed and closed, and metrics distinguish delivery failures from no-subscriber publishes; and
-- ordinary `node_updated` processing skips Kanban projection lookup when there are no relevant local board subscribers.
+- backend WebSocket writes have a bounded deadline, failed connections are removed and closed, and metrics distinguish delivery failures from no-subscriber publishes;
+- ordinary `node_updated` processing skips Kanban projection lookup when there are no relevant local board subscribers;
+- mailbox ownership is exact and active-only: first/reconnect acceptance closes the load-to-subscribe race, message/folder hints invalidate/reconcile exact keys, authoritative exact-key refreshes bypass reusable caches and generation-fence pre-invalidation provider results from repopulating folder/page/detail state, selected detail refreshes only when directly affected, and navigation cancels obsolete timers/work;
+- draft fallback data survives recoverable Mango/provider/service/network failures, exact-scope generations prevent stale load overwrites, and draft attachments require a still-live exact draft while independent sent-message links survive;
+- Node chat, Kanban, and shared-mailbox publication reauthorize current recipients; resource existence is checked separately from administrator overrides; malformed/over-limit scopes fail closed; and bounded concurrent fan-out prevents stalled browsers from multiplying publish latency serially.
 
 Follow-up focused automated evidence:
 
-Frontend evidence combines direct behavior tests of `createCoalescedCanonicalRefresh` (one active request, one queued final request, and disposal) and `createCommittedTitleEditBuffer` (same-entity deferral/latest flush, unrelated-entity passthrough, and reset cancellation), shared socket/coordinator/local-event helper tests, the exact-three-subscription-owner inventory, and one AppLayout cache-coordinator installation guard. It is not a mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Backend evidence exercises the server, authorization, registry, routing, deadline, and lookup-guard paths.
+Frontend evidence combines direct behavior tests of the notification/chat/board/mailbox coalescers, committed-title edit buffering, exact mailbox target/event/navigation ownership, exact cache invalidation, draft error/concurrency safety, shared socket/coordinator/local-event helpers, the forbidden-broad-scope inventory, and one AppLayout cache-coordinator installation guard. It is not a complete mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Backend evidence exercises server admission, exact authorization/existence, publication-time audience checks, registry/routing, concurrent deadline handling, attachment lifecycle, and lookup-guard paths.
 
-- shared-client first/reconnect/late-handler acceptance behavior plus single-flight/queued-final helpers and a source inventory proving only the notification bridge, mounted Node chat, and mounted Kanban own product subscriptions;
+- shared-client first/reconnect/late-handler acceptance behavior plus single-flight/queued-final helpers and a source inventory proving only the four approved surfaces own product subscriptions;
 - coordinator-level local notification HTTP delete/clear plus matching socket-echo cardinality, including socket-first response-loss ordering whose canonical source requires a mounted feed reconciliation;
 - same-window local-event/edit-buffer/reducer behavior and direct publication-time communications/Kanban/graph cache tests, plus the AppLayout coordinator-installation and Editor blur-suppression wiring guards;
 - unauthenticated and token-query handshake rejection, cross-Server signed tickets, per-family authorization denial/not-stored behavior, and normal-close cleanup;
@@ -57,13 +62,17 @@ Frontend evidence combines direct behavior tests of `createCoalescedCanonicalRef
 
 Same-window title convergence also uses one company/type/resource registry with a monotonic version. The implemented Home, Company Explorer/GVIC/search, Editor entity-detail, NodeWorkspace assigned Logic Gate/options/search, Kanban, Node/Logic Gate Map graph/detail, My Work, and Project Management async title-bearing paths capture the version at request start and overlay only newer commits before storing a response. The app-lifetime committed-title cache reconciliation coordinator synchronously patches or invalidates affected communications, project-relationship, Kanban, My Work matrix, record-store, workspace-snapshot, and graph caches. Request-start version folding and targeted cache generation/invalidation guards prevent pre-commit requests from repopulating older titles. Cache hits and remounts therefore retain the committed label, while a genuine request begun after the commit remains authoritative. Denormalized persisted sidebar-pin responses instead overlay all latest local commits after fetch/create/reorder/rollback so stale pin-row names cannot overwrite the current visible label. This is targeted fencing of the enumerated caches/setters, not a generalized client replication layer or a claim about unrelated async state.
 
-Genuine remaining limitations are deliberate: realtime delivery is process-local while the committed dev and prod Terraform roots both default to two backend tasks and the target groups configure no stickiness. A mutation HTTP request and the recipient's WebSocket may therefore land on different tasks, making cross-user live delivery nondeterministic whenever two tasks run. A broker/stickiness change and backend task-count changes are deferred. `domain_events` retention/archive cleanup is deferred, and the workspace-derived 200-company catch-up limit is unchanged. Exact multi-user document coediting remains a separate future Huddle/CRDT/OT project. No replay, gap, generalized event-history, or notification-recovery plane is added. Non-live cross-user surfaces may remain stale until navigation, open, reload, or explicit refresh.
+Genuine remaining limitations are deliberate: realtime delivery is process-local while the committed dev and prod Terraform roots both default to two backend tasks and the target groups configure no stickiness. A mutation HTTP request and the recipient's WebSocket may therefore land on different tasks, making cross-user live delivery nondeterministic whenever two tasks run. A broker/stickiness change and backend task-count changes are deferred. `domain_events` retention/archive cleanup is deferred, and the workspace-derived 200-company catch-up limit is unchanged. Exact multi-user document coediting remains a separate future Huddle/CRDT/OT project. No replay, gap, generalized event-history, or notification-recovery plane is added. Non-live cross-user surfaces may remain stale until navigation, open, reload, or explicit refresh; the exact active-mailbox exception follows the contract above.
 
 Original audit branch: codex/live-feed-audit
 
 Original audit worktree: C:\tmp\MangoRTSDev-workers\MangoRTSDev-live-feed-audit
 
 Original audit base: 5747e73f7fbb4c8795870c8be9f014b1ba7ca5fe. The one-shot charter was reconciled against local main through 66fd76c76a17d397326bdafa0aa59f5154957ac0; recheck current main before editing because source lines may move.
+
+## Historical 2026-07-12 Audit (Superseded Where Noted)
+
+The remainder of this file is intentionally preserved as the audit, deletion rationale, execution charter, and copy-paste prompt used for the 2026-07-12 simplification. Statements below that say “exactly three,” “mail non-live,” “communications deleted,” or “only notifications/chat/board” describe that historical decision and are superseded by the current four-surface addendum above. They must not be copied into new implementation work as current requirements. The broad workspace/projection/event-row deletions, process-local limitation, same-browser title distinction, and future-Huddle deferral remain valid.
 
 ## Executive Decision
 

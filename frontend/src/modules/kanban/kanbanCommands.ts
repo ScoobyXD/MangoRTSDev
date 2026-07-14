@@ -359,6 +359,7 @@ export async function convertTriageMessagesToKanbanColumnCommand(args: {
   columnID: string;
   messageIDs: string[];
   sharedInboxID?: string;
+  accountEmail?: string;
   priority?: number;
   client?: KanbanCommandClient;
 }): Promise<CommunicationsTriageConversionResult> {
@@ -371,9 +372,12 @@ export async function convertTriageMessagesToKanbanColumnCommand(args: {
   }
 
   const target: CommunicationsTriageConversionTarget = { mode: "existing_logic_gate", logicGateID };
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
   return client.convertTriageMessagesToExplorerTarget({
     companyID: context.companyID,
-    sharedInboxID: args.sharedInboxID?.trim() || undefined,
+    ...(sharedInboxID ? { sharedInboxID } : {}),
+    ...(accountEmail ? { accountEmail } : {}),
     target,
     messageIDs,
     priority: args.priority,

@@ -20,6 +20,7 @@ export type HomeTriageConversionAppliedDetail = {
   companyID?: string;
   messageIDs?: string[];
   sharedInboxID?: string;
+  accountEmail?: string;
   logicGateID?: string;
   nodeIDs?: string[];
   boardIDs?: string[];

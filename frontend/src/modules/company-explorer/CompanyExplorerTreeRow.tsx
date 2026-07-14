@@ -367,6 +367,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             onTriageMessagesDrop?.(triageDropTarget, triageMessageDrag.messageIDs, { x: event.clientX, y: event.clientY }, {
               companyID: triageMessageDrag.companyID,
               sharedInboxID: triageMessageDrag.sharedInboxID,
+              accountEmail: triageMessageDrag.accountEmail,
             });
             return;
           }

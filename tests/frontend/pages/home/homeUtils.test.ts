@@ -40,6 +40,7 @@ import {
   GVICRoleCellKey,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
+  readTriageMessageDrag,
   setNodeDragData,
   sharedInboxCanLoadMail,
   sortEmailConversationMessagesNewestFirst,
@@ -49,7 +50,7 @@ import {
 import { messageUnreadDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
-import { GVIC_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
+import { GVIC_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {
@@ -64,12 +65,46 @@ function sharedInbox(id: string, name: string, position: number, parentID?: stri
   };
 }
 
+function triageDataTransfer(payload: unknown): DataTransfer {
+  return {
+    getData: (type: string) => type === TRIAGE_MESSAGE_DRAG_MIME ? JSON.stringify(payload) : "",
+  } as DataTransfer;
+}
+
+test("triage drag parsing preserves one exact normalized personal account", () => {
+  assert.deepEqual(readTriageMessageDrag(triageDataTransfer({
+    kind: "triage_messages",
+    company_id: " company-1 ",
+    message_ids: [" message-1 ", "message-1", "message-2"],
+    account_email: " SECOND@Example.TEST ",
+  })), {
+    companyID: "company-1",
+    messageIDs: ["message-1", "message-2"],
+    sharedInboxID: undefined,
+    accountEmail: "second@example.test",
+  });
+});
+
+test("triage drag parsing makes a shared inbox authoritative over personal account identity", () => {
+  assert.deepEqual(readTriageMessageDrag(triageDataTransfer({
+    kind: "triage_messages",
+    message_ids: ["message-1"],
+    shared_inbox_id: " shared-1 ",
+    account_email: "ignored@example.test",
+  })), {
+    messageIDs: ["message-1"],
+    sharedInboxID: "shared-1",
+    accountEmail: undefined,
+    companyID: undefined,
+  });
+});
+
 test("triage email bodies render before cancellable inline-image hydration completes", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded\)/);
+  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, accountEmail, expanded && bodyLoaded\)/);
   assert.match(homeParts, /if \(!enabled \|\| !body\.trim\(\) \|\| inlineAttachments\.length === 0\) return undefined/);
-  assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal \}\)/);
+  assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal, accountEmail \}\)/);
   assert.match(homeParts, /const item = await loadInlineAttachment\(attachment\);[\s\S]{0,300}setDownloadedSourceByContentID/);
   assert.match(homeParts, /controller\.abort\(\)/);
   assert.doesNotMatch(homeParts, /bodyDocument\.loading/);

@@ -26,7 +26,7 @@ Live AWS verification was not available from this shell because no AWS credentia
 - Local `infra/aws-dev/terraform.tfvars` has `create_private_ecs_subnets = true`, `ecs_nat_gateway_mode = "single"`, and no existing private subnet IDs.
 - `infra/aws-dev/waf.tf` creates one CloudFront-scope WAF web ACL with four rules/rule groups.
 - `docs/MangoRTS` records that the database is Aurora PostgreSQL, Database Insights Advanced is enabled, Enhanced Monitoring is enabled at 60 seconds, and PostgreSQL log exports are enabled.
-- The frontend opens authenticated SSE streams for communications and workspace freshness. The backend sends each open stream a heartbeat every 5 seconds. That is not the main cost driver, but it is unnecessary traffic for a tiny dev site.
+- Historical snapshot (superseded): at the time of this May 2026 audit, the frontend opened broad authenticated SSE streams for communications/workspace freshness and the backend sent five-second heartbeats. Those broad streams were later retired; the current narrow process-local WebSocket contract is documented in `docs/tests/REST API & WebSocket.md`.
 
 ## Interpretation
 

@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, authorization, routing, dead/stalled connections, and the Kanban lookup guard for RW23 and RW37-RW40. Frontend behavior tests exercise shared-socket acceptance/reconnect/late-handler semantics, notification HTTP/socket ordering, coalescing, local-title and edit-buffer helpers, and RW15 publication-time communications/Kanban/graph cache convergence. A central source inventory proves exactly three subscription owners, and one AppLayout guard proves installation of the committed-title cache reconciliation coordinator. These are not a full mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
+- Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, exact-scope authorization, resource existence/shape/limit admission, publication-time revocation, bounded concurrent stalled-client delivery, routing, and the Kanban lookup guard for RW23 and RW37-RW43. Frontend behavior tests exercise shared-socket acceptance/reconnect/late-handler semantics, mailbox first-acceptance/reconnect/event coalescing and navigation ownership, notification HTTP/socket ordering, coalescing, local-title and edit-buffer helpers, and RW15 publication-time cache convergence. A central source inventory rejects forbidden broad scopes while allowing the four approved surfaces, and one AppLayout guard proves installation of the committed-title cache reconciliation coordinator. These are not a full mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
 
 ## Business Logic
 
@@ -17,8 +17,8 @@ RW6 - Timed-out, failed, pending, and confirmed editor saves must be distinguish
 RW7 - A timed-out editor save must leave enough information to retry or reconcile the latest local document value.
 RW8 - Timeout investigations must identify the exact HTTP method, route, request duration, and backend log line for the affected request.
 RW9 - Backend request logs must make it possible to distinguish slow durable writes from slow background reads or refetches.
-RW10 - Realtime is a post-commit wake-up only for notifications, mounted Node chat, and a mounted Logic Gate Kanban board; it never writes or carries durable editor content.
-RW11 - Exactly three product scope families exist: `notifications:user:{user_id}`, `chat:node:{node_id}`, and `board:{board_id}`. Broad workspace, Explorer, graph, GVIC/My Work, Project Management, communications, permission, and generic editor scopes are forbidden.
+RW10 - Realtime is a post-commit wake-up only for four approved surfaces: notifications/Updates, mounted Node chat, a mounted Logic Gate Kanban board, and the actively viewed mailbox. It never writes or carries durable editor or email content.
+RW11 - The approved scope patterns are `notifications:user:{user_id}`, `chat:node:{node_id}`, `board:{board_id}`, exact personal account `mailbox:personal:account:{user_id}:{normalized_account_email}`, and exact shared inbox `mailbox:shared:{shared_inbox_id}`. The two mailbox patterns implement one active-mailbox product surface. Broad user-wide mail/communications, workspace, Explorer, graph, GVIC/My Work, Project Management, permission, and generic editor scopes are forbidden.
 RW12 - WebSocket reconnects or subscription failures must not be reported as successful durable saves.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
@@ -27,7 +27,7 @@ RW16 - Explicit editor saved versions are created through HTTP save-version rout
 RW17 - Restoring an editor saved version is an HTTP restore route that overwrites the current editor projection after user confirmation; it does not publish a document or generic projection realtime message.
 RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
 RW19 - WebSocket reconnects after backend replacement/deploy must use randomized delay, exponential backoff, and bounded or very slow retry behavior; clients must not all reconnect immediately.
-RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, and mounted board canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Updates adds its canonical feed read only while open. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
+RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, mounted board, or exact actively viewed mailbox canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Updates adds its canonical feed read only while open. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
@@ -44,10 +44,14 @@ RW33 - One committed card-visible change publishes only to each affected mounted
 RW34 - `304 Not Modified` reuses the current complete snapshot without clearing board state or creating duplicate render churn.
 RW35 - A conditional `GET /v2/nodes/{node_id}/view` performs effective Node authorization first, then reads one dedicated shared node-view version and one actor-specific version. Its ETag includes company, node, actor, effective permission flags, response-contract salt, and both versions; a match returns `304` before `GetNodeView`, serialization, body hashing, object reads, or seen-state writes and never depends on `event_rows`.
 RW36 - Attachment content conditionals remain HTTP-authorized: one repository read selects attachment, requested-or-original variant, and active links; specialized resource checks authorize those links; and a strong validator match returns private `304` before the single object-storage read.
-RW37 - The realtime handshake rejects unauthenticated clients and token-bearing URL query authentication, signed tickets work across Server instances that share the environment signing contract, unauthorized retained scopes are denied and not stored, and closing a connection removes its subscriptions.
-RW38 - Backend WebSocket writes use a bounded deadline. A send failure removes and closes the dead connection so later mutations cannot block on it; healthy subscribers continue receiving messages, and delivery-failure metrics are distinct from no-subscriber metrics.
+RW37 - The realtime handshake rejects unauthenticated clients and token-bearing URL query authentication, signed tickets work across Server instances that share the environment signing contract, and closing a connection removes its subscriptions. Admission validates scope shape/length, rejects malformed, nonexistent, cross-company, cross-user, and wrong-account resources even for administrator overrides, permits at most 16 distinct subscriptions per connection, keeps duplicates idempotent, and stores no durable subscription rows.
+RW38 - Backend WebSocket writes use a bounded deadline and at most 16 concurrent fan-out workers per serialized publish batch, preserving per-connection write safety and event order without making N stalled clients cost N sequential deadlines. Failed connections are removed and closed; healthy subscribers continue receiving messages; and attempted, delivered, failed, no-subscriber, and no-authorized-subscriber metrics remain distinct.
 RW39 - Notification create, delete, and clear operations publish only to the matching authenticated user's notification scope. First acceptance/reconnect reconcile canonical state. A local delete/clear marker records HTTP and socket observers separately. HTTP-first keeps the local optimistic source, while socket-first uses a canonical non-local source so open Updates reloads even if the HTTP response is lost; the matching second observer emits nothing, and after both claim the marker is removed so a distinct later clear is not suppressed. Duplicate socket frames remain suppressed while a lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
 RW40 - Ordinary `node_updated` processing does not query Kanban projection rows when there are no relevant local board subscribers; a mounted local board preserves exact affected-board lookup and delivery.
+RW41 - Node chat and Logic Gate Kanban publication re-resolve the current exact resource audience before writing already-subscribed sockets. Shared-mailbox publication likewise uses the current exact inbox audience. Access revoked after a legitimate subscription therefore suppresses every later hint without requiring reconnect; authorization lookup failure is fail-closed and does not broaden company fan-out.
+RW42 - Home retains at most one exact mailbox scope: the selected connected personal account for My Triage or the selected mail-bearing shared inbox for Shared Triage. Shared root/headings/group rows/plain folders, Drafts, non-mail views, inaccessible resources, and inactive mailboxes retain no fallback mailbox subscription and issue no provider GET because of a hint. Navigation loads and subscribes the destination mailbox and cancels timers, pending work, and the old subscription. Equivalent shared-inbox metadata/callback replacement retains the existing exact company/scope subscription lifetime; only an actual target or mail-bearing transition reinstalls it.
+RW43 - First mailbox acceptance and reconnect acceptance each coalesce one canonical exact-mailbox folder/list reconciliation, closing the initial-list-to-subscription race. `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active list and folder metadata; folder create/update/delete hints reconcile folder metadata; selected detail reloads only when its message/thread is identified and that captured selection is still active when delayed/queued work executes. Exact cache invalidation and delayed request keys include company plus personal account/shared inbox, and obsolete or off-view work issues no provider read. Realtime reconciliation uses authoritative exact-key refreshes: it bypasses reusable mail caches, coalesces with same-key in-flight work, and generation-fences provider reads begun before invalidation from repopulating folder, page, or detail caches.
+RW44 - `POST /v1/communications/triage/convert` resolves the provider connection from exactly one source mailbox key. A personal conversion sends normalized `account_email` in the query and the backend verifies that account belongs to the authenticated user; a shared conversion sends `shared_inbox_id`, ignores/suppresses personal identity, and performs exact inbox permission and company-connection resolution. The drag payload, every Explorer/Kanban/project/pin handoff, and the same-browser committed-result event retain that same key.
 
 ## Scenarios
 
@@ -138,13 +142,13 @@ Business logic covered:
 - RW12
 
 Given:
-- A durable notification, Node chat change, or mounted-board-visible mutation commits.
+- A durable notification, Node chat change, mounted-board-visible mutation, or exact active-mailbox provider change commits.
 - A matching retained scope has a local subscriber.
 
 Expected:
-- The backend publishes only to the matching notification, Node chat, or board scope.
-- First acceptance and reconnect use only that scope's coalesced canonical HTTP read; Updates fetches its feed only while open.
-- Ordinary workspace, Explorer, graph, My Work, Project Management, mail, permission, and document mutations emit no product socket message.
+- The backend publishes only to the matching notification, Node chat, board, exact personal-account mailbox, or exact shared-inbox mailbox scope.
+- First acceptance and reconnect use only that active surface's coalesced canonical HTTP read; Updates fetches its feed only while open and mail reconciles only while the exact mailbox is active.
+- Ordinary workspace, Explorer, graph, My Work, Project Management, broad communications, permission, and document mutations emit no product socket message.
 
 ### Scenario RW-S5: Same-Window Node And Logic Gate Titles Converge
 
@@ -222,7 +226,7 @@ Expected:
 - Reconnect attempts use exponential backoff after repeated failures.
 - Reconnect behavior is capped or becomes very slow instead of retrying aggressively forever.
 - A reconnect does not refetch the whole app by default.
-- First acceptance and reconnect each request only the canonical data for active subscriptions; a closed Updates view requests no feed.
+- First acceptance and reconnect each request only the canonical data for active subscriptions; a closed Updates view requests no feed and an off-view mailbox requests no provider data.
 
 ### Scenario RW-S9: Realtime Tickets Work Across Backend Workers
 
@@ -328,19 +332,23 @@ Business logic covered:
 - RW23
 - RW37
 - RW39
+- RW41
 
 Given:
 - Clients attempt unauthenticated and token-query WebSocket handshakes.
 - One Server instance signs a ticket and another Server instance accepts the upgrade.
-- An authenticated client requests an unauthorized retained scope, later subscribes to an authorized scope, and then closes.
+- An authenticated client requests malformed, nonexistent, cross-company, cross-user, wrong-account, unauthorized, and over-limit retained scopes, later subscribes to an authorized scope, repeats that subscription, and then closes.
 - Notification create, delete, and clear commands commit.
+- A Node-chat, mounted-board, or shared-mailbox subscriber then loses access before another event commits.
 
 Expected:
 - Unauthenticated and token-query handshakes are rejected.
 - The signed ticket works across Server instances under the shared signing contract.
-- The unauthorized scope is denied and never stored.
+- Invalid and unauthorized scopes are denied and never stored, including nonexistent administrator-selected resources and the former user-wide personal mailbox scope.
+- The 17th distinct scope is rejected while a duplicate accepted scope remains idempotent.
 - Closing removes all retained subscriptions.
 - Notification create, delete, and clear publish only to the matching user scope.
+- A user revoked after subscribing receives no later Node-chat, board, or shared-mailbox hint.
 
 ### Scenario RW-S15: Acceptance Reconciliation, Dead Connections, And Board Lookup Guard
 
@@ -351,17 +359,43 @@ Business logic covered:
 - RW40
 
 Given:
-- Notification, mounted Node chat, and mounted board subscriptions receive first acceptance, later reconnect acceptance, and compact hints while a canonical read is slow; a second local same-scope handler also joins after the shared scope is already accepted.
-- One WebSocket writer is slow or dead while another subscriber is healthy.
+- Notification, mounted Node chat, mounted board, and active-mailbox subscriptions receive first acceptance, later reconnect acceptance, and compact hints while a canonical read is slow; a second local same-scope handler also joins after the shared scope is already accepted.
+- Several controlled WebSocket writers are stalled or dead while another subscriber is healthy.
 - A local notification delete/clear result is followed by its matching socket echo.
 - In the opposite ordering, the server commits and the socket echo arrives before a lost/rejected HTTP response for an Updates-local Seen mutation.
 - Ordinary `node_updated` publication runs both without and with a relevant local board subscriber.
 
 Expected:
-- Each active retained surface performs one single-flight canonical reconciliation on first acceptance and reconnect, with at most one queued final read and no overlap/restart; Updates fetches only while open.
+- Each active retained surface performs one single-flight canonical reconciliation on first acceptance and reconnect, with at most one queued final read and no overlap/restart; Updates fetches only while open and mail fetches only for the active exact mailbox.
 - A late handler joining an already accepted shared scope receives immediate local acceptance; accepted state clears on disconnect, rejection, or last unsubscribe.
-- The dead write reaches its bounded deadline, the connection is closed and evicted, and the healthy subscriber still receives delivery.
+- Stalled writes proceed within the bounded worker fan-out rather than one serial deadline per client; failed connections are closed and evicted, and the healthy subscriber still receives delivery.
 - Delivery failures and no-subscriber publishes increment distinct metrics.
 - HTTP-first plus its matching echo causes at most one summary request and, subject to the local optimistic source filter, at most one open-feed request.
 - Socket-first plus a lost/rejected HTTP response performs exactly one summary reconciliation and one mounted Updates feed reconciliation; the later HTTP failure emits no second update.
 - No-subscriber `node_updated` performs no Kanban projection lookup; a mounted board preserves correct lookup and board-scoped delivery.
+
+### Scenario RW-S16: Exact Active Mailbox Reconciliation
+
+Business logic covered:
+- RW10
+- RW11
+- RW20
+- RW42
+- RW43
+- RW44
+
+Given:
+- My Triage initially loads personal Account A, a message commits before first subscription acceptance, and acceptance then arrives.
+- The user receives a burst of message/folder hints while one canonical reconciliation is active, switches to personal Account B or Shared Inbox A before a delayed timer runs, later visits a Shared Triage root row, and reconnects while the exact inbox is open.
+- One hint identifies selected message/thread A, selection changes to unrelated B before its delayed/queued turn, another creates unrelated mail, and equivalent shared-inbox metadata objects replace the current inventory without changing the exact target.
+- The user drags mail from personal Account B through Explorer, Kanban, project, and pin conversion owners, then performs the equivalent drop from Shared Inbox A.
+
+Expected:
+- First acceptance discovers the between-load-and-subscribe message with one canonical reconciliation, and reconnect acceptance performs the same one-shot recovery.
+- Bursts coalesce; work arriving during an active read produces at most one necessary final read.
+- Equivalent metadata replacement keeps one subscription/acceptance lifetime, and the stale A detail hint performs no provider read for B.
+- Account A never wakes Account B, one shared inbox never invalidates another mailbox, and a timer captured for the old mailbox is canceled or discarded.
+- Shared root/headings/group rows/plain folders and off-view mailboxes retain no fallback scope and perform no hint-triggered provider GET.
+- `message.created`, `message.updated` (including moves), and `message.deleted` reconcile only the active list/folders; folder events reconcile folders; selected detail reloads only for a directly named selected message/thread.
+- Payloads remain compact hints and canonical HTTP data remains authoritative.
+- Personal conversion requests retain normalized Account B `account_email` end to end and cannot fall back to Account A. Shared conversion requests retain only Shared Inbox A as the client request selector; the backend resolves its canonical company mailbox account after exact permission checks.

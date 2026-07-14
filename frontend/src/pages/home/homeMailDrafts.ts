@@ -5,17 +5,16 @@ import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeT
 
 const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
 const HOME_MAIL_SIGNATURE_STORAGE_PREFIX = "mangorts.home.mailSignature.v1";
+const homeMailDraftScopeRevisions = new Map<string, number>();
+const homeMailDraftLoadGenerations = new Map<string, number>();
+const homeMailDraftEnsurePromises = new Map<string, Promise<HomeMailDraft[]>>();
+const homeMailDraftRemoteMutationTails = new Map<string, Promise<void>>();
 const homeMailSignatureRemoteSaveQueues = new Map<string, Promise<void>>();
 const homeMailSignatureLocalRevisions = new Map<string, number>();
 const HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES = new Set([
   "access_denied",
   "company_access_denied",
   "company_not_found",
-  "email_account_not_connected",
-  "email_account_required",
-  "nylas_not_connected",
-  "nylas_reauth_required",
-  "shared_inbox_email_account_not_connected",
   "shared_inbox_not_found",
   "shared_inbox_not_mailbox",
 ]);
@@ -50,6 +49,103 @@ function storagePart(value: string, fallback: string): string {
 
 function draftsStorageKey(companyID: string, userID: string): string {
   return `${HOME_MAIL_DRAFTS_STORAGE_PREFIX}:${storagePart(companyID, "global")}:${storagePart(userID, "anonymous")}`;
+}
+
+function homeMailDraftScopeIdentity(sharedInboxID = "", accountEmail = ""): string {
+  const cleanSharedInboxID = sharedInboxID.trim();
+  if (cleanSharedInboxID) return "shared:" + encodeURIComponent(cleanSharedInboxID);
+  return "personal:" + encodeURIComponent(accountEmail.trim().toLowerCase() || "account");
+}
+
+function homeMailDraftScopeKey(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string {
+  return draftsStorageKey(companyID, userID) + ":" + homeMailDraftScopeIdentity(sharedInboxID, accountEmail);
+}
+
+function homeMailDraftScopeKeyForDraft(draft: HomeMailDraft): string {
+  return homeMailDraftScopeKey(draft.companyID, draft.userID, draft.sharedInboxID, draft.accountEmail);
+}
+
+function homeMailDraftRemoteMutationKey(
+  companyID: string,
+  userID: string,
+  draftID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string {
+  return homeMailDraftScopeKey(companyID, userID, sharedInboxID, accountEmail) + ":" + draftID.trim();
+}
+
+function queueHomeMailDraftRemoteMutation<T>(key: string, mutation: () => Promise<T>): Promise<T> {
+  const previous = homeMailDraftRemoteMutationTails.get(key) ?? Promise.resolve();
+  const result = previous.catch(() => undefined).then(mutation);
+  const tail = result.then(() => undefined, () => undefined);
+  homeMailDraftRemoteMutationTails.set(key, tail);
+  void tail.then(() => {
+    if (homeMailDraftRemoteMutationTails.get(key) === tail) homeMailDraftRemoteMutationTails.delete(key);
+  });
+  return result;
+}
+
+function readHomeMailDraftScopeRevision(scopeKey: string): number {
+  return homeMailDraftScopeRevisions.get(scopeKey) ?? 0;
+}
+
+function advanceHomeMailDraftScopeRevision(scopeKey: string): void {
+  homeMailDraftScopeRevisions.set(scopeKey, readHomeMailDraftScopeRevision(scopeKey) + 1);
+}
+
+function homeMailDraftScopeFingerprints(drafts: HomeMailDraft[]): Map<string, string> {
+  const draftsByScope = new Map<string, HomeMailDraft[]>();
+  for (const draft of drafts) {
+    const scopeKey = homeMailDraftScopeKeyForDraft(draft);
+    const scopedDrafts = draftsByScope.get(scopeKey) ?? [];
+    scopedDrafts.push(draft);
+    draftsByScope.set(scopeKey, scopedDrafts);
+  }
+  return new Map(Array.from(draftsByScope, ([scopeKey, scopedDrafts]) => [scopeKey, JSON.stringify(scopedDrafts)]));
+}
+
+function advanceChangedHomeMailDraftScopeRevisions(before: HomeMailDraft[], after: HomeMailDraft[]): void {
+  const beforeByScope = homeMailDraftScopeFingerprints(before);
+  const afterByScope = homeMailDraftScopeFingerprints(after);
+  const scopeKeys = new Set([...beforeByScope.keys(), ...afterByScope.keys()]);
+  for (const scopeKey of scopeKeys) {
+    if (beforeByScope.get(scopeKey) !== afterByScope.get(scopeKey)) {
+      advanceHomeMailDraftScopeRevision(scopeKey);
+    }
+  }
+}
+
+type HomeMailDraftLoadAttempt = {
+  scopeKey: string;
+  localRevision: number;
+  generation: number;
+};
+
+function beginHomeMailDraftLoad(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): HomeMailDraftLoadAttempt {
+  const scopeKey = homeMailDraftScopeKey(companyID, userID, sharedInboxID, accountEmail);
+  const generation = (homeMailDraftLoadGenerations.get(scopeKey) ?? 0) + 1;
+  homeMailDraftLoadGenerations.set(scopeKey, generation);
+  return {
+    scopeKey,
+    localRevision: readHomeMailDraftScopeRevision(scopeKey),
+    generation,
+  };
+}
+
+function homeMailDraftLoadIsCurrent(attempt: HomeMailDraftLoadAttempt): boolean {
+  return homeMailDraftLoadGenerations.get(attempt.scopeKey) === attempt.generation
+    && readHomeMailDraftScopeRevision(attempt.scopeKey) === attempt.localRevision;
 }
 
 function legacySignatureStorageKey(companyID: string, userID: string): string {
@@ -334,41 +430,40 @@ export function readHomeMailDraftsForScope(
 }
 
 function writeHomeMailDrafts(companyID: string, userID: string, drafts: HomeMailDraft[]): HomeMailDraft[] {
+  const priorDrafts = readHomeMailDrafts(companyID, userID);
   const sorted = mergeHomeMailDrafts(drafts, []);
   try {
-    if (storageAvailable()) localStorage.setItem(draftsStorageKey(companyID, userID), JSON.stringify(sorted));
+    if (storageAvailable()) {
+      localStorage.setItem(draftsStorageKey(companyID, userID), JSON.stringify(sorted));
+      advanceChangedHomeMailDraftScopeRevisions(priorDrafts, sorted);
+    }
   } catch {
     return readHomeMailDrafts(companyID, userID);
   }
   return sorted;
 }
 
+function replaceHomeMailDraftScope(
+  companyID: string,
+  userID: string,
+  sharedInboxID: string,
+  accountEmail: string,
+  scopedDrafts: HomeMailDraft[],
+): HomeMailDraft[] {
+  const currentDrafts = readHomeMailDrafts(companyID, userID);
+  const otherScopeDrafts = currentDrafts.filter((draft) => !homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
+  return writeHomeMailDrafts(companyID, userID, [...otherScopeDrafts, ...scopedDrafts])
+    .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
+}
+
 type APIRequestFailure = Error & {
   code?: unknown;
-  status?: unknown;
 };
 
-export function homeMailDraftScopeFailureRequiresLocalPurge(error: unknown): boolean {
+function homeMailDraftScopeFailureRequiresLocalPurge(error: unknown): boolean {
   const failure = error instanceof Error ? error as APIRequestFailure : null;
-  const status = typeof failure?.status === "number" ? failure.status : 0;
   const code = typeof failure?.code === "string" ? failure.code.trim().toLowerCase() : "";
-  if (status === 401 || status === 403) return true;
-  if (HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES.has(code)) return true;
-
-  // Preserve compatibility with callers that still throw plain Errors without
-  // the structured API status/code metadata installed by apiFetchJSON.
-  const message = failure?.message.trim().toLowerCase() ?? "";
-  return message === "you are not signed in."
-    || message === "you do not have access to this resource."
-    || message === "you do not have access to perform this action."
-    || message === "connect your mailbox before opening home."
-    || message === "email access expired. disconnect and reconnect your mailbox."
-    || message === "company_access_denied"
-    || message === "email_account_not_connected"
-    || message === "email_account_required"
-    || message === "shared_inbox_email_account_not_connected"
-    || message === "shared_inbox_not_found"
-    || message === "shared_inbox_not_mailbox";
+  return HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES.has(code);
 }
 
 export async function loadHomeMailDrafts(
@@ -377,19 +472,24 @@ export async function loadHomeMailDrafts(
   sharedInboxID = "",
   accountEmail = "",
 ): Promise<HomeMailDraft[]> {
-  const allLocalDrafts = readHomeMailDrafts(companyID, userID);
-  const localDrafts = allLocalDrafts.filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
-  const otherScopeDrafts = allLocalDrafts.filter((draft) => !homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
+  const loadAttempt = beginHomeMailDraftLoad(companyID, userID, sharedInboxID, accountEmail);
+  const localDrafts = readHomeMailDraftsForScope(companyID, userID, sharedInboxID, accountEmail);
+  const readCurrentScope = () => readHomeMailDraftsForScope(companyID, userID, sharedInboxID, accountEmail);
   try {
     const scope = { sharedInboxID: sharedInboxID.trim() || undefined, accountEmail: accountEmail.trim() || undefined };
     const remoteDrafts = (await listEmailDrafts(companyID, scope))
       .map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
       .filter((draft): draft is HomeMailDraft => Boolean(draft))
       .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
+    if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
     const supersededRemoteDraftIDs = supersededHomeMailDraftIDs(remoteDrafts);
     if (supersededRemoteDraftIDs.length > 0) {
-      await Promise.all(supersededRemoteDraftIDs.map((draftID) => deleteEmailDraft(companyID, draftID, scope).catch(() => undefined)));
+      await Promise.all(supersededRemoteDraftIDs.map((draftID) => queueHomeMailDraftRemoteMutation(
+        homeMailDraftRemoteMutationKey(companyID, userID, draftID, sharedInboxID, accountEmail),
+        () => deleteEmailDraft(companyID, draftID, scope),
+      ).catch(() => undefined)));
     }
+    if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
     const activeRemoteDrafts = mergeHomeMailDrafts(remoteDrafts, []);
     const remoteByID = new Map(remoteDrafts.map((draft) => [draft.id, draft]));
     const pendingLocalDrafts = localDrafts.filter((draft) => (
@@ -400,83 +500,166 @@ export async function loadHomeMailDrafts(
       )
       && composeHasDraftContent(homeMailDraftToCompose(draft), "")
     ));
-    const migratedDrafts = (await Promise.all(pendingLocalDrafts.map((draft) => saveHomeMailDraftToDatabase(draft).catch(() => null))))
+    const migratedDrafts = (await Promise.all(pendingLocalDrafts.map((draft) => queueHomeMailDraftRemoteMutation(
+      homeMailDraftRemoteMutationKey(companyID, userID, draft.id, draft.sharedInboxID, draft.accountEmail),
+      () => saveHomeMailDraftToDatabase(draft),
+    ).catch(() => null))))
       .filter((draft): draft is HomeMailDraft => Boolean(draft));
     const failedPendingDraftIDs = new Set(pendingLocalDrafts.map((draft) => draft.id));
     for (const migrated of migratedDrafts) failedPendingDraftIDs.delete(migrated.id);
     const failedPendingDrafts = pendingLocalDrafts.filter((draft) => failedPendingDraftIDs.has(draft.id));
     const scopedDrafts = mergeHomeMailDrafts([...activeRemoteDrafts, ...migratedDrafts], failedPendingDrafts);
-    writeHomeMailDrafts(companyID, userID, [...otherScopeDrafts, ...scopedDrafts]);
-    return scopedDrafts;
+    if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
+    return replaceHomeMailDraftScope(companyID, userID, sharedInboxID, accountEmail, scopedDrafts);
   } catch (error) {
+    if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
     if (homeMailDraftScopeFailureRequiresLocalPurge(error)) {
-      writeHomeMailDrafts(companyID, userID, otherScopeDrafts);
-      return [];
+      return replaceHomeMailDraftScope(companyID, userID, sharedInboxID, accountEmail, []);
     }
-    return localDrafts;
+    return readCurrentScope();
   }
 }
 
-export async function syncHomeMailDraftFromCompose(
+export function syncHomeMailDraftFromCompose(
   companyID: string,
   userID: string,
   compose: ComposeState,
   signature: string,
 ): Promise<HomeMailDraft[]> {
-  const priorDraft = compose.draftID.trim()
-    ? readHomeMailDrafts(companyID, userID).find((item) => item.id === compose.draftID.trim()) ?? null
+  const draftID = compose.draftID.trim();
+  const priorDraft = draftID
+    ? readHomeMailDrafts(companyID, userID).find((item) => item.id === draftID) ?? null
     : null;
   const localDrafts = saveHomeMailDraftFromCompose(companyID, userID, compose, signature);
-  try {
-    const draftID = compose.draftID.trim();
-    const draft = draftID ? localDrafts.find((item) => item.id === draftID) : null;
-    if (draft) {
-      const saved = await saveHomeMailDraftToDatabase(draft);
-      if (saved) {
-        const allDrafts = readHomeMailDrafts(companyID, userID);
-        writeHomeMailDrafts(companyID, userID, [saved, ...allDrafts.filter((item) => item.id !== saved.id)]);
-      }
-    } else if (draftID) {
-      if (priorDraft) {
+  const scopeKey = homeMailDraftScopeKey(companyID, userID, compose.sharedInboxID, compose.accountEmail);
+  let expectedLocalRevision = readHomeMailDraftScopeRevision(scopeKey);
+  const readCurrentScope = () => readHomeMailDraftsForScope(
+    companyID,
+    userID,
+    compose.sharedInboxID,
+    compose.accountEmail,
+  );
+  if (!draftID) return Promise.resolve(readCurrentScope());
+  const mutationKey = homeMailDraftRemoteMutationKey(
+    companyID,
+    userID,
+    draftID,
+    compose.sharedInboxID,
+    compose.accountEmail,
+  );
+  return queueHomeMailDraftRemoteMutation(mutationKey, async () => {
+    try {
+      const draft = localDrafts.find((item) => item.id === draftID) ?? null;
+      if (draft) {
+        const saved = await saveHomeMailDraftToDatabase(draft);
+        if (saved) {
+          if (readHomeMailDraftScopeRevision(scopeKey) !== expectedLocalRevision) return readCurrentScope();
+          const allDrafts = readHomeMailDrafts(companyID, userID);
+          writeHomeMailDrafts(companyID, userID, [saved, ...allDrafts.filter((item) => item.id !== saved.id)]);
+          expectedLocalRevision = readHomeMailDraftScopeRevision(scopeKey);
+        }
+      } else if (priorDraft) {
         await deleteEmailDraft(companyID, draftID, {
           sharedInboxID: priorDraft.sharedInboxID || undefined,
           accountEmail: priorDraft.accountEmail || undefined,
         });
+        return readCurrentScope();
       }
+      if (readHomeMailDraftScopeRevision(scopeKey) !== expectedLocalRevision) return readCurrentScope();
+      return loadHomeMailDrafts(companyID, userID, compose.sharedInboxID, compose.accountEmail);
+    } catch {
+      return readCurrentScope();
     }
-    return loadHomeMailDrafts(companyID, userID, compose.sharedInboxID, compose.accountEmail);
-  } catch {
-    return localDrafts;
-  }
+  });
+}
+
+export function ensureHomeMailDraftAttachmentTarget(
+  companyID: string,
+  userID: string,
+  compose: ComposeState,
+  signature: string,
+): Promise<HomeMailDraft[]> {
+  const draftID = compose.draftID.trim();
+  if (!compose.open || !draftID) return Promise.reject(new Error("email_draft_target_unavailable"));
+  const scopeKey = homeMailDraftScopeKey(companyID, userID, compose.sharedInboxID, compose.accountEmail);
+  const operationKey = homeMailDraftRemoteMutationKey(
+    companyID,
+    userID,
+    draftID,
+    compose.sharedInboxID,
+    compose.accountEmail,
+  );
+  const existingOperation = homeMailDraftEnsurePromises.get(operationKey);
+  if (existingOperation) return existingOperation;
+
+  const operation = queueHomeMailDraftRemoteMutation(operationKey, async () => {
+    const localDrafts = saveHomeMailDraftFromCompose(companyID, userID, compose, signature, { preserveEmpty: true });
+    const draft = localDrafts.find((item) => item.id === draftID) ?? null;
+    if (!draft) throw new Error("email_draft_target_unavailable");
+    if (draft.pendingRemoteSync === false) {
+      return readHomeMailDraftsForScope(companyID, userID, compose.sharedInboxID, compose.accountEmail);
+    }
+    const expectedLocalRevision = readHomeMailDraftScopeRevision(scopeKey);
+    const saved = await saveHomeMailDraftToDatabase(draft);
+    if (!saved) throw new Error("email_draft_target_unavailable");
+    if (readHomeMailDraftScopeRevision(scopeKey) === expectedLocalRevision) {
+      const allDrafts = readHomeMailDrafts(companyID, userID);
+      writeHomeMailDrafts(companyID, userID, [saved, ...allDrafts.filter((item) => item.id !== saved.id)]);
+    }
+    return readHomeMailDraftsForScope(companyID, userID, compose.sharedInboxID, compose.accountEmail);
+  });
+  homeMailDraftEnsurePromises.set(operationKey, operation);
+  void operation.finally(() => {
+    if (homeMailDraftEnsurePromises.get(operationKey) === operation) homeMailDraftEnsurePromises.delete(operationKey);
+  }).catch(() => undefined);
+  return operation;
 }
 
 export async function deleteHomeMailDraftRemote(companyID: string, userID: string, draftID: string): Promise<HomeMailDraft[]> {
   const existing = readHomeMailDrafts(companyID, userID).find((draft) => draft.id === draftID.trim()) ?? null;
   const localDrafts = deleteHomeMailDraft(companyID, userID, draftID);
   if (!existing) return localDrafts;
-  try {
-    await deleteEmailDraft(companyID, draftID, {
-      sharedInboxID: existing.sharedInboxID || undefined,
-      accountEmail: existing.accountEmail || undefined,
-    });
-    return loadHomeMailDrafts(companyID, userID, existing.sharedInboxID, existing.accountEmail);
-  } catch {
-    return localDrafts;
-  }
+  const readCurrentScope = () => readHomeMailDraftsForScope(
+    companyID,
+    userID,
+    existing.sharedInboxID,
+    existing.accountEmail,
+  );
+  const mutationKey = homeMailDraftRemoteMutationKey(
+    companyID,
+    userID,
+    draftID,
+    existing.sharedInboxID,
+    existing.accountEmail,
+  );
+  return queueHomeMailDraftRemoteMutation(mutationKey, async () => {
+    try {
+      await deleteEmailDraft(companyID, draftID, {
+        sharedInboxID: existing.sharedInboxID || undefined,
+        accountEmail: existing.accountEmail || undefined,
+      });
+      return readCurrentScope();
+    } catch {
+      return readCurrentScope();
+    }
+  });
 }
 
 export async function deleteHomeMailDraftsRemote(companyID: string, userID: string, draftIDs: string[]): Promise<HomeMailDraft[]> {
   const cleanDraftIDs = new Set(draftIDs.map((draftID) => draftID.trim()).filter(Boolean));
   const existingDrafts = readHomeMailDrafts(companyID, userID).filter((draft) => cleanDraftIDs.has(draft.id));
-  const localDrafts = deleteHomeMailDrafts(companyID, userID, draftIDs);
+  deleteHomeMailDrafts(companyID, userID, draftIDs);
   try {
-    await Promise.all(existingDrafts.map((draft) => deleteEmailDraft(companyID, draft.id, {
-      sharedInboxID: draft.sharedInboxID || undefined,
-      accountEmail: draft.accountEmail || undefined,
-    })));
-    return localDrafts;
+    await Promise.all(existingDrafts.map((draft) => queueHomeMailDraftRemoteMutation(
+      homeMailDraftRemoteMutationKey(companyID, userID, draft.id, draft.sharedInboxID, draft.accountEmail),
+      () => deleteEmailDraft(companyID, draft.id, {
+        sharedInboxID: draft.sharedInboxID || undefined,
+        accountEmail: draft.accountEmail || undefined,
+      }),
+    )));
+    return readHomeMailDrafts(companyID, userID);
   } catch {
-    return localDrafts;
+    return readHomeMailDrafts(companyID, userID);
   }
 }
 
@@ -625,9 +808,10 @@ export function saveHomeMailDraftFromCompose(
   userID: string,
   compose: ComposeState,
   signature: string,
+  options: { preserveEmpty?: boolean } = {},
 ): HomeMailDraft[] {
   if (!compose.open) return readHomeMailDrafts(companyID, userID);
-  if (!composeHasDraftContent(compose, signature)) {
+  if (!options.preserveEmpty && !composeHasDraftContent(compose, signature)) {
     return compose.draftID ? deleteHomeMailDraft(companyID, userID, compose.draftID) : readHomeMailDrafts(companyID, userID);
   }
   const now = new Date().toISOString();

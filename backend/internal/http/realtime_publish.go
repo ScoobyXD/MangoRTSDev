@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/domain"
@@ -13,14 +14,51 @@ func (s *Server) publishRealtimeMessage(companyID, scope string, message any) in
 	return s.publishRealtimeMessageWithAudience(companyID, scope, nil, message)
 }
 
-func (s *Server) publishRealtimeMessageToUsers(companyID, scope string, userIDs []string, message any) int {
+func realtimeAllowedUserIDs(userIDs []string) map[string]struct{} {
 	allowedUserIDs := map[string]struct{}{}
 	for _, userID := range userIDs {
 		if userID = strings.TrimSpace(userID); userID != "" {
 			allowedUserIDs[userID] = struct{}{}
 		}
 	}
-	return s.publishRealtimeMessageWithAudience(companyID, scope, allowedUserIDs, message)
+	return allowedUserIDs
+}
+
+func (s *Server) publishRealtimeMessageToCurrentEntityAudience(companyID, scope, resourceType, resourceID, permission string, message any) int {
+	companyID = strings.TrimSpace(companyID)
+	scope = strings.TrimSpace(scope)
+	resourceID = strings.TrimSpace(resourceID)
+	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" || resourceID == "" {
+		return 0
+	}
+	// Serialize the authorization lookup with delivery for this exact scope.
+	// Otherwise a queued event could retain an audience captured before access
+	// was revoked while it waited behind an earlier stalled write.
+	unlockPublishScope := s.realtimeRegistry.lockPublishScope(companyID, scope)
+	defer unlockPublishScope()
+	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return 0
+	}
+	exists, err := s.realtimeEntityExists(companyID, resourceType, resourceID)
+	if err != nil {
+		log.Printf("failed to verify realtime publication resource company_id=%s scope_type=%s scope=%s resource_type=%s resource_id=%s: %v", companyID, realtimeScopeType(scope), scope, resourceType, resourceID, err)
+		s.recordOperationalMetric("realtime.publish_authorization_failure_count", realtimeScopeType(scope), 1, 0)
+		return 0
+	}
+	if !exists {
+		return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, map[string]struct{}{}, message)
+	}
+	userIDs, err := s.repo.ListEffectiveUsersForResource(companyID, resourceType, resourceID, permission)
+	if errors.Is(err, store.ErrNotFound) {
+		return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, map[string]struct{}{}, message)
+	}
+	if err != nil {
+		log.Printf("failed to resolve current realtime audience company_id=%s scope_type=%s scope=%s resource_type=%s resource_id=%s: %v", companyID, realtimeScopeType(scope), scope, resourceType, resourceID, err)
+		s.recordOperationalMetric("realtime.publish_authorization_failure_count", realtimeScopeType(scope), 1, 0)
+		return 0
+	}
+	return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, realtimeAllowedUserIDs(userIDs), message)
 }
 
 func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
@@ -29,6 +67,14 @@ func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, all
 	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
 		return 0
 	}
+	unlockPublishScope := s.realtimeRegistry.lockPublishScope(companyID, scope)
+	defer unlockPublishScope()
+	return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, allowedUserIDs, message)
+}
+
+// publishRealtimeMessageWithAudienceUnlocked publishes one event while the
+// caller holds this exact scope's publication lock.
+func (s *Server) publishRealtimeMessageWithAudienceUnlocked(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
 	restrictedAudience := allowedUserIDs != nil
 	if restrictedAudience && len(allowedUserIDs) == 0 {
 		s.recordOperationalMetric("realtime.publish_skipped_no_authorized_subscribers_count", realtimeScopeType(scope), 1, 0)
@@ -45,11 +91,14 @@ func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, all
 	}
 	result := realtimePublishResult{}
 	if restrictedAudience {
-		result = s.realtimeRegistry.publishToUsers(companyID, scope, payload, allowedUserIDs)
+		result = s.realtimeRegistry.publishToUsersUnlocked(companyID, scope, payload, allowedUserIDs)
 	} else {
-		result = s.realtimeRegistry.publish(companyID, scope, payload)
+		result = s.realtimeRegistry.publishUnlocked(companyID, scope, payload)
 	}
 	attempted := result.delivered + result.failed
+	if attempted > 0 {
+		s.recordOperationalMetric("realtime.delivery_attempt_count", realtimeScopeType(scope), int64(attempted), 0)
+	}
 	if result.failed > 0 {
 		log.Printf("realtime_delivery_failed company_id=%s scope_type=%s scope=%s attempted=%d failed=%d", companyID, realtimeScopeType(scope), scope, attempted, result.failed)
 		s.recordOperationalMetric("realtime.delivery_failure_count", realtimeScopeType(scope), int64(result.failed), 0)
@@ -93,7 +142,7 @@ func (s *Server) publishNodeChatCreated(companyID, nodeID, messageID string, ite
 	}
 	_ = json.Unmarshal([]byte(item.Information), &payload)
 	scope := realtimeChatScope(nodeID)
-	s.publishRealtimeMessage(companyID, scope, realtimeChatMessage{
+	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit, realtimeChatMessage{
 		Type:      realtimeMessageChatCreated,
 		CompanyID: strings.TrimSpace(companyID),
 		Scope:     scope,
@@ -105,7 +154,7 @@ func (s *Server) publishNodeChatCreated(companyID, nodeID, messageID string, ite
 
 func (s *Server) publishNodeChatDeleted(companyID, nodeID, blockID, messageID string) {
 	scope := realtimeChatScope(nodeID)
-	s.publishRealtimeMessage(companyID, scope, realtimeChatMessage{
+	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit, realtimeChatMessage{
 		Type:      realtimeMessageChatDeleted,
 		CompanyID: strings.TrimSpace(companyID),
 		Scope:     scope,
@@ -154,7 +203,11 @@ func (s *Server) publishCapturedKanbanDeletes(companyID string, boardIDs []strin
 }
 func (s *Server) publishKanbanChanged(companyID, boardID, changeType string) {
 	scope := realtimeBoardScope(boardID)
-	s.publishRealtimeMessage(companyID, scope, realtimeKanbanChangedMessage{
+	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+	if logicGateID == "" {
+		return
+	}
+	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView, realtimeKanbanChangedMessage{
 		Type:       realtimeMessageKanbanChanged,
 		CompanyID:  strings.TrimSpace(companyID),
 		Scope:      scope,

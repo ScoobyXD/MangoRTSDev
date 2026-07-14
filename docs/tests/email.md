@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/modules/editor/richTextEditing.test.ts` covers rich email HTML serialization, spacing, indentation, lists, links, highlight sanitization, and safe sanitization; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers exact compose/signature flush submission, unified signature mounting, shared highlight controls, and signature hydration/save ordering; backend communications and attachment handler tests cover provider send boundaries, S3 attachment resolution, email draft attachment authorization, and rejection of embedded inline file bytes from durable draft/signature writes. Broader draft/signature persistence endpoint coverage remains partial.)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
 - Mailbox query-mode tests in `backend/internal/http/communications_handlers_test.go`, `backend/internal/http/nylas_client_test.go`, and `tests/frontend/modules/communications/communicationsApi.test.ts` cover exact Google Primary bucketing, native/structured parameter exclusivity, thread precedence, preview-only response normalization, and Primary cache-overlay exclusions.
 - Thread viewer parity and Reply All focus are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; recipient deduplication/mailbox exclusion by `tests/frontend/modules/communications/emailRecipients.test.ts`; semantic reply-draft identity by `tests/frontend/pages/home/homeMailDrafts.test.ts`; and calendar RSVP request construction by `tests/frontend/modules/communications/communicationsApi.test.ts`.
@@ -68,7 +68,7 @@ EMAIL40 - Received body text and HTML render before inline CID downloads finish.
 EMAIL41 - Normal detail reads use mailbox-scoped frontend/backend caches and same-key in-flight coalescing without `refresh=true`. Raw MIME is not part of an ordinary body-only detail critical path; calendar RSVP and concrete unresolved inline-content recovery remain authenticated raw-MIME uses.
 EMAIL42 - Missing recipients and empty subject/body without a valid attachment reference are rejected before attachment authorization, repository expansion, S3, or Nylas send work. Attachment-only email remains valid. Every referenced Mango attachment then completes tenant-scoped original metadata and active-link authorization preflight; nonnegative sizes are summed without overflow and an aggregate above exactly 24,000,000 bytes is rejected before any object opens.
 EMAIL43 - Provider-ready outbound attachments are metadata plus exact size and a lazy opener, separate from inbound `NylasAttachment.Content`. Once the Nylas gate admits the send, S3 bytes stream exactly once into a deterministic-Content-Length multipart request with preserved order, filenames, content types, CID/inline semantics, and exact bytes. Length mismatch, short/long/error readers, cancellation, and provider failure close every opened body; no outbound base64 round trip or complete multipart buffer is allowed.
-EMAIL44 - Signed provider `message.created` webhooks publish narrow exact-mailbox invalidation hints after server cache invalidation and existing webhook deduplication. The active matching My/Shared Triage Inbox performs one coalesced canonical refresh; a bounded local-conversion suppression defers that pending refresh until expiry instead of dropping it. Off-view hints only invalidate cache, reconnect acceptance reconciles an open Inbox once, event payloads never insert rows, and no mail polling loop is added. Transient audience/delivery lookup failure forgets the dedupe receipt and returns a retryable server error.
+EMAIL44 - Signed provider message/folder webhooks publish compact exact-mailbox hints after exact server-cache invalidation and webhook deduplication. Personal hints target `mailbox:personal:account:{user_id}:{normalized_account_email}`; shared hints target `mailbox:shared:{shared_inbox_id}` after current-audience filtering. First acceptance and reconnect acceptance each perform one coalesced canonical folder/list reconciliation, closing the initial-list-to-subscribe race. `message.created`, `message.updated` (including moves), and `message.deleted` reconcile the active list/folders; folder changes reconcile folder metadata; and directly identified selected message/thread changes reconcile detail. Unrelated new mail does not refetch selected detail; off-view mailboxes issue no provider GET; payloads never insert rows or carry bodies; and no polling loop is added.
 EMAIL45 - Thread reconstruction supports external-initiated, Mango-user-initiated, alternating inbound/outbound replies, and forwards without guessing. Provider thread IDs or exact supported reply metadata may establish membership; subject similarity never does, cross-mailbox IDs cannot merge, duplicates collapse by message ID, and unresolved one-offs remain single conversations.
 EMAIL46 - An unread card always has the unread dot and thicker frame. Pointer or keyboard open optimistically clears unread UI and decrements/recomputes the visible count before the scoped provider command completes; success survives selection/realtime refresh, while failure rolls back accurately and surfaces the established error. Pending-read timers, overlays, and responses are keyed by authenticated mailbox plus provider message ID and may mutate only the captured list/filter and selection generation, so identical provider IDs or stale completions cannot cross users, personal accounts, shared inboxes, searches, or selections. Selection uses the separate full-card Mango selection surface and accessible pressed state.
 EMAIL47 - Draft scope columns are immutable across upsert conflicts, soft deletion, and known-ID reuse. List/get/delete store predicates include exact scope, shared account email is canonicalized from the inbox, and cross-user/account/inbox IDs cannot be read, taken over, reassigned, updated, or deleted.
@@ -76,6 +76,12 @@ EMAIL48 - An email-card thread icon appears on the left only when the sanitized 
 EMAIL49 - Locally persisted sent-reply fallback data is keyed by company, authenticated user, personal account/shared inbox, source message, and thread. When a provider send response omits thread ID, exact reply-target metadata supplies it before the enriched reply is persisted under the thread key; no local reply cache crosses users or mailboxes.
 EMAIL50 - Google Primary always means `in:inbox -category:social -category:promotions`. User search is grouped and unread-only is folded into that same native expression so advanced `OR` searches cannot widen the mailbox bucket. The backend response boundary plus backend/frontend cache reconciliation apply the same Primary exclusion, so fresh, refreshed, cached, and optimistic star/read paths cannot leak Social or Promotions into Primary. The messages remain eligible for All and, when starred, Starred.
 EMAIL51 - Nylas message-list serialization has mutually exclusive query modes. A Gmail-native mailbox request sends only `search_query_native`, `limit`, and optional `page_token`; it omits `select`, `thread_id`, `q`, `in`, `unread`, `starred`, and every other structured filter. A thread-history request uses structured `thread_id` mode without `search_query_native`, while ordinary non-native lists retain the selected-field projection. Native response supersets are normalized back to Mango's preview-only list shape so body/detail hydration, mailbox membership, ordering, pagination, and account/shared-inbox scope do not change.
+EMAIL52 - Home subscribes to at most one mail-bearing mailbox: the selected connected personal account in My Triage or exact selected shared inbox. Multiple personal accounts never share a user-wide realtime scope. Shared root/headings/grouping rows/plain folders, Drafts, and non-mail views install no fallback personal scope, and navigation cancels obsolete timers/work and unsubscribes the old mailbox. Replacing shared-inbox metadata or callback objects without changing the exact company/scope does not recreate the subscription or repeat acceptance reconciliation; only an actual target/mailability change does.
+EMAIL53 - Mailbox hint invalidation and delayed reconciliation are keyed by exact company, personal account/shared inbox, message, thread, folder/page request, and current mailbox request generation. Bursts coalesce; one signal arriving during an active read may queue one final read; a timer or response owned by mailbox A cannot refresh, invalidate, or overwrite mailbox B. A detail hint also captures the selected message/thread that made it relevant and rechecks that owner before a delayed or queued read, so switching selection cannot wake an unrelated new detail. Acceptance/hint reconciliation performs an authoritative refresh only for the exact affected folder, page, message, or thread key; it bypasses reusable cache entries, joins or queues behind same-key in-flight work rather than overlapping it, and an exact-key invalidation generation prevents a provider read begun before the hint from repopulating stale cache state.
+EMAIL54 - Local fallback draft data is purged only for explicit authorization revocation or a definitively deleted/non-mail-bearing scope (`access_denied`, `company_access_denied`, `company_not_found`, `shared_inbox_not_found`, or `shared_inbox_not_mailbox`). Mango session `401`, unclassified `403`, provider reauthorization/disconnection `409`, service `5xx`, and network failure retain unsynchronized drafts in their exact company/user/personal-account/shared-inbox scope.
+EMAIL55 - Each remote draft load owns one exact scope generation and local revision. It may replace only that scope and only while still current; an older load cannot overwrite a newer completed load, local save, local delete, remote save completion, another personal account, or another shared inbox. Returned values and the fallback mirror both reflect the current scope state.
+EMAIL56 - An `email_draft` attachment can be created, linked, listed, sent, or read only while the exact owning draft still exists and is not deleted. Personal access is exact owner/account; legacy accountless personal IDs are live-draft owner-only read compatibility and never mutation authority; shared access uses the exact live inbox and current permissions. Compose creates the durable draft before attachment upload/link. Deleting a draft makes all draft-only attachment paths unreadable even to manager/admin bypass attempts, while an independently linked `email_message`/sent attachment remains readable through its own live authorization.
+EMAIL57 - Every email conversion and local mail mutation retains one exact source mailbox request key. Personal My Triage drag payloads and `POST /v1/communications/triage/convert` carry normalized `account_email`; Shared Triage carries `shared_inbox_id` and suppresses any personal account parameter. Explorer, Kanban, project, and pin handoffs preserve that identity through the committed-result event, so one personal account cannot convert, unstar, archive, update, move, or delete through another account's grant.
 
 ## Scenarios
 
@@ -313,18 +319,27 @@ Business logic covered:
 - EMAIL47
 - EMAIL48
 - EMAIL49
+- EMAIL52
+- EMAIL53
+- EMAIL57
 
 Given:
-- An external sender sends the first message, the Mango user replies, and the external sender replies again while the personal or exact shared inbox is open or while another view is active.
+- An external sender sends the first message, the Mango user replies, and the external sender replies again after the initial HTTP list but before first subscription acceptance, while the personal or exact shared inbox is open, or while another view is active.
 - The bounded preview page omits the Mango sent reply, or the initial send response omits thread ID while its exact reply target has one.
 - Another user/account/shared inbox knows a durable draft ID and attempts list, get, update, delete, or attachment access.
+- A hint burst overlaps one active refresh, the user navigates between personal accounts/shared inboxes before a delayed timer fires, and an unrelated new message arrives while another detail is selected.
+- A personal or shared message is converted from one exact source mailbox while another personal account or shared inbox is also connected.
 
 Expected:
-- A signed, deduplicated create webhook emits one authorized exact-mailbox hint. The matching active list refreshes canonically once, shows the arrival once in date order, and updates unread metadata; an off-view mailbox performs no request until canonical open.
+- A signed, deduplicated exact-mailbox hint is authorized for only the selected connected personal account or exact shared inbox. First acceptance discovers mail committed after the initial list, reconnect acceptance performs one recovery, and the matching active list/folders refresh canonically without polling.
+- Bursts use one active refresh plus at most one queued final refresh. Navigating cancels/discards the old request key; personal Account A, personal Account B, and Shared Inbox A never invalidate or issue provider GETs for one another.
+- Shared root/headings/grouping/plain-folder and other off-view states retain no fallback mailbox subscription and perform no hint-triggered GET.
+- `message.created`, `message.updated` (including moves), `message.deleted`, and folder changes reconcile only relevant canonical state; directly named selected message/thread changes refresh detail, while an unrelated new message does not.
 - Conversation detail contains all provider-listed sent and received members, including the intervening Mango reply, without duplicate IDs, subject-based merging, cross-scope history, or loss of valid one-offs/forwards.
 - The unread dot/frame and visible count clear immediately on pointer/Enter/Space open and stay cleared after success; a failed provider write rolls back and reports the error. The selected full-card surface remains distinct.
 - The row shows a thread icon only for the proven multi-message conversation.
 - Every draft operation and attachment authorization uses one immutable exact scope. Personal owner and shared view/edit distinctions hold; cross-scope known IDs cannot expose content or mutate scope, spoofed shared account data is ignored, and stale browser mirrors cannot reappear as another scope's drafts.
+- Conversion and its follow-up unstar/archive/move commands preserve the exact source `account_email` or `shared_inbox_id` through committed-result handoffs; another connected mailbox grant is never substituted.
 
 ### Scenario EMAIL-S12: Mailbox Buckets, Thread Query Mode, And Database Drafts
 
@@ -347,3 +362,42 @@ Expected:
 - Every native provider request contains only `search_query_native`, `limit`, and optional `page_token`; the returned Mango list remains preview-only even if the provider returns extra body/content fields.
 - Thread previews use `thread_id`, `select`, `limit`, and optional `page_token` without native mailbox search. Authoritative thread `message_ids` remain the source of truth: members absent from bounded previews are recovered immediately by exact ID, while preview-resolved older bodies hydrate through per-card detail reads on expand or Expand all.
 - Opening Drafts makes no provider message-list request. Personal Drafts shows only the authenticated user and active account; Shared Drafts shows only the selected shared inbox according to its view/edit permissions.
+
+### Scenario EMAIL-S13: Draft Recovery And Scope-Safe Concurrency
+
+Business logic covered:
+- EMAIL2
+- EMAIL3
+- EMAIL4
+- EMAIL47
+- EMAIL54
+- EMAIL55
+
+Given:
+- An exact-scope draft list fails with Mango `401`, an unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, or a network error.
+- Separate requests prove explicit access revocation, company deletion, shared-inbox deletion, or a shared row that is no longer mail-bearing.
+- Two account/inbox loads complete out of order while a same-scope local save or delete occurs.
+
+Expected:
+- Recoverable auth/provider/service/network failures retain every unsynchronized draft in the exact affected scope and do not leak it into another scope.
+- Only explicit revocation or definitive scope deletion purges that one scope; unrelated personal accounts and shared inboxes remain intact.
+- A stale load returns the current exact-scope value and cannot overwrite a newer load, save, delete, or different account/inbox in browser storage.
+
+### Scenario EMAIL-S14: Live Draft Attachment Authorization
+
+Business logic covered:
+- EMAIL6
+- EMAIL12
+- EMAIL17
+- EMAIL56
+
+Given:
+- A user starts an otherwise empty personal or shared compose and selects an attachment.
+- The draft is later deleted; the attachment may also have an independent sent-message link.
+- A wrong user/account, revoked shared viewer, company manager, or company administrator attempts draft-scoped access.
+
+Expected:
+- Mango creates the exact durable draft before uploading or linking the attachment, and concurrent preparation creates that row once.
+- Active personal draft access requires the exact owner/account; active shared access requires the exact inbox and current permission; legacy accountless personal IDs are read-only compatibility for a still-live owner draft.
+- Once the draft is deleted, list/content/send/mutation through its draft link returns not found for every actor, including administrative bypass attempts.
+- A legitimate independently linked sent-message attachment remains readable under its own authorization after draft deletion.

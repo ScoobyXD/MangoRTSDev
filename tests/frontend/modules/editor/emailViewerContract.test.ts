@@ -2,10 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { resolveEditorEmailMailboxScope } from "../../../../frontend/src/modules/editor/editorEmailMailboxScope.js";
 
 function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), "utf8");
 }
+
+test("node email mailbox scopes normalize personal accounts and suppress them for shared inboxes", () => {
+  assert.deepEqual(resolveEditorEmailMailboxScope(undefined, " Owner@Example.Test "), { accountEmail: "owner@example.test" });
+  assert.deepEqual(resolveEditorEmailMailboxScope(" shared-1 ", "ignored@example.test"), { sharedInboxID: "shared-1" });
+  assert.deepEqual(resolveEditorEmailMailboxScope("", ""), {});
+});
 
 test("node-attached email viewer retains triage thread, recipient, attachment, and image behavior", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
@@ -26,7 +33,15 @@ test("node-attached email viewer retains triage thread, recipient, attachment, a
   assert.match(nodeParts, /respondToCalendarInvite/);
   assert.match(nodeParts, /sharedInboxID=\{email\.sharedInboxID\}/);
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
-  assert.match(nodeParts, /respondToCalendarInvite\(\{ messageID: message\.id, status, companyID, sharedInboxID \}\)/);
+  assert.match(nodeParts, /respondToCalendarInvite\(\{ messageID: message\.id, status, companyID, sharedInboxID, accountEmail \}\)/);
+  assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail \}\)/);
+  assert.match(nodeParts, /getEmailMessage\(email\.messageID, companyID, mailboxScope\.sharedInboxID, \{ accountEmail: mailboxScope\.accountEmail \}\)/);
+  assert.match(nodeParts, /getEmailThread\(threadID, companyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/);
+  assert.match(nodeParts, /listEmailMessages\(\{ companyID, \.\.\.mailboxScope, mailbox: "all"/);
+  assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
+  assert.match(nodeParts, /status\.connected && status\.status === "connected"/);
+  assert.match(nodeParts, /if \(!accountScopeResolved \|\| !accountEmail\) return/);
+  assert.ok((nodeParts.match(/listEmailMessages\(\{\s*accountEmail,/g) ?? []).length >= 3);
   assert.match(nodeParts, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
@@ -86,25 +101,9 @@ test("personal and shared mail rows expose unread, selected, thread, and keyboar
   assert.doesNotMatch(homeParts, /messageSelectDotStyle/);
 });
 
-test("mailbox live refresh, read-on-open rollback, and draft scope stay wired through shared Home paths", () => {
+test("read-on-open rollback and draft scope stay wired through shared Home paths", () => {
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
   const drafts = source("frontend/src/pages/home/homeMailDrafts.ts");
-
-  assert.ok(homePage.includes("realtimePersonalMailboxScope(currentUserID)"));
-  assert.ok(homePage.includes("realtimeSharedMailboxScope(sharedInbox.folder_id)"));
-  assert.ok(homePage.includes("onMailboxMessageChanged: onMailboxChanged"));
-  assert.ok(homePage.includes("onMailboxFolderChanged: onMailboxChanged"));
-  assert.ok(homePage.includes("onAccepted: () =>"));
-  assert.ok(homePage.includes("if (!acceptedOnce)"));
-  assert.ok(homePage.includes("const mailboxRealtimeScopesKey = useMemo"));
-  assert.ok(homePage.includes("invalidateCommunicationsCache({ folders: true, messagePages: true })"));
-  assert.ok(homePage.includes("scheduleMessageListRefresh(120, { refresh: true, bumpMailboxRealtimeRevision: true })"));
-  assert.ok(homePage.includes("pendingOptions.refresh = pendingOptions.refresh || options?.refresh === true"));
-  assert.ok(homePage.includes("pendingOptions.bumpMailboxRealtimeRevision = pendingOptions.bumpMailboxRealtimeRevision || options?.bumpMailboxRealtimeRevision === true"));
-  assert.ok(homePage.includes("const hasCanonicalArrivalRefresh = pendingOptions.refresh || pendingOptions.bumpMailboxRealtimeRevision"));
-  assert.ok(homePage.includes("messageListRefreshTimerRef.current = window.setTimeout(runScheduledRefresh, retryDelayMs)"));
-  assert.match(homePage, /if \(localTriageConversionMailNetworkIsSuppressed\(requestKey\)\) \{\s*scheduleMessageListRefresh\(0, \{ refresh: options\.refresh \}\);\s*return;/);
-  assert.ok(homePage.includes("setMailboxRealtimeRevision((revision) => revision + 1)"));
 
   assert.ok(homePage.includes("locallyReadMessageKeysRef.current.add(messageKey)"));
   assert.ok(homePage.includes("unreadEmailThreadMessagesForSelection(messagesRef.current, message)"));
@@ -140,7 +139,6 @@ test("mailbox live refresh, read-on-open rollback, and draft scope stay wired th
   assert.ok(homePage.includes("activeMailAccountEmail,"));
   assert.ok(homePage.includes("draftCount={activeMailDrafts.length}"));
   assert.ok(drafts.includes("draft.pendingRemoteSync === true"));
-  assert.ok(drafts.includes("otherScopeDrafts"));
   assert.ok(drafts.includes("draft.accountEmail.trim().toLowerCase()"));
 });
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -197,5 +198,73 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	}
 	if projectionPayload["shared_inbox_id"] != folder.FolderID || projectionPayload["account_email"] != "support@example.com" {
 		t.Fatalf("shared projection mailbox provenance = %+v", projectionPayload)
+	}
+}
+
+func TestCommunicationsTriageConvertSelectsExactOwnedPersonalAccount(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "22222222-2222-4222-8222-222222222203"
+	repo.EnsureCompany(companyID, "Exact Personal Email Conversion Company")
+	user, err := repo.UpsertAuthUser("exact-personal-email-converter", "account-a@example.com", "Exact Converter")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	for _, connection := range []store.UserEmailConnectionInput{
+		{UserID: user.UserID, Provider: "google", AccountEmail: "account-a@example.com", GrantID: "grant-convert-account-a", Status: "connected"},
+		{UserID: user.UserID, Provider: "microsoft", AccountEmail: "account-b@example.com", GrantID: "grant-convert-account-b", Status: "connected"},
+	} {
+		if _, err := repo.UpsertUserEmailConnection(connection); err != nil {
+			t.Fatalf("UpsertUserEmailConnection: %v", err)
+		}
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Exact Account Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	nylas := &fakeNylasClient{message: NylasMessage{
+		ID:       "account-b-message",
+		ThreadID: "account-b-thread",
+		Subject:  "Account B conversion email",
+		From:     []NylasEmailAddress{{Email: "customer@example.com"}},
+		Starred:  true,
+	}}
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: nylas})
+	body, _ := json.Marshal(map[string]any{
+		"company_id":    companyID,
+		"logic_gate_id": logicGate.LogicGateID,
+		"message_ids":   []string{"account-b-message"},
+	})
+	path := "/v1/communications/triage/convert?account_email=" + url.QueryEscape("ACCOUNT-B@EXAMPLE.COM")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithActorForTest(req, user, companyID)
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST exact account convert status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if nylas.lastDetailGrantID != "grant-convert-account-b" {
+		t.Fatalf("Nylas detail grant = %q, want grant-convert-account-b", nylas.lastDetailGrantID)
+	}
+	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-convert-account-b" {
+		t.Fatalf("Nylas update calls = %+v, want exact account B grant", nylas.updateCalls)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{"account-b-message"})
+	if err != nil || len(placements) != 1 {
+		t.Fatalf("ListCommunicationsEmailPlacements = %+v err=%v", placements, err)
+	}
+	projections, err := repo.ListNodeProjections(companyID, placements[0].NodeID)
+	if err != nil || len(projections) != 1 {
+		t.Fatalf("ListNodeProjections = %+v err=%v", projections, err)
+	}
+	var projectionPayload map[string]any
+	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if projectionPayload["account_email"] != "account-b@example.com" {
+		t.Fatalf("projection account email = %+v, want account-b@example.com", projectionPayload)
 	}
 }

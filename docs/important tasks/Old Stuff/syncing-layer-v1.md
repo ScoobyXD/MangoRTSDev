@@ -1,6 +1,6 @@
 # Syncing Layer V1 (Superseded)
 
-Status: historical only. The broad projection-delta/event-row/workspace-stream direction below was removed by the 2026-07-12 realtime simplification. The current contract is `docs/v4-architecture-doc.md`: only `notifications:user:{user_id}`, `chat:node:{node_id}`, and mounted `board:{board_id}` are product realtime scopes. My Work/GVIC, Company Explorer, maps, Project Management, mail, permissions, and generic editor documents are non-live; `event_rows` and projection replication are deleted. Future Huddle CRDT/OT work is separate.
+Status: historical only. The broad projection-delta/event-row/workspace-stream direction below was removed by the 2026-07-12 realtime simplification. Its 2026-07-12 statement that mail was entirely non-live was superseded on 2026-07-13 by the current contract in `docs/v4-architecture-doc.md`: four approved live product surfaces exist—notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, and the actively viewed mailbox. The mailbox surface uses separate exact personal-account and shared-inbox scope patterns. My Work/GVIC, Company Explorer, maps, Project Management, broad communications, permissions, and generic editor documents remain non-live; `event_rows` and projection replication remain deleted. Same-browser title convergence is local rather than a backend stream, delivery remains process-local, and future Huddle CRDT/OT work remains separate.
 
 The remainder is retained only as implementation history and is not an active requirement.
 ## Purpose

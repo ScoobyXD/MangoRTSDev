@@ -315,7 +315,7 @@ func (r *MemoryRepo) personalEmailConnectionForUserLocked(userID string) (domain
 }
 
 func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
-	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
+	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
 	if !ok {
 		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
 	}
@@ -377,6 +377,7 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 	next.ScopeType = scope.ScopeType
 	next.ScopeID = scope.ScopeID
 	next.UserID = scope.UserID
+	next.PersonalAccountEmail = scope.PersonalAccountEmail
 	next.CompanyID = scope.CompanyID
 	next.CompanyEmailConnectionID = scope.CompanyEmailConnectionID
 	next.SharedInboxID = scope.SharedInboxID
@@ -388,7 +389,7 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 }
 
 func (r *MemoryRepo) ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error) {
-	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.CompanyID, input.CompanyEmailConnectionID, "")
+	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, "")
 	if !ok {
 		return nil, ErrInvalid
 	}
@@ -450,14 +451,16 @@ type communicationsMessageReadStatusScopeInfo struct {
 	ScopeType                string
 	ScopeID                  string
 	UserID                   string
+	PersonalAccountEmail     string
 	CompanyID                string
 	CompanyEmailConnectionID string
 	SharedInboxID            string
 }
 
-func communicationsMessageReadStatusScope(scopeType, userID, companyID, companyEmailConnectionID, sharedInboxID string) (communicationsMessageReadStatusScopeInfo, bool) {
+func communicationsMessageReadStatusScope(scopeType, userID, personalAccountEmail, companyID, companyEmailConnectionID, sharedInboxID string) (communicationsMessageReadStatusScopeInfo, bool) {
 	scopeType = strings.TrimSpace(strings.ToLower(scopeType))
 	userID = strings.TrimSpace(userID)
+	personalAccountEmail = normalizeEmail(personalAccountEmail)
 	companyID = strings.TrimSpace(companyID)
 	companyEmailConnectionID = strings.TrimSpace(companyEmailConnectionID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
@@ -470,13 +473,14 @@ func communicationsMessageReadStatusScope(scopeType, userID, companyID, companyE
 	}
 	switch scopeType {
 	case "personal":
-		if userID == "" {
+		if userID == "" || personalAccountEmail == "" {
 			return communicationsMessageReadStatusScopeInfo{}, false
 		}
 		return communicationsMessageReadStatusScopeInfo{
-			ScopeType: "personal",
-			ScopeID:   userID,
-			UserID:    userID,
+			ScopeType:            "personal",
+			ScopeID:              communicationsPersonalMessageReadStatusScopeID(userID, personalAccountEmail),
+			UserID:               userID,
+			PersonalAccountEmail: personalAccountEmail,
 		}, true
 	case "shared":
 		if companyID == "" || companyEmailConnectionID == "" {
@@ -492,6 +496,10 @@ func communicationsMessageReadStatusScope(scopeType, userID, companyID, companyE
 	default:
 		return communicationsMessageReadStatusScopeInfo{}, false
 	}
+}
+
+func communicationsPersonalMessageReadStatusScopeID(userID, personalAccountEmail string) string {
+	return strings.TrimSpace(userID) + ":" + normalizeEmail(personalAccountEmail)
 }
 
 func normalizeCommunicationsMessageReadStatus(status string) string {

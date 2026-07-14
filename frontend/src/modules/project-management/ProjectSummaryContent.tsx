@@ -1030,10 +1030,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const cleanLogicGateID = logicGateID.trim();
     if (!companyID || !cleanProjectID) return;
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
+    const accountEmail = sharedInboxID ? undefined : drag.accountEmail?.trim().toLowerCase() || undefined;
     setError("");
     setRelationshipDropActive(false);
     selectRightPanelTab("relationships");
-    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID });
+    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
     try {
       const position = relationships.length + 1;
       const target: CommunicationsTriageConversionTarget = cleanLogicGateID
@@ -1042,6 +1043,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const result = await convertTriageMessagesToExplorerTarget({
         companyID,
         sharedInboxID,
+        accountEmail,
         target,
         messageIDs,
         priority: 3,
@@ -1062,6 +1064,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID,
+        accountEmail,
         logicGateID: result.board?.logic_gate_id?.trim() || cleanLogicGateID || undefined,
         nodeIDs: (result.nodes ?? []).map((node) => node.node_id),
         boardIDs,

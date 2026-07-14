@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
@@ -342,6 +343,12 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 			t.Fatal(err)
 		}
 	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email,
+		GrantID: "realtime-personal-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
@@ -349,7 +356,7 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 	client.readJSON(t)
 	allowed := []string{
 		realtimeNotificationScope(user.UserID),
-		realtimePersonalMailboxScope(user.UserID),
+		realtimePersonalMailboxScope(user.UserID, user.Email),
 		realtimeSharedMailboxScope(sharedInbox.FolderID),
 		realtimeChatScope(node.NodeID),
 		realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID)),
@@ -365,7 +372,7 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 		scope string
 		error string
 	}{
-		{scope: realtimePersonalMailboxScope(otherUser.UserID), error: "access_denied"},
+		{scope: realtimePersonalMailboxScope(otherUser.UserID, otherUser.Email), error: "access_denied"},
 		{scope: realtimeSharedMailboxScope(hiddenInbox.FolderID), error: "access_denied"},
 		{scope: "workspace:user:" + user.UserID, error: "unsupported_scope"},
 		{scope: "company_explorer:user:" + user.UserID, error: "unsupported_scope"},
@@ -382,6 +389,289 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 		if message["type"] != realtimeMessageSubscriptionRejected || message["error"] != test.error {
 			t.Fatalf("forbidden scope %s response = %+v, want error %s", test.scope, message, test.error)
 		}
+	}
+}
+
+func TestRealtimePersonalMailboxScopesRequireExactExistingAccountAndPublishIndependently(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "23232323-2323-4232-8232-232323232323"
+	token := "personal-mailbox-exact-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "personal-mailbox-exact", domain.RoleCompanyUser)
+	otherUser := mustRealtimeAuthUser(t, repo, companyID, "personal-mailbox-other", domain.RoleCompanyUser)
+	for _, input := range []store.UserEmailConnectionInput{
+		{UserID: user.UserID, Provider: "google", AccountEmail: "account-a@example.com", GrantID: "account-a-grant", Status: "connected"},
+		{UserID: user.UserID, Provider: "microsoft", AccountEmail: "account-b@example.com", GrantID: "account-b-grant", Status: "connected"},
+		{UserID: user.UserID, Provider: "google", AccountEmail: "disconnected@example.com", GrantID: "disconnected-grant", Status: "disconnected"},
+		{UserID: user.UserID, Provider: "microsoft", AccountEmail: "reauth@example.com", GrantID: "reauth-grant", Status: "reauth_required"},
+		{UserID: otherUser.UserID, Provider: "google", AccountEmail: "other@example.com", GrantID: "other-grant", Status: "connected"},
+	} {
+		if _, err := repo.UpsertUserEmailConnection(input); err != nil {
+			t.Fatalf("UpsertUserEmailConnection(%s): %v", input.AccountEmail, err)
+		}
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+
+	scopeA := realtimePersonalMailboxScope(user.UserID, "account-a@example.com")
+	scopeB := realtimePersonalMailboxScope(user.UserID, "account-b@example.com")
+	for _, scope := range []string{scopeA, scopeB} {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+		if accepted := client.readJSON(t); accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
+			t.Fatalf("exact personal account subscription = %+v, want %s", accepted, scope)
+		}
+	}
+
+	rejectedCases := []struct {
+		scope string
+		code  string
+	}{
+		{scope: realtimePersonalMailboxScope(user.UserID, "missing@example.com"), code: "resource_not_found"},
+		{scope: realtimePersonalMailboxScope(user.UserID, "disconnected@example.com"), code: "resource_not_found"},
+		{scope: realtimePersonalMailboxScope(user.UserID, "reauth@example.com"), code: "resource_not_found"},
+		{scope: realtimePersonalMailboxScope(otherUser.UserID, "other@example.com"), code: "access_denied"},
+		{scope: realtimePersonalMailboxScopePrefix + user.UserID + ":ACCOUNT-A@EXAMPLE.COM", code: "invalid_scope"},
+		{scope: "mailbox:personal:user:" + user.UserID, code: "unsupported_scope"},
+	}
+	for _, test := range rejectedCases {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": test.scope})
+		if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["error"] != test.code {
+			t.Fatalf("personal scope %q response = %+v, want %s", test.scope, rejected, test.code)
+		}
+	}
+
+	change := nylasWebhookChange{Trigger: "message.created", MessageID: "mail-a", ThreadID: "thread-a", OccurredAt: time.Now().UTC()}
+	if err := server.publishPersonalMailboxWebhookHint(user.UserID, "account-a@example.com", change); err != nil {
+		t.Fatalf("publish account A hint: %v", err)
+	}
+	if message := client.readJSON(t); message["type"] != realtimeMessageMailboxMessageChanged || message["scope"] != scopeA || message["message_id"] != "mail-a" {
+		t.Fatalf("account A message = %+v", message)
+	}
+	client.assertNoMessage(t)
+	change.MessageID = "mail-b"
+	change.ThreadID = "thread-b"
+	if err := server.publishPersonalMailboxWebhookHint(user.UserID, "account-b@example.com", change); err != nil {
+		t.Fatalf("publish account B hint: %v", err)
+	}
+	if message := client.readJSON(t); message["scope"] != scopeB || message["message_id"] != "mail-b" {
+		t.Fatalf("account B message = %+v", message)
+	}
+}
+
+func TestRealtimeResourceSubscriptionsRequireExistingSameCompanyResourceEvenForAdmin(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "24242424-2424-4242-8242-242424242424"
+	otherCompanyID := "25252525-2525-4252-8252-252525252525"
+	token := "resource-existence-admin-token"
+	repo.EnsureCompany(companyID, "Realtime resource existence company")
+	admin := mustRealtimeAuthUser(t, repo, companyID, "resource-existence-admin", domain.RoleCompanyAdmin)
+	repo.EnsureCompany(otherCompanyID, "Other realtime company")
+	foreignNode, err := repo.CreateNode(otherCompanyID, "Foreign node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	heading, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Heading without mailbox", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, admin)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+
+	for _, scope := range []string{
+		realtimeChatScope("26262626-2626-4262-8262-262626262626"),
+		realtimeBoardScope(store.LogicGateKanbanBoardID("27272727-2727-4272-8272-272727272727")),
+		realtimeSharedMailboxScope("28282828-2828-4282-8282-282828282828"),
+		realtimeChatScope(foreignNode.NodeID),
+		realtimeSharedMailboxScope(heading.FolderID),
+	} {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+		if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope || rejected["error"] != "resource_not_found" {
+			t.Fatalf("admin resource scope %q response = %+v, want resource_not_found", scope, rejected)
+		}
+		if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 0 {
+			t.Fatalf("nonexistent/cross-company resource scope %q was stored", scope)
+		}
+	}
+}
+
+func TestRealtimeSubscriptionScopeShapeAndLengthValidation(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "29292929-2929-4292-8292-292929292929"
+	token := "scope-shape-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "scope-shape-user", domain.RoleCompanyUser)
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+
+	invalid := []string{
+		"notifications:user:not-a-uuid",
+		"chat:node:not-a-uuid",
+		"chat:node:30303030-3030-4030-8030-303030303030:extra",
+		"board:30303030-3030-4030-8030-303030303030",
+		"board:logic-gate:not-a-uuid",
+		"mailbox:shared:not-a-uuid",
+		"mailbox:personal:account:" + user.UserID + ":not-an-email",
+	}
+	for _, scope := range invalid {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+		if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["error"] != "invalid_scope" {
+			t.Fatalf("malformed scope %q response = %+v, want invalid_scope", scope, rejected)
+		}
+	}
+	tooLong := realtimeChatScopePrefix + strings.Repeat("a", maxRealtimeScopeBytes)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": tooLong})
+	if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["error"] != "scope_too_long" {
+		t.Fatalf("overlong scope response = %+v, want scope_too_long", rejected)
+	}
+}
+
+func TestRealtimeSubscriptionLimitKeepsDuplicatesIdempotent(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "31313131-3131-4131-8131-313131313131"
+	user := mustRealtimeAuthUser(t, repo, companyID, "subscription-limit-user", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Subscription limit node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	memberships, err := repo.ListUserMemberships(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	defer server.Close()
+	networkConn := &recordingRealtimeNetConn{}
+	conn := &realtimeConnection{
+		id: "subscription-limit-connection", companyID: companyID, userID: user.UserID,
+		actor: ActorContext{User: user, Memberships: memberships}, conn: networkConn,
+	}
+	notificationScope := realtimeNotificationScope(user.UserID)
+	server.realtimeRegistry.subscribe(conn, notificationScope)
+	for index := 1; index < maxRealtimeSubscriptionsPerConnection; index++ {
+		server.realtimeRegistry.subscribe(conn, fmt.Sprintf("test-fixture-scope:%02d", index))
+	}
+
+	server.handleRealtimeSubscribe(conn, realtimeClientMessage{Type: realtimeMessageSubscribe, Scope: notificationScope})
+	chatScope := realtimeChatScope(node.NodeID)
+	server.handleRealtimeSubscribe(conn, realtimeClientMessage{Type: realtimeMessageSubscribe, Scope: chatScope})
+	messages := networkConn.messages(t)
+	if len(messages) != 2 || messages[0]["type"] != realtimeMessageSubscriptionAccepted || messages[0]["scope"] != notificationScope {
+		t.Fatalf("duplicate response = %+v, want idempotent acceptance", messages)
+	}
+	if messages[1]["type"] != realtimeMessageSubscriptionRejected || messages[1]["scope"] != chatScope || messages[1]["error"] != "subscription_limit_exceeded" {
+		t.Fatalf("over-limit response = %+v", messages[1])
+	}
+	if got := server.realtimeRegistry.connectionSubscriptionCount(conn.id); got != maxRealtimeSubscriptionsPerConnection {
+		t.Fatalf("connection subscriptions = %d, want cap %d", got, maxRealtimeSubscriptionsPerConnection)
+	}
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, chatScope) != 0 {
+		t.Fatal("over-limit subscription was stored")
+	}
+}
+
+func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "32323232-3232-4232-8232-323232323232"
+	token := "chat-revocation-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "chat-revocation-user", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Revocable chat node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}},
+	}
+	if _, err := repo.SetEntityPermissions(grant); err != nil {
+		t.Fatal(err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeChatScope(node.NodeID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	client.readJSON(t)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server.publishNodeChatCreated(companyID, node.NodeID, "revoked-message", domain.NodeInformation{Type: "Text block chat", Information: `{"block_id":"revoked-block"}`})
+	client.assertNoMessage(t)
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
+		t.Fatal("revocation test lost its existing subscription")
+	}
+	if _, err := repo.SetEntityPermissions(grant); err != nil {
+		t.Fatal(err)
+	}
+	server.publishNodeChatCreated(companyID, node.NodeID, "restored-message", domain.NodeInformation{Type: "Text block chat", Information: `{"block_id":"restored-block"}`})
+	if message := client.readJSON(t); message["type"] != realtimeMessageChatCreated || message["message_id"] != "restored-message" {
+		t.Fatalf("restored chat publication = %+v", message)
+	}
+}
+
+func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "33323232-3232-4232-8232-323232323232"
+	token := "kanban-revocation-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "kanban-revocation-user", domain.RoleCompanyUser)
+	gate, err := repo.CreateLogicGate(companyID, "Revocable board")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}},
+	}
+	if _, err := repo.SetEntityPermissions(grant); err != nil {
+		t.Fatal(err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
+	scope := realtimeBoardScope(boardID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	client.readJSON(t)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server.publishKanbanChanged(companyID, boardID, "revoked-change")
+	client.assertNoMessage(t)
+	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
+		t.Fatal("revocation test lost its existing board subscription")
+	}
+	if _, err := repo.SetEntityPermissions(grant); err != nil {
+		t.Fatal(err)
+	}
+	server.publishKanbanChanged(companyID, boardID, "restored-change")
+	if message := client.readJSON(t); message["type"] != realtimeMessageKanbanChanged || message["change_type"] != "restored-change" {
+		t.Fatalf("restored board publication = %+v", message)
 	}
 }
 

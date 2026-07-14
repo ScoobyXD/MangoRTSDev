@@ -2113,7 +2113,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
 
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
-    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID });
+    const accountEmail = sharedInboxID ? undefined : drag.accountEmail?.trim().toLowerCase() || undefined;
+    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
     const mutationBoardID = boardID;
     const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateID);
     let shouldRefresh = false;
@@ -2124,6 +2125,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         columnID: cleanColumnID,
         messageIDs,
         sharedInboxID,
+        accountEmail,
         priority,
       });
       const savedCards = result.cards ?? [];
@@ -2155,6 +2157,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID,
+        accountEmail,
         logicGateID: resultLogicGateID,
         nodeIDs: result.nodes.map((node) => node.node_id),
         boardIDs,

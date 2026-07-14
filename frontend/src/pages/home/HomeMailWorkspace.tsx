@@ -249,6 +249,8 @@ export function HomeMailWorkspace({
   onEmailSignatureChange,
   onSaveEmailSignature,
   onSaveComposeDraft,
+  onEnsureComposeDraft,
+  onDiscardEmptyComposeDraft,
   onSearchDraftChange,
   onSelectMessage,
   onStartMessageDrag,
@@ -322,6 +324,8 @@ export function HomeMailWorkspace({
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: (signature: string) => void;
   onSaveComposeDraft: (compose: ComposeState) => void;
+  onEnsureComposeDraft: (compose: ComposeState) => Promise<ComposeState>;
+  onDiscardEmptyComposeDraft: (compose: ComposeState) => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
   onStartMessageDrag: (message: EmailMessage, event: React.DragEvent<HTMLElement>) => void;
@@ -717,6 +721,8 @@ export function HomeMailWorkspace({
             onEmailSignatureChange={onEmailSignatureChange}
             onSaveEmailSignature={onSaveEmailSignature}
             onSaveDraft={onSaveComposeDraft}
+            onEnsureDraft={onEnsureComposeDraft}
+            onDiscardEmptyDraft={onDiscardEmptyComposeDraft}
           />
         ) : selectedMessage ? (
           <MessageDetail
@@ -724,6 +730,7 @@ export function HomeMailWorkspace({
             threadMessages={selectedThreadMessages}
             companyID={companyID}
             sharedInboxID={activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined}
+            accountEmail={accountEmail}
             loading={loadingDetail}
             archiveAvailable={archiveAvailable}
             archiveLabel={archiveLabel}

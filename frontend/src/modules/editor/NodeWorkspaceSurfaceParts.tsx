@@ -25,6 +25,7 @@ import {
   type EditorHighlightColor,
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
+import { resolveEditorEmailMailboxScope } from "./editorEmailMailboxScope.js";
 import { splitChatTextLinks } from "./nodeChatLinks";
 import {
   getEditorSelectionOffsets,
@@ -3508,17 +3509,18 @@ function createAttachedEmailFolderID(): string {
 }
 
 async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string): Promise<EmailMessage[]> {
-  const primary = await getEmailMessage(email.messageID, companyID, email.sharedInboxID);
+  const mailboxScope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
+  const primary = await getEmailMessage(email.messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
   const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
   if (!threadID) return mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []);
   try {
-    const thread = await getEmailThread(threadID, companyID, email.sharedInboxID);
+    const thread = await getEmailThread(threadID, companyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail);
     const ids = Array.from(new Set((thread.message_ids ?? []).map((id) => id.trim()).filter(Boolean)));
     if (!ids.includes(primary.id)) ids.unshift(primary.id);
     const details = await Promise.all(ids.map(async (id) => {
       if (id === primary.id) return primary;
       try {
-        return await getEmailMessage(id, companyID, email.sharedInboxID);
+        return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
       } catch {
         return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
       }
@@ -4526,11 +4528,12 @@ const EmailBodyFrame: React.FC<{
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   compact: boolean;
   strokeColor: string;
   accent: string;
   onSelectionChange?: (selection: EmailFrameSelection | null) => void;
-}> = ({ message, apiBase, companyID, sharedInboxID, compact, strokeColor, accent, onSelectionChange }) => {
+}> = ({ message, apiBase, companyID, sharedInboxID, accountEmail, compact, strokeColor, accent, onSelectionChange }) => {
   const body = message.body || message.snippet || "";
   const attachments = useMemo(() => message.attachments ?? [], [message.attachments]);
   const [srcDoc, setSrcDoc] = useState(() => messageDocument(body, compact));
@@ -4563,7 +4566,7 @@ const EmailBodyFrame: React.FC<{
         const sourceURL = mangoAttachmentID
           ? await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
           : providerAttachmentID
-            ? URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID))
+            ? URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID, { accountEmail }))
             : "";
         if (cancelled) {
           if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
@@ -4584,7 +4587,7 @@ const EmailBodyFrame: React.FC<{
       controller.abort();
       objectURLs.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [apiBase, attachments, body, compact, companyID, message.id, sharedInboxID]);
+  }, [accountEmail, apiBase, attachments, body, compact, companyID, message.id, sharedInboxID]);
 
   useEffect(() => () => frameCleanupRef.current(), []);
 
@@ -4720,12 +4723,13 @@ const EmailMessageAttachments: React.FC<{
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   respondable: boolean;
   accent: string;
   surfaceText: string;
   strokeColor: string;
   onError: (message: string) => void;
-}> = ({ message, apiBase, companyID, sharedInboxID, respondable, accent, surfaceText, strokeColor, onError }) => {
+}> = ({ message, apiBase, companyID, sharedInboxID, accountEmail, respondable, accent, surfaceText, strokeColor, onError }) => {
   const attachments = (message.attachments ?? []).filter((attachment) => !attachment.is_inline && !attachment.content_id?.trim());
   const hasCalendarInvite = (message.attachments ?? []).some(emailAttachmentIsCalendarInvite);
   const [previewAttachment, setPreviewAttachment] = useState<EmailAttachment | null>(null);
@@ -4737,11 +4741,11 @@ const EmailMessageAttachments: React.FC<{
   const respondToInvite = useCallback((status: CalendarInviteRSVPStatus) => {
     if (calendarResponseBusy || !respondable) return;
     setCalendarResponseBusy(true);
-    void respondToCalendarInvite({ messageID: message.id, status, companyID, sharedInboxID })
+    void respondToCalendarInvite({ messageID: message.id, status, companyID, sharedInboxID, accountEmail })
       .then(() => setCalendarResponse(status))
       .catch((cause) => onError(cause instanceof Error ? cause.message : "failed_to_respond_to_calendar_invite"))
       .finally(() => setCalendarResponseBusy(false));
-  }, [calendarResponseBusy, companyID, message.id, onError, respondable, sharedInboxID]);
+  }, [accountEmail, calendarResponseBusy, companyID, message.id, onError, respondable, sharedInboxID]);
 
   const loadAttachmentURL = useCallback(async (attachment: EmailAttachment, variant: "display" | "original") => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4752,8 +4756,8 @@ const EmailMessageAttachments: React.FC<{
     }
     const providerAttachmentID = attachment.id?.trim() ?? "";
     if (!providerAttachmentID) throw new Error("attachment_unavailable");
-    return { url: URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID)), revoke: true };
-  }, [apiBase, companyID, message.id, sharedInboxID]);
+    return { url: URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID, { accountEmail })), revoke: true };
+  }, [accountEmail, apiBase, companyID, message.id, sharedInboxID]);
 
   const downloadAttachment = useCallback(async (attachment: EmailAttachment) => {
     const filename = emailAttachmentFilename(attachment);
@@ -5163,6 +5167,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   onSelectionChatRequest,
   onSelectionNodeRequest,
 }) => {
+  const mailboxScope = useMemo(
+    () => resolveEditorEmailMailboxScope(sharedInboxID, accountEmail),
+    [accountEmail, sharedInboxID],
+  );
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
@@ -5216,7 +5224,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     void (async () => {
-      const payload = await getEmailMessage(messageID, companyID, sharedInboxID);
+      const payload = await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
       if (cancelled) return;
       setMessage(payload);
       setThreadMessages([payload]);
@@ -5230,18 +5238,18 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
       try {
-        const thread = await getEmailThread(threadID, companyID, sharedInboxID);
+        const thread = await getEmailThread(threadID, companyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail);
         if (cancelled) return;
         let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
         if (ids.length === 0) {
-          const page = await listEmailMessages({ companyID, sharedInboxID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
         }
         if (!ids.includes(payload.id)) ids.unshift(payload.id);
         const details = await Promise.all(ids.map(async (id) => {
           if (id === payload.id) return payload;
           try {
-            return await getEmailMessage(id, companyID, sharedInboxID);
+            return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
           } catch {
             return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
           }
@@ -5249,14 +5257,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
       } catch {
         try {
-          const page = await listEmailMessages({ companyID, sharedInboxID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           if (cancelled) return;
           const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
           if (!ids.includes(payload.id)) ids.unshift(payload.id);
           const details = await Promise.all(ids.map(async (id) => {
             if (id === payload.id) return payload;
             try {
-              return await getEmailMessage(id, companyID, sharedInboxID);
+              return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
             } catch {
               return (page.messages ?? []).find((item) => item.id === id) ?? null;
             }
@@ -5274,7 +5282,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, messageID, sharedInboxID]);
+  }, [companyID, mailboxScope, messageID]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;
@@ -5542,7 +5550,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         .filter((attachment) => attachment.attachment_id),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
-      shared_inbox_id: sharedInboxID,
+      shared_inbox_id: mailboxScope.sharedInboxID,
+      account_email: mailboxScope.accountEmail,
     })
       .then((sent) => {
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
@@ -5746,6 +5755,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       apiBase={apiBase}
                       companyID={companyID}
                       sharedInboxID={sharedInboxID}
+                      accountEmail={accountEmail}
                       compact={inlineExpansion}
                       strokeColor={strokeColor}
                       accent={accent}
@@ -5778,6 +5788,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     apiBase={apiBase}
                     companyID={companyID}
                     sharedInboxID={sharedInboxID}
+                    accountEmail={accountEmail}
                     respondable={editable}
                     accent={accent}
                     surfaceText={surfaceText}
@@ -6031,6 +6042,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [accountScopeResolved, setAccountScopeResolved] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
   const prefetchedPageRef = useRef<EmailPickerPrefetchedPage | null>(null);
@@ -6047,9 +6059,25 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
     let cancelled = false;
     void fetchCommunicationsStatus()
       .then((status) => {
-        if (!cancelled) setAccountEmail(status.connection?.account_email?.trim() ?? "");
+        if (cancelled) return;
+        const resolvedAccountEmail = status.connected && status.status === "connected"
+          ? status.connection?.account_email?.trim().toLowerCase() ?? ""
+          : "";
+        setAccountEmail(resolvedAccountEmail);
+        if (!resolvedAccountEmail) {
+          setLoading(false);
+          setError("email_account_not_connected");
+        }
       })
-      .catch(() => undefined);
+      .catch((cause) => {
+        if (!cancelled) {
+          setLoading(false);
+          setError(cause instanceof Error ? cause.message : "failed_to_load_email_account");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAccountScopeResolved(true);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -6095,6 +6123,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
 
 
   useEffect(() => {
+    if (!accountScopeResolved || !accountEmail) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       const requestSeq = requestSeqRef.current + 1;
@@ -6108,7 +6137,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
       nextPageTokenRef.current = "";
       setNextPageToken("");
       clearPrefetchedPage();
-      void listEmailMessages({ mailbox, limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, q: query.trim() || undefined, unread: unreadOnly || undefined })
+      void listEmailMessages({ accountEmail, mailbox, limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, q: query.trim() || undefined, unread: unreadOnly || undefined })
         .then((page) => {
           if (cancelled || requestSeqRef.current !== requestSeq) return;
           setMessages(page.messages ?? []);
@@ -6130,7 +6159,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [clearPrefetchedPage, mailbox, query, unreadOnly]);
+  }, [accountEmail, accountScopeResolved, clearPrefetchedPage, mailbox, query, unreadOnly]);
 
   const appendPrefetchedPage = useCallback((pageToken: string): string | null => {
     const prefetched = prefetchedPageRef.current;
@@ -6153,6 +6182,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
     prefetchFilterKeyRef.current = requestFilterKey;
     prefetchPageTokenRef.current = pageToken;
     const request = listEmailMessages({
+      accountEmail,
       mailbox,
       limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
       pageToken,
@@ -6173,7 +6203,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
       });
     prefetchPromiseRef.current = request;
     await request;
-  }, [mailbox, query, unreadOnly]);
+  }, [accountEmail, mailbox, query, unreadOnly]);
 
   const loadMoreMessages = useCallback(async () => {
     if (loadingRef.current || loadingMoreRef.current) return;
@@ -6202,6 +6232,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
         }
       }
       const page = await listEmailMessages({
+        accountEmail,
         mailbox,
         limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
         pageToken,
@@ -6219,7 +6250,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [appendMessagePage, appendPrefetchedPage, mailbox, prefetchNextMessagePage, query, unreadOnly]);
+  }, [accountEmail, appendMessagePage, appendPrefetchedPage, mailbox, prefetchNextMessagePage, query, unreadOnly]);
 
   const emailPickerWithinPrefetchDistance = useCallback((): boolean => {
     const list = messageListRef.current;

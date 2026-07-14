@@ -6,8 +6,8 @@ import { readTriageMessageDrag } from "../pages/home/homeUtils.js";
 import { sidebarPinFallbackName, type SidebarPin, type SidebarPinDraft, type SidebarPinKind } from "./sidebarPins.js";
 
 export type SidebarPinnedResourceDropAction =
-  | { kind: "triage_to_logic_gate"; pin: SidebarPin; logicGateID: string; messageIDs: string[]; sharedInboxID?: string }
-  | { kind: "triage_to_node"; pin: SidebarPin; nodeID: string; messageIDs: string[]; sharedInboxID?: string }
+  | { kind: "triage_to_logic_gate"; pin: SidebarPin; logicGateID: string; messageIDs: string[]; sharedInboxID?: string; accountEmail?: string }
+  | { kind: "triage_to_node"; pin: SidebarPin; nodeID: string; messageIDs: string[]; sharedInboxID?: string; accountEmail?: string }
   | { kind: "nodes_to_logic_gate"; pin: SidebarPin; logicGateID: string; nodeIDs: string[] };
 
 export type SidebarPinDropPlacement = "before" | "after" | "inside";
@@ -57,9 +57,9 @@ export function readSidebarPinnedResourceDropAction(pin: SidebarPin, dataTransfe
   const triageMessageDrag = readTriageMessageDrag(dataTransfer);
   if (triageMessageDrag.messageIDs.length > 0) {
     if (pin.kind === "logic_gate") {
-      return { kind: "triage_to_logic_gate", pin, logicGateID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID };
+      return { kind: "triage_to_logic_gate", pin, logicGateID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID, accountEmail: triageMessageDrag.accountEmail };
     }
-    return { kind: "triage_to_node", pin, nodeID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID };
+    return { kind: "triage_to_node", pin, nodeID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID, accountEmail: triageMessageDrag.accountEmail };
   }
 
   if (pin.kind === "logic_gate") {

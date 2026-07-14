@@ -128,6 +128,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
 				ScopeType:                communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection),
 				UserID:                   grantContext.connection.UserID,
+				PersonalAccountEmail:     communicationsMessageReadStatusPersonalAccountEmailForConnection(grantContext.connection),
 				CompanyID:                grantContext.connection.CompanyID,
 				CompanyEmailConnectionID: grantContext.connection.CompanyEmailConnectionID,
 				SharedInboxID:            firstNonEmptyString(grantContext.sharedInboxIDs...),
@@ -296,56 +297,52 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID, accountScope string,
 	case "message.opened":
 		// Read-receipt status is enriched from the store on every response; the
 		// cached provider body and list payload remain valid.
-	default:
-		s.commCache.invalidateUser(userID)
+	}
+}
+
+func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope string, change nylasWebhookChange) {
+	switch change.Trigger {
+	case "folder.created", "folder.updated", "folder.deleted":
+		s.commCache.invalidateFoldersForAccountScope(accountScope)
+	case "message.created", "message.updated", "message.deleted":
+		s.commCache.invalidateFoldersForAccountScope(accountScope)
+		s.commCache.invalidateMessagePagesForAccountScope(accountScope)
+		s.commCache.invalidateMessageForAccountScope(accountScope, change.MessageID)
+	case "message.opened":
 	}
 }
 
 func (s *Server) applyCommunicationsWebhookChange(grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
-		return s.publishPersonalMailboxWebhookHint(grantContext.connection.UserID, change)
+		return s.publishPersonalMailboxWebhookHint(grantContext.connection.UserID, grantContext.connection.AccountEmail, change)
 	}
+	s.applyNylasWebhookCacheInvalidationForAccountScope(grantContext.cacheScope, change)
 	if len(grantContext.sharedInboxIDs) == 0 {
 		log.Printf("skipping shared communications webhook delivery without linked shared inbox company_id=%s company_email_connection_id=%s trigger=%s message_id=%s", grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, change.Trigger, change.MessageID)
 		return nil
 	}
-	invalidatedUsers := map[string]struct{}{}
 	for _, sharedInboxID := range grantContext.sharedInboxIDs {
 		sharedInboxID = strings.TrimSpace(sharedInboxID)
 		if sharedInboxID == "" {
 			continue
 		}
-		userIDs, err := s.communicationsWebhookSharedInboxAudience(grantContext.connection.CompanyID, sharedInboxID)
-		if err != nil {
-			return fmt.Errorf("resolve shared inbox audience %s: %w", sharedInboxID, err)
-		}
-		for _, userID := range userIDs {
-			userID = strings.TrimSpace(userID)
-			if userID == "" {
-				continue
-			}
-			if _, ok := invalidatedUsers[userID]; ok {
-				continue
-			}
-			invalidatedUsers[userID] = struct{}{}
-			s.applyNylasWebhookCacheInvalidation(userID, grantContext.cacheScope, change)
-		}
-		s.publishSharedMailboxWebhookHint(grantContext.connection.CompanyID, sharedInboxID, userIDs, change)
+		s.publishSharedMailboxWebhookHint(grantContext.connection.CompanyID, sharedInboxID, change)
 	}
 	return nil
 }
 
-func (s *Server) publishPersonalMailboxWebhookHint(userID string, change nylasWebhookChange) error {
+func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, change nylasWebhookChange) error {
 	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	accountEmail = normalizeEmailForCompare(accountEmail)
+	if userID == "" || !isRealtimeAccountEmail(accountEmail) {
 		return store.ErrInvalid
 	}
 	memberships, err := s.repo.ListUserMemberships(userID)
 	if err != nil {
 		return fmt.Errorf("load personal mailbox memberships: %w", err)
 	}
-	scope := realtimePersonalMailboxScope(userID)
+	scope := realtimePersonalMailboxScope(userID, accountEmail)
 	publishedCompanies := map[string]struct{}{}
 	for _, membership := range memberships {
 		companyID := strings.TrimSpace(membership.CompanyID)
@@ -361,14 +358,21 @@ func (s *Server) publishPersonalMailboxWebhookHint(userID string, change nylasWe
 	return nil
 }
 
-func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, userIDs []string, change nylasWebhookChange) {
+func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, change nylasWebhookChange) {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || sharedInboxID == "" {
 		return
 	}
 	scope := realtimeSharedMailboxScope(sharedInboxID)
-	s.publishRealtimeMessageToUsers(companyID, scope, userIDs, realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change))
+	s.publishRealtimeMessageToCurrentEntityAudience(
+		companyID,
+		scope,
+		store.EntityTypeSharedInbox,
+		sharedInboxID,
+		store.EntityPermissionView,
+		realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change),
+	)
 }
 
 func realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID string, change nylasWebhookChange) realtimeMailboxChangedMessage {

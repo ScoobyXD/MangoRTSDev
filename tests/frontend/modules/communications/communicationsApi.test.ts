@@ -18,8 +18,9 @@ import {
   getEmailSignature,
   getEmailThread,
   invalidateCommunicationsCache,
-  invalidateCommunicationsFolderCache,
+  invalidateCommunicationsMailboxCache,
   invalidateEmailMessageCache,
+  invalidateEmailThreadCache,
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
@@ -40,6 +41,7 @@ import {
   saveEmailSignature,
   saveEmailDraft,
   sendEmail,
+  settleCommunicationsMailboxMessageOverlays,
   unarchiveEmailMessage,
   updateEmailMessage,
   updateCommunicationsSharedInbox,
@@ -89,6 +91,7 @@ test("calendar RSVP uses message identity and shared mailbox scope", async () =>
       status: "maybe",
       companyID: " company-1 ",
       sharedInboxID: " shared-1 ",
+      accountEmail: "ignored@example.com",
     });
     assert.equal(response.rsvp_status, "maybe");
     assert.deepEqual(calls, [{
@@ -178,6 +181,7 @@ test("triage conversion payload can target a specific Kanban column", async () =
     await convertTriageMessagesToExplorerTarget({
       companyID: "company-1",
       sharedInboxID: " shared-1 ",
+      accountEmail: "ignored@example.test",
       target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
       messageIDs: [" msg-1 "],
       columnID: " review ",
@@ -290,7 +294,7 @@ test("email address parser supports comma and semicolon lists with display names
   ]);
 });
 
-test("communications stream helpers prepend one new inbox message without replacing the page", () => {
+test("local list merge helpers prepend one new inbox message without replacing the page", () => {
   const existing: EmailMessage[] = [
     message("old-1", { subject: "Old", folders: ["inbox"] }),
     message("old-2", { subject: "Older", folders: ["inbox"] }),
@@ -454,7 +458,7 @@ test("listCompanyUserGroups shares node-open reference reads and honors scoped i
   }
 });
 
-test("communications stream helpers do not inject new messages into paged or searched lists", () => {
+test("local list merge helpers do not inject new messages into paged or searched lists", () => {
   const existing = [message("old-1", { subject: "Old", folders: ["inbox"] })];
   const created = message("new-1", { subject: "Fresh", folders: ["inbox"] });
 
@@ -465,7 +469,7 @@ test("communications stream helpers do not inject new messages into paged or sea
   assert.equal(emailMessageMatchesListFilters(created, { mailbox: "primary", q: "invoice" }), false);
 });
 
-test("communications stream helpers remove updated messages that no longer match the active filter", () => {
+test("local list merge helpers remove updated messages that no longer match the active filter", () => {
   const existing = [message("read-1", { subject: "Read", unread: true, folders: ["inbox"] })];
   const updated = message("read-1", { subject: "Read", unread: false, folders: ["inbox"] });
 
@@ -494,7 +498,7 @@ test("message pages are ordered newest first by message date", async () => {
   }
 });
 
-test("communications stream helpers insert created messages by message date", () => {
+test("local list merge helpers insert created messages by message date", () => {
   const existing: EmailMessage[] = [
     message("newest", { date: 300, folders: ["inbox"] }),
     message("oldest", { date: 100, folders: ["inbox"] }),
@@ -571,6 +575,50 @@ test("logic gate placement patch keeps cached email rows visible", async () => {
     assert.equal(primaryFetches, 1);
     assert.deepEqual(primary.messages.map((item) => [item.id, item.logic_gate_count, item.logic_gate_ids]), [["msg-1", 1, ["gate-1"]]]);
     assert.deepEqual(all.messages.map((item) => [item.id, item.logic_gate_count, item.logic_gate_ids]), [["msg-1", 1, ["gate-1"]]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("account-only cache helpers never patch another personal account with the same provider message id", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = new URL(input.toString(), "http://mango.test");
+    const accountEmail = url.searchParams.get("account_email") ?? "";
+    const scopedMessage = message("same-provider-message-id", {
+      body: `Body for ${accountEmail}`,
+      folders: ["INBOX"],
+      thread_id: "same-thread-id",
+    });
+    if (url.pathname.endsWith("/same-provider-message-id")) return jsonResponse({ message: scopedMessage });
+    return jsonResponse({ messages: [scopedMessage] });
+  };
+  const accountA = { accountEmail: "account-a@example.test" };
+  const accountB = { accountEmail: "account-b@example.test" };
+  try {
+    await Promise.all([
+      listEmailMessages({ ...accountA, mailbox: "primary" }),
+      listEmailMessages({ ...accountB, mailbox: "primary" }),
+      getEmailMessage("same-provider-message-id", undefined, undefined, accountA),
+      getEmailMessage("same-provider-message-id", undefined, undefined, accountB),
+    ]);
+    patchEmailMessagesLogicGatePlacement(["same-provider-message-id"], "gate-a", accountA);
+    addLocalEmailReply("same-provider-message-id", message("sent-a", { folders: ["sent"] }), accountA);
+
+    const [detailA, detailB, pageA, pageB] = await Promise.all([
+      getEmailMessage("same-provider-message-id", undefined, undefined, accountA),
+      getEmailMessage("same-provider-message-id", undefined, undefined, accountB),
+      listEmailMessages({ ...accountA, mailbox: "primary" }),
+      listEmailMessages({ ...accountB, mailbox: "primary" }),
+    ]);
+    assert.deepEqual(detailA.logic_gate_ids, ["gate-a"]);
+    assert.deepEqual(detailA.local_replies?.map((reply) => reply.id), ["sent-a"]);
+    assert.equal(detailB.logic_gate_ids, undefined);
+    assert.equal(detailB.local_replies, undefined);
+    assert.deepEqual(pageA.messages[0]?.logic_gate_ids, ["gate-a"]);
+    assert.equal(pageB.messages[0]?.logic_gate_ids, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -675,6 +723,111 @@ test("read and archive overlays never cross personal and shared mailbox cache sc
     assert.deepEqual((await listEmailMessages(sharedParams)).messages.map((item) => item.id), []);
     assert.equal(personalFetches, 1);
     assert.equal(sharedFetches, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("realtime settlement lets canonical mail win only for the exact personal account or shared inbox", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const accountA = { mailbox: "primary" as const, limit: 25, companyID: "company-1", accountEmail: "a@example.com" };
+  const accountB = { mailbox: "primary" as const, limit: 25, companyID: "company-1", accountEmail: "b@example.com" };
+  const shared = { mailbox: "primary" as const, limit: 25, companyID: "company-1", sharedInboxID: "shared-1" };
+  const requestMailbox = (path: string) => {
+    const url = new URL(path, "https://mangorts.invalid");
+    return url.searchParams.get("shared_inbox_id")
+      ? `shared:${url.searchParams.get("shared_inbox_id")}`
+      : `personal:${url.searchParams.get("account_email")}`;
+  };
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    const mailbox = requestMailbox(path);
+    if (path.includes("/unarchive")) {
+      return jsonResponse({ message: message("primary-only", { subject: `Optimistic primary ${mailbox}`, folders: ["INBOX"] }) });
+    }
+    if (path.includes("/archive")) {
+      return jsonResponse({ message: message("collision-1", { subject: `Optimistic ${mailbox}`, folders: ["INBOX"] }) });
+    }
+    if (init?.method === "PUT") {
+      return jsonResponse({ message: message("collision-1", { subject: `Optimistic starred ${mailbox}`, folders: ["INBOX"], starred: true }) });
+    }
+    if (path.includes("mailbox=starred")) return jsonResponse({ messages: [] });
+    if (path.includes("mailbox=primary")) {
+      return jsonResponse({ messages: [message("collision-1", { subject: `Canonical ${mailbox}`, folders: ["INBOX"] })] });
+    }
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    await Promise.all([listEmailMessages(accountA), listEmailMessages(accountB), listEmailMessages(shared)]);
+    await Promise.all([
+      archiveEmailMessage("collision-1", undefined, "company-1", "a@example.com"),
+      archiveEmailMessage("collision-1", undefined, "company-1", "b@example.com"),
+      archiveEmailMessage("collision-1", "shared-1", "company-1"),
+    ]);
+
+    settleCommunicationsMailboxMessageOverlays(accountA, "collision-1");
+    invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
+    invalidateCommunicationsMailboxCache(accountB, { messagePages: true });
+    invalidateCommunicationsMailboxCache(shared, { messagePages: true });
+
+    assert.deepEqual(
+      (await listEmailMessages({ ...accountA, refresh: true })).messages.map((item) => item.subject),
+      ["Canonical personal:a@example.com"],
+      "the hinted account accepts its canonical provider result",
+    );
+    assert.deepEqual(
+      (await listEmailMessages({ ...accountB, refresh: true })).messages,
+      [],
+      "settling account A does not remove account B's optimistic archive",
+    );
+    assert.deepEqual(
+      (await listEmailMessages({ ...shared, refresh: true })).messages,
+      [],
+      "settling a personal account does not remove a shared-inbox overlay",
+    );
+
+    settleCommunicationsMailboxMessageOverlays(shared, "collision-1");
+    invalidateCommunicationsMailboxCache(shared, { messagePages: true });
+    assert.deepEqual(
+      (await listEmailMessages({ ...shared, refresh: true })).messages.map((item) => item.subject),
+      ["Canonical shared:shared-1"],
+      "the exact shared inbox can settle independently",
+    );
+    assert.deepEqual(
+      (await listEmailMessages({ ...accountB, refresh: true })).messages,
+      [],
+      "shared settlement still leaves the other personal account untouched",
+    );
+
+    await unarchiveEmailMessage("primary-only", undefined, "company-1", "a@example.com");
+    assert.equal(
+      (await listEmailMessages(accountA)).messages.some((item) => item.id === "primary-only"),
+      true,
+      "a successful local unarchive remains optimistic before a newer hint settles it",
+    );
+    settleCommunicationsMailboxMessageOverlays(accountA, "primary-only");
+    invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
+    assert.equal(
+      (await listEmailMessages({ ...accountA, refresh: true })).messages.some((item) => item.id === "primary-only"),
+      false,
+      "canonical primary absence wins after settlement",
+    );
+
+    await updateEmailMessage("collision-1", { starred: true }, undefined, "company-1", "a@example.com");
+    assert.deepEqual(
+      (await listEmailMessages({ ...accountA, mailbox: "starred" })).messages.map((item) => item.id),
+      ["collision-1"],
+      "a successful local star remains optimistic before a newer hint settles it",
+    );
+    settleCommunicationsMailboxMessageOverlays(accountA, "collision-1");
+    invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
+    assert.deepEqual(
+      (await listEmailMessages({ ...accountA, mailbox: "starred", refresh: true })).messages,
+      [],
+      "canonical starred absence wins after settlement",
+    );
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -1057,25 +1210,168 @@ test("folder invalidation keeps the replacement unread counts authoritative", as
   const staleResponse = deferred<Response>();
   const freshResponse = deferred<Response>();
   let calls = 0;
-  globalThis.fetch = (async () => {
+  const paths: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    paths.push(input.toString());
     calls += 1;
     return calls === 1 ? staleResponse.promise : freshResponse.promise;
   }) as typeof fetch;
   try {
-    const staleRead = listEmailFolders({ companyID: "company-1" });
-    invalidateCommunicationsFolderCache();
-    const freshRead = listEmailFolders({ companyID: "company-1" });
+    const scope = { companyID: "company-1", accountEmail: "owner@example.com" };
+    const staleRead = listEmailFolders(scope);
+    invalidateCommunicationsMailboxCache(scope, { folders: true });
+    const freshRead = listEmailFolders({ ...scope, refresh: true });
 
     freshResponse.resolve(jsonResponse({ folders: [{ id: "inbox", name: "Inbox", unread_count: 1 }] }));
     assert.equal((await freshRead)[0]?.unread_count, 1);
     staleResponse.resolve(jsonResponse({ folders: [{ id: "inbox", name: "Inbox", unread_count: 9 }] }));
     assert.equal((await staleRead)[0]?.unread_count, 9);
 
-    assert.equal((await listEmailFolders({ companyID: "company-1" }))[0]?.unread_count, 1);
+    assert.equal((await listEmailFolders(scope))[0]?.unread_count, 1);
     assert.equal(calls, 2);
+    assert.equal(paths[1], "/v1/communications/folders?company_id=company-1&account_email=owner%40example.com&refresh=true");
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
+  }
+});
+
+test("personal triage conversion selects the exact normalized account", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({
+      target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
+      board: { company_id: "company-1", board_id: "logic-gate:gate-1", logic_gate_id: "gate-1", title: "Gate", position: 1000, created_timestamp: "2026-05-20T00:00:00.000Z", updated_timestamp: "2026-05-20T00:00:00.000Z" },
+      cards: [],
+      nodes: [],
+      deleted_message_ids: ["msg-1"],
+    }, 201);
+  };
+  try {
+    await convertTriageMessagesToExplorerTarget({
+      companyID: "company-1",
+      accountEmail: " SECOND@Example.TEST ",
+      target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
+      messageIDs: ["msg-1"],
+    });
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/triage/convert?account_email=second%40example.test",
+      method: "POST",
+      body: {
+        company_id: "company-1",
+        target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
+        message_ids: ["msg-1"],
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("mailbox hint invalidation is exact across personal accounts and shared inboxes", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls = new Map<string, number>();
+  const accountA = { companyID: "company-1", accountEmail: "a@example.com" };
+  const accountB = { companyID: "company-1", accountEmail: "b@example.com" };
+  const shared = { companyID: "company-1", sharedInboxID: "shared-1" };
+  const requestKey = (url: URL) => {
+    const mailbox = url.searchParams.get("shared_inbox_id")
+      ? `shared:${url.searchParams.get("shared_inbox_id")}`
+      : `personal:${url.searchParams.get("account_email")}`;
+    return `${url.pathname}|${mailbox}`;
+  };
+  globalThis.fetch = (async (input) => {
+    const url = new URL(String(input), "https://mangorts.invalid");
+    const key = requestKey(url);
+    calls.set(key, (calls.get(key) ?? 0) + 1);
+    if (url.pathname === "/v1/communications/messages") {
+      return jsonResponse({ messages: [{ id: "same", subject: key, unread: false, starred: false }] });
+    }
+    if (url.pathname === "/v1/communications/messages/same") {
+      return jsonResponse({ message: { id: "same", subject: key, unread: false, starred: false, body: key } });
+    }
+    if (url.pathname === "/v1/communications/threads/thread-1") {
+      return jsonResponse({ thread: { id: "thread-1", message_ids: [key] } });
+    }
+    throw new Error(`unexpected_request:${url}`);
+  }) as typeof fetch;
+  try {
+    await Promise.all([
+      listEmailMessages(accountA),
+      listEmailMessages(accountB),
+      listEmailMessages(shared),
+      getEmailMessage("same", "company-1", undefined, { accountEmail: "a@example.com" }),
+      getEmailMessage("same", "company-1", undefined, { accountEmail: "b@example.com" }),
+      getEmailMessage("same", "company-1", "shared-1"),
+      getEmailThread("thread-1", "company-1", undefined, "a@example.com"),
+      getEmailThread("thread-1", "company-1", undefined, "b@example.com"),
+      getEmailThread("thread-1", "company-1", "shared-1"),
+    ]);
+
+    invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
+    await Promise.all([listEmailMessages(accountA), listEmailMessages(accountB), listEmailMessages(shared)]);
+    assert.equal(calls.get("/v1/communications/messages|personal:a@example.com"), 2);
+    assert.equal(calls.get("/v1/communications/messages|personal:b@example.com"), 1);
+    assert.equal(calls.get("/v1/communications/messages|shared:shared-1"), 1);
+
+    invalidateEmailMessageCache("same", "company-1", undefined, "a@example.com");
+    await Promise.all([
+      getEmailMessage("same", "company-1", undefined, { accountEmail: "a@example.com" }),
+      getEmailMessage("same", "company-1", undefined, { accountEmail: "b@example.com" }),
+      getEmailMessage("same", "company-1", "shared-1"),
+    ]);
+    assert.equal(calls.get("/v1/communications/messages/same|personal:a@example.com"), 2);
+    assert.equal(calls.get("/v1/communications/messages/same|personal:b@example.com"), 1);
+    assert.equal(calls.get("/v1/communications/messages/same|shared:shared-1"), 1);
+
+    invalidateEmailThreadCache("thread-1", "company-1", "shared-1");
+    await Promise.all([
+      getEmailThread("thread-1", "company-1", undefined, "a@example.com"),
+      getEmailThread("thread-1", "company-1", undefined, "b@example.com"),
+      getEmailThread("thread-1", "company-1", "shared-1"),
+    ]);
+    assert.equal(calls.get("/v1/communications/threads/thread-1|personal:a@example.com"), 1);
+    assert.equal(calls.get("/v1/communications/threads/thread-1|personal:b@example.com"), 1);
+    assert.equal(calls.get("/v1/communications/threads/thread-1|shared:shared-1"), 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("calendar RSVP selects the exact personal account", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({ status: "responded", rsvp_status: "yes", event_id: "event-1", calendar_id: "primary" });
+  };
+  try {
+    await respondToCalendarInvite({
+      messageID: "message-1",
+      status: "yes",
+      companyID: "company-1",
+      accountEmail: " SECOND@Example.COM ",
+    });
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/calendar-invites/respond?company_id=company-1&account_email=second%40example.com",
+      method: "POST",
+      body: { message_id: "message-1", status: "yes" },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -1226,18 +1522,33 @@ test("a fetched empty email body remains a valid detail-cache entry", async () =
   }
 });
 
-test("provider attachment downloads forward cancellation signals", async () => {
+test("provider attachment downloads preserve exact personal and shared mailbox scope", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
-  let observedSignal: AbortSignal | null | undefined;
-  globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
-    observedSignal = init?.signal;
+  const calls: Array<{ path: string; signal: AbortSignal | null | undefined }> = [];
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ path: input.toString(), signal: init?.signal });
     return new Response(new Blob(["attachment-bytes"]), { status: 200 });
   };
   try {
-    const blob = await downloadEmailAttachment("message-1", "attachment-1", "company-1", "shared-1", { signal: controller.signal });
-    assert.equal(observedSignal, controller.signal);
+    const blob = await downloadEmailAttachment("message-1", "attachment-1", "company-1", undefined, {
+      signal: controller.signal,
+      accountEmail: " SECOND@Example.COM ",
+    });
     assert.equal(await blob.text(), "attachment-bytes");
+    await downloadEmailAttachment("message-1", "attachment-1", "company-1", "shared-1", {
+      accountEmail: "ignored@example.com",
+    });
+    assert.deepEqual(calls, [
+      {
+        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&account_email=second%40example.com",
+        signal: controller.signal,
+      },
+      {
+        path: "/v1/communications/messages/message-1/attachments/attachment-1?company_id=company-1&shared_inbox_id=shared-1",
+        signal: undefined,
+      },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
