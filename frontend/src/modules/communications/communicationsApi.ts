@@ -396,6 +396,7 @@ const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
 const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const RECENT_PRIMARY_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const PRIMARY_EXCLUDED_FOLDER_TOKENS = ["sent", "trash", "spam", "junk", "category:social", "category:promotions"] as const;
 const LOCAL_EMAIL_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-replies-v1";
 const LOCAL_EMAIL_THREAD_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-thread-replies-v1";
 const RECENT_STARRED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
@@ -1917,7 +1918,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 
   const mailbox = params.mailbox ?? "primary";
   if (mailbox === "primary") {
-    return messageIsArchived(message) || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+    return messageIsArchived(message) || messageIsExcludedFromPrimary(message);
   }
   if (mailbox === "archive") {
     return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
@@ -2457,8 +2458,12 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
   if (mailbox === "spam") return messageHasAnyFolder(message, ["spam", "\\spam", "junk", "\\junk"]);
-  if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
+  if (messageIsExcludedFromPrimary(message)) return false;
   return !messageHasFolderMetadata(message) || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
+}
+
+function messageIsExcludedFromPrimary(message: EmailMessage): boolean {
+  return messageHasAnyFolder(message, PRIMARY_EXCLUDED_FOLDER_TOKENS);
 }
 
 function messageIsArchived(message: EmailMessage): boolean {
@@ -2488,7 +2493,7 @@ function formatAddressesForSearch(addresses: EmailAddress[] | undefined): string
   return (addresses ?? []).map((address) => `${address.name ?? ""} ${address.email}`).join(" ");
 }
 
-function messageHasAnyFolder(message: EmailMessage, candidates: string[]): boolean {
+function messageHasAnyFolder(message: EmailMessage, candidates: readonly string[]): boolean {
   return candidates.some((candidate) => messageHasFolder(message, candidate));
 }
 

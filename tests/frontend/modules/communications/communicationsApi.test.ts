@@ -517,8 +517,24 @@ test("archive mailbox filter matches messages outside inbox but not trash or sen
 test("primary mailbox filter matches real inbox labels, not archived Gmail category labels", () => {
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "primary" }), true);
   assert.equal(emailMessageMatchesListFilters(message("starred-inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"], starred: true }), { mailbox: "primary" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("social", { folders: ["INBOX", "CATEGORY_SOCIAL"] }), { mailbox: "primary" }), false);
+  assert.equal(emailMessageMatchesListFilters(message("promotions", { folder_ids: ["INBOX", "CATEGORY_PROMOTIONS"] }), { mailbox: "primary" }), false);
   assert.equal(emailMessageMatchesListFilters(message("archived-category", { folders: ["CATEGORY_PERSONAL"] }), { mailbox: "primary" }), false);
   assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT", "INBOX"] }), { mailbox: "primary" }), false);
+});
+
+test("primary cache overlays never insert or retain social and promotions messages", () => {
+  for (const category of ["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS"]) {
+    const categorized = message(category, { folders: ["INBOX", category], starred: false });
+    assert.deepEqual(
+      mergeEmailMessageIntoMessageList([], categorized, { limit: 25, mailbox: "primary" }, { prependIfMissing: true }),
+      [],
+    );
+    assert.deepEqual(
+      mergeEmailMessageIntoMessageList([categorized], { ...categorized, starred: true }, { limit: 25, mailbox: "primary" }),
+      [],
+    );
+  }
 });
 
 test("starred mailbox filter only matches starred messages", () => {

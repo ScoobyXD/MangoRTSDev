@@ -2306,6 +2306,9 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 	if nylas.lastMessageGrantID != "grant-personal" {
 		t.Fatalf("personal message grant = %q, want grant-personal", nylas.lastMessageGrantID)
 	}
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions" {
+		t.Fatalf("personal Primary search_query_native = %q", nylas.lastQuery.SearchQueryNative)
+	}
 
 	sharedPath := "/v1/communications/messages?mailbox=primary&limit=5&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
 	req := httptest.NewRequest(http.MethodGet, sharedPath, nil)
@@ -2317,6 +2320,9 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 	}
 	if nylas.lastMessageGrantID != "grant-shared" {
 		t.Fatalf("shared message grant = %q, want grant-shared", nylas.lastMessageGrantID)
+	}
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions" {
+		t.Fatalf("shared Primary search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "shared-message") || strings.Contains(body, "personal-message") {
@@ -2662,20 +2668,142 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	nylas := &fakeNylasClient{messages: []NylasMessage{
+		{ID: "primary-message", Unread: true, Folders: []string{"INBOX", "CATEGORY_PERSONAL"}},
+		{ID: "social-message", Unread: true, Folders: []string{"INBOX", "CATEGORY_SOCIAL"}},
+		{ID: "promotions-message", Unread: true, FolderIDs: []string{"INBOX", "CATEGORY_PROMOTIONS"}},
+		{ID: "sent-message", Unread: true, Folders: []string{"SENT"}},
+	}}
+	server := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   nylas,
-	}).Routes()
+	})
+	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&q=from%3Aops%40example.com&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions from:ops@example.com is:unread" {
+	requestPage := func(requestPath string) NylasMessagePage {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+		req.Header.Set("Authorization", token)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200 body=%s", requestPath, rec.Code, rec.Body.String())
+		}
+		var page NylasMessagePage
+		if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	assertPrimaryOnly := func(label string, page NylasMessagePage) {
+		t.Helper()
+		if len(page.Messages) != 1 || page.Messages[0].ID != "primary-message" {
+			t.Fatalf("%s Primary messages = %+v, want only primary-message", label, page.Messages)
+		}
+		if page.NextPageToken != "next-token" {
+			t.Fatalf("%s Primary next page token = %q, want next-token", label, page.NextPageToken)
+		}
+	}
+
+	path := "/v1/communications/messages?mailbox=primary&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
+	assertPrimaryOnly("fresh", requestPage(path))
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions (from:ops@example.com OR category:social) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
 		t.Fatalf("query = %+v, want Gmail-native inbox search only", nylas.lastQuery)
+	}
+	if cached, ok := server.commCache.getMessagePage(
+		user.UserID,
+		"grant:grant-1",
+		nylas.lastQuery,
+		communicationsMessagesCacheTTL,
+		time.Now().UTC(),
+	); !ok || len(cached.Messages) != 1 || cached.Messages[0].ID != "primary-message" {
+		t.Fatalf("cached Primary page = %+v present=%v, want only primary-message", cached.Messages, ok)
+	}
+	assertPrimaryOnly("cached", requestPage(path))
+	if nylas.messageCalls != 1 {
+		t.Fatalf("message calls after cached Primary read = %d, want 1", nylas.messageCalls)
+	}
+	assertPrimaryOnly("refreshed", requestPage(path+"&refresh=true"))
+	if nylas.messageCalls != 2 {
+		t.Fatalf("message calls after refreshed Primary read = %d, want 2", nylas.messageCalls)
+	}
+
+	allPath := "/v1/communications/messages?mailbox=all&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
+	allPage := requestPage(allPath)
+	if len(allPage.Messages) != 4 {
+		t.Fatalf("All messages = %+v, want Primary, Social, Promotions, and Sent", allPage.Messages)
+	}
+	if nylas.messageCalls != 3 {
+		t.Fatalf("message calls after All read = %d, want 3", nylas.messageCalls)
+	}
+}
+
+func TestCommunicationsDefaultMailboxOrdinaryLoadAlwaysExcludesSocialAndPromotions(t *testing.T) {
+	t.Parallel()
+
+	query, err := new(Server).applyCommunicationsMailboxQuery(
+		context.Background(),
+		domain.UserEmailConnection{Provider: "google"},
+		NylasMessageQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.SearchQueryNative != "in:inbox -category:social -category:promotions" {
+		t.Fatalf("ordinary Primary search_query_native = %q", query.SearchQueryNative)
+	}
+	if query.Mailbox != "primary" || query.Query != "" || query.Unread != nil || query.FolderID != "" || query.ThreadID != "" || query.Starred != nil {
+		t.Fatalf("ordinary Primary query = %+v, want one Gmail-native bucket expression", query)
+	}
+}
+
+func TestCommunicationsGoogleThreadListBypassesMailboxNativeSearch(t *testing.T) {
+	t.Parallel()
+
+	unread := true
+	starred := true
+	query, err := new(Server).applyCommunicationsMailboxQuery(
+		context.Background(),
+		domain.UserEmailConnection{Provider: "google"},
+		NylasMessageQuery{
+			Limit:             12,
+			PageToken:         "thread-page",
+			FolderID:          "INBOX",
+			ThreadID:          "thread-1",
+			Query:             "invoice",
+			SearchQueryNative: "in:anywhere",
+			Mailbox:           "primary",
+			CompanyID:         "company-1",
+			SharedInboxID:     "shared-inbox-1",
+			Unread:            &unread,
+			Starred:           &starred,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.ThreadID != "thread-1" || query.Mailbox != "all" || query.Limit != 12 || query.PageToken != "thread-page" ||
+		query.CompanyID != "company-1" || query.SharedInboxID != "shared-inbox-1" {
+		t.Fatalf("thread query lost paging or mailbox scope: %+v", query)
+	}
+	if query.SearchQueryNative != "" || query.Query != "" || query.Unread != nil || query.Starred != nil || query.FolderID != "" {
+		t.Fatalf("thread query = %+v, want structured thread_id mode only", query)
+	}
+	threadPage := filterGooglePrimaryMessagePage(
+		domain.UserEmailConnection{Provider: "google"},
+		query,
+		NylasMessagePage{Messages: []NylasMessage{
+			{ID: "received", Folders: []string{"INBOX", "CATEGORY_SOCIAL"}},
+			{ID: "sent", Folders: []string{"SENT"}},
+		}},
+	)
+	if len(threadPage.Messages) != 2 {
+		t.Fatalf("thread page = %+v, want complete received and sent history", threadPage.Messages)
 	}
 }
 
@@ -2707,7 +2835,7 @@ func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=archive&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts (invoice) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -2743,7 +2871,7 @@ func TestCommunicationsSpamMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=spam&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:spam invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:spam (invoice) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -2779,7 +2907,7 @@ func TestCommunicationsAllMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=all&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:anywhere (invoice) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
@@ -2815,7 +2943,7 @@ func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=starred&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "is:starred invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "is:starred (invoice) is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.Starred != nil {
@@ -2933,6 +3061,15 @@ func TestCommunicationsCacheIncludesStarredMessagesInSourceMailboxes(t *testing.
 	}
 	if !nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-3", Folders: []string{"SPAM"}}, NylasMessageQuery{Mailbox: "spam"}) {
 		t.Fatal("spam cache matcher excluded a spam message")
+	}
+	for _, category := range []string{"CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS"} {
+		categorized := NylasMessage{ID: "categorized", Starred: true, Folders: []string{"INBOX", category}}
+		if nylasMessageMatchesCachedPageQuery(categorized, NylasMessageQuery{Mailbox: "primary"}) {
+			t.Fatalf("primary cache matcher included %s message", category)
+		}
+		if !nylasMessageMatchesCachedPageQuery(categorized, NylasMessageQuery{Mailbox: "starred"}) {
+			t.Fatalf("starred cache matcher excluded %s message", category)
+		}
 	}
 }
 

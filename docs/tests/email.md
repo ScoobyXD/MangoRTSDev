@@ -6,6 +6,7 @@ Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/modules/editor/richTextEditing.test.ts` covers rich email HTML serialization, spacing, indentation, lists, links, highlight sanitization, and safe sanitization; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers exact compose/signature flush submission, unified signature mounting, shared highlight controls, and signature hydration/save ordering; backend communications and attachment handler tests cover provider send boundaries, S3 attachment resolution, email draft attachment authorization, and rejection of embedded inline file bytes from durable draft/signature writes. Broader draft/signature persistence endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
+- Mailbox query-mode tests in `backend/internal/http/communications_handlers_test.go`, `backend/internal/http/nylas_client_test.go`, and `tests/frontend/modules/communications/communicationsApi.test.ts` cover exact Google Primary bucketing, native/structured parameter exclusivity, thread precedence, preview-only response normalization, and Primary cache-overlay exclusions.
 - Thread viewer parity and Reply All focus are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; recipient deduplication/mailbox exclusion by `tests/frontend/modules/communications/emailRecipients.test.ts`; semantic reply-draft identity by `tests/frontend/pages/home/homeMailDrafts.test.ts`; and calendar RSVP request construction by `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
 - Automatic signature insertion, rich-body deduplication, signature-only draft detection, mailbox scope keys, and personal/shared signature request scope are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
@@ -23,7 +24,7 @@ Required regression scenario:
 - Attach an email from a node text box, delete that box, reopen the node with no live text boxes, and open the email from the node-header counter/list.
 - Confirm the count and projection remain, the standalone attached-email organizer renders its list/folders and retained thread, no replacement text box is created, and a view-only user can open it without receiving edit controls.
 
-EMAIL1 - Mango email drafts are Mango application records, not Nylas provider drafts and not browser-only state.
+EMAIL1 - Mango email drafts are Mango application records, not Nylas provider drafts and not browser-only state. Personal and shared Drafts tabs render exact-scope `communications_email_drafts` rows, with only the fallback behavior allowed by EMAIL2; they never list the Gmail/Nylas Draft mailbox.
 EMAIL2 - Browser `localStorage` may be used only as a company/user-keyed fallback mirror for drafts and signatures. Every view filters it to the exact active personal account or shared inbox; after a successful database read, only rows explicitly marked pending sync may migrate, and stale/unmarked local rows cannot resurrect deleted or revoked drafts.
 EMAIL3 - Personal draft and signature rows are scoped to the actor's personal `user_email_connections` tuple of `user_id` plus `account_email`.
 EMAIL4 - Shared draft and signature rows are scoped to `shared_inbox_id`; `shared_inboxes` remains the Mango permission/resource wrapper and points to `company_email_connections` for provider grant plumbing.
@@ -73,6 +74,8 @@ EMAIL46 - An unread card always has the unread dot and thicker frame. Pointer or
 EMAIL47 - Draft scope columns are immutable across upsert conflicts, soft deletion, and known-ID reuse. List/get/delete store predicates include exact scope, shared account email is canonicalized from the inbox, and cross-user/account/inbox IDs cannot be read, taken over, reassigned, updated, or deleted.
 EMAIL48 - An email-card thread icon appears on the left only when the sanitized canonical/loaded message count is greater than one; thread-ID presence alone is not proof of a multi-message conversation.
 EMAIL49 - Locally persisted sent-reply fallback data is keyed by company, authenticated user, personal account/shared inbox, source message, and thread. When a provider send response omits thread ID, exact reply-target metadata supplies it before the enriched reply is persisted under the thread key; no local reply cache crosses users or mailboxes.
+EMAIL50 - Google Primary always means `in:inbox -category:social -category:promotions`. User search is grouped and unread-only is folded into that same native expression so advanced `OR` searches cannot widen the mailbox bucket. The backend response boundary plus backend/frontend cache reconciliation apply the same Primary exclusion, so fresh, refreshed, cached, and optimistic star/read paths cannot leak Social or Promotions into Primary. The messages remain eligible for All and, when starred, Starred.
+EMAIL51 - Nylas message-list serialization has mutually exclusive query modes. A Gmail-native mailbox request sends only `search_query_native`, `limit`, and optional `page_token`; it omits `select`, `thread_id`, `q`, `in`, `unread`, `starred`, and every other structured filter. A thread-history request uses structured `thread_id` mode without `search_query_native`, while ordinary non-native lists retain the selected-field projection. Native response supersets are normalized back to Mango's preview-only list shape so body/detail hydration, mailbox membership, ordering, pagination, and account/shared-inbox scope do not change.
 
 ## Scenarios
 
@@ -322,3 +325,25 @@ Expected:
 - The unread dot/frame and visible count clear immediately on pointer/Enter/Space open and stay cleared after success; a failed provider write rolls back and reports the error. The selected full-card surface remains distinct.
 - The row shows a thread icon only for the proven multi-message conversation.
 - Every draft operation and attachment authorization uses one immutable exact scope. Personal owner and shared view/edit distinctions hold; cross-scope known IDs cannot expose content or mutate scope, spoofed shared account data is ignored, and stale browser mirrors cannot reappear as another scope's drafts.
+
+### Scenario EMAIL-S12: Mailbox Buckets, Thread Query Mode, And Database Drafts
+
+Business logic covered:
+- EMAIL1
+- EMAIL3
+- EMAIL4
+- EMAIL18
+- EMAIL22
+- EMAIL50
+- EMAIL51
+
+Given:
+- A Google personal or shared mailbox contains Primary, Social, Promotions, starred, sent, archived, and spam messages.
+- The user loads Primary, All, Starred, Archive, Spam, a multi-message thread, and the exact personal/shared Drafts tab.
+
+Expected:
+- Primary uses `in:inbox -category:social -category:promotions` on fresh ordinary loads, `refresh=true`, cached responses, and after local reconciliation; Social and Promotions never appear there.
+- All remains `in:anywhere`, Starred remains `is:starred`, and Archive/Spam retain their existing Gmail-native expressions. Search text is grouped and unread-only is folded into the one native expression, so user operators cannot widen the selected bucket.
+- Every native provider request contains only `search_query_native`, `limit`, and optional `page_token`; the returned Mango list remains preview-only even if the provider returns extra body/content fields.
+- Thread previews use `thread_id`, `select`, `limit`, and optional `page_token` without native mailbox search. Authoritative thread `message_ids` remain the source of truth: members absent from bounded previews are recovered immediately by exact ID, while preview-resolved older bodies hydrate through per-card detail reads on expand or Expand all.
+- Opening Drafts makes no provider message-list request. Personal Drafts shows only the authenticated user and active account; Shared Drafts shows only the selected shared inbox according to its view/edit permissions.
