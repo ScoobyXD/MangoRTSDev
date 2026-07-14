@@ -25,13 +25,7 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 
 ### Required model, reasoning, and speed settings
 
-When Jonat asks a project/Local task in the Codex desktop app to create, spawn, or start a new worktree, match the launcher's current runtime settings unless he explicitly requests different settings.
-
-- The required current profile is GPT-5.6 Sol (`gpt-5.6-sol`) with `ultra` reasoning in Fast mode.
-- When the app task-creation control accepts model and reasoning overrides, pass `model: "gpt-5.6-sol"` and `thinking: "ultra"` explicitly. Never omit them and allow a new worktree task to fall back to the default Medium reasoning setting.
-- Fast mode is an execution service tier, not a prompt instruction. Preserve or explicitly select the launcher's active Fast/priority service tier through the available app/configuration control. Do not claim that a worker is in Fast mode merely because the words "Fast mode" were added to its prompt.
-- If a future task-creation control exposes a speed or service-tier argument, pass the active Fast setting explicitly. If it does not, verify that the persisted/current Fast/priority tier is active so the new task inherits it.
-- State the selected model, reasoning effort, and speed tier in the worker prompt and in the launcher's creation confirmation.
+Whatever the original task's model and speed settings were, and reasoning settings were, just copy and use that exact same setting for the work tree agent. 
 
 ### Default: create the worker, then stop without integration
 
