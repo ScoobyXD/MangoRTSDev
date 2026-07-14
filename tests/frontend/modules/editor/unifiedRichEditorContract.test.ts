@@ -1165,7 +1165,7 @@ test("signature Save persists the exact serialized editor HTML returned by flush
   assert.match(flushImplementation, /editorRef\.current \? serializeEditorDocumentHTML\(editorRef\.current\) : lastAppliedValueRef\.current/);
   assert.match(flushImplementation, /return nextValue/);
   assert.match(unifiedRichEditorSurface, /flush: \(\) => flushDocumentSave\(\)/);
-  assert.match(unifiedRichEditorSurface, /if \(lastAppliedValueRef\.current === value && attachmentHydrationContextKeyRef\.current === hydrationContextKey\) return/);
+  assert.match(unifiedRichEditorSurface, /attachmentHydrationContextKeyRef\.current === attachmentHydrationContextKey[\s\S]{0,160}attachmentHydrationCleanupRef\.current/);
   assert.doesNotMatch(unifiedRichEditorSurface, /editorHasFocus/);
   assert.match(unifiedRichEditorSurface, /restoreSelectionForHydrationRef\.current\?\.\(editor\);\s*const selectionOffsets = getEditorSelectionOffsets\(editor\)/);
   assert.match(unifiedRichEditorSurface, /setEditorSelectionByOffsets\(editor, selectionOffsets\.start, selectionOffsets\.end\)/);
@@ -1362,4 +1362,28 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.match(handlers, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*borderRadius: 8/);
   assert.match(editorImages, /payload\[declaredImageType\] = blobPromise/);
   assert.match(editorImages, /createStandaloneImageClipboardHTML\(portableSource/);
+});
+
+test("signature attachment previews restart after editor lifecycle replay and expose durable states", () => {
+  const unified = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+  const editorStyles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+
+  assert.match(unified, /attachmentHydrationContextKeyRef\.current === attachmentHydrationContextKey[\s\S]{0,160}attachmentHydrationCleanupRef\.current/);
+  assert.match(unified, /const hydrationCleanup = attachmentHydrationCleanupRef\.current/);
+  assert.match(unified, /return \(\) => \{[\s\S]{0,180}hydrationCleanup\?\.\(\)[\s\S]{0,180}attachmentHydrationCleanupRef\.current = null/);
+  assert.doesNotMatch(unified, /useEffect\(\(\) => \(\) => \{\s*attachmentHydrationCleanupRef/);
+  assert.match(unified, /onError: \(\) => editorImageAttachmentErrorRef\.current/);
+  assert.match(homeParts, /eagerEditorImageHydration/);
+
+  assert.match(editorImages, /EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE/);
+  assert.match(editorImages, /image\.style\.objectFit = "contain"/);
+  assert.match(editorImages, /setEditorImageFrameHydrationState\(frame, "loading"\)/);
+  assert.match(editorImages, /image\.onload = \(\) =>/);
+  assert.match(editorImages, /image\.onerror = \(\) =>/);
+  assert.match(editorImages, /retryDelay === undefined[\s\S]{0,260}setEditorImageFrameHydrationState\(frame, "error"\)/);
+  assert.match(editorImages, /setEditorImageFrameDisplaySource\(frame, editorAttachmentImageSource\(attachmentID\)\)/);
+  assert.match(editorStyles, /data-mango-editor-image-hydration="loading"/);
+  assert.match(editorStyles, /content: "Preview unavailable"/);
 });

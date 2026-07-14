@@ -196,6 +196,7 @@ ST167 - Shared folder metadata is owned by company plus exact shared inbox, inde
 ST168 - Signed shared message/folder webhooks distinguish legitimate zero-delivery from authorization infrastructure failure. No subscriber or no currently authorized viewer is acknowledged as a no-op. Existence/audience timeout or repository error releases deduplication and returns a retryable failure so a transient authorization outage does not permanently lose the exact-inbox hint. Retrying the same `message.opened` payload reuses its first receipt timestamp and does not inflate the signal count.
 ST169 - Shared Triage conversation headers show only the subject. Collapsed messages show sender/date/snippet and hide From/To/Cc/Bcc; activating the accessible disclosure reveals that exact message's labeled participants, full body, attachments, and actions without changing reply target, provider thread membership, or source inbox.
 ST170 - Ordinary shared-inbox compose/reply, due scheduled-draft execution, and collaboration shared-draft send all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green Undo row appears in the established triage notice area with a right-to-left countdown; Undo sends no provider request and preserves the durable draft/revision; for a due scheduled draft it also clears the persisted send time so the scheduler cannot retry it, while expiry dispatches once through the exact shared grant and existing collaboration claim/idempotency path.
+ST171 - Shared Triage uses the same responsive mail-control row as My Triage: compact search controls on the left, visible unread count plus Unread only and accessible Newest/Oldest ordering on the right, and clean wrapping at narrow widths. Newest first is the default. Ordering applies only to the current filtered/condensed page, does not change provider request identity or archive-page membership, and remains exact-shared-inbox scoped while search and unread-only filtering compose normally.
 
 ## Scenarios
 
@@ -897,3 +898,20 @@ Expected:
 - The overall header shows only the subject. Collapsed rows hide recipient details, while expanding one row reveals only that message's From/To/Cc/Bcc, body, files, and exact-message actions.
 - Seen appears only from persisted provider open signals; the focused/hovered chip lists local occurrence times and states recipient identity unavailable rather than guessing.
 - The non-green Undo row appears immediately, no shared-send HTTP request starts for ten seconds, Undo prevents dispatch and preserves the draft/revision, a due draft is unscheduled durably, and expiry sends once through the exact shared source and existing authoritative claim path.
+
+### Scenario ST-S23: Responsive Shared Mail Controls And List Ordering
+
+Business logic covered:
+- ST43
+- ST111
+- ST166
+- ST171
+
+Given:
+- One exact shared inbox Primary page contains read and unread conversations with different timestamps.
+- The authorized viewer searches, enables Unread only, toggles Oldest/Newest ordering, and narrows the pane.
+
+Expected:
+- Shared Triage renders the same compact left search group and right unread/filter/order group as My Triage, wrapping cleanly without obscuring controls or changing authorization scope.
+- Newest is the initial visible/icon/accessible state; toggling changes all three to Oldest and back.
+- Search and unread-only remain exact-shared-inbox provider filters while ordering reverses only the already filtered/condensed fixed page, preserving page membership, selection, source inbox, and Archive page semantics.

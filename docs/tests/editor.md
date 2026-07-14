@@ -86,6 +86,7 @@ ED61 - Pasting one copied ordered/alphanumeric/bullet/checklist row at a collaps
 ED62 - A single-clicked node/project inline image exposes a small bottom-right download button while retaining its comment/create-node actions. Attachment-backed images can be turned into chat by reloading the original Mango attachment bytes. Copy publishes the richest standards-supported clipboard payload: an image MIME representation plus portable data-image HTML and filename text when Async Clipboard supports them, with the existing sanitized Mango HTML fallback for editor-to-editor copy.
 ED63 - Creating a node text box with the + action scrolls the new block into the visible workspace, focuses its rich editor, and places a usable caret at its end.
 ED64 - Turning selected text into chat keeps the source quote visibly annotated as soon as the chat composer opens and after the durable chat is created. The same canonical offset/quote fallback applies inside nested bullet and alphanumeric structures.
+ED65 - Unified-editor attachment hydration owns setup and cleanup in the same layout lifecycle. Cleanup replay cannot leave a durable `mango-attachment:` source stranded behind an already-applied-value guard: the authenticated hydration restarts whenever no active owner remains. Durable frames expose loading/ready/error state, hide native broken-image glyphs, use contain sizing, preserve the stored reference on failure, and retain double-click original-image viewing through its separately authorized loader.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1218,6 +1219,7 @@ Business logic covered:
 - ED58
 - ED59
 - ED60
+- ED65
 
 Given:
 - A user selects text that wraps from the right edge of one rendered line to the left edge of the next and also selects an ordinary inline range.
@@ -1228,4 +1230,5 @@ Expected:
 - Both selections expose Comment and persist quotes/offsets that re-highlight the exact canonical text.
 - Paste keeps useful list semantics but removes source positioning and keeps markers/content inside the editor border.
 - The larger signature editor switches coherently between Edit and read-only Preview, and its image displays through authenticated eager attachment hydration in both preview and compose.
+- Cleaning up and immediately replaying the editor lifecycle restarts exact-mailbox hydration; loading hides the durable protocol source, success uses contain sizing, and terminal failure shows Preview unavailable without losing the reference or double-click original view.
 - Sanitization still rejects unsafe attributes, public storage shortcuts, data URLs, and embedded file bytes.

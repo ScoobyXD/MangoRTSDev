@@ -1703,10 +1703,51 @@ export const accountEmailStyle: React.CSSProperties = {
 };
 
 export const searchRowStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 72px",
-  gap: 6,
+  display: "flex",
+  flexWrap: "wrap",
   alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minWidth: 0,
+};
+
+export const mailSearchControlsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(112px, 1fr) 64px",
+  alignItems: "center",
+  flex: "1 1 210px",
+  maxWidth: 250,
+  minWidth: 0,
+  gap: 6,
+};
+
+export const mailControlStatusStyle: React.CSSProperties = {
+  display: "flex",
+  flex: "1 1 200px",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  minWidth: 0,
+  gap: 9,
+};
+
+export const mailOrderButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 80,
+  minHeight: 30,
+  height: 30,
+  padding: "0 8px",
+  gap: 5,
+};
+
+export const mailOrderLabelStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
 };
 
 export const searchButtonStyle: React.CSSProperties = {

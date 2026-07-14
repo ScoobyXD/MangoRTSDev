@@ -117,6 +117,8 @@ EMAIL88 - Personal-account and shared-inbox signatures use a practical-height un
 EMAIL89 - A message is shown as Seen only from a persisted, exact-mailbox Nylas `message.opened` signal; merely listing, previewing, selecting, or displaying a Mango inbox/thread never creates a receipt. Each distinct provider-reported open timestamp is persisted and returned by the read-status API, and the compact Seen entity chip lists every available occurrence in the viewer's local date/time on hover or keyboard focus. Nylas open tracking is a tracking-pixel load rather than proof of a deliberate human click/read and does not identify which To/Cc/Bcc recipient caused the load, so Mango labels the person as unavailable instead of inventing identity; proxy/privacy behavior may create or suppress signals.
 EMAIL90 - Every outbound user-email entry point, including personal/shared compose, Reply, Reply All, node-attached reply, scheduled-draft execution, and collaboration-draft send, must enter one centralized ten-second dispatch gate before any provider-send HTTP request begins. Undo removes only that pending attempt, rejects its waiting caller with the typed undo result, and guarantees that dispatch cannot start; expiry removes the pending item once and executes the existing authoritative backend send path once. Double Undo is harmless, simultaneous attempts remain independent, in-app navigation and component unmount do not bypass or prematurely cancel the module-owned timer, and post-expiry provider errors retain normal error/draft behavior. Undoing an automatically due scheduled draft also clears and persists its send time so the scheduler cannot requeue it. Full document termination cannot dispatch a queued attempt because no HTTP request has started; surfaces with durable drafts retain them, while other surfaces follow their existing draft-persistence contract.
 EMAIL91 - While an outbound attempt is pending, Mango renders a neutral elevated Undo surface in the established top-of-triage notice area and in the node-attached reply dock when that is the active sender. Each pending attempt has its own clear Undo action, live seconds label, and rectangular progress fill anchored left so its right edge visibly depletes toward the left across the ten-second window; the Undo control and surface are not success-green.
+EMAIL92 - My Triage and Shared Triage share one responsive mailbox-list control row. Search remains a submitted exact-mailbox filter in a compact left group; unread count, Unread only, and an icon-plus-label ordering button form the right group. The ordering button visibly and accessibly reports Newest first or Oldest first, defaults to Newest first, and reverses only the current filtered/condensed page presentation without entering the provider filter key, changing thread identity, or changing fixed archive-page membership.
+EMAIL93 - A durable signature image begins in an explicit loading-preview state, obtains its display source only through the authenticated exact-mailbox attachment loader, uses contain sizing, and becomes visible only after the browser decodes that source. The hydration owner must restart after any setup/cleanup lifecycle replay, including React development replay, and revoke every superseded object URL. Final fetch/decode failure shows a non-broken Preview unavailable state while preserving the durable Mango reference and the independent authenticated original-image lightbox path.
 
 ## Scenarios
 
@@ -565,22 +567,28 @@ Expected:
 - Legitimate zero-recipient publication is acknowledged. Audience timeout/error releases webhook deduplication and returns failure so the same delivery can retry without double-counting an already-stored `message.opened` signal.
 - Empty-draft cleanup runs once only after the last all-failed lease. Any successful upload/link prevents a sibling failure from deleting that durable draft.
 
-### Scenario EMAIL-S20: Conversation Order And Signature Image Preview
+### Scenario EMAIL-S20: Mailbox And Conversation Order With Durable Signature Preview
 
 Business logic covered:
 - EMAIL80
 - EMAIL87
 - EMAIL88
+- EMAIL92
+- EMAIL93
 
 Given:
-- A conversation has several sent and received messages with deterministic timestamps.
-- The exact mailbox signature includes a durable Mango attachment image.
+- A My Triage or Shared Triage page and one selected conversation contain messages with deterministic timestamps.
+- Search and Unread only produce a smaller fixed mailbox page.
+- The exact mailbox signature includes a durable Mango attachment image, and editor hydration is cleaned up and replayed once.
 
 Expected:
-- The detail opens Newest first, the user can select Oldest first, and exact-message actions/loading remain attached to the same messages.
+- Mailbox controls default to Newest, expose the current/alternate state visibly and accessibly, and reverse only the filtered current page; search/unread request identity and page membership remain unchanged.
+- Conversation detail independently defaults to Newest and may switch to Oldest while exact-message actions/loading remain attached to the same messages.
 - Opening signature settings provides a practical editor plus explicit sanitized Preview, and switching modes does not change mailbox scope or saved content.
-- The signature image appears in settings preview and after insertion into compose through authenticated eager hydration.
-- No signature path stores public object URLs, data URLs, provider secrets, or attachment bytes in the rich body.
+- After lifecycle replay the signature image restarts authenticated eager hydration in settings and compose, displays with contain sizing only after decode, and keeps double-click original viewing.
+- Loading and terminal failure show explicit private states instead of a native broken thumbnail; failure preserves the durable Mango reference.
+- No signature path stores public object URLs, data URLs, provider secrets, or attachment bytes in the rich body, and cleanup revokes every display URL.
+
 ### Scenario EMAIL-S21: Open Receipts, Thread Disclosure, Unread Styling, And Universal Undo Send
 
 Business logic covered:

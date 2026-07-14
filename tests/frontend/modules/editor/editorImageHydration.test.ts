@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE,
+  EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE,
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   editorAttachmentImageSource,
   hydrateEditorAttachmentImageFrames,
@@ -12,6 +13,11 @@ import { prepareTextBlockImageFile } from "../../../../frontend/src/modules/edit
 
 class FakeImage {
   private readonly attributes = new Map<string, string>();
+  readonly style = { visibility: "" };
+  readonly complete = true;
+  readonly naturalWidth = 1;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
   getAttribute(name: string) { return this.attributes.get(name) ?? null; }
   set src(value: string) { this.attributes.set("src", value); }
   get src() { return this.attributes.get("src") ?? ""; }
@@ -28,6 +34,7 @@ class FakeSpan {
   }
   getAttribute(name: string) { return this.attributes.get(name) ?? null; }
   setAttribute(name: string, value: string) { this.attributes.set(name, value); }
+  removeAttribute(name: string) { this.attributes.delete(name); }
   querySelector(selector: string) { return selector === "img" || selector === "img[src]" ? this.image : null; }
 }
 
@@ -184,6 +191,36 @@ test("eager hydration loads compact signature previews without waiting for an ob
     assert.equal(calls, 1);
     assert.equal(frame.image.src, "blob:signature-logo");
     cleanup();
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
+
+test("signature image hydration survives an immediate lifecycle cleanup and replay", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: undefined });
+  try {
+    const frame = new FakeSpan("signature-lifecycle");
+    const root = new FakeRoot([frame]);
+    let calls = 0;
+    const load = async () => {
+      calls += 1;
+      return `blob:signature-lifecycle:${calls}`;
+    };
+
+    const firstCleanup = hydrateEditorAttachmentImageFrames(root as unknown as HTMLElement, load, { eager: true });
+    firstCleanup();
+    const replayCleanup = hydrateEditorAttachmentImageFrames(root as unknown as HTMLElement, load, { eager: true });
+    await flushPromises();
+
+    assert.equal(calls, 2);
+    assert.equal(frame.image.src, "blob:signature-lifecycle:2");
+    assert.equal(frame.getAttribute(EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE), "ready");
+    assert.equal(frame.image.style.visibility, "visible");
+    replayCleanup();
+    assert.equal(frame.image.src, editorAttachmentImageSource("signature-lifecycle"));
+    assert.equal(frame.getAttribute(EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE), "loading");
   } finally {
     Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
   }

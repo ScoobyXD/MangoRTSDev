@@ -169,6 +169,7 @@ MT141 - Personal folder loads are owned by company/user/account only. Changing l
 MT142 - Legacy personal `Seen` summaries are assigned to an exact account only for users with one stored personal connection. Ambiguous multi-account or orphan/no-stored-account broad rows are intentionally removed during cutover, never guessed into one account and never left as unreachable user-wide shadow rows.
 MT143 - My Triage conversation headers show only the subject. Collapsed messages show sender/date/snippet and hide From/To/Cc/Bcc; activating the accessible disclosure reveals that exact message's labeled participants, full body, attachments, and actions without changing reply target or thread membership.
 MT144 - Personal New, Reply, Reply All, Forward, and due scheduled-draft sends all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green Undo row appears in the existing triage notice area with a right-to-left countdown; Undo sends no provider request and keeps the durable draft/source available; for a due scheduled draft it also clears the persisted send time so the scheduler cannot retry it, while expiry dispatches once through the exact personal-account path.
+MT145 - My Triage uses one responsive mail-control row: a compact left-aligned search field and Search button, with the visible unread count, Unread only checkbox, and list-order control aligned to the right and wrapping cleanly at narrow widths. The list opens Newest first; the accessible icon/button exposes the current Newest/Oldest state and alternate action. Ordering is presentation-only over the current fixed page and composes with exact-account search and unread filtering without changing provider request identity, thread condensation, selection, or archive-page membership.
 
 ## Scenarios
 
@@ -737,3 +738,20 @@ Expected:
 - The overall header shows only the subject. Collapsed rows hide recipient details, while expanding one row reveals only that message's From/To/Cc/Bcc, body, files, and exact-message actions.
 - Seen appears only from persisted provider open signals; the focused/hovered chip lists local occurrence times and states that recipient identity is unavailable rather than guessing.
 - The non-green Undo row appears immediately, no personal-send HTTP request starts for ten seconds, Undo prevents dispatch and retains the draft, a due draft is unscheduled durably, and expiry sends once through the exact account.
+
+### Scenario MT-S18: Responsive Mail Controls And List Ordering
+
+Business logic covered:
+- MT21
+- MT45
+- MT86
+- MT145
+
+Given:
+- A personal Primary page contains read and unread conversations with different timestamps.
+- The user submits a search, enables Unread only, toggles Oldest/Newest ordering, and narrows the mail pane.
+
+Expected:
+- Search and Search stay compact on the left while unread count, Unread only, and the icon-plus-state order button align right on the same row or wrap as intact groups without overlap.
+- The control starts Newest, exposes current/alternate state to assistive technology and tooltip users, and changes the visible label/icon when toggled.
+- Search and unread-only remain exact-account provider filters; ordering reverses only the resulting current 12-conversation page and never changes its membership, selection, thread condensation, provider filter key, or Archive page action.
