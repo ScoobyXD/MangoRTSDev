@@ -8,6 +8,7 @@ Coverage Status:
 - Outbound email metadata preflight, exact 24,000,000-byte and zero-byte boundaries, authorization, lazy storage opening, deterministic multipart framing, exact stream lengths, cancellation, provider rejection, and cleanup are covered by `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go`; bounded query shape is covered by the attachment handler/store contract tests.
 - Direct-upload coverage must additionally prove bounded hashing, JSON-only Mango control requests, raw credential-free S3 PUTs, exact signed headers, progress/cancel/retry/resume, completed-part reconciliation, node-scoped deletion survival, and completed-only list/count refresh.
 - Business Logic Covered By Scenarios: 100%
+- Draft mutation leasing across preparation plus upload/link, mixed success, and final all-failed settlement is covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; a mounted ComposePanel toolbar-plus-inline race remains a higher-level coverage gap.
 - Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, draft/signature durable-inline guards, destination resource linking, and migration behavior are covered. `backend/internal/http/email_draft_attachment_scope_test.go` covers active/deleted exact and legacy draft links, wrong user/account, shared permission revocation, manager/admin bypass attempts, and independent sent-message survival; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers durable draft preparation before upload plus failure retention. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
 
 ## Business Logic
@@ -76,6 +77,7 @@ ATT42 - Outbound email has a separate aggregate limit of exactly 24,000,000 atta
 ATT43 - After outbound preflight succeeds, S3 bodies open lazily inside the admitted provider send and stream directly into a deterministic-length Nylas multipart request. Each returned object length must match the authorized metadata before reading; the stream is bounded to that exact size, detects short, long, and failing readers, and closes on success, failure, provider rejection, or cancellation. Outbound send creates neither base64 attachment copies nor a complete multipart buffer, while incoming Nylas MIME recovery and calendar attachment content remain unchanged.
 ATT44 - Every `email_draft` attachment list/content/send/edit authorization first proves that the exact draft exists and is not deleted. Personal operations are owner-only and new IDs include normalized account; legacy accountless user/draft IDs are owner-only read compatibility for a live draft and cannot mutate. Company manager/admin status is not a personal override. Shared reads require current View and mutations current Edit access to the exact live inbox/draft. Cross-user/account/inbox identifiers fail closed.
 ATT45 - Deleting an email draft immediately makes every draft-only attachment URL/link unreadable and immutable, including exact and legacy resource IDs and manager/admin bypass attempts. The attachment object or metadata need not be deleted when another live resource owns it: an independently linked `email_message`/sent attachment remains readable through that resource's authorization.
+ATT46 - Draft attachment mutation ownership spans durable preparation plus the complete upload or existing-attachment link operation. Concurrent mutations for one exact draft share preparation but retain independent active leases until each settles. Failure cleanup may delete an otherwise-empty draft only after the last lease ends and only when every mutation failed; while another lease remains active, or after any mutation succeeds, the draft stays live.
 
 ## Scenarios
 
@@ -362,3 +364,19 @@ Expected:
 - Authorization runs on every content request. A matching validator returns `304` before S3/object storage, uses private cache semantics and `nosniff`, and never exposes storage identifiers.
 - A derivative row whose object is missing falls back to the original once.
 - Existing-image repair is human-only, dry-run by default, requires company plus limit, reports a deterministic next cursor, cannot apply without the explicit confirmation guard, and exits nonzero after its report when apply has failures.
+
+### Scenario ATT-S13: Concurrent Draft Attachment Preparation And Cleanup
+
+Business logic covered:
+- ATT46
+
+Given:
+- Two inline-image, upload, or existing-link mutations begin against one otherwise-empty exact personal/shared draft.
+- Durable draft preparation finishes once, the first mutation fails, and the second remains in progress.
+- The second mutation is exercised once as a success and once as a failure.
+
+Expected:
+- Each mutation retains its lease through preparation and the complete upload/link operation.
+- The first failure cannot delete the draft while the second lease is active.
+- A successful sibling latches the group as successful and no later failure deletes the draft.
+- When both fail, only the final settlement requests one empty-draft cleanup.

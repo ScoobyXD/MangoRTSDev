@@ -1512,7 +1512,7 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 	flightGeneration, releaseAdmission := s.commCache.beginFolderGeneration(connection.UserID, cacheScope)
 	defer releaseAdmission()
 	flightKey := communicationsAccountScopedCacheKey(connection.UserID, cacheScope) + communicationsCacheKeySeparator + strconv.FormatBool(refresh) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsFolderFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsFolderFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if !refresh {
 			if cached, ok := s.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL, flightNow); ok {
@@ -1546,6 +1546,15 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 		}
 		return folders, nil
 	})
+	var result any
+	var flightErr error
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case completed := <-flightResult:
+		result = completed.Val
+		flightErr = completed.Err
+	}
 	if flightErr != nil {
 		return nil, flightErr
 	}
@@ -1569,7 +1578,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	flightGeneration, releaseAdmission := s.commCache.beginMessagePageGeneration(connection.UserID, cacheScope)
 	defer releaseAdmission()
 	flightKey := communicationsMessagePageCacheKey(connection.UserID, cacheScope, cacheQuery) + communicationsCacheKeySeparator + strconv.FormatBool(query.Refresh) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsMessagePageFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsMessagePageFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if !query.Refresh {
 			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, flightNow); ok {
@@ -1593,6 +1602,15 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 		s.commCache.setMessagePageIfGeneration(connection.UserID, cacheScope, cacheQuery, page, time.Now().UTC(), flightGeneration)
 		return page, nil
 	})
+	var result any
+	var flightErr error
+	select {
+	case <-ctx.Done():
+		return NylasMessagePage{}, ctx.Err()
+	case completed := <-flightResult:
+		result = completed.Val
+		flightErr = completed.Err
+	}
 	if flightErr != nil {
 		return NylasMessagePage{}, flightErr
 	}
@@ -1614,7 +1632,7 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	flightGeneration, releaseAdmission := s.commCache.beginMessageGeneration(connection.UserID, cacheScope, messageID)
 	defer releaseAdmission()
 	flightKey := communicationsMessageCacheKey(connection.UserID, cacheScope, messageID) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
-	result, flightErr, _ := s.communicationsMessageFlights.Do(flightKey, func() (any, error) {
+	flightResult := s.communicationsMessageFlights.DoChan(flightKey, func() (any, error) {
 		flightNow := time.Now().UTC()
 		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, flightNow); ok {
 			if messageNeedsRawMIMEAttachmentRecovery(cached) {
@@ -1646,6 +1664,15 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 		s.commCache.setMessageIfGeneration(connection.UserID, cacheScope, message, time.Now().UTC(), flightGeneration)
 		return message, nil
 	})
+	var result any
+	var flightErr error
+	select {
+	case <-ctx.Done():
+		return NylasMessage{}, ctx.Err()
+	case completed := <-flightResult:
+		result = completed.Val
+		flightErr = completed.Err
+	}
 	if flightErr != nil {
 		return NylasMessage{}, flightErr
 	}

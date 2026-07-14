@@ -275,7 +275,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			deletedByUserID := actor.User.UserID
 			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}}
-			capturedBoardIDs := s.captureKanbanBoardsForDeleteTargets(companyID, targets)
+			capturedBoardDeletes := s.captureKanbanBoardsForDeleteTargets(companyID, targets)
 			stop = timings.observeAccounted("source.transaction")
 			var result store.CompanyExplorerDeleteResult
 			var err error
@@ -294,7 +294,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			stop = timings.observeAccounted("events.publish.enqueue")
 			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
-			s.publishCapturedKanbanDeletes(companyID, capturedBoardIDs)
+			s.publishCapturedKanbanDeletes(companyID, capturedBoardDeletes)
 			stop()
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return

@@ -332,6 +332,66 @@ order by membership.user_id::text`, companyID, resourceType, resourceID, accessL
 	return userIDs, rows.Err()
 }
 
+func (r *PostgresRepo) ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error) {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if ctx == nil || companyID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
+		return false, nil, ErrInvalid
+	}
+
+	existsQuery := ""
+	switch resourceType {
+	case EntityTypeNode:
+		existsQuery = `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`
+	case EntityTypeLogicGate:
+		existsQuery = `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`
+	case EntityTypeSharedInbox:
+		existsQuery = `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`
+	default:
+		return false, nil, ErrInvalid
+	}
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, existsQuery, companyID, resourceID).Scan(&exists); err != nil {
+		return false, nil, err
+	}
+	if !exists {
+		return false, []string{}, nil
+	}
+
+	candidateUserIDs = cleanUUIDTextSlice(candidateUserIDs)
+	if len(candidateUserIDs) == 0 {
+		return true, []string{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+with requested(user_id) as (
+  select distinct unnest(string_to_array($5, ',')::uuid[])
+)
+select distinct requested.user_id::text
+from requested
+join company_memberships membership on membership.user_id=requested.user_id
+where (membership.company_id=$1::uuid or membership.role='dev_admin')
+  and mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, requested.user_id, $4::text)
+order by requested.user_id::text`, companyID, resourceType, resourceID, accessLevel, strings.Join(candidateUserIDs, ","))
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+	userIDs := []string{}
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return false, nil, err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return false, nil, err
+	}
+	return true, userIDs, nil
+}
+
 func validatePostgresCompatibilitySourceScope(ctx context.Context, tx effectiveAccessExecer, companyID, sourceType, sourceID string) error {
 	if ctx == nil || tx == nil || cleanUUIDText(companyID) == "" || strings.TrimSpace(sourceType) == "" || strings.TrimSpace(sourceID) == "" {
 		return ErrInvalid

@@ -5,6 +5,7 @@ Last updated: 2026-07-13
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, exact-scope authorization, resource existence/shape/limit admission, publication-time revocation, bounded concurrent stalled-client delivery, routing, and the Kanban lookup guard for RW23 and RW37-RW43. Frontend behavior tests exercise shared-socket acceptance/reconnect/late-handler semantics, mailbox first-acceptance/reconnect/event coalescing and navigation ownership, notification HTTP/socket ordering, coalescing, local-title and edit-buffer helpers, and RW15 publication-time cache convergence. A central source inventory rejects forbidden broad scopes while allowing the four approved surfaces, and one AppLayout guard proves installation of the committed-title cache reconciliation coordinator. These are not a full mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
+- RW45-RW48 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 
 ## Business Logic
 
@@ -52,6 +53,10 @@ RW41 - Node chat and Logic Gate Kanban publication re-resolve the current exact 
 RW42 - Home retains at most one exact mailbox scope: the selected connected personal account for My Triage or the selected mail-bearing shared inbox for Shared Triage. Shared root/headings/group rows/plain folders, Drafts, non-mail views, inaccessible resources, and inactive mailboxes retain no fallback mailbox subscription and issue no provider GET because of a hint. Navigation loads and subscribes the destination mailbox and cancels timers, pending work, and the old subscription. Equivalent shared-inbox metadata/callback replacement retains the existing exact company/scope subscription lifetime; only an actual target or mail-bearing transition reinstalls it.
 RW43 - First mailbox acceptance and reconnect acceptance each coalesce one canonical exact-mailbox folder/list reconciliation, closing the initial-list-to-subscription race. `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active list and folder metadata; folder create/update/delete hints reconcile folder metadata; selected detail reloads only when its message/thread is identified and that captured selection is still active when delayed/queued work executes. Exact cache invalidation and delayed request keys include company plus personal account/shared inbox, and obsolete or off-view work issues no provider read. Realtime reconciliation uses authoritative exact-key refreshes: it bypasses reusable mail caches, coalesces with same-key in-flight work, and generation-fences provider reads begun before invalidation from repopulating folder, page, or detail caches.
 RW44 - `POST /v1/communications/triage/convert` resolves the provider connection from exactly one source mailbox key. A personal conversion sends normalized `account_email` in the query and the backend verifies that account belongs to the authenticated user; a shared conversion sends `shared_inbox_id`, ignores/suppresses personal identity, and performs exact inbox permission and company-connection resolution. The drag payload, every Explorer/Kanban/project/pin handoff, and the same-browser committed-result event retain that same key.
+RW45 - A committed Logic Gate deletion publishes one `resource_deleted` hint to the exact mounted-board audience captured while the Logic Gate still existed and access was authoritative. Ordinary board events continue to reauthorize at publication time. The tombstone path must not perform a post-delete existence check that necessarily empties the audience, and it must not broaden delivery beyond pre-delete authorized local subscribers.
+RW46 - Publication-time entity existence and audience resolution are deadline-bound, limited to distinct users currently subscribed to the exact local scope, and fail closed. No-subscriber and no-current-authorized-recipient outcomes are successful no-ops; repository timeout or lookup failure is a distinct error. A shared provider webhook propagates that error, releases its deduplication receipt, and returns a retryable failure instead of acknowledging a lost hint. Retrying an identical `message.opened` delivery reuses the receipt's first timestamp so read-signal aggregation remains idempotent.
+RW47 - Backend folder, message-page, and message-detail singleflight keeps one shared provider leader per exact generation while every joined waiter observes its own context. Canceling a joined waiter returns promptly without canceling or duplicating the leader; the waiter releases its generation admission, the leader retains its own admission until completion, and only the still-current generation may cache the result.
+RW48 - Mailbox work uses separate ownership domains. Message-list/detail work may include mailbox tab, search, unread-only state, and selection generation; folder metadata uses only company plus exact mailbox scope; a queued provider mark-read is captured mutation intent rather than disposable list-refresh work. Navigation may detach stale UI results but cannot silently drop the mark-read command or let a prior scope overwrite the destination.
 
 ## Scenarios
 
@@ -399,3 +404,25 @@ Expected:
 - `message.created`, `message.updated` (including moves), and `message.deleted` reconcile only the active list/folders; folder events reconcile folders; selected detail reloads only for a directly named selected message/thread.
 - Payloads remain compact hints and canonical HTTP data remains authoritative.
 - Personal conversion requests retain normalized Account B `account_email` end to end and cannot fall back to Account A. Shared conversion requests retain only Shared Inbox A as the client request selector; the backend resolves its canonical company mailbox account after exact permission checks.
+
+### Scenario RW-S17: Bounded Audience Resolution And Independent Mail Waiters
+
+Business logic covered:
+- RW45
+- RW46
+- RW47
+- RW48
+
+Given:
+- An authorized user has a mounted Logic Gate board while another local connection lacks View access, and the Logic Gate is deleted.
+- A retained entity publisher has local subscribers plus unrelated company users, then its repository lookup stalls or fails.
+- A signed shared-mailbox delivery repeats after that transient lookup failure.
+- Two HTTP callers join one provider folder/page/detail read; the joined caller cancels while the leader remains active.
+- A mailbox filter transition occurs while folder work and provider mark-read intent are pending, followed separately by an exact scope transition.
+
+Expected:
+- The committed deletion sends one `resource_deleted` tombstone only to the pre-delete authorized mounted-board audience; ordinary events still resolve current existence/access.
+- Audience lookup receives only distinct exact-scope local subscriber IDs, obeys its deadline, and fails closed without scanning every company user.
+- No-subscriber/no-authorized results succeed, but shared lookup failure returns retryable failure and releases deduplication before the repeated delivery succeeds without duplicating its open-signal count.
+- The canceled waiter returns immediately without canceling or duplicating the leader and releases only its own cache-generation admission.
+- Filter transitions preserve exact-scope folder work and captured mark-read intent while invalidating stale list/detail presentation work; scope transitions reject every old-scope result.

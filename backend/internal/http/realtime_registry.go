@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"sort"
 	"strings"
 	"sync"
 )
@@ -201,6 +202,31 @@ func (r *realtimeSubscriptionRegistry) connectionSubscriptionCount(connectionID 
 
 func (r *realtimeSubscriptionRegistry) hasSubscribers(companyID, scope string) bool {
 	return r.scopeSubscriptionCount(companyID, scope) > 0
+}
+
+func (r *realtimeSubscriptionRegistry) scopeUserIDs(companyID, scope string) []string {
+	companyID = strings.TrimSpace(companyID)
+	scope = strings.TrimSpace(scope)
+	if r == nil || companyID == "" || scope == "" {
+		return []string{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[string]struct{}{}
+	for _, conn := range r.scopeConnections[realtimeScopeKey{companyID: companyID, scope: scope}] {
+		if conn == nil {
+			continue
+		}
+		if userID := strings.TrimSpace(conn.userID); userID != "" {
+			seen[userID] = struct{}{}
+		}
+	}
+	userIDs := make([]string, 0, len(seen))
+	for userID := range seen {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	return userIDs
 }
 
 func (r *realtimeSubscriptionRegistry) hasScopeTypeSubscribers(companyID, scopeType string) bool {

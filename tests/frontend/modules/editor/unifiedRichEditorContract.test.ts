@@ -16,7 +16,12 @@ import {
   UNIFIED_NODE_SHELL_SURFACE_CONTRACTS,
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
-import { withPreparedEditorAttachmentResource } from "../../../../frontend/src/modules/editor/editorAttachmentPreparation.js";
+import {
+  beginEditorAttachmentMutation,
+  finishEditorAttachmentMutation,
+  withPreparedEditorAttachmentResource,
+  type EditorAttachmentMutationState,
+} from "../../../../frontend/src/modules/editor/editorAttachmentPreparation.js";
 
 const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Format controls",
@@ -54,6 +59,71 @@ test("editor attachment mutations wait for resource preparation and stop when it
     /draft_not_durable/,
   );
   assert.equal(linked, false);
+});
+
+test("editor attachment lifecycle spans preparation and the complete mutation", async () => {
+  const events: string[] = [];
+  let releasePreparation!: () => void;
+  let releaseMutation!: () => void;
+  const preparationGate = new Promise<void>((resolve) => { releasePreparation = resolve; });
+  const mutationGate = new Promise<void>((resolve) => { releaseMutation = resolve; });
+  const work = withPreparedEditorAttachmentResource(
+    async () => {
+      events.push("prepare:start");
+      await preparationGate;
+      events.push("prepare:done");
+    },
+    async () => {
+      events.push("mutation:start");
+      await mutationGate;
+      events.push("mutation:done");
+      return "linked";
+    },
+    {
+      begin: () => { events.push("lease:begin"); },
+      finish: (succeeded) => { events.push(`lease:finish:${succeeded}`); },
+    },
+  );
+  assert.deepEqual(events, ["lease:begin", "prepare:start"]);
+
+  releasePreparation();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(events, ["lease:begin", "prepare:start", "prepare:done", "mutation:start"]);
+
+  releaseMutation();
+  assert.equal(await work, "linked");
+  assert.deepEqual(events, [
+    "lease:begin",
+    "prepare:start",
+    "prepare:done",
+    "mutation:start",
+    "mutation:done",
+    "lease:finish:true",
+  ]);
+});
+
+test("concurrent draft attachment leases clean up only after the last all-failed mutation", () => {
+  const key = "company:user:draft:account";
+  const mixedStates = new Map<string, EditorAttachmentMutationState>();
+  beginEditorAttachmentMutation(mixedStates, key);
+  beginEditorAttachmentMutation(mixedStates, key);
+  assert.deepEqual(mixedStates.get(key), { active: 2, succeeded: false });
+  assert.equal(finishEditorAttachmentMutation(mixedStates, key, false), false);
+  assert.deepEqual(mixedStates.get(key), { active: 1, succeeded: false });
+  assert.equal(finishEditorAttachmentMutation(mixedStates, key, true), false);
+  assert.equal(mixedStates.has(key), false, "the completed mixed group releases its bookkeeping");
+
+  beginEditorAttachmentMutation(mixedStates, key);
+  assert.equal(finishEditorAttachmentMutation(mixedStates, key, false), true, "a later independent all-failed group may clean up if the draft is still empty");
+  assert.equal(mixedStates.has(key), false);
+
+  const failedStates = new Map<string, EditorAttachmentMutationState>();
+  beginEditorAttachmentMutation(failedStates, key);
+  beginEditorAttachmentMutation(failedStates, key);
+  assert.equal(finishEditorAttachmentMutation(failedStates, key, false), false, "one active sibling prevents cleanup");
+  assert.equal(finishEditorAttachmentMutation(failedStates, key, false), true, "the final all-failed settlement owns cleanup");
+  assert.equal(failedStates.has(key), false);
 });
 
 function assertSharedToolbarControls(editorTabBarSource: string, preferencesSource: string) {

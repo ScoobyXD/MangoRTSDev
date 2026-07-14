@@ -83,6 +83,35 @@ func (r *failOnceWebhookMembershipRepo) ListUserMemberships(userID string) ([]do
 	return r.Repository.ListUserMemberships(userID)
 }
 
+type failOnceWebhookAudienceRepo struct {
+	store.Repository
+	mu       sync.Mutex
+	failures int
+	calls    int
+}
+
+func (r *failOnceWebhookAudienceRepo) ResolveEffectiveUsersForResource(
+	ctx context.Context,
+	companyID, resourceType, resourceID, accessLevel string,
+	candidateUserIDs []string,
+) (bool, []string, error) {
+	r.mu.Lock()
+	r.calls++
+	if r.failures > 0 {
+		r.failures--
+		r.mu.Unlock()
+		return false, nil, errors.New("temporary shared audience lookup failure")
+	}
+	r.mu.Unlock()
+	return r.Repository.ResolveEffectiveUsersForResource(ctx, companyID, resourceType, resourceID, accessLevel, candidateUserIDs)
+}
+
+func (r *failOnceWebhookAudienceRepo) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
 type blockingCommunicationsNylasClient struct {
 	*fakeNylasClient
 	blockingMu       sync.Mutex
@@ -4133,6 +4162,96 @@ func TestNylasWebhookDeliveryFailureForgetsReceiptSoProviderRetryCanRecover(t *t
 	second := send()
 	if second.Code != http.StatusOK {
 		t.Fatalf("retried delivery status=%d body=%s", second.Code, second.Body.String())
+	}
+}
+
+func TestSharedNylasWebhookAudienceFailureRetriesOpenedWithoutInflatingSignalCount(t *testing.T) {
+	baseRepo := store.NewMemoryRepo()
+	companyID := "70707070-7070-4070-8070-707070707199"
+	baseRepo.EnsureCompany(companyID, "Shared webhook retry company")
+	user := mustRealtimeAuthUser(t, baseRepo, companyID, "shared-webhook-retry", domain.RoleCompanyUser)
+	companyConnection, err := baseRepo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "retry-shared@example.com",
+		GrantID:           "retry-shared-grant",
+		Status:            "connected",
+		ConnectedByUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := baseRepo.CreateCommunicationsSharedInboxFolder(companyID, "", "Retry shared", "retry-shared@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseRepo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedInbox,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := &failOnceWebhookAudienceRepo{Repository: baseRepo, failures: 1}
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}})
+	defer server.Close()
+	networkConn := &recordingRealtimeNetConn{}
+	conn := &realtimeConnection{
+		id:        "shared-webhook-retry-connection",
+		companyID: companyID,
+		userID:    user.UserID,
+		conn:      networkConn,
+	}
+	server.realtimeRegistry.subscribe(conn, realtimeSharedMailboxScope(folder.FolderID))
+	defer conn.close()
+	handler := server.Routes()
+	body := `{"type":"message.opened","data":{"object":{"message_id":"retry-shared-message","thread_id":"retry-shared-thread","grant_id":"retry-shared-grant"}}}`
+
+	send := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+		req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	first := send()
+	if first.Code != http.StatusInternalServerError || !strings.Contains(first.Body.String(), "failed_to_deliver_email_change") {
+		t.Fatalf("first shared retryable delivery status=%d body=%s", first.Code, first.Body.String())
+	}
+	if messages := networkConn.messages(t); len(messages) != 0 {
+		t.Fatalf("failed shared audience lookup delivered messages: %+v", messages)
+	}
+	second := send()
+	if second.Code != http.StatusOK {
+		t.Fatalf("retried shared delivery status=%d body=%s", second.Code, second.Body.String())
+	}
+	if repo.callCount() != 2 {
+		t.Fatalf("shared audience calls = %d, want failed lookup plus retry", repo.callCount())
+	}
+	messages := networkConn.messages(t)
+	if len(messages) != 1 || messages[0]["message_id"] != "retry-shared-message" {
+		t.Fatalf("retried shared webhook messages = %+v, want one recovered hint", messages)
+	}
+	statuses, err := baseRepo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
+		ScopeType:                "shared",
+		CompanyID:                companyID,
+		CompanyEmailConnectionID: companyConnection.CompanyEmailConnectionID,
+		MessageIDs:               []string{"retry-shared-message"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 1 || statuses[0].SignalCount != 1 {
+		t.Fatalf("retried opened receipt = %+v, want one idempotent signal", statuses)
 	}
 }
 

@@ -12,18 +12,26 @@ const (
 	nylasWebhookReceiptMaxEntries = 2048
 )
 
+type nylasWebhookReceipt struct {
+	firstSeenAt time.Time
+	remembered  bool
+}
+
 type nylasWebhookReceiptCache struct {
 	mu   sync.Mutex
-	seen map[string]time.Time
+	seen map[string]nylasWebhookReceipt
 }
 
 func newNylasWebhookReceiptCache() *nylasWebhookReceiptCache {
-	return &nylasWebhookReceiptCache{seen: map[string]time.Time{}}
+	return &nylasWebhookReceiptCache{seen: map[string]nylasWebhookReceipt{}}
 }
 
-func (c *nylasWebhookReceiptCache) remember(payload []byte, now time.Time) (string, bool) {
+func (c *nylasWebhookReceiptCache) remember(payload []byte, now time.Time) (string, time.Time, bool) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	if c == nil || len(payload) == 0 {
-		return "", false
+		return "", now, false
 	}
 	sum := sha256.Sum256(payload)
 	key := hex.EncodeToString(sum[:])
@@ -31,12 +39,17 @@ func (c *nylasWebhookReceiptCache) remember(payload []byte, now time.Time) (stri
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.evictExpiredLocked(now)
-	if _, ok := c.seen[key]; ok {
-		return key, true
+	if receipt, ok := c.seen[key]; ok {
+		if receipt.remembered {
+			return key, receipt.firstSeenAt, true
+		}
+		receipt.remembered = true
+		c.seen[key] = receipt
+		return key, receipt.firstSeenAt, false
 	}
-	c.seen[key] = now
+	c.seen[key] = nylasWebhookReceipt{firstSeenAt: now, remembered: true}
 	c.evictOldestLocked(nylasWebhookReceiptMaxEntries)
-	return key, false
+	return key, now, false
 }
 
 func (c *nylasWebhookReceiptCache) forget(key string) {
@@ -44,13 +57,16 @@ func (c *nylasWebhookReceiptCache) forget(key string) {
 		return
 	}
 	c.mu.Lock()
-	delete(c.seen, key)
+	if receipt, ok := c.seen[key]; ok {
+		receipt.remembered = false
+		c.seen[key] = receipt
+	}
 	c.mu.Unlock()
 }
 
 func (c *nylasWebhookReceiptCache) evictExpiredLocked(now time.Time) {
-	for key, seenAt := range c.seen {
-		if now.Sub(seenAt) > nylasWebhookReceiptTTL {
+	for key, receipt := range c.seen {
+		if now.Sub(receipt.firstSeenAt) > nylasWebhookReceiptTTL {
 			delete(c.seen, key)
 		}
 	}
@@ -60,10 +76,10 @@ func (c *nylasWebhookReceiptCache) evictOldestLocked(maxEntries int) {
 	for len(c.seen) > maxEntries {
 		oldestKey := ""
 		var oldestTime time.Time
-		for key, seenAt := range c.seen {
-			if oldestKey == "" || seenAt.Before(oldestTime) {
+		for key, receipt := range c.seen {
+			if oldestKey == "" || receipt.firstSeenAt.Before(oldestTime) {
 				oldestKey = key
-				oldestTime = seenAt
+				oldestTime = receipt.firstSeenAt
 			}
 		}
 		if oldestKey == "" {

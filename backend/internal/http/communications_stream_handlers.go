@@ -81,7 +81,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "invalid_webhook_json")
 		return
 	}
-	receiptKey, duplicate := s.nylasWebhooks.remember(body, time.Now().UTC())
+	receiptKey, receiptFirstSeenAt, duplicate := s.nylasWebhooks.remember(body, time.Now().UTC())
 	if duplicate {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -123,7 +123,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		if change.Trigger == "message.opened" && strings.TrimSpace(change.MessageID) != "" {
 			signalAt := change.OccurredAt.UTC()
 			if signalAt.IsZero() {
-				signalAt = time.Now().UTC()
+				signalAt = receiptFirstSeenAt
 			}
 			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
 				ScopeType:                communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection),
@@ -327,7 +327,9 @@ func (s *Server) applyCommunicationsWebhookChange(grantContext communicationsWeb
 		if sharedInboxID == "" {
 			continue
 		}
-		s.publishSharedMailboxWebhookHint(grantContext.connection.CompanyID, sharedInboxID, change)
+		if err := s.publishSharedMailboxWebhookHint(grantContext.connection.CompanyID, sharedInboxID, change); err != nil {
+			return fmt.Errorf("publish shared mailbox %s webhook hint: %w", sharedInboxID, err)
+		}
 	}
 	return nil
 }
@@ -358,14 +360,14 @@ func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, 
 	return nil
 }
 
-func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, change nylasWebhookChange) {
+func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, change nylasWebhookChange) error {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || sharedInboxID == "" {
-		return
+		return store.ErrInvalid
 	}
 	scope := realtimeSharedMailboxScope(sharedInboxID)
-	s.publishRealtimeMessageToCurrentEntityAudience(
+	_, err := s.publishRealtimeMessageToCurrentEntityAudienceResult(
 		companyID,
 		scope,
 		store.EntityTypeSharedInbox,
@@ -373,6 +375,7 @@ func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string
 		store.EntityPermissionView,
 		realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change),
 	)
+	return err
 }
 
 func realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID string, change nylasWebhookChange) realtimeMailboxChangedMessage {
@@ -437,15 +440,6 @@ func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnection(connectio
 		ids = append(ids, sharedInboxID)
 	}
 	return ids, nil
-}
-
-func (s *Server) communicationsWebhookSharedInboxAudience(companyID, sharedInboxID string) ([]string, error) {
-	companyID = strings.TrimSpace(companyID)
-	sharedInboxID = strings.TrimSpace(sharedInboxID)
-	if companyID == "" || sharedInboxID == "" {
-		return nil, store.ErrInvalid
-	}
-	return s.repo.ListEffectiveUsersForResource(companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
 }
 
 func firstStringValue(values map[string]any, keys ...string) string {

@@ -4,6 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
+- KB125 is covered by `backend/internal/http/realtime_audience_hardening_test.go`, including the Logic Gate tombstone exception and post-delete current-audience reauthorization for a surviving board after Node deletion.
 - Business Logic Covered By Automated Tests: Partial (frontend Kanban command/helper coverage and saved-view backend coverage exist; unified node popup fullscreen inset/search-hide source contracts are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 ## Scope
@@ -158,6 +159,7 @@ KB121 - The dedicated Logic Gate work version changes for gate/header/default/pe
 KB122 - Logic Gate boards and columns remain synthesized contract data rather than persisted legacy Kanban board/column rows; a response-contract salt invalidates ETags when synthesized shapes or ordering constants change.
 KB123 - Ordinary `node_updated` processing performs no Kanban projection-row lookup when that company has no relevant local board subscriber. With a mounted board subscriber, it resolves affected boards and preserves exact board-scoped publication correctness.
 KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
+KB125 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked View access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
 
 ## Scenarios
 
@@ -505,3 +507,18 @@ Expected:
 - No projection replay or sequence-gap path exists.
 - The work payload contains the required minimal collections and none of the redundant collections.
 - Authorization is checked before any `304`, and canonical status rank preserves business ordering.
+
+### Scenario KB-S11: Logic Gate Deletion Closes A Mounted Board
+
+Business logic covered:
+- KB125
+
+Given:
+- A Logic Gate board is mounted by one currently authorized local viewer and one local connection without View access.
+- The delete command captures publication state, commits the Logic Gate deletion, and publishes afterward.
+
+Expected:
+- Audience capture occurs while the Logic Gate still exists and uses current exact View authorization.
+- The authorized mounted viewer receives one compact `resource_deleted` hint and closes/reconciles the board.
+- The unauthorized connection receives nothing.
+- Publication does not re-query the deleted resource, and ordinary non-tombstone board events continue to reauthorize at send time.

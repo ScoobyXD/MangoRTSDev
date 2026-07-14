@@ -31,6 +31,11 @@ export type HomeMailboxRequestOwner = Readonly<{
   requestKey: string;
   mailboxScopeKey: string;
 }>;
+export type HomeMailboxFolderOwner = Readonly<{
+  companyID: string;
+  mailboxScopeKey: string;
+}>;
+
 
 export type HomeMailboxCountOverrideKey = "primary" | "starred";
 export type HomeMailboxCountOverrides = Record<string, Partial<Record<HomeMailboxCountOverrideKey, number>>>;
@@ -57,13 +62,13 @@ type HomeMailboxRealtimeCoordinatorOptions = {
 };
 
 type HomeMailboxFolderLoadCoordinatorOptions = {
-  isOwnerCurrent: (owner: HomeMailboxRequestOwner) => boolean;
-  load: (owner: HomeMailboxRequestOwner, refresh: boolean) => boolean | Promise<boolean>;
+  isOwnerCurrent: (owner: HomeMailboxFolderOwner) => boolean;
+  load: (owner: HomeMailboxFolderOwner, refresh: boolean) => boolean | Promise<boolean>;
   onError?: (cause: unknown) => void;
 };
 
 type HomeMailboxFolderLoadRequest = {
-  owner: HomeMailboxRequestOwner;
+  owner: HomeMailboxFolderOwner;
   refresh: boolean;
 };
 
@@ -86,6 +91,29 @@ export function homeMailboxRequestOwnerIsCurrent(
     && !!owner.mailboxScopeKey
     && owner.requestKey === current.requestKey
     && owner.mailboxScopeKey === current.mailboxScopeKey;
+}
+
+export function homeMailboxFolderOwnerIsCurrent(
+  owner: HomeMailboxFolderOwner,
+  current: HomeMailboxFolderOwner,
+): boolean {
+  return !!owner.companyID.trim()
+    && !!owner.mailboxScopeKey.trim()
+    && owner.companyID.trim() === current.companyID.trim()
+    && owner.mailboxScopeKey.trim() === current.mailboxScopeKey.trim();
+}
+
+export function cancelHomeMailboxListRequestTimers(
+  timerIDs: Set<number>,
+  exactMutationTimerByKey: ReadonlyMap<string, number>,
+  clearTimer: (timerID: number) => void,
+): void {
+  const exactMutationTimerIDs = new Set(exactMutationTimerByKey.values());
+  for (const timerID of Array.from(timerIDs)) {
+    if (exactMutationTimerIDs.has(timerID)) continue;
+    clearTimer(timerID);
+    timerIDs.delete(timerID);
+  }
 }
 
 export function homeMailboxCountKey(mailboxScopeKey: string): string {
@@ -119,8 +147,8 @@ export function createHomeMailboxFolderLoadCoordinator(options: HomeMailboxFolde
   const states = new Map<string, HomeMailboxFolderLoadState>();
   let disposed = false;
 
-  const ownersMatch = (left: HomeMailboxRequestOwner, right: HomeMailboxRequestOwner) => (
-    homeMailboxRequestOwnerIsCurrent(left, right)
+  const ownersMatch = (left: HomeMailboxFolderOwner, right: HomeMailboxFolderOwner) => (
+    homeMailboxFolderOwnerIsCurrent(left, right)
   );
   const resolveQueued = (
     queued: HomeMailboxFolderLoadState["queued"],
@@ -167,8 +195,10 @@ export function createHomeMailboxFolderLoadCoordinator(options: HomeMailboxFolde
   };
 
   return {
-    request(owner: HomeMailboxRequestOwner, refresh = false): Promise<boolean> {
-      const scopeKey = homeMailboxCountKey(owner.mailboxScopeKey);
+    request(owner: HomeMailboxFolderOwner, refresh = false): Promise<boolean> {
+      const companyID = owner.companyID.trim();
+      const mailboxScopeKey = owner.mailboxScopeKey.trim();
+      const scopeKey = companyID && mailboxScopeKey ? `${companyID.length}:${companyID}${mailboxScopeKey}` : "";
       if (disposed || !scopeKey || !options.isOwnerCurrent(owner)) return Promise.resolve(false);
       let state = states.get(scopeKey);
       if (!state) {
@@ -188,7 +218,7 @@ export function createHomeMailboxFolderLoadCoordinator(options: HomeMailboxFolde
         if (state) state.queued = { owner, refresh, waiters: [resolve] };
       });
     },
-    cancelObsolete(currentOwner: HomeMailboxRequestOwner) {
+    cancelObsolete(currentOwner: HomeMailboxFolderOwner) {
       for (const [scopeKey, state] of states) {
         if (state.queued && !ownersMatch(state.queued.owner, currentOwner)) {
           resolveQueued(state.queued, false);
@@ -303,7 +333,13 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
   let inFlight = false;
 
   const mergeScheduled = (current: ScheduledRefresh | null, next: ScheduledRefresh): ScheduledRefresh => {
-    if (!current || current.requestKey !== next.requestKey) return next;
+    if (!current) return next;
+    if (current.requestKey !== next.requestKey) {
+      return {
+        ...next,
+        plan: { ...next.plan, folders: current.plan.folders || next.plan.folders },
+      };
+    }
     return {
       requestKey: current.requestKey,
       plan: mergePlans(current.plan, next.plan),
@@ -312,14 +348,19 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
   };
 
   const start = (scheduled: ScheduledRefresh) => {
-    if (disposed || !options.isRequestCurrent(scheduled.requestKey)) return;
+    if (disposed) return;
     if (inFlight) {
       queued = mergeScheduled(queued, scheduled);
       return;
     }
-    const plan = scheduled.plan.selectedDetail && !selectionMatches(scheduled.detailOwner, options.getSelection())
-      ? { ...scheduled.plan, selectedDetail: false }
-      : scheduled.plan;
+    const requestIsCurrent = options.isRequestCurrent(scheduled.requestKey);
+    const plan = {
+      folders: scheduled.plan.folders,
+      messageList: scheduled.plan.messageList && requestIsCurrent,
+      selectedDetail: scheduled.plan.selectedDetail
+        && requestIsCurrent
+        && selectionMatches(scheduled.detailOwner, options.getSelection()),
+    };
     if (!hasRefreshWork(plan)) return;
     inFlight = true;
     let result: void | Promise<void>;

@@ -28,6 +28,10 @@ The shared client tracks acceptance per live scope. A later mounted handler join
 
 Backend WebSocket writes have a bounded deadline. A publish batch uses at most 16 concurrent writers while preserving per-connection write safety and process-local publish order, so stalled clients do not multiply webhook latency serially. Failed writes close and remove dead connections. Operational metrics distinguish attempted, delivered, failed, no-subscriber, and no-authorized-subscriber outcomes.
 
+Publication-time resource authorization is deadline-bounded and evaluates only distinct users actually subscribed to that exact process-local scope. A missing resource or no currently authorized subscriber is a successful empty result; repository failure or timeout is an error. Retained ordinary events fail closed, and a signed shared-mailbox webhook converts that error into a retryable response instead of acknowledging a lost wake-up.
+Retryable webhook receipt state retains the signed payload's first-seen timestamp for its bounded deduplication window. A repeated `message.opened` signal with that identical timestamp merges idempotently, so an audience-infrastructure retry cannot inflate read evidence.
+
+
 Subscription admission is intentionally bounded and ephemeral. Scope syntax and length are validated, every resource-backed scope must resolve an existing same-company resource even when an administrator has an authorization override, and one connection may retain at most 16 distinct subscriptions. Duplicate subscriptions are idempotent and do not consume another slot. No subscription rows are stored durably.
 
 ## Authorization
@@ -37,6 +41,7 @@ Subscription admission is intentionally bounded and ephemeral. Scope syntax and 
 - A board subscription requires effective View access to the existing same-company owning Logic Gate. Publication resolves that current audience again so a user whose access was revoked after subscribing receives no later board hint.
 - A personal mailbox subscription must match both the authenticated user and one currently connected account identified by its normalized account email. The former user-wide personal scope is invalid.
 - A shared mailbox subscription requires the exact existing mail-bearing shared inbox and current View access. Shared publication rechecks the current audience, so revoked viewers are excluded without reconnecting.
+- A committed Logic Gate deletion is the narrow board-publication exception: it captures the currently authorized local mounted-board audience before deletion and sends the compact `resource_deleted` tombstone after commit. It never broadens delivery, while avoiding a post-delete existence check that would make the event undeliverable.
 - HTTP authorization remains authoritative. There is no generic permission-change socket message.
 
 ## Immediate And Non-Live Freshness
@@ -65,15 +70,29 @@ Node chat continues to use its existing durable editor information/projection st
 
 Committed Node-card title changes, card add/remove/move/reorder, column changes, and other card-visible mutations publish `kanban.changed` to each affected mounted `board:{board_id}` scope. The initiating user applies the HTTP result locally; another mounted viewer routes first subscription acceptance, reconnect acceptance, and compact hints through one active refresh plus one queued-final bit, so an in-flight board read is neither overlapped nor aborted/restarted. Ordinary `node_updated` publication does not query Kanban projection rows when there are no relevant local board subscribers. There is no projection sequence, replay log, workspace echo, or permanent browser-replication queue.
 
+Logic Gate deletion captures the exact authorized local mounted-board audience while the resource still exists, commits the deletion, and then sends `resource_deleted` directly to that captured audience. This tombstone-only path is distinct from ordinary hints, which continue to resolve existence and current View access at publication time.
+
 ## Actively Viewed Mailbox
 
 Home owns at most one mailbox subscription: the selected personal account in My Triage or the exact selected mail-bearing Shared Triage inbox. Navigating to that mailbox performs the normal canonical load and installs its exact subscription; navigating to another account, inbox, plain folder, root, heading, grouping row, Drafts, or non-mail Home surface cancels pending timers/work and removes the old subscription. No fallback personal subscription is installed for a non-mail-bearing Shared Triage row, and an inactive mailbox hint issues no provider HTTP request.
 
+Mailbox work has distinct ownership domains. Folder metadata belongs to company plus the exact personal-account/shared-inbox scope. Message list/detail ownership may additionally include tab, search, unread-only, and selection state. A provider mark-read timer is captured mutation intent and is not disposable list-refresh work.
+
 Every first `subscription.accepted` and every reconnect acceptance performs one coalesced canonical folder/list reconciliation. This closes the interval between the initial list response and subscription acceptance. Acceptance and event bursts use one active request plus at most one necessary queued final request; delayed work captures the mailbox request key that scheduled it and is discarded if navigation makes that key obsolete.
+
+A presentation-filter change may invalidate list/detail work but keeps a valid exact-scope folder response and any folder reconciliation already queued. An exact mailbox-scope change invalidates both. Reconciliation that began under an old list filter may retain folder work only; it cannot apply the old list or detail result.
 
 Ordinary navigation may use exact-mailbox caches, but acceptance and hint reconciliation perform authoritative exact-key refreshes. A refresh joins or queues behind same-key in-flight work, bypasses reusable cache entries, and advances an exact-key generation so provider work begun before invalidation cannot repopulate stale folder, page, message, or thread state.
 
+Backend provider folder, page, and detail reads use generation-fenced singleflight. Every joined caller waits through its own context-aware select: canceling that caller returns promptly and releases only its admission, while the shared leader continues for remaining callers and caches only if its exact generation is still current.
+
 Provider `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active displayed list and folder metadata. `folder.created`, `folder.updated`, and `folder.deleted` hints reconcile folder metadata. A `message.opened` receipt hint refreshes only directly identified selected message/thread detail and never refreshes the list or folders. Other hints also refresh selected detail only when they identify that selected message or thread, so an unrelated new message does not refetch the open detail. Cache invalidation is limited to the exact company, account/shared inbox, message, thread, pages, and folders represented by the hint.
+
+Opening an unread message may optimistically update the captured exact mailbox and queue provider mark-read. Ordinary navigation can suppress stale visible-state application but cannot cancel the provider command while retaining a false read overlay; terminal session suppression releases both ownership and overlay state.
+
+Personal read-receipt summaries use `user_id:normalized_account_email`. Cutover data keyed only by user is merged into an exact scope only for a user with one stored personal connection. Multi-account and no-account broad rows are deliberately removed as ambiguous history rather than guessed or retained as unreachable data.
+
+Compose attachment preparation and upload/link share a per-draft mutation lease. Empty-draft failure cleanup waits for the final concurrent lease and runs only if every mutation failed; any successful mutation latches the draft as live for that group.
 
 Mailbox messages carry only scope, trigger, and compact provider identifiers. They never carry provider credentials, message bodies, attachment bytes, or durable mail state. Canonical HTTP reads remain authoritative. Delivery remains process-local; no Redis, broker, distributed pub/sub, replay, or polling loop is introduced.
 

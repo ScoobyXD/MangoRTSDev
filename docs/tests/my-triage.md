@@ -152,6 +152,9 @@ MT124 - Personal read-on-open timers, optimistic overlays, and mutation response
 MT125 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT126 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
 MT127 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
+MT128 - A personal read-on-open provider command survives ordinary mailbox-tab, search, unread-only, Home-view, and account navigation under its captured exact account. Navigation may prevent its completion from mutating the new visible list or selection, but it cannot cancel the command while retaining a local read overlay. Identical provider message IDs in another account remain independent.
+MT129 - Personal folder loads are owned by company/user/account only. Changing list presentation filters while the request is active accepts the valid folder response and starts no duplicate replacement; changing the exact personal account rejects the old response and loads the destination account.
+MT130 - Legacy personal `Seen` summaries are assigned to an exact account only for users with one stored personal connection. Ambiguous multi-account or orphan/no-stored-account broad rows are intentionally removed during cutover, never guessed into one account and never left as unreachable user-wide shadow rows.
 
 ## Scenarios
 
@@ -616,3 +619,19 @@ Expected:
 - Each personal draft API operation requires the exact authenticated user/account scope. User B cannot list, fetch, overwrite, move, delete, or access attachments for User A's draft even when the draft ID is known, and a successful remote load cannot resurrect an unmarked stale browser draft.
 - Recoverable errors retain pending local drafts; only explicit revocation/deletion purges the exact scope. Out-of-order loads cannot overwrite newer loads, saves, deletes, or another personal account.
 - Compose persists the live exact-account draft before attachment upload. Deleting it denies draft-scoped attachment access to every actor, while the independent sent-message link stays valid.
+
+### Scenario MT-S13: Personal Navigation Ownership And Exact Receipt Cutover
+
+Business logic covered:
+- MT128
+- MT129
+- MT130
+
+Given:
+- Account A queues provider mark-read and starts a folder request, then list filters change and the user later selects Account B.
+- Legacy personal receipt summaries exist for singleton-account, multi-account, and orphan users with no stored account connection.
+
+Expected:
+- Account A's provider command still executes under its captured scope but cannot patch Account B's visible state.
+- A list-filter change accepts Account A's valid folder result without another request; the account change rejects it and loads Account B.
+- Only singleton history is copied to `user_id:normalized_account_email`; ambiguous and orphan broad history is explicitly removed.

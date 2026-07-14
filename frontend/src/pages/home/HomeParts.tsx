@@ -27,6 +27,7 @@ import {
 import { downloadEmailAttachment, parseEmailAddressList, respondToCalendarInvite, type CalendarInviteRSVPStatus, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
+import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
@@ -5015,6 +5016,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const bodyEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
   const signatureEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
   const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null, bcc: null });
+  const attachmentMutationStatesRef = React.useRef<Map<string, EditorAttachmentMutationState>>(new Map());
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
@@ -5036,6 +5038,30 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const [signatureTextAlignment, setSignatureTextAlignment] = React.useState<EditorTextAlignment>("left");
   const apiBase = readAuthConfig().apiBase;
   const attachmentRequestJSON = React.useMemo(() => defaultAttachmentRequestJSON(apiBase), [apiBase]);
+  const attachmentMutationKey = (value: ComposeState) => JSON.stringify([
+    companyID.trim(),
+    currentUserID.trim(),
+    value.draftID.trim(),
+    value.sharedInboxID.trim(),
+    value.accountEmail.trim().toLowerCase(),
+  ]);
+  const createAttachmentMutationLifecycle = (value: ComposeState) => {
+    const key = attachmentMutationKey(value);
+    return {
+      begin: () => beginEditorAttachmentMutation(attachmentMutationStatesRef.current, key),
+      finish: (succeeded: boolean) => {
+        if (finishEditorAttachmentMutation(attachmentMutationStatesRef.current, key, succeeded)) {
+          onDiscardEmptyDraft(value);
+        }
+      },
+    };
+  };
+  const activeAttachmentMutationKey = attachmentMutationKey(compose);
+  React.useEffect(() => {
+    for (const [key, state] of attachmentMutationStatesRef.current) {
+      if (key !== activeAttachmentMutationKey && state.active === 0) attachmentMutationStatesRef.current.delete(key);
+    }
+  }, [activeAttachmentMutationKey]);
   const update = (patch: Partial<ComposeState> | ((current: ComposeState) => Partial<ComposeState>)) => {
     onChange((current) => ({
       ...current,
@@ -5209,8 +5235,12 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       setAttachmentError("Attachments are limited to 24 MB total.");
       return;
     }
+    const preparedTarget = { ...compose, draftID: cleanDraftID };
+    const attachmentMutationLifecycle = createAttachmentMutationLifecycle(preparedTarget);
+    attachmentMutationLifecycle.begin();
+    let attachmentMutationSucceeded = false;
     try {
-      const preparedCompose = await onEnsureDraft({ ...compose, draftID: cleanDraftID });
+      const preparedCompose = await onEnsureDraft(preparedTarget);
       const preparedSharedInboxID = preparedCompose.sharedInboxID.trim();
       const preparedAccountEmail = preparedCompose.accountEmail.trim().toLowerCase();
       const resourceID = mangoEmailDraftResourceID({
@@ -5240,16 +5270,17 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
         };
       }));
       const additions = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      attachmentMutationSucceeded = additions.length > 0;
       if (additions.length > 0) update((current) => ({ draftID: cleanDraftID, attachments: [...current.attachments, ...additions] }));
-      else onDiscardEmptyDraft(preparedCompose);
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
       if (failures.length > 0) {
         const first = failures[0]?.reason;
         setAttachmentError(first instanceof Error ? first.message : `${failures.length} attachment upload${failures.length === 1 ? "" : "s"} failed.`);
       }
     } catch (attachError) {
-      onDiscardEmptyDraft({ ...compose, draftID: cleanDraftID });
       setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to upload attachment.");
+    } finally {
+      attachmentMutationLifecycle.finish(attachmentMutationSucceeded);
     }
   };
   const removeAttachment = (attachmentID: string) => {
@@ -5402,12 +5433,12 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       resourceType: "email_draft" as const,
       resourceID: composeAttachmentResourceID,
       editorSurface: composeEditorSurfaceID,
+      mutationLifecycle: createAttachmentMutationLifecycle(compose),
       prepareResource: async () => {
         await onEnsureDraft(compose);
       },
       onError: (message: string) => {
         setAttachmentError(message);
-        onDiscardEmptyDraft(compose);
       },
     }
     : undefined;

@@ -179,6 +179,9 @@ ST150 - Shared read-on-open timers, optimistic overlays, and mutation responses 
 ST151 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
 ST152 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
 ST153 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
+ST154 - A shared read-on-open provider command survives ordinary mailbox-tab, search, unread-only, and Home-view navigation under its captured exact shared inbox. Its response is barred from a newly selected inbox/list/selection, but navigation cannot cancel the provider mutation while retaining a false optimistic overlay.
+ST155 - Shared folder metadata is owned by company plus exact shared inbox, independent of Primary/Starred/Sent, search, and unread-only filters. A filter transition accepts an in-flight exact-inbox folder response; an inbox transition rejects it and performs destination reconciliation.
+ST156 - Signed shared message/folder webhooks distinguish legitimate zero-delivery from authorization infrastructure failure. No subscriber or no currently authorized viewer is acknowledged as a no-op. Existence/audience timeout or repository error releases deduplication and returns a retryable failure so a transient authorization outage does not permanently lose the exact-inbox hint. Retrying the same `message.opened` payload reuses its first receipt timestamp and does not inflate the signal count.
 
 ## Scenarios
 
@@ -778,3 +781,19 @@ Expected:
 - A viewer may list/get only A's drafts and attachments; only an editor may create/update/delete or mutate draft attachments. A cannot enumerate or take over B/personal IDs, personal drafts never appear in Shared Triage, scope cannot be reassigned on conflict or soft-delete reuse, and a shared account-email spoof is replaced by the canonical inbox account.
 - Recoverable auth/provider/service/network errors retain pending drafts; only explicit revocation, deleted inbox, or non-mail-bearing scope purges A. Out-of-order loads cannot overwrite saves, deletes, B, or personal storage.
 - Compose persists the live exact-inbox draft before attachment upload. Permission revocation denies the former viewer, and draft deletion denies every draft-scoped actor including manager/admin attempts while the independent sent-message link stays valid.
+
+### Scenario ST-S18: Shared Navigation Ownership And Webhook Retry
+
+Business logic covered:
+- ST154
+- ST155
+- ST156
+
+Given:
+- Shared Inbox A queues provider mark-read and folder work, list filters change, and the user later selects Shared Inbox B.
+- A signed Shared Inbox A webhook runs with no subscribers, no authorized local viewer, and a transient audience lookup failure before redelivery.
+
+Expected:
+- Captured mark-read for A is not canceled by navigation and cannot patch B's visible state.
+- Filter changes preserve A's valid folder work; the exact-inbox change rejects it and loads B.
+- Empty audiences are acknowledged as legitimate no-ops. Lookup failure is returned as retryable failure, deduplication is released, and redelivery may publish after authorization recovers without counting an identical open signal twice.

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -221,6 +222,43 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 	out := mapKeys(seen)
 	sort.Strings(out)
 	return out, nil
+}
+
+func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error) {
+	companyID = strings.TrimSpace(companyID)
+	resourceID = strings.TrimSpace(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if ctx == nil || companyID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
+		return false, nil, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return false, nil, err
+	}
+
+	candidates := map[string]struct{}{}
+	for _, userID := range candidateUserIDs {
+		if userID = strings.TrimSpace(userID); userID != "" {
+			candidates[userID] = struct{}{}
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return false, nil, err
+	}
+	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
+		return false, []string{}, nil
+	}
+	userIDs := make([]string, 0, len(candidates))
+	for userID := range candidates {
+		if r.userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel) {
+			userIDs = append(userIDs, userID)
+		}
+	}
+	sort.Strings(userIDs)
+	return true, userIDs, nil
 }
 
 func (r *MemoryRepo) effectiveUserIDsForResourceLocked(companyID, resourceType, resourceID, accessLevel string) map[string]bool {
