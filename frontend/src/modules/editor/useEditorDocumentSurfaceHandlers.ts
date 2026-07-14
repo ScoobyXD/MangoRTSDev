@@ -4327,6 +4327,7 @@ export function useEditorDocumentSurfaceHandlers({
         "aria-modal": true,
         "aria-label": activeImagePreview.label,
         "data-mango-copyable-image": "true",
+        "data-mango-image-preview-backdrop": "translucent",
         onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => {
           if (event.target === event.currentTarget) setActiveImagePreview(null);
         },
@@ -4334,7 +4335,7 @@ export function useEditorDocumentSurfaceHandlers({
           position: "fixed",
           inset: 0,
           zIndex: 1,
-          background: "rgba(15,23,42,0.98)",
+          background: "rgba(15,23,42,0.82)",
           display: "grid",
           placeItems: "center",
           padding: 12,

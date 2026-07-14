@@ -682,8 +682,12 @@ test("shared toolbar hover and focus styling is scoped to each clickable control
   assert.doesNotMatch(formatGroupOpening, /outlineMenuAccent|active/);
   assert.match(editorTabBar, /const hovered = hoveredFormatControl === id && !formatControlsDisabled/);
   assert.match(editorTabBar, /const formatControlHoverHandlers = \(id: EditorFormatControlID\) => \(\{/);
-  assert.match(formatControlStyle, /background: active\s*\? `linear-gradient\(135deg, \$\{colorWithAlpha\(outlineMenuAccent, 0\.36\)\}, rgba\(94,234,212,0\.28\) 52%, rgba\(168,85,247,0\.24\)\)`/);
-  assert.match(formatControlStyle, /boxShadow: active\s*\? `inset 0 0 0 1px \$\{colorWithAlpha\(outlineMenuAccent, 0\.52\)\}, 0 0 8px \$\{colorWithAlpha\(outlineMenuAccent, 0\.18\)\}`/);
+  assert.match(editorTabBar, /const toolbarActiveBackground = [^;]*rgba\(92,238,255,0\.78\)[^;]*rgba\(183,124,255,0\.70\)/);
+  assert.match(editorTabBar, /const toolbarHoverBackground = "linear-gradient\(135deg, rgba\(255,255,255,0\.94\)[^"]*rgba\(92,238,255,0\.40\)[^"]*rgba\(183,124,255,0\.34\)/);
+  assert.match(editorTabBar, /const tabSelectedBackgroundVibrant = toolbarActiveBackground/);
+  assert.match(formatControlStyle, /background: active\s*\? toolbarActiveBackground/);
+  assert.match(formatControlStyle, /color: active \? "#0f172a" : surfaceText/);
+  assert.match(formatControlStyle, /boxShadow: active\s*\? `inset 0 0 0 1px \$\{colorWithAlpha\(outlineMenuAccent, 0\.78\)\}[^\n]*rgba\(183,124,255,0\.32\)`/);
   for (const controlID of ["decrease-font", "increase-font", "bold", "underline", "italic", "strikethrough", "highlight", "highlight-menu", "table"]) {
     const controlIndex = editorTabBar.indexOf(`data-mango-editor-format-control="${controlID}"`);
     const hoverIndex = editorTabBar.indexOf(`formatControlHoverHandlers("${controlID}")`, controlIndex);
@@ -784,6 +788,7 @@ test("italic, strikethrough, alignment, and table insertion route through the sh
   assert.match(editorSurfaceHandlers, /applyTextAlignment: \(alignment\) => \{[\s\S]*applyEditorTextAlignmentToRoot\(editor, alignment/);
   assert.match(editorTabBar, /aria-label="Italic"[\s\S]*aria-pressed=\{italicActive\}/);
   assert.match(editorTabBar, /aria-label="Strikethrough"[\s\S]*aria-pressed=\{strikethroughActive\}[\s\S]*onToggleStrikethrough\(\)/);
+  assert.match(editorTabBar, /data-mango-editor-format-control="strikethrough"[\s\S]*<span aria-hidden="true" style=\{\{ textDecoration: "line-through"[^}]*\}\}>A<\/span>/);
   assert.match(editorTabBar, /const label = `Align \$\{alignment\}`[\s\S]*aria-pressed=\{active\}/);
   assert.match(editorTabBar, /aria-label="Insert table"[\s\S]*if \(!formatControlsDisabled\) onInsertTable\(\)/);
 
@@ -996,6 +1001,8 @@ test("mentions, image preview and undo hydration, and retired table-cell control
   assert.match(editorSurfaceHandlers, /event\.key === "Backspace"[\s\S]*event\.key === "Delete"[\s\S]*applyAtomicMentionKeyboardEdit\(/);
 
   assert.match(imagePreview, /role: "dialog"[\s\S]*"aria-modal": true[\s\S]*position: "fixed"[\s\S]*inset: 0/);
+  assert.match(imagePreview, /"data-mango-image-preview-backdrop": "translucent"[\s\S]*background: "rgba\(15,23,42,0\.82\)"/);
+  assert.doesNotMatch(imagePreview, /background: "rgba\(15,23,42,0\.98\)"/);
   assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE[\s\S]*top: 18[\s\S]*right: 18[\s\S]*borderRadius: 8/);
   assert.match(imagePreview, /"aria-label": "Download image"[\s\S]*data-mango-image-preview-download[\s\S]*onClick: downloadActiveImagePreview/);
   assert.match(imagePreview, /width: "auto"[\s\S]*height: "auto"[\s\S]*maxWidth: "calc\(100vw - 32px\)"[\s\S]*maxHeight: "calc\(100vh - 32px\)"/);
