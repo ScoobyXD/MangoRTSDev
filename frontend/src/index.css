@@ -642,6 +642,30 @@ button, input, textarea, select {
   padding-left: 22px;
 }
 
+.editor-document-scroll ol[data-mango-editor-ordered-list="true"] {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 2px 0;
+  padding-inline-start: 32px;
+  list-style-position: outside;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  clear: both;
+}
+
+.editor-document-scroll ol[data-mango-editor-ordered-list="true"] ol[data-mango-editor-ordered-list="true"] {
+  margin: 2px 0;
+  padding-inline-start: 28px;
+}
+
+.editor-document-scroll ol[data-mango-editor-ordered-list="true"] > li {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding-inline-start: 4px;
+  overflow-wrap: anywhere;
+}
+
 .editor-document-scroll li[data-mango-editor-list-item] {
   position: relative;
   min-height: 1.55em;

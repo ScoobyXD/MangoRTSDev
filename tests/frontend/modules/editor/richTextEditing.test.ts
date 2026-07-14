@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, mapEditorSelectedTextRunOffsets, normalizeEditorHighlightColor, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_ORDERED_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, mapEditorSelectedTextRunOffsets, normalizeEditorHighlightColor, normalizeEditorOrderedListAttributes, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource, resolveEditorImageFrameSource, shouldUseEditorImageFileTransferShortcut, writeImageClipboardData } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -55,6 +55,26 @@ test("email serialization preserves rich lists and indented blocks", () => {
 
   assert.match(html, /<ul data-mango-editor-list="bullet"><li>One<\/li><li>Two<\/li><\/ul>/);
   assert.match(html, /<div style="margin-left: 40px;">Indented<\/div>/);
+});
+
+test("pasted ordered lists keep safe marker semantics and receive bounded editor layout", () => {
+  const css = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
+
+  assert.deepEqual(normalizeEditorOrderedListAttributes({ markerType: "A", start: "3", reversed: true }), {
+    markerType: "A",
+    start: 3,
+    reversed: true,
+  });
+  assert.deepEqual(normalizeEditorOrderedListAttributes({ markerType: "unsafe", start: "not-a-number", reversed: false }), {
+    markerType: undefined,
+    start: undefined,
+    reversed: false,
+  });
+  assert.match(source, new RegExp(`list\\.setAttribute\\(EDITOR_ORDERED_LIST_ATTRIBUTE, "true"\\)`));
+  assert.match(source, /appendSanitizedOrderedList[\s\S]*normalizeEditorOrderedListAttributes/);
+  assert.equal(EDITOR_ORDERED_LIST_ATTRIBUTE, "data-mango-editor-ordered-list");
+  assert.match(css, /ol\[data-mango-editor-ordered-list="true"\][\s\S]*width: 100%[\s\S]*padding-inline-start: 32px[\s\S]*overflow-wrap: anywhere/);
 });
 
 

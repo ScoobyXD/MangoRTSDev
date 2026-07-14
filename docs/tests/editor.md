@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Unified Editor Tests
 
@@ -79,6 +79,9 @@ ED54 - Table creation and editing remain shared editor capabilities, but a table
 ED55 - Double-clicking an inline editor image opens its final dark fullscreen overlay directly through the shared modal layer, without a transient intermediate panel, outline, unmeasured window, or geometry jump while the image source loads. The overlay provides a conspicuous bright-red top-right close button with an accessible name and button semantics; that button closes the preview while supported Escape/backdrop or existing double-click dismissal behavior remains intact.
 ED56 - The shared `ChatPane` may render one optional caller-owned `headerTrailing` slot in its existing header above the unchanged conversation rows. The slot is presentation input only: `ChatPane` does not fetch email collaborations, derive participant or group membership, or change message ordering, reply indentation, composer, attachment, mention, deletion, or realtime behavior. `EmailCollaborationChatSurface` may supply the EMAIL77 participant-roster header, while existing Node and Project callers that omit the slot retain their current UI and data dependencies.
 ED57 - A Node/project text-block annotation preserves its stable chat comment ID through highlight geometry. A normal click hit-tests that annotation without making the overlay intercept selection/editing, opens the shared chat surface, expands ancestors, scrolls the exact comment into view, and focuses its labeled article with `aria-current` and a visible focus outline; active selections and prevented editor actions do not navigate.
+ED58 - Node text-block comment selections use the same canonical plain-text model as saved annotation highlights, including block separators. A selection that visually wraps or crosses rendered lines must expose the comment action and persist the exact trimmed quote/start/end offsets; ordinary single-line selection remains unchanged.
+ED59 - Pasted ordered, alphanumeric, bullet, and nested list content is sanitized into editor-owned list structure. Safe ordered-list marker type/start/reversed semantics may survive, but source positioning/margins do not; list boxes, markers, and long content remain contained inside every editor/node border.
+ED60 - The mailbox signature surface provides a practical full editor and an explicit Edit/Preview mode using the same sanitized unified rich editor. Stored Mango attachment image references hydrate eagerly in both signature preview and composed message surfaces; preview never introduces public URLs, raw image bytes, or a second sanitizer.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1207,3 +1210,24 @@ Expected:
 - The simple click opens the shared chat pane, expands the target's ancestors, scrolls the exact stable comment ID into view, and places visible accessible focus on its labeled comment article.
 - The chat composer does not steal requested comment focus.
 - Drag selection, editing, and prevented/default editor actions do not navigate, and multiple highlights never collapse to the wrong comment.
+
+### Scenario ED-S13: Wrapped Comments, Pasted Lists, And Signature Preview
+
+Business logic covered:
+- ED4
+- ED26
+- ED37
+- ED58
+- ED59
+- ED60
+
+Given:
+- A user selects text that wraps from the right edge of one rendered line to the left edge of the next and also selects an ordinary inline range.
+- External rich content contains numbered/alphanumeric/bullet lists with negative source margins and long items.
+- A mailbox signature contains a durable Mango image reference.
+
+Expected:
+- Both selections expose Comment and persist quotes/offsets that re-highlight the exact canonical text.
+- Paste keeps useful list semantics but removes source positioning and keeps markers/content inside the editor border.
+- The larger signature editor switches coherently between Edit and read-only Preview, and its image displays through authenticated eager attachment hydration in both preview and compose.
+- Sanitization still rejects unsafe attributes, public storage shortcuts, data URLs, and embedded file bytes.

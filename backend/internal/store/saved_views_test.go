@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-func TestNormalizeSavedViewGroupingsAllowsUpdatesStatus(t *testing.T) {
+func TestNormalizeSavedViewGroupingsAllowsUpdatesPriorityAndStatus(t *testing.T) {
 	groupings, ok := NormalizeSavedViewGroupings(SavedViewSurfaceUpdates, []domain.SavedViewGrouping{
 		{Field: "project", Direction: "asc"},
+		{Field: "priority", Direction: "desc"},
 		{Field: "status", Direction: "asc"},
 	})
 	if !ok {
-		t.Fatal("expected Updates status grouping to be accepted")
+		t.Fatal("expected Updates priority and status grouping to be accepted")
 	}
-	if len(groupings) != 2 || groupings[1].Field != "status" || groupings[1].Direction != "asc" {
-		t.Fatalf("normalized groupings = %+v, want project then status", groupings)
+	if len(groupings) != 3 || groupings[1].Field != "priority" || groupings[1].Direction != "desc" || groupings[2].Field != "status" {
+		t.Fatalf("normalized groupings = %+v, want project, priority, then status", groupings)
 	}
 }

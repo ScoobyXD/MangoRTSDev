@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Updates Tests
 
@@ -31,7 +31,7 @@ U20 - Notifications sort newest first, then by title or ID to keep ordering stab
 U21 - Updates visibility filters out notifications whose project, logic gate, or node is not viewable by the current user.
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
 U23 - One app-lifetime notification coordinator owns `notifications:user:{user_id}`. Every first or reconnect `subscription.accepted` performs one coalesced canonical notification-summary reconciliation; a later local handler joining an already accepted shared scope receives immediate acceptance, and created/deleted/cleared hints use the same coalescer to update urgent `!`, normal `@`, and regular unread badges.
-U24 - Updates registers with the notification coordinator only while open. First subscription acceptance, reconnect acceptance, and external notification hints run one canonical feed load at a time with at most one queued final load; they never overlap or restart a slow load and cause no feed request while closed. HTTP-first local Seen keeps its existing optimistic no-reload behavior.
+U24 - Updates registers with the notification coordinator only while open. First/reconnect subscription acceptance reconciles notification summary only and does not reload the feed. External notification-created/deleted/cleared hints run one canonical feed load at a time with at most one queued final load; they never overlap or restart a slow load and cause no feed request while closed. HTTP-first local Seen keeps its existing optimistic no-reload behavior.
 U25 - Updates saved grouping views persist Project, Logic Gate, and Status grouping fields through the saved-views API.
 U26 - The update trigger canon is limited to the rules in U27 through U49; adding a new update trigger requires updating this file.
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
@@ -87,6 +87,8 @@ U76 - A normal email-chat mention uses `mention.created` and canonical copy `{Us
 U77 - One accepted user-group mention creates at most one mention notification for each newly snapshotted member, excluding the actor and deduplicating overlap with direct/other-group mentions. Retrying the same committed chat write or later changing group membership does not duplicate, add, or retract those historical notifications.
 U78 - Email-collaboration notification metadata may include collaboration ID, Node ID, provider message/thread ID, source mailbox discriminator, chat information ID, and selection-anchor metadata needed for authorized navigation, but never provider credentials, message/attachment bytes, presigned URLs, or storage keys.
 U79 - Email collaboration mention/chat rows use the shared email icon token required by U55. Activating an authorized row opens the email collaboration at the referenced message/chat anchor with the same underlying Node chat; a revoked/deleted/inaccessible target fails closed instead of falling back to an unrelated Node or mailbox.
+U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
+U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> GVIC -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
 
 ## Update Row Copy And Visual Language
 
@@ -246,7 +248,7 @@ Expected:
 - Clearing notifications can be scoped and publishes a cleared event.
 - Summary counts update after read/delete operations.
 - First subscription acceptance and reconnect acceptance each coalesce one canonical summary refresh; a late handler on an accepted shared scope receives its own immediate acceptance.
-- Only while Updates is open, first acceptance, reconnect acceptance, and hints run one feed request at a time with at most one queued final request; a closed Updates view performs no feed request.
+- First and reconnect acceptance update summary only. Only while Updates is open, real external notification hints run one feed request at a time with at most one queued final request; a closed Updates view performs no feed request.
 - HTTP-first local delete/clear plus its matching socket echo emits at most one summary update and, subject to optimistic source filtering, at most one open-feed update.
 - Socket-first plus a lost/rejected HTTP response emits exactly one summary update and one mounted Updates feed update; HTTP failure with no socket emits neither.
 - The coordinator does not fabricate feed rows, and local Seen preserves its no-reload behavior.
@@ -259,13 +261,14 @@ Business logic covered:
 - U72
 
 Given:
-- A user saves an Updates view grouped by Project, Logic Gate, and Status.
+- The user opens the built-in Updates tab, then saves a custom Updates view grouped by Project, Logic Gate, and Status and separately saves an explicitly empty grouping stack.
 - Rows include recognized statuses, a legacy Verify or Backlogged spelling, and a status-changing event whose node has since moved again.
 - The user opens an Updates saved view from the sidebar saved-view rows.
 - The user leaves and later reloads Updates saved views.
 
 Expected:
-- Project, Logic Gate, and Status grouping fields save through the saved-views API.
+- The built-in tab defaults exactly to Date, GVIC, Priority, then Logic Gate, and Priority is available in the grouping picker.
+- Project, Logic Gate, Priority, and Status grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
 - The status-changing row groups by the status recorded on that event; rows without an event status use the current resolved node status and otherwise No status.
 - Comment and mention prose that happens to contain phrases such as `moved to` or `changed ... to` never creates a synthetic status group, and legacy `a new status/state` copy falls back to the current node status.
@@ -273,7 +276,7 @@ Expected:
 - Legacy Verify and Backlogged spellings join the Review and Backlog groups rather than creating duplicate groups.
 - Updates saved grouping views live under the Updates entry in the Key Views sidebar, where users can add, activate, edit, rename, reorder, and delete saved grouping rows.
 - Unknown Updates grouping fields are rejected instead of silently stored.
-- Removing every Updates grouping is valid; the saved view reloads with a blank grouping stack instead of restoring default Project and Logic Gate grouping.
+- Removing every Updates grouping is valid; the saved view reloads with a blank grouping stack instead of restoring the built-in default chain.
 - Updates saved-view rows are shown under the Updates sidebar tab when they exist, and the floating grouping editor opens from + Add new or right-click Edit.
 - Right-clicking a saved Updates view can edit, rename, or delete it, and drag reorder persists through saved-view position.
 
@@ -456,3 +459,24 @@ Expected:
 - Existing participant chat updates may use the blue email-chat row.
 - The payload contains only the authorized IDs/anchor metadata needed to open the same email/Node chat and contains no credentials or file/object bytes.
 - Activation opens the referenced collaboration message/chat anchor after authorization; missing or inaccessible targets fail closed.
+
+### Scenario U-S11: Acceptance Is Non-Disruptive And Built-In Grouping Is Exact
+
+Business logic covered:
+- U23
+- U24
+- U25
+- U66
+- U80
+- U81
+
+Given:
+- Updates is open with a selected row, active node preview, and a user-collapsed nested group.
+- The notification socket accepts or reconnects, then a real external notification hint arrives.
+- The user switches between built-in Updates and customized/explicitly ungrouped saved views.
+
+Expected:
+- Acceptance refreshes summary badges only and issues no roots/branch feed requests.
+- The real hint performs one coalesced background canonical feed reconciliation without blanking visible rows, selection, preview, or expansion state; failure leaves the prior feed visible.
+- Row changes do not reopen a group the user collapsed.
+- Built-in Updates uses Date -> GVIC -> Priority -> Logic Gate exactly, while custom and empty stacks reload unchanged.

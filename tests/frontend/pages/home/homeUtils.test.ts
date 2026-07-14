@@ -38,6 +38,7 @@ import {
   missingEmailThreadMessageIDs,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
+  orderEmailConversationMessages,
   rewriteEmailDocumentCIDSources,
   GVICRoleCellKey,
   resizeHomeColumns,
@@ -488,6 +489,17 @@ test("conversation messages are newest first with a deterministic id tie-breaker
   ]);
 
   assert.deepEqual(ordered.map((message) => message.id), ["newest", "same-date-b", "same-date-a", "older"]);
+});
+
+test("conversation ordering can be switched to oldest first without changing the newest-first default", () => {
+  const messages = [
+    emailMessage("middle", "thread-1", 200),
+    emailMessage("newest", "thread-1", 300),
+    emailMessage("oldest", "thread-1", 100),
+  ];
+
+  assert.deepEqual(orderEmailConversationMessages(messages, "newest").map((message) => message.id), ["newest", "middle", "oldest"]);
+  assert.deepEqual(orderEmailConversationMessages(messages, "oldest").map((message) => message.id), ["oldest", "middle", "newest"]);
 });
 
 test("message documents preserve Mango-authored email body structure", () => {

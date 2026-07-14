@@ -55,7 +55,7 @@ import type { EmailCollaborationSelection } from "./EmailCollaborationChatSurfac
 
 export type EmailCollaborationNavigation = EmailCollaborationSelection & { requestID: number };
 import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
-import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
+import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, orderEmailConversationMessages, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type EmailConversationOrder } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -5024,6 +5024,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const attachmentMutationStatesRef = React.useRef<Map<string, EditorAttachmentMutationState>>(new Map());
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
+  const [signatureEditorMode, setSignatureEditorMode] = React.useState<"edit" | "preview">("edit");
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "", bcc: "" });
   const [replyEditorHeight, setReplyEditorHeight] = React.useState(() => (
@@ -5576,6 +5577,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           onSelectionHighlightColorChange={setBodyHighlightColor}
           onSelectionTextAlignmentChange={setBodyTextAlignment}
           editorImageAttachmentContext={composeEditorImageAttachmentContext}
+          eagerEditorImageHydration
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
         />
@@ -5591,7 +5593,14 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
             }}
           />
           <button type="button" style={mailPanelSmallButtonStyle} onClick={() => fileInputRef.current?.click()}>Attach files</button>
-          <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
+          <button
+            type="button"
+            style={mailPanelSmallButtonStyle}
+            onClick={() => setSignatureEditorOpen((current) => {
+              if (!current) setSignatureEditorMode("edit");
+              return !current;
+            })}
+          >
             {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
           </button>
           {!compose.sharedDraft && (
@@ -5618,7 +5627,28 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
         )}
         {signatureEditorOpen && (
           <div style={mailComposeSignatureBoxStyle}>
-            <EditorTabBar
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <strong>Mailbox signature</strong>
+                <div style={mutedSmallStyle}>Edit the full signature, then preview it exactly as it will appear in the message editor.</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" style={mailPanelSmallButtonStyle} aria-pressed={signatureEditorMode === "edit"} onClick={() => setSignatureEditorMode("edit")}>Edit</button>
+                <button
+                  type="button"
+                  style={mailPanelSmallButtonStyle}
+                  aria-pressed={signatureEditorMode === "preview"}
+                  onClick={() => {
+                    const signature = signatureEditorControllerRef.current?.flush() ?? emailSignature;
+                    onEmailSignatureChange(signature);
+                    setSignatureEditorMode("preview");
+                  }}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+            {signatureEditorMode === "edit" && <EditorTabBar
               activeTab={signatureToolbarTab}
               outlineStyle={signatureOutlineStyle}
               accent={HOME_CYAN}
@@ -5651,14 +5681,15 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               }}
               reserveHeaderOffset={false}
               visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
-            />
+            />}
             <UnifiedRichEditorSurface
               key={`signature-editor:${signatureAttachmentResourceID || `${compose.sharedInboxID}:${emailSignatureAccountEmail}`}`}
               value={emailSignature}
               outlineStyle={signatureOutlineStyle}
               surfaceID="email-signature"
-              ariaLabel="Email signature"
-              placeholder="Email signature"
+              editable={signatureEditorMode === "edit"}
+              ariaLabel={signatureEditorMode === "edit" ? "Email signature editor" : "Email signature preview"}
+              placeholder={signatureEditorMode === "edit" ? "Email signature" : "No signature saved"}
               surfaceText="#111827"
               accent={HOME_CYAN}
               indentGuideColor="rgba(14,165,233,0.38)"
@@ -6202,12 +6233,21 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
 }) {
   const messageDate = formatMessageDate(message.date);
-  const conversationMessages = conversationMessagesForDetail(message, threadMessages);
-  const singleMessage = conversationMessages.length <= 1;
-  const newestMessageID = conversationMessages[0]?.id ?? message.id;
+  const newestFirstConversationMessages = conversationMessagesForDetail(message, threadMessages);
+  const singleMessage = newestFirstConversationMessages.length <= 1;
+  const newestMessageID = newestFirstConversationMessages[0]?.id ?? message.id;
+  const [conversationOrder, setConversationOrder] = React.useState<EmailConversationOrder>("newest");
+  const conversationIdentity = message.thread_id?.trim() || message.id;
+  const conversationMessages = React.useMemo(
+    () => orderEmailConversationMessages(newestFirstConversationMessages, conversationOrder),
+    [conversationOrder, newestFirstConversationMessages],
+  );
   const [expandedMessageIDs, setExpandedMessageIDs] = React.useState<Set<string>>(() => new Set([newestMessageID]));
   const [loadingMessageBodyIDs, setLoadingMessageBodyIDs] = React.useState<Set<string>>(() => new Set());
   const messageBodyInflightRef = React.useRef<Map<string, Promise<EmailMessage | null>>>(new Map());
+  React.useEffect(() => {
+    setConversationOrder("newest");
+  }, [conversationIdentity]);
   const loadConversationMessageBody = React.useCallback((conversationMessage: EmailMessage): Promise<EmailMessage | null> => {
     if (emailMessageBodyIsLoaded(conversationMessage)) return Promise.resolve(conversationMessage);
     const messageID = conversationMessage.id.trim();
@@ -6242,7 +6282,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   }, [loadConversationMessageBody, navigationTargetMessage?.id, selectionNavigation?.requestID]);
   React.useLayoutEffect(() => {
     setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
-    const newestMessage = conversationMessages[0];
+    const newestMessage = newestFirstConversationMessages[0];
     if (newestMessage && !emailMessageBodyIsLoaded(newestMessage)) void loadConversationMessageBody(newestMessage);
   }, [loadConversationMessageBody, newestMessageID]);
   const toggleConversationMessage = (conversationMessage: EmailMessage) => {
@@ -6297,13 +6337,27 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
       </div>
       <div style={toolbarStyle}>
         {!singleMessage && (
-          <button
-            style={mailPanelSmallButtonStyle}
-            disabled={allConversationMessagesExpanded}
-            onClick={expandAllConversationMessages}
-          >
-            Expand all threads
-          </button>
+          <>
+            <label style={{ ...mutedSmallStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              Order
+              <select
+                aria-label="Email conversation order"
+                style={{ ...mailPanelInputStyle, minHeight: 30, height: 30, width: 132, padding: "0 8px" }}
+                value={conversationOrder}
+                onChange={(event) => setConversationOrder(event.currentTarget.value as EmailConversationOrder)}
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </label>
+            <button
+              style={mailPanelSmallButtonStyle}
+              disabled={allConversationMessagesExpanded}
+              onClick={expandAllConversationMessages}
+            >
+              Expand all threads
+            </button>
+          </>
         )}
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>

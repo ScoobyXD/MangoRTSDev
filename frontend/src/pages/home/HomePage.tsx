@@ -81,7 +81,7 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type
 
 import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
-import { EVENT_NOTIFICATIONS_UPDATED } from "../../modules/notifications/notificationsApi";
+import { EVENT_NOTIFICATIONS_UPDATED, NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED } from "../../modules/notifications/notificationsApi";
 import {
   commitEntityTitleMutation,
   foldCommittedEntityTitlesSince,
@@ -2501,9 +2501,10 @@ export function HomePage({
   useEffect(() => { void loadMessages(); }, [loadMessages]);
   useEffect(() => {
     const handleNotificationsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      const detail = (event as CustomEvent<{ companyID?: string; source?: string }>).detail;
       const eventCompanyID = detail?.companyID?.trim() ?? "";
       if (eventCompanyID && eventCompanyID !== companyID) return;
+      if (detail?.source?.trim() === NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED) return;
       if (!isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
       scheduleMessageListRefresh(0);
     };

@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyEmailSignatureOnceForSession,
+  applyEmailSignature,
   beginEmailSignatureApplicationSession,
   loadedEmailSignatureForScope,
   type ScopedEmailSignatureState,
 } from "../../../../frontend/src/modules/editor/emailSignatureBody.js";
+import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 
 test("scoped signature state never exposes a previous mailbox body", () => {
   const accountA: ScopedEmailSignatureState = {
@@ -36,4 +38,13 @@ test("one reply session waits for hydration and never reinserts after deliberate
   const nextReplySession = applyEmailSignatureOnceForSession("New reply", "Saved signature", null, scopeKey);
   assert.notEqual(nextReplySession.body, "New reply");
   assert.match(nextReplySession.body, /Saved signature/);
+});
+
+test("signature insertion preserves durable image references for eager compose hydration", () => {
+  const signature = `${EDITOR_RICH_TEXT_PREFIX}<div>Best,</div><span data-mango-editor-image="true" data-mango-editor-attachment-id="signature-logo"><img src="mango-attachment:signature-logo" alt="Company logo"></span>`;
+  const body = applyEmailSignature("", signature);
+
+  assert.match(body, /data-mango-editor-attachment-id="signature-logo"/);
+  assert.match(body, /src="mango-attachment:signature-logo"/);
+  assert.doesNotMatch(body, /data:image|javascript:/);
 });

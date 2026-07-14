@@ -205,6 +205,13 @@ export function sortEmailConversationMessagesNewestFirst(messages: EmailMessage[
   });
 }
 
+export type EmailConversationOrder = "newest" | "oldest";
+
+export function orderEmailConversationMessages(messages: EmailMessage[], order: EmailConversationOrder): EmailMessage[] {
+  const newestFirst = sortEmailConversationMessagesNewestFirst(messages);
+  return order === "oldest" ? newestFirst.reverse() : newestFirst;
+}
+
 export function condenseEmailThreadMessages(messages: EmailMessage[]): EmailMessage[] {
   const groups = new Map<string, EmailMessage[]>();
   const order: string[] = [];

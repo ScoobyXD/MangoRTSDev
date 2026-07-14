@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Nodes Tests
 
@@ -131,6 +131,7 @@ N102 - Future provider messages do not create additional Nodes or attached-email
 N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
 N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
+N106 - Transient Node popup view mode is owned by the active popup instance, not canonical Node/board projections. Same-Node refresh or title reconciliation preserves fullscreen; only explicit user exit/close or opening a different Node may restore the normal saved non-fullscreen ratio.
 
 ## Scenarios
 
@@ -634,3 +635,17 @@ Expected:
 - Drag-selection and normal editor input do not trigger chat navigation, and existing chat-to-highlight behavior still works.
 - Both email paths display unreferenced files with metadata and authorized actions under the originating mailbox identity.
 - Reply and Reply All append the exact saved signature once, including after late hydration, without overwriting typed text.
+
+### Scenario N-S21: Same-Node Reconciliation Does Not Collapse Fullscreen
+
+Business logic covered:
+- N94
+- N106
+
+Given:
+- A Logic Gate Node popup is fullscreen and background canonical work/view reconciliation updates the same Node's card or title.
+
+Expected:
+- The live Node editor and fresh canonical data remain visible.
+- The reconciliation does not reset local fullscreen or the saved restore ratio.
+- The popup returns to normal only through explicit user action, close, or a different-Node open.

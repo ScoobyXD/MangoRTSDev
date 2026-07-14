@@ -29,6 +29,7 @@ export const EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE = "data-mango-editor-table
 export const EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE = "data-mango-editor-table-align-action";
 export const EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE = "data-mango-editor-table-align-icon";
 export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
+export const EDITOR_ORDERED_LIST_ATTRIBUTE = "data-mango-editor-ordered-list";
 export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
 export const EDITOR_LIST_MARKER_ATTRIBUTE = "data-mango-editor-list-marker";
@@ -37,6 +38,11 @@ export const EDITOR_HIGHLIGHT_ATTRIBUTE = "data-mango-editor-highlight";
 export const EDITOR_HIGHLIGHT_CLEAR_VALUE = "none";
 
 export type EditorListKind = "bullet" | "checklist";
+export type EditorOrderedListAttributes = {
+  markerType?: "1" | "a" | "A" | "i" | "I";
+  start?: number;
+  reversed: boolean;
+};
 export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
 export type EditorTextAlignment = "left" | "center" | "right";
 export type EditorHighlightColor = `#${string}`;
@@ -612,8 +618,34 @@ function appendSanitizedEditorList(source: HTMLElement, target: Node, ownerDocum
   target.appendChild(list);
 }
 
+export function normalizeEditorOrderedListAttributes(input: {
+  markerType?: string | null;
+  start?: string | null;
+  reversed?: boolean;
+}): EditorOrderedListAttributes {
+  const rawMarkerType = input.markerType?.trim() ?? "";
+  const markerType = ["1", "a", "A", "i", "I"].includes(rawMarkerType)
+    ? rawMarkerType as EditorOrderedListAttributes["markerType"]
+    : undefined;
+  const parsedStart = Number.parseInt(input.start ?? "", 10);
+  return {
+    markerType,
+    start: Number.isFinite(parsedStart) ? Math.max(-100000, Math.min(100000, parsedStart)) : undefined,
+    reversed: input.reversed === true,
+  };
+}
+
 function appendSanitizedOrderedList(source: HTMLElement, target: Node, ownerDocument: Document) {
   const list = ownerDocument.createElement("ol");
+  list.setAttribute(EDITOR_ORDERED_LIST_ATTRIBUTE, "true");
+  const attributes = normalizeEditorOrderedListAttributes({
+    markerType: source.getAttribute("type"),
+    start: source.getAttribute("start"),
+    reversed: source.hasAttribute("reversed"),
+  });
+  if (attributes.markerType) list.setAttribute("type", attributes.markerType);
+  if (attributes.start !== undefined) list.setAttribute("start", String(attributes.start));
+  if (attributes.reversed) list.setAttribute("reversed", "");
   Array.from(source.children)
     .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li")
     .forEach((sourceItem) => {

@@ -16,8 +16,15 @@ import {
   type SavedViewPrincipal,
   type SavedViewSurface,
 } from "./savedViewsApi";
+import { DEFAULT_UPDATE_GROUPINGS, UPDATE_GROUPING_FIELDS, normalizeUpdateGroupingStack } from "./updatesGrouping";
 
 export const EVENT_HOME_SAVED_VIEWS_CHANGED = "mangorts:home-saved-views-changed";
+
+export function selectBuiltInHomeSavedView(surface: HomeSavedViewsSurface, companyID: string, userID: string): void {
+  const storageUserID = userID.trim() || "local";
+  clearSelectedSavedViewID(surface, companyID, storageUserID);
+  emitHomeSavedViewsChanged(surface, "");
+}
 
 type HomeSavedViewsSurface = Extract<SavedViewSurface, "my_work" | "updates">;
 
@@ -44,18 +51,6 @@ type HomeSavedViewsSidebarSectionProps = {
   onSelectSurface: () => void;
 };
 
-const UPDATES_GROUPING_FIELDS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "type", label: "Update Type" },
-  { value: "date", label: "Date" },
-  { value: "gvic", label: "GVIC" },
-  { value: "project", label: "Project" },
-  { value: "logic_gate", label: "Logic Gate" },
-  { value: "status", label: "Status" },
-];
-const DEFAULT_UPDATE_GROUPINGS: SavedViewGrouping[] = [
-  { field: "project", direction: "asc" },
-  { field: "logic_gate", direction: "asc" },
-];
 const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const HOME_SAVED_VIEW_DRAG_MIME = "application/x-mangorts-home-saved-view";
@@ -676,32 +671,20 @@ function clearSelectedSavedViewID(surface: HomeSavedViewsSurface, companyID: str
 }
 
 function homeSavedViewGroupingFields(surface: HomeSavedViewsSurface): ReadonlyArray<{ value: string; label: string }> {
-  return surface === "my_work" ? MY_WORK_GROUPING_FIELDS : UPDATES_GROUPING_FIELDS;
+  return surface === "my_work" ? MY_WORK_GROUPING_FIELDS : UPDATE_GROUPING_FIELDS;
 }
 
 function defaultGroupings(surface: HomeSavedViewsSurface): SavedViewGrouping[] {
   return surface === "my_work"
     ? DEFAULT_MY_WORK_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction }))
-    : [...DEFAULT_UPDATE_GROUPINGS];
+    : DEFAULT_UPDATE_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction }));
 }
 
 function normalizeHomeSavedGroupingStack(surface: HomeSavedViewsSurface, value: unknown): SavedViewGrouping[] {
   if (surface === "my_work") {
     return normalizeMyWorkGroupingStack(value).map((item) => ({ field: item.field, direction: item.direction }));
   }
-  if (!Array.isArray(value)) return defaultGroupings(surface);
-  const validFields = new Set(homeSavedViewGroupingFields(surface).map((field) => field.value));
-  const out: SavedViewGrouping[] = [];
-  const seen = new Set<string>();
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const candidate = item as { field?: unknown; direction?: unknown };
-    const field = typeof candidate.field === "string" ? candidate.field.trim() : "";
-    if (!field || !validFields.has(field) || seen.has(field)) continue;
-    seen.add(field);
-    out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
-  }
-  return out;
+  return normalizeUpdateGroupingStack(value).map((item) => ({ field: item.field, direction: item.direction }));
 }
 
 function createDefaultSavedView(surface: HomeSavedViewsSurface, companyID: string, currentUserID: string): HomeSavedGroupingSetting {

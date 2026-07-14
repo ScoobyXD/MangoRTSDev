@@ -11,6 +11,7 @@ import {
   EVENT_NOTIFICATIONS_UPDATED,
   markNotificationRead,
   markNotificationsRead,
+  NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
   NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
 } from "../../../../frontend/src/modules/notifications/notificationsApi.js";
 
@@ -253,14 +254,21 @@ test("a failed clear releases its marker so a later socket event reconciles", as
   }
 });
 
-test("an accepted notification subscription emits one canonical reconciliation", () => {
+test("an accepted notification subscription reconciles summary without reloading the mounted Updates feed", () => {
   const { events, restore } = installTestWindow();
   try {
     const handlers = createNotificationRealtimeHandlers("company-1");
     handlers.onAccepted();
     assert.deepEqual(events.map((event) => event.detail), [
-      { companyID: "company-1", source: "" },
+      { companyID: "company-1", source: NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED },
     ]);
+    assert.equal(updatesNotificationEventRequiresReload({
+      activeCompanyID: "company-1",
+      eventCompanyID: events[0].detail.companyID,
+      source: events[0].detail.source,
+      localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
+      summaryOnlySource: NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
+    }), false);
   } finally {
     restore();
   }

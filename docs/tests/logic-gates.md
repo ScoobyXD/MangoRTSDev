@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 # Logic Gates Tests
 
@@ -55,6 +55,7 @@ LG41 - The Logic Gate editor header keeps Editor, Permissions, the shared format
 LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount through the shared body-level modal portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts, trap focus while topmost, and restore prior focus when closed.
 LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.
 LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
+LG45 - A Node popup opened from Logic Gate Arena owns its transient half/fullscreen mode locally. Realtime acceptance and canonical summary/work/view projection reconciliation may update Node/board data and titles, but reopening/reconciling the same Node must preserve fullscreen until the user exits fullscreen or closes it; opening a different Node starts from the normal saved half-view ratio.
 
 ## Scenarios
 
@@ -287,3 +288,20 @@ Expected:
 - Success identifies A and B, removes the Node from A without refresh, and reconciles each mounted/relevant destination through the canonical board loader.
 - Local and socket hints coalesce and cannot apply a duplicate projection.
 - Failure emits no success invalidation and leaves A's existing Node visible.
+
+### Scenario LG-S12: Same-Node Board Reconciliation Preserves Fullscreen
+
+Business logic covered:
+- LG31
+- LG33
+- LG45
+
+Given:
+- A Node popup is opened from Logic Gate Arena and the user switches it to fullscreen.
+- Notification ticket/summary and board work/view reconciliation update the mounted cards and re-run the controlled same-Node open request.
+
+Expected:
+- Canonical data and title changes still apply.
+- The same-Node reconciliation does not restore the half-view ratio or clear fullscreen.
+- Fullscreen persists until the user explicitly exits or closes the popup.
+- Closing or opening a different Node restores the normal saved half-view behavior.

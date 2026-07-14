@@ -28,7 +28,7 @@ RW16 - Explicit editor saved versions are created through HTTP save-version rout
 RW17 - Restoring an editor saved version is an HTTP restore route that overwrites the current editor projection after user confirmation; it does not publish a document or generic projection realtime message.
 RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
 RW19 - WebSocket reconnects after backend replacement/deploy must use randomized delay, exponential backoff, and bounded or very slow retry behavior; clients must not all reconnect immediately.
-RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, mounted board, or exact actively viewed mailbox canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Updates adds its canonical feed read only while open. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
+RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, mounted board, or exact actively viewed mailbox canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Notifications acceptance is tagged summary-only; an open Updates feed reloads only for a real notification-created/deleted/cleared change. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
@@ -63,6 +63,7 @@ RW51 - A committed Logic Gate deletion publishes one `resource_deleted` hint to 
 RW52 - Publication-time entity existence and audience resolution are deadline-bound, limited to distinct users currently subscribed to the exact local scope, and fail closed. No-subscriber and no-current-authorized-recipient outcomes are successful no-ops; repository timeout or lookup failure is a distinct error. A shared provider webhook propagates that error, releases its deduplication receipt, and returns a retryable failure instead of acknowledging a lost hint. Retrying an identical `message.opened` delivery reuses the receipt's first timestamp so read-signal aggregation remains idempotent.
 RW53 - Backend folder, message-page, and message-detail singleflight keeps one shared provider leader per exact generation while every joined waiter observes its own context. Canceling a joined waiter returns promptly without canceling or duplicating the leader; the waiter releases its generation admission, the leader retains its own admission until completion, and only the still-current generation may cache the result.
 RW54 - Mailbox work uses separate ownership domains. Message-list/detail work may include mailbox tab, search, unread-only state, and selection generation; folder metadata uses only company plus exact mailbox scope; a queued provider mark-read is captured mutation intent rather than disposable list-refresh work. Navigation may detach stale UI results but cannot silently drop the mark-read command or let a prior scope overwrite the destination.
+RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
 
 ## Scenarios
 
@@ -377,7 +378,7 @@ Given:
 - Ordinary `node_updated` publication runs both without and with a relevant local board subscriber.
 
 Expected:
-- Each active retained surface performs one single-flight canonical reconciliation on first acceptance and reconnect, with at most one queued final read and no overlap/restart; Updates fetches only while open and mail fetches only for the active exact mailbox.
+- Each active retained surface performs one single-flight canonical reconciliation on first acceptance and reconnect, with at most one queued final read and no overlap/restart; notification acceptance reconciles summary only, and mail fetches only for the active exact mailbox.
 - A late handler joining an already accepted shared scope receives immediate local acceptance; accepted state clears on disconnect, rejection, or last unsubscribe.
 - Stalled writes proceed within the bounded worker fan-out rather than one serial deadline per client; failed connections are closed and evicted, and the healthy subscriber still receives delivery.
 - Delivery failures and no-subscriber publishes increment distinct metrics.
@@ -477,3 +478,22 @@ Expected:
 - No-subscriber/no-authorized results succeed, but shared lookup failure returns retryable failure and releases deduplication before the repeated delivery succeeds without duplicating its open-signal count.
 - The canceled waiter returns immediately without canceling or duplicating the leader and releases only its own cache-generation admission.
 - Filter transitions preserve exact-scope folder work and captured mark-read intent while invalidating stale list/detail presentation work; scope transitions reject every old-scope result.
+
+### Scenario RW-S20: Canonical Reconciliation Preserves Local Presentation
+
+Business logic covered:
+- RW20
+- RW32
+- RW39
+- RW55
+
+Given:
+- Notifications accepts/reconnects while Updates has selection and collapsed grouping state.
+- A real notification hint later commits.
+- Logic Gate work/view reconciliation updates cards while its controlled same-Node popup is fullscreen.
+
+Expected:
+- Acceptance refreshes notification summary but performs no Updates roots/branch read.
+- The real notification hint coalesces one atomic feed reconciliation without first clearing visible rows, selection, or expansion.
+- Board reconciliation applies canonical card/title data without changing same-Node fullscreen.
+- No whole-app refresh, projection delta, or loss of necessary realtime correctness is introduced.
