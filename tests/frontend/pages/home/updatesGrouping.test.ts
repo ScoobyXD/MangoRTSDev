@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import {
   DEFAULT_UPDATE_GROUPINGS,
@@ -36,4 +38,19 @@ test("the built-in Updates setting remains first without rewriting custom settin
   const settings = withBuiltInUpdateGroupingSetting(builtIn, [custom]);
   assert.deepEqual(settings.map((setting) => setting.setting_id), ["built-in", "custom"]);
   assert.deepEqual(settings[1], custom);
+});
+
+test("individual Updates rows omit Logic Gate presentation without removing Logic Gate grouping or navigation", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  const rowCopyStart = source.indexOf("function UpdateCanonicalRowCopy(");
+  const rowCopyEnd = source.indexOf("function UpdateInlineEntity(", rowCopyStart);
+  assert.ok(rowCopyStart >= 0 && rowCopyEnd > rowCopyStart);
+  const rowCopy = source.slice(rowCopyStart, rowCopyEnd);
+
+  assert.match(rowCopy, /const nodeEntity = <UpdateInlineEntity kind="node"/);
+  assert.doesNotMatch(rowCopy, /logicGateEntity|logicGateLabel|resolveLogicGateDetails|kind="logic_gate"/);
+  assert.match(rowCopy, /item\.entity_type === "logic_gate"[\s\S]*"urgently mentioned you" : "mentioned you"/);
+  assert.match(source, /if \(field === "logic_gate"\)[\s\S]*resolveCurrentUpdateLogicGateGroupValue/);
+  assert.match(source, /group\.resource_type === "project" \|\| group\.resource_type === "logic_gate" \|\| group\.resource_type === "node"/);
+  assert.match(source, /onOpenLogicGate\(resourceID, resolveCurrentUpdateLogicGateLabel/);
 });

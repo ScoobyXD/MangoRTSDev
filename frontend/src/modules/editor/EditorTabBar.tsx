@@ -222,10 +222,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
   const outlineMenuSurface = "linear-gradient(145deg, rgba(248, 251, 255, 0.98), rgba(230, 236, 246, 0.96))";
   const outlineRowSurface = "linear-gradient(145deg, rgba(250, 253, 255, 0.96), rgba(232, 238, 248, 0.9))";
-  const outlineRowHoverSurface = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.7) 46%, rgba(247,239,255,0.74))";
-  const outlineRowSelectedSurface = `linear-gradient(145deg, ${colorWithAlpha(outlineMenuAccent, 0.17)}, rgba(255, 255, 255, 0.84))`;
-  const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
-  const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
+  const toolbarActiveBackground = `linear-gradient(135deg, rgba(92,238,255,0.78) 0%, ${colorWithAlpha(outlineMenuAccent, 0.66)} 48%, rgba(183,124,255,0.70) 100%)`;
+  const toolbarHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.94) 0%, rgba(92,238,255,0.40) 48%, rgba(183,124,255,0.34) 100%)";
+  const outlineRowHoverSurface = toolbarHoverBackground;
+  const outlineRowSelectedSurface = `linear-gradient(135deg, rgba(92,238,255,0.58), ${colorWithAlpha(outlineMenuAccent, 0.46)} 50%, rgba(183,124,255,0.52))`;
+  const tabHoverBackground = toolbarHoverBackground;
+  const tabSelectedBackgroundVibrant = toolbarActiveBackground;
+  const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.14), 0 0 16px rgba(92, 238, 255, 0.26), 0 0 18px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255,255,255,0.78)";
   const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
   const primaryTabs = visibleTabs.filter((tab) => EDITOR_PRIMARY_HEADER_TAB_IDS.includes(tab.id));
   const overflowTabs = visibleTabs.filter((tab) => EDITOR_OVERFLOW_HEADER_TAB_IDS.includes(tab.id));
@@ -283,13 +286,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     whiteSpace: "nowrap",
     border: `1px solid ${selected || hovered ? "transparent" : strokeColor}`,
     background: selected
-      ? `${tabSelectedBackground} padding-box, ${tabFrameBackground} border-box`
+      ? `${tabSelectedBackgroundVibrant} padding-box, ${tabFrameBackground} border-box`
       : hovered
         ? `${tabHoverBackground} padding-box, ${tabFrameBackground} border-box`
         : tabBackground,
-    color: surfaceText,
+    color: selected ? "#0f172a" : surfaceText,
     fontSize: 10,
-    fontWeight: selected ? 650 : 500,
+    fontWeight: selected ? 800 : 500,
     letterSpacing: 0,
     padding: "4px 10px",
     borderRadius: 8,
@@ -300,7 +303,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
   });
   const formatControlDivider = `1px solid ${colorWithAlpha(strokeColor, 0.92)}`;
-  const formatControlHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.72) 46%, rgba(247,239,255,0.74))";
+  const formatControlHoverBackground = toolbarHoverBackground;
   const formatControlStyle = (id: EditorFormatControlID, options: { active?: boolean; withRightBorder?: boolean; width?: number; fontSize?: number } = {}): React.CSSProperties => {
     const active = options.active ?? false;
     const hovered = hoveredFormatControl === id && !formatControlsDisabled;
@@ -310,9 +313,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       border: 0,
       borderRight: options.withRightBorder === false ? 0 : formatControlDivider,
       background: active
-        ? `linear-gradient(135deg, ${colorWithAlpha(outlineMenuAccent, 0.36)}, rgba(94,234,212,0.28) 52%, rgba(168,85,247,0.24))`
+        ? toolbarActiveBackground
         : hovered ? formatControlHoverBackground : "transparent",
-      color: active ? outlineMenuAccent : surfaceText,
+      color: active ? "#0f172a" : surfaceText,
       display: "grid",
       placeItems: "center",
       cursor: formatControlsDisabled ? "default" : "pointer",
@@ -321,8 +324,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       fontWeight: 900,
       lineHeight: 1,
       boxShadow: active
-        ? `inset 0 0 0 1px ${colorWithAlpha(outlineMenuAccent, 0.52)}, 0 0 8px ${colorWithAlpha(outlineMenuAccent, 0.18)}`
-        : hovered ? "inset 2px 2px 5px rgba(15,23,42,0.08), inset -2px -2px 5px rgba(255,255,255,0.78)" : undefined,
+        ? `inset 0 0 0 1px ${colorWithAlpha(outlineMenuAccent, 0.78)}, 0 0 0 1px rgba(92,238,255,0.34), 0 0 12px rgba(183,124,255,0.32)`
+        : hovered ? "inset 1px 1px 3px rgba(15,23,42,0.08), inset -1px -1px 3px rgba(255,255,255,0.74), 0 0 10px rgba(92,238,255,0.22)" : undefined,
       transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease",
     };
   };
@@ -520,7 +523,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 }}
                 style={inlineFormatButtonStyle("strikethrough", strikethroughActive)}
               >
-                <span style={{ textDecoration: "line-through", textDecorationThickness: 2 }}>S</span>
+                <span aria-hidden="true" style={{ textDecoration: "line-through", textDecorationThickness: 2, textDecorationColor: "currentColor" }}>A</span>
               </button>
               <span role="group" aria-label="Text highlight" style={{ display: "inline-flex", alignItems: "stretch" }}>
                 <button

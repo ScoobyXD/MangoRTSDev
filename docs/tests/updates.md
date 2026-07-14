@@ -57,12 +57,12 @@ U46 - Logic Gate issue-flag changes do not create updates; the issue-flag featur
 U47 - Project-level notifications are not part of the Updates trigger canon yet, including project create, delete, rename, GVIC, and permission changes.
 U48 - Shared triage and shared inbox GVIC assignment changes create updates.
 U49 - Shared triage and shared inbox permission or access changes create updates.
-U50 - Update row copy follows the shape "{User} did {action} on {thing} in {context}"; the actor appears first, the specific verb appears second, and the primary object and workspace context are named in the row.
-U51 - Node updates with Logic Gate context must name both the node and the Logic Gate in the row text, even when the row is already visually grouped under that Logic Gate.
+U50 - Update row copy keeps the actor first, the specific verb second, and the primary non-Logic-Gate object named where one exists. Individual update rows do not render a Logic Gate icon, label, or trailing Logic Gate context.
+U51 - Logic Gate IDs and labels remain available for grouping, filtering, resource opening, sorting, and navigation, but are not repeated inside individual Updates row copy. Node rows still name the node; a direct Logic Gate notification uses concise action copy without a per-row Logic Gate chip or label.
 U52 - Update row tone is determined by update type: urgent mentions reserve red with a ! marker, normal mentions reserve orange with an @ marker, new/added/appended actions use blue, changed/updated actions use purple, and deleted/removed actions use dark mellow red.
 U53 - Mention tones override other row tones for the notification sent to the mentioned user: urgent ! mention is highest priority, then normal @ mention, then the underlying chat, editor, field, or attachment action.
 U54 - Status and priority values shown inside update rows must reuse the same shared visual tokens as node status and node priority controls; Updates must not hardcode separate status or priority colors, fonts, icons, or pill styles.
-U55 - Entity icons shown inside update rows must come from a shared app icon registry or equivalent shared token source for nodes, emails, Logic Gates, folders, projects, and future reusable entities; Updates must not define local copies of those icons.
+U55 - Entity icons shown inside update rows must come from a shared app icon registry or equivalent shared token source for nodes, emails, folders, projects, and future reusable entities; Updates must not define local copies of those icons. Logic Gate icons remain shared for grouping headers and other resource surfaces, but U51 excludes them from individual row copy.
 U56 - Assignment and permission tones follow the exact action subtype: newly assigned, newly granted, or newly attached uses blue; changed or updated uses purple; removed or revoked uses dark mellow red.
 U57 - The canonical row wording in the Update Row Copy table is the source of truth for update display text; changing row wording requires updating this file.
 U58 - A mention inserted in a node text editor or Logic Gate text editor becomes a committed inline mention chip when the user selects the mention target; later typing near that chip must edit surrounding text, not mutate the committed mention target.
@@ -81,7 +81,7 @@ U70 - Attachment-related update rows may reference attachment IDs, email IDs, no
 U71 - Seeing an individual update opens/highlights that clicked row's node and referenced information in the node preview. The next remaining visible row below becomes the list selection/focus target for continued keyboard or repeated Seen work, but it must not replace the clicked row's node preview until the user activates it. If no row remains below, Updates clears the list selection without jumping upward and retains the clicked node preview.
 U72 - Updates Status grouping consumes the shared universal status contract also used by My Work and Project Logic Gates / Nodes. A real status carried by a status-bearing notification is authoritative for that event row; arbitrary comment/mention prose and backend placeholders such as `a new status` or `a new state` are never status values. When no real event status exists, Updates falls back to the currently resolved node status, then the distinct No status group. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify aliases normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and completed/closed/archived aliases normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and No status remain before Done.
 U73 - A pending local notification delete/clear marker tracks whether HTTP and socket observers have claimed it. HTTP-first success emits once with its local optimistic source and a matching socket echo emits nothing; after both observers claim, the marker is removed so a distinct later clear is not suppressed. Socket-first commit emits once with a canonical non-local source so mounted Updates fetches even if the HTTP response is lost/rejected; duplicate socket frames remain suppressed while that lost response is pending. A failed HTTP request with no socket emits no update and releases its marker.
-U74 - A successful same-window Node or Logic Gate rename creates no notification under U45 and never rewrites the historical `NotificationItem.title` or `body_preview`. Mounted Updates resolves the current Node or Logic Gate label from Home's locally converged entity cache for the row's current-entity label, selected-panel entity label, and open action. For Logic Gate rows only, the current title also supplies saved Logic Gate grouping headers and alphabetical sort values.
+U74 - A successful same-window Node or Logic Gate rename creates no notification under U45 and never rewrites the historical `NotificationItem.title` or `body_preview`. Mounted Updates resolves the current Node label from Home's locally converged entity cache for Node row/panel copy and the open action. For Logic Gates, the current title supplies saved Logic Gate grouping headers, alphabetical sort values, and the open action, but U51 keeps that title out of individual row copy.
 U75 - Email-collaboration chat uses the existing Node chat trigger canon rather than a parallel notification subsystem. A new chat may create the normal chat-message update for already authorized participants under U34; the newly mentioned user's row is a normal or urgent mention update and mention tone overrides the underlying chat tone under U53.
 U76 - A normal email-chat mention uses `mention.created` and canonical copy `{User} mentioned you on <email icon> {Email subject}`; an urgent email-chat mention uses `mention.urgent_created` and `{User} urgently mentioned you on <email icon> {Email subject}`. It must not describe the private collaboration Node as a Logic Gate work Node.
 U77 - One accepted user-group mention creates at most one mention notification for each newly snapshotted member, excluding the actor and deduplicating overlap with direct/other-group mentions. Retrying the same committed chat write or later changing group membership does not duplicate, add, or retract those historical notifications.
@@ -124,45 +124,45 @@ Status and priority chips in Updates must match the node UI status and priority 
 | 5 Later (low priority) | Purple low-priority cue |
 | Unassigned to a Logic Gate | Muted gray unassigned cue |
 
-Entity icons in Updates must also be shared tokens. At minimum, the shared icon set must cover `<node icon>`, `<email icon>`, `<logic gate icon>`, `<folder icon>`, and `<project icon>`. `{Shared Surface}` means the relevant shared triage or shared inbox surface.
+Entity icons in Updates must also be shared tokens. Individual row copy may use `<node icon>`, `<email icon>`, `<folder icon>`, and `<project icon>`; `<logic gate icon>` remains available to Logic Gate grouping headers and other resource surfaces but is not rendered inside individual rows. `{Shared Surface}` means the relevant shared triage or shared inbox surface.
 
 ### Canonical Row Copy
 
 | Update event | Tone | Canonical row text |
 | --- | --- | --- |
-| Node added to Logic Gate | Blue | `{User} added <node icon> {Node} {Priority} {Status} to <logic gate icon> {Logic Gate}` |
-| Node requested to Logic Gate | Blue | `{User} requested <node icon> {Node} {Priority} to <logic gate icon> {Logic Gate}` |
-| Email converted into node | Blue | `{User} turned <email icon> email into <node icon> {Node} and added to <logic gate icon> {Logic Gate}` |
-| Node moved status | Purple | `{User} updated <node icon> {Node} to {Status} in <logic gate icon> {Logic Gate}` |
-| Normal mention in node text box | Orange @ | `{User} mentioned you in <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Urgent mention in node text box | Red ! | `{User} urgently mentioned you in <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Normal mention in node chat | Orange @ | `{User} mentioned you in chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Urgent mention in node chat | Red ! | `{User} urgently mentioned you in chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| New node chat message | Blue | `{User} sent chat on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
+| Node added to Logic Gate | Blue | `{User} added <node icon> {Node} {Priority} {Status}` |
+| Node requested to Logic Gate | Blue | `{User} requested <node icon> {Node} {Priority}` |
+| Email converted into node | Blue | `{User} turned <email icon> email into <node icon> {Node}` |
+| Node moved status | Purple | `{User} updated <node icon> {Node} to {Status}` |
+| Normal mention in node text box | Orange @ | `{User} mentioned you in <node icon> {Node}` |
+| Urgent mention in node text box | Red ! | `{User} urgently mentioned you in <node icon> {Node}` |
+| Normal mention in node chat | Orange @ | `{User} mentioned you in chat on <node icon> {Node}` |
+| Urgent mention in node chat | Red ! | `{User} urgently mentioned you in chat on <node icon> {Node}` |
+| New node chat message | Blue | `{User} sent chat on <node icon> {Node}` |
 | Normal mention in email collaboration chat | Orange @ | `{User} mentioned you on <email icon> {Email subject}` |
 | Urgent mention in email collaboration chat | Red ! | `{User} urgently mentioned you on <email icon> {Email subject}` |
 | New email collaboration chat message | Blue | `{User} sent chat on <email icon> {Email subject}` |
-| Normal mention in Logic Gate text editor | Orange @ | `{User} mentioned you in <logic gate icon> {Logic Gate}` |
-| Urgent mention in Logic Gate text editor | Red ! | `{User} urgently mentioned you in <logic gate icon> {Logic Gate}` |
-| Email attached directly to node | Blue | `{User} attached <email icon> email to <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Email-node card dropped or merged onto node | Blue | `{User} attached <email icon> email to <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Node removed from Logic Gate | Dark mellow red | `{User} removed <node icon> {Node} from <logic gate icon> {Logic Gate}` |
-| Node deleted | Dark mellow red | `{User} deleted <node icon> {Node} from <logic gate icon> {Logic Gate}` |
-| GVIC assigned on node | Blue | `{User} assigned {Assignee} as {GVIC Role} on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| GVIC changed on node | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| GVIC removed from node | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| GVIC assigned on Logic Gate | Blue | `{User} assigned {Assignee} as {GVIC Role} on <logic gate icon> {Logic Gate}` |
-| GVIC changed on Logic Gate | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <logic gate icon> {Logic Gate}` |
-| GVIC removed from Logic Gate | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <logic gate icon> {Logic Gate}` |
-| Permission granted on node | Blue | `{User} gave {Subject} access to <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Permission changed on node | Purple | `{User} changed {Subject}'s access on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Permission revoked on node | Dark mellow red | `{User} removed {Subject}'s access from <node icon> {Node} in <logic gate icon> {Logic Gate}` |
-| Permission granted on Logic Gate | Blue | `{User} gave {Subject} access to <logic gate icon> {Logic Gate}` |
-| Permission changed on Logic Gate | Purple | `{User} changed {Subject}'s access on <logic gate icon> {Logic Gate}` |
-| Permission revoked on Logic Gate | Dark mellow red | `{User} removed {Subject}'s access from <logic gate icon> {Logic Gate}` |
-| Node priority changed | Purple | `{User} updated <node icon> {Node} to {Priority} in <logic gate icon> {Logic Gate}` |
-| Node due date changed | Purple | `{User} changed the due date on <node icon> {Node} to {Due Date} in <logic gate icon> {Logic Gate}` |
-| Other update-relevant node field changed | Purple | `{User} changed {Field} on <node icon> {Node} in <logic gate icon> {Logic Gate}` |
+| Normal mention in Logic Gate text editor | Orange @ | `{User} mentioned you` |
+| Urgent mention in Logic Gate text editor | Red ! | `{User} urgently mentioned you` |
+| Email attached directly to node | Blue | `{User} attached <email icon> email to <node icon> {Node}` |
+| Email-node card dropped or merged onto node | Blue | `{User} attached <email icon> email to <node icon> {Node}` |
+| Node removed from Logic Gate | Dark mellow red | `{User} removed <node icon> {Node}` |
+| Node deleted | Dark mellow red | `{User} deleted <node icon> {Node}` |
+| GVIC assigned on node | Blue | `{User} assigned {Assignee} as {GVIC Role} on <node icon> {Node}` |
+| GVIC changed on node | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <node icon> {Node}` |
+| GVIC removed from node | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <node icon> {Node}` |
+| GVIC assigned on Logic Gate | Blue | `{User} assigned {Assignee} as {GVIC Role}` |
+| GVIC changed on Logic Gate | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role}` |
+| GVIC removed from Logic Gate | Dark mellow red | `{User} removed {Assignee}'s GVIC role` |
+| Permission granted on node | Blue | `{User} gave {Subject} access to <node icon> {Node}` |
+| Permission changed on node | Purple | `{User} changed {Subject}'s access on <node icon> {Node}` |
+| Permission revoked on node | Dark mellow red | `{User} removed {Subject}'s access from <node icon> {Node}` |
+| Permission granted on Logic Gate | Blue | `{User} gave {Subject} access` |
+| Permission changed on Logic Gate | Purple | `{User} changed {Subject}'s access` |
+| Permission revoked on Logic Gate | Dark mellow red | `{User} removed {Subject}'s access` |
+| Node priority changed | Purple | `{User} updated <node icon> {Node} to {Priority}` |
+| Node due date changed | Purple | `{User} changed the due date on <node icon> {Node} to {Due Date}` |
+| Other update-relevant node field changed | Purple | `{User} changed {Field} on <node icon> {Node}` |
 | Shared triage or shared inbox GVIC assigned | Blue | `{User} assigned {Assignee} as {GVIC Role} on <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox GVIC changed | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox GVIC removed | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <folder icon> {Shared Surface}` |
@@ -337,11 +337,11 @@ Business logic covered:
 Given:
 - A user receives update rows for node additions, node requests, email conversions, node status moves, mentions, node chat messages, email attachments, node removals, node deletions, GVIC changes, permission changes, node field changes, and shared triage changes.
 - Some rows include node status and priority values.
-- Some rows include node, email, Logic Gate, folder, or project entity icons.
+- Some rows include node, email, folder, or project entity icons, while Logic Gate context remains present in grouping/navigation data.
 
 Expected:
 - Each update row uses the canonical row text from the Update Row Copy table.
-- Node updates with Logic Gate context name both the node and the Logic Gate.
+- Node rows name the node but omit the Logic Gate icon, label, and trailing context; direct Logic Gate notifications also omit the per-row Logic Gate chip/label.
 - Urgent mentions use the reserved red ! treatment.
 - Normal mentions use the reserved orange @ treatment.
 - New, added, appended, attached, converted, assigned, or granted actions use blue.
@@ -349,7 +349,7 @@ Expected:
 - Removed, deleted, revoked, or detached actions use dark mellow red.
 - Mention rows use mention tone instead of the underlying chat, editor, field, or attachment tone.
 - Status and priority chips match the shared node UI tokens exactly.
-- Entity icons are pulled from the shared app icon registry or equivalent shared token source, not from Updates-local hardcoding.
+- Rendered row entity icons are pulled from the shared app icon registry or equivalent shared token source, while Logic Gate icons remain available to grouping headers rather than individual row copy.
 
 ### Scenario U-S7: Seen Actions, Multi-Select, And Text Editor Mention Commit
 
@@ -428,7 +428,7 @@ Given:
 Expected:
 - The rename creates no new notification.
 - The row's stored notification title and body preview remain the historical text recorded when the notification was created.
-- The mounted row's current-entity label, selected preview panel entity label, and open-Node or open-Logic-Gate action immediately use the current committed title.
+- The mounted Node row, selected Node preview label, and open-Node action immediately use the current committed Node title. The open-Logic-Gate action uses the current committed Logic Gate title without adding that title back to individual row copy.
 - For the Logic Gate case, the saved Logic Gate grouping header and alphabetical grouping order use the current committed title and sort value.
 - No feed reload, cross-user title socket, or generalized fan-out plane is required for this same-window convergence.
 

@@ -731,7 +731,6 @@ export function UpdatesView({
               onOpenGroupResource={openGroupResource}
               onOpenContextMenu={openUpdateContextMenu}
               resolveNodeDetails={resolveNodeDetails}
-              resolveLogicGateDetails={resolveLogicGateDetails}
               resolveUserLabel={resolveUserLabel}
             />
           )}
@@ -741,7 +740,6 @@ export function UpdatesView({
         <UpdatesNodePanel
           panel={activeNodePanel}
           resolveNodeDetails={resolveNodeDetails}
-          resolveLogicGateDetails={resolveLogicGateDetails}
           resolveUserLabel={resolveUserLabel}
           onClose={() => setActiveNodePanel(null)}
         />
@@ -776,7 +774,6 @@ function UpdateGroupList({
   onOpenGroupResource,
   onOpenContextMenu,
   resolveNodeDetails,
-  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   groups: UpdateDisplayGroup[];
@@ -793,7 +790,6 @@ function UpdateGroupList({
   onOpenGroupResource: (group: UpdateDisplayGroup) => void;
   onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
-  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   return (
@@ -843,7 +839,6 @@ function UpdateGroupList({
                 onOpenGroupResource={onOpenGroupResource}
                 onOpenContextMenu={onOpenContextMenu}
                 resolveNodeDetails={resolveNodeDetails}
-                resolveLogicGateDetails={resolveLogicGateDetails}
                 resolveUserLabel={resolveUserLabel}
               />
             )}
@@ -860,7 +855,6 @@ function UpdateGroupList({
                 onHoverNotification={onHoverNotification}
                 onOpenContextMenu={onOpenContextMenu}
                 resolveNodeDetails={resolveNodeDetails}
-                resolveLogicGateDetails={resolveLogicGateDetails}
                 resolveUserLabel={resolveUserLabel}
               />
             )}
@@ -925,7 +919,6 @@ function UpdateRows({
   onHoverNotification,
   onOpenContextMenu,
   resolveNodeDetails,
-  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   rows: UpdateFeedRow[];
@@ -939,7 +932,6 @@ function UpdateRows({
   onHoverNotification: (notificationKey: string) => void;
   onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
-  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   return (
@@ -991,7 +983,6 @@ function UpdateRows({
                 <UpdateCanonicalRowCopy
                   row={row}
                   resolveNodeDetails={resolveNodeDetails}
-                  resolveLogicGateDetails={resolveLogicGateDetails}
                   resolveUserLabel={resolveUserLabel}
                 />
               </span>
@@ -1105,30 +1096,24 @@ function updateRowTone(item: NotificationItem): "urgent" | "mention" | "new" | "
 function UpdateCanonicalRowCopy({
   row,
   resolveNodeDetails,
-  resolveLogicGateDetails,
   resolveUserLabel,
 }: {
   row: UpdateFeedRow;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
-  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
   const item = row.item;
   const tone = updateRowTone(item);
   const nodeID = updateRowNodeID(row);
   const nodeDetails = nodeID ? resolveNodeDetails?.(nodeID) ?? null : null;
-  const logicGateID = resolveUpdateLogicGateID(row);
-  const logicGateDetails = logicGateID ? resolveLogicGateDetails?.(logicGateID) ?? null : null;
   const actor = updateActorLabel(item, resolveUserLabel);
   const nodeLabel = updateRowNodeLabel(row, nodeDetails);
-  const logicGateLabel = updateRowLogicGateLabel(row, logicGateDetails);
   const statusLabel = updateRowStatusLabel(row, nodeDetails);
   const chatMention = updateRowIsChatMention(row);
   const priorityValue = nodeDetails ? updatePriorityValue(nodeDetails.priority) : null;
   const statusToken = statusLabel ? <UpdateStatusToken status={statusLabel} /> : null;
   const priorityToken = priorityValue !== null ? <UpdatePriorityToken priority={priorityValue} /> : null;
   const nodeEntity = <UpdateInlineEntity kind="node" label={nodeLabel} />;
-  const logicGateEntity = <UpdateInlineEntity kind="logic_gate" label={logicGateLabel} />;
 
   if (tone === "urgent" || tone === "mention") {
     if (updateItemIsEmailMention(item)) {
@@ -1145,8 +1130,7 @@ function UpdateCanonicalRowCopy({
       return (
         <span style={updateRowCopyStyle}>
           <span>{actor}</span>
-          <span>{tone === "urgent" ? "urgently mentioned you in" : "mentioned you in"}</span>
-          {logicGateEntity}
+          <span>{tone === "urgent" ? "urgently mentioned you" : "mentioned you"}</span>
         </span>
       );
     }
@@ -1155,8 +1139,6 @@ function UpdateCanonicalRowCopy({
         <span>{actor}</span>
         <span>{tone === "urgent" ? (chatMention ? "urgently mentioned you in chat on" : "urgently mentioned you in") : (chatMention ? "mentioned you in chat on" : "mentioned you in")}</span>
         {nodeEntity}
-        <span>in</span>
-        {logicGateEntity}
       </span>
     );
   }
@@ -1169,8 +1151,6 @@ function UpdateCanonicalRowCopy({
         {nodeEntity}
         {priorityToken}
         {statusToken}
-        <span>to</span>
-        {logicGateEntity}
       </span>
     );
   }
@@ -1181,8 +1161,6 @@ function UpdateCanonicalRowCopy({
         <span>{actor}</span>
         <span>removed</span>
         {nodeEntity}
-        <span>from</span>
-        {logicGateEntity}
       </span>
     );
   }
@@ -1195,8 +1173,6 @@ function UpdateCanonicalRowCopy({
         {nodeEntity}
         {statusToken ? <span>to</span> : null}
         {statusToken}
-        <span>in</span>
-        {logicGateEntity}
       </span>
     );
   }
@@ -1207,8 +1183,6 @@ function UpdateCanonicalRowCopy({
         <span>{actor}</span>
         <span>sent chat on</span>
         {nodeEntity}
-        <span>in</span>
-        {logicGateEntity}
       </span>
     );
   }
@@ -1266,13 +1240,11 @@ function UpdateStatusToken({ status }: { status: string }) {
 function UpdatesNodePanel({
   panel,
   resolveNodeDetails,
-  resolveLogicGateDetails,
   resolveUserLabel,
   onClose,
 }: {
   panel: UpdatesNodePanelState;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
-  resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
   onClose: () => void;
 }) {
@@ -1288,7 +1260,6 @@ function UpdatesNodePanel({
             <UpdateCanonicalRowCopy
               row={panel.row}
               resolveNodeDetails={resolveNodeDetails}
-              resolveLogicGateDetails={resolveLogicGateDetails}
               resolveUserLabel={resolveUserLabel}
             />
             {body && <span style={updatesNodePanelNotificationBodyStyle}>{body}</span>}
@@ -1381,14 +1352,6 @@ function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | nu
     || extractMentionTargetLabel(row.item)
     || extractNodeLabelFromPreview(row.item)
     || "Node";
-}
-
-function updateRowLogicGateLabel(row: UpdateFeedRow, details?: UpdateLogicGateDetails | null): string {
-  return resolveCurrentUpdateLogicGateLabel({
-    currentDetails: details,
-    groupedLabel: row.logicGate?.label,
-    historicalEntityLabel: row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "",
-  });
 }
 
 function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: string) => string): string {
