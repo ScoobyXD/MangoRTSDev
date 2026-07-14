@@ -33,6 +33,13 @@ When Jonat asks a project/Local task in the Codex desktop app to create, spawn, 
 - If a future task-creation control exposes a speed or service-tier argument, pass the active Fast setting explicitly. If it does not, verify that the persisted/current Fast/priority tier is active so the new task inherits it.
 - State the selected model, reasoning effort, and speed tier in the worker prompt and in the launcher's creation confirmation.
 
+### Canonical app-worker naming
+
+- The canonical user-visible Git branch identity is `codex/<descriptive-english-words><7 digits>`, for example `codex/fix-worktree-names0000123`.
+- The descriptive portion contains only English letters and hyphen-separated words. Do not prepend or retain a GUID, UUID, thread ID, or other opaque identifier. The collision-safe seven-digit allocation suffix is the only numeric portion and must be the final seven characters.
+- Include a dedicated `MANGORTS_WORKTREE_PURPOSE: <short English purpose>` line in every app-worker prompt so the naming hook receives a concise human-readable purpose instead of inferring one from the full task.
+- The Codex app owns the opaque checkout directory beneath `.codex/worktrees`; do not rename that internal directory. Treat the suffix-bearing Git branch as the canonical worker identity.
+
 ### Default: create the worker, then stop without integration
 
 When Jonat asks a project/Local task in the Codex desktop app to create, spawn, or start a new worktree for one job, use this lifecycle by default:

@@ -216,7 +216,7 @@ Expected V1 behavior:
 - base the worker from local `main`
 - fetch `origin/main` only to verify local `main` contains GitHub's latest `main`
 - allow local `main` to be ahead of GitHub
-- create a unique branch name from the agent run and node title
+- create a unique descriptive branch name from the agent run and node title, followed by the collision-safe seven-digit suffix
 - create a separate worktree under a predictable local path
 - write the context bundle into the worktree in an ignored agent/context location
 - start Codex headlessly in that worktree
@@ -225,13 +225,13 @@ Expected V1 behavior:
 Possible branch format:
 
 ```text
-agent/0001234-fix-login-redirect
+agent/fix-login-redirect0001234
 ```
 
 Possible worktree root:
 
 ```text
-C:\tmp\mangorts-agent-worktrees\0001234-fix-login-redirect
+C:\tmp\mangorts-agent-worktrees\fix-login-redirect0001234
 ```
 
 Do not open a new IDE for V1 Agent Service runs.

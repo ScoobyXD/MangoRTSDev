@@ -1,6 +1,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "codex\mango_worktree_naming_common.ps1")
+
 function Resolve-AgentPath {
   param(
     [Parameter(Mandatory = $true)]

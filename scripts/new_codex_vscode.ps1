@@ -13,50 +13,6 @@ param(
 
 . (Join-Path $PSScriptRoot "parallel_agent_common.ps1")
 
-function Get-NextCodexSuffixNumber {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$RepoPath
-  )
-
-  $numbers = New-Object "System.Collections.Generic.List[int]"
-
-  $worktreeLines = Invoke-AgentGit -RepoPath $RepoPath -Arguments @("worktree", "list", "--porcelain")
-  foreach ($line in $worktreeLines) {
-    if (-not $line.StartsWith("worktree ")) {
-      continue
-    }
-
-    $name = Split-Path -Leaf $line.Substring("worktree ".Length)
-    $match = [regex]::Match($name, "(\d{7})$")
-    if ($match.Success) {
-      $numbers.Add([int]$match.Groups[1].Value)
-    }
-  }
-
-  $branches = Invoke-AgentGit -RepoPath $RepoPath -Arguments @("for-each-ref", "--format=%(refname:short)", "refs/heads")
-  foreach ($branch in $branches) {
-    $match = [regex]::Match($branch, "(\d{7})$")
-    if ($match.Success) {
-      $numbers.Add([int]$match.Groups[1].Value)
-    }
-  }
-
-  if ($numbers.Count -eq 0) {
-    return 1
-  }
-
-  $ordered = @($numbers | Sort-Object -Unique)
-  for ($i = 1; $i -lt $ordered.Count; $i += 1) {
-    $gap = $ordered[$i] - $ordered[$i - 1]
-    if (($ordered[$i] -ge 100000) -and ($gap -gt 1000)) {
-      return ([int]$ordered[$i - 1] + 1)
-    }
-  }
-
-  return ([int]$ordered[-1] + 1)
-}
-
 function ConvertTo-PowerShellSingleQuotedLiteral {
   param(
     [Parameter(Mandatory = $true)]
@@ -406,7 +362,7 @@ if ([string]::IsNullOrWhiteSpace($Purpose)) {
   $Purpose = Read-Host "Purpose"
 }
 
-$baseSlug = ConvertTo-AgentSlug -Name $Purpose
+$baseSlug = ConvertTo-MangoWorktreePurposeSlug -Name $Purpose
 
 Invoke-AgentGit -RepoPath $mainRoot -Arguments @("fetch", "origin", "main")
 $containsRemote = Invoke-AgentGitExitCode -RepoPath $mainRoot -Arguments @("merge-base", "--is-ancestor", "FETCH_HEAD", "main")
@@ -420,7 +376,7 @@ if (-not $NoStart) {
   }
 }
 
-$suffixNumber = Get-NextCodexSuffixNumber -RepoPath $mainRoot
+$suffixNumber = Get-MangoNextCodexSuffixNumber -RepoPath $mainRoot
 while ($suffixNumber -le 9999999) {
   $suffix = "{0:D7}" -f $suffixNumber
   $slug = "$baseSlug$suffix"
