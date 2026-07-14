@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal";
+import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE } from "./UnifiedNodeShell";
 import {
+  downloadMangoAttachment,
+  fetchMangoAttachmentBlob,
   fileFromDataURL,
   linkMangoResourceAttachment,
   loadMangoAttachmentObjectURL,
@@ -118,8 +121,8 @@ import {
   getSelectedEditorImageFrame,
   selectEditorImageFrame,
   shouldUseEditorImageFileTransferShortcut,
+  writeEditorImageToSystemClipboard,
   writeImageClipboardData,
-  writeImageToSystemClipboard,
   type EditorImageTransferHTMLKind,
   type EditorImageClipboardData,
   type EditorImageData,
@@ -663,6 +666,22 @@ function replaceSelectionWithEditorListFragment(root: HTMLElement, range: Range,
   if (pastedItems.length === 0) return false;
 
   removeEditorTerminalBreaks(root);
+  if (pastedItems.length === 1 && !directNestedEditorList(pastedItems[0])) {
+    const pastedItem = pastedItems[0];
+    const inlineContent = root.ownerDocument.createDocumentFragment();
+    while (pastedItem.firstChild) inlineContent.appendChild(pastedItem.firstChild);
+    const lastInserted = inlineContent.lastChild;
+    if (!lastInserted) return false;
+    if (editorListItemContentIsEmpty(activeItem)) removeEditorListItemPlaceholders(activeItem);
+    range.deleteContents();
+    range.insertNode(inlineContent);
+    range.setStartAfter(lastInserted);
+    range.collapse(true);
+    const selection = root.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+  }
   if (editorListItemContentIsEmpty(activeItem)) {
     insertEditorListItemsBefore(activeItem, pastedItems);
     activeItem.remove();
@@ -1897,6 +1916,31 @@ function selectEditorListItem(root: HTMLElement, item: HTMLLIElement, edge: "sta
   selection.addRange(range);
 }
 
+function editorListItemCaretOffset(root: HTMLElement, item: HTMLLIElement): number {
+  const range = getEditorSelectionRange(root);
+  if (!range || !(item === range.startContainer || item.contains(range.startContainer))) return readEditorListItemOwnText(item).length;
+  const prefix = root.ownerDocument.createRange();
+  try {
+    prefix.setStart(item, 0);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    return Math.max(0, Math.min(readEditorListItemOwnText(item).length, prefix.toString().length));
+  } catch {
+    return 0;
+  }
+}
+
+function selectEditorListItemAtOffset(root: HTMLElement, item: HTMLLIElement, offset: number) {
+  let remaining = Math.max(0, Math.trunc(offset));
+  for (const textNode of editorListItemOwnTextNodes(item)) {
+    if (remaining <= textNode.data.length) {
+      setCollapsedSelectionInTextNode(root, textNode, remaining);
+      return;
+    }
+    remaining -= textNode.data.length;
+  }
+  selectEditorListItem(root, item, remaining > 0 ? "end" : "start");
+}
+
 function insertTextIntoEmptyEditorListItem(root: HTMLElement, item: HTMLLIElement, text: string): boolean {
   if (!text || !editorListItemContentIsEmpty(item)) return false;
   removeEditorListItemPlaceholders(item);
@@ -2066,7 +2110,9 @@ function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): bool
     try {
       if (!range.collapsed) range.deleteContents();
       splitRange.setStart(range.startContainer, range.startOffset);
-      splitRange.setEnd(item, item.childNodes.length);
+      const nestedList = directNestedEditorList(item);
+      if (nestedList) splitRange.setEndBefore(nestedList);
+      else splitRange.setEnd(item, item.childNodes.length);
     } catch {
       item.after(nextItem);
       selectEditorListItem(root, nextItem, "start");
@@ -2190,8 +2236,10 @@ function indentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
     nestedList.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
     previousItem.appendChild(nestedList);
   }
+  const caretOffset = editorListItemCaretOffset(root, item);
   nestedList.appendChild(item);
-  selectEditorListItem(root, item, "end");
+  root.focus({ preventScroll: true });
+  selectEditorListItemAtOffset(root, item, caretOffset);
   return true;
 }
 
@@ -2199,17 +2247,17 @@ function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean 
   const list = getEditorListForItem(item);
   if (!list) return false;
   const parentItem = list.parentElement instanceof HTMLLIElement ? list.parentElement : null;
+  const caretOffset = editorListItemCaretOffset(root, item);
   if (parentItem) {
     parentItem.after(item);
     if (list.children.length === 0) list.remove();
-    selectEditorListItem(root, item, "end");
+    root.focus({ preventScroll: true });
+    selectEditorListItemAtOffset(root, item, caretOffset);
     return true;
   }
 
   const trailingList = item.nextSibling ? list.cloneNode(false) as HTMLUListElement : null;
   while (trailingList && item.nextSibling) trailingList.appendChild(item.nextSibling);
-  const ownTextNodes = editorListItemOwnTextNodes(item);
-  const preferredTextNode = ownTextNodes[ownTextNodes.length - 1] ?? null;
   const plainBlock = root.ownerDocument.createElement("div");
   while (item.firstChild) plainBlock.appendChild(item.firstChild);
   if (plainBlock.childNodes.length === 0) plainBlock.appendChild(root.ownerDocument.createElement("br"));
@@ -2220,8 +2268,24 @@ function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean 
     plainBlock.after(trailingList);
     applyEditorListMarkerStyles(trailingList);
   }
-  if (preferredTextNode && plainBlock.contains(preferredTextNode)) {
-    setCollapsedSelectionInTextNode(root, preferredTextNode, preferredTextNode.data.length);
+  root.focus({ preventScroll: true });
+  const plainTextNodes: Text[] = [];
+  const walker = root.ownerDocument.createTreeWalker(plainBlock, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const nestedList = node.parentElement?.closest(`ul[${EDITOR_LIST_ATTRIBUTE}]`);
+      return nestedList && plainBlock.contains(nestedList) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) plainTextNodes.push(node);
+  let remainingOffset = caretOffset;
+  const preferredTextNode = plainTextNodes.find((node) => {
+    const length = node.textContent?.length ?? 0;
+    if (remainingOffset <= length) return true;
+    remainingOffset -= length;
+    return false;
+  });
+  if (preferredTextNode) {
+    setCollapsedSelectionInTextNode(root, preferredTextNode, remainingOffset);
   } else {
     const selection = root.ownerDocument.getSelection();
     const range = root.ownerDocument.createRange();
@@ -2685,6 +2749,10 @@ type EditorImagePreviewDraft = {
   label: string;
   html: string;
   attachmentID?: string;
+  filename?: string;
+  mimeType?: string;
+  width: number;
+  height: number;
 };
 
 function previewEditorImageFrame(
@@ -2699,6 +2767,10 @@ function previewEditorImageFrame(
     label: "Editor image",
     html: createEditorImageClipboardHTML(root.ownerDocument, data),
     attachmentID: data.attachmentID,
+    filename: data.filename,
+    mimeType: data.mimeType,
+    width: data.width,
+    height: data.height,
   });
   return true;
 }
@@ -2853,14 +2925,25 @@ function isEditorRedoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boole
   return (key === "z" && event.shiftKey) || key === "y";
 }
 
-function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer): boolean {
+function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer, attachmentContext?: EditorImageAttachmentContext): boolean {
   const frame = getSelectedEditorImageFrame(root);
   if (!frame) return false;
   const data = readEditorImageData(frame);
   if (!data) return false;
   const html = createEditorImageClipboardHTML(root.ownerDocument, data);
   if (!writeImageClipboardData(clipboardData, data.src, html)) return false;
-  writeImageToSystemClipboard(data.src, html);
+  const attachmentID = data.attachmentID?.trim() ?? "";
+  writeEditorImageToSystemClipboard(
+    root.ownerDocument,
+    data,
+    attachmentID && editorImageAttachmentContextReady(attachmentContext)
+      ? () => fetchMangoAttachmentBlob(attachmentContext.apiBase, attachmentContext.companyID, attachmentID, "original")
+      : data.src.startsWith("blob:") ? async () => {
+        const response = await fetch(data.src);
+        if (!response.ok) throw new Error("failed_to_read_editor_image");
+        return response.blob();
+      } : undefined,
+  );
   return true;
 }
 
@@ -4068,14 +4151,42 @@ export function useEditorDocumentSurfaceHandlers({
     if (!activeImagePreview) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "c") return;
-      if (writeImageToSystemClipboard(activeImagePreview.src, activeImagePreview.html)) {
+      const attachmentID = activeImagePreview.attachmentID?.trim() ?? "";
+      if (writeEditorImageToSystemClipboard(document, {
+        ...activeImagePreview,
+        attachmentID: attachmentID || undefined,
+      }, attachmentID && editorImageAttachmentContextReady(editorImageAttachmentContext)
+        ? () => fetchMangoAttachmentBlob(editorImageAttachmentContext.apiBase, editorImageAttachmentContext.companyID, attachmentID, "original")
+        : undefined)) {
         event.preventDefault();
         event.stopPropagation();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeImagePreview]);
+  }, [activeImagePreview, editorImageAttachmentContext]);
+
+  const downloadActiveImagePreview = useCallback(() => {
+    if (!activeImagePreview) return;
+    const attachmentID = activeImagePreview.attachmentID?.trim() ?? "";
+    if (attachmentID && editorImageAttachmentContextReady(editorImageAttachmentContext)) {
+      void downloadMangoAttachment({
+        apiBase: editorImageAttachmentContext.apiBase,
+        companyID: editorImageAttachmentContext.companyID,
+        attachmentID,
+        filename: activeImagePreview.filename,
+        variant: "original",
+      }).catch(() => undefined);
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = activeImagePreview.src;
+    link.download = activeImagePreview.filename?.trim() || "editor-image";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [activeImagePreview, editorImageAttachmentContext]);
 
   useEffect(() => {
     const attachmentID = activeImagePreview?.attachmentID?.trim() ?? "";
@@ -4238,39 +4349,65 @@ export function useEditorDocumentSurfaceHandlers({
           "data-mango-image-preview-close": "true",
           onClick: () => setActiveImagePreview(null),
           style: {
+            ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE,
             position: "fixed",
             top: 18,
             right: 18,
             zIndex: 2,
-            width: 44,
-            height: 44,
-            border: "2px solid rgba(255,255,255,0.94)",
-            borderRadius: 999,
-            background: "#ef4444",
-            color: "#ffffff",
-            cursor: "pointer",
-            display: "grid",
-            placeItems: "center",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.46)",
-            fontSize: 28,
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            fontSize: 24,
             fontWeight: 900,
             lineHeight: 1,
           } satisfies React.CSSProperties,
         },
         "×",
       ),
-      React.createElement("img", {
-        alt: activeImagePreview.label,
-        src: activeImagePreview.src,
-        style: {
-          width: "auto",
-          height: "auto",
-          maxWidth: "calc(100vw - 32px)",
-          maxHeight: "calc(100vh - 32px)",
-          objectFit: "contain",
-          display: "block",
-        } satisfies React.CSSProperties,
-      }),
+      React.createElement(
+        "div",
+        { style: { position: "relative", display: "inline-block", lineHeight: 0 } satisfies React.CSSProperties },
+        React.createElement("img", {
+          alt: activeImagePreview.label,
+          src: activeImagePreview.src,
+          style: {
+            width: "auto",
+            height: "auto",
+            maxWidth: "calc(100vw - 32px)",
+            maxHeight: "calc(100vh - 32px)",
+            objectFit: "contain",
+            display: "block",
+          } satisfies React.CSSProperties,
+        }),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Download image",
+            title: "Download image",
+            "data-mango-image-preview-download": "true",
+            onClick: downloadActiveImagePreview,
+            style: {
+              position: "absolute",
+              right: 10,
+              bottom: 10,
+              width: 36,
+              height: 36,
+              border: "1px solid rgba(255,255,255,0.82)",
+              borderRadius: 8,
+              background: "rgba(15,23,42,0.86)",
+              color: "#ffffff",
+              cursor: "pointer",
+              display: "grid",
+              placeItems: "center",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.38)",
+              fontSize: 20,
+              lineHeight: 1,
+            } satisfies React.CSSProperties,
+          },
+          "⇩",
+        ),
+      ),
     )
     : null;
 
@@ -4562,7 +4699,7 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onCopy(event) {
       const root = event.currentTarget;
-      if (copySelectedEditorImage(root, event.clipboardData) || copySelectedEditorDocumentFragment(root, event.clipboardData)) {
+      if (copySelectedEditorImage(root, event.clipboardData, editorImageAttachmentContext) || copySelectedEditorDocumentFragment(root, event.clipboardData)) {
         event.preventDefault();
       }
     },
@@ -4571,7 +4708,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (!getSelectedEditorImageFrame(root)) return;
       event.preventDefault();
       const undoBefore = snapshotEditorDocumentRoot(root);
-      if (!copySelectedEditorImage(root, event.clipboardData)) return;
+      if (!copySelectedEditorImage(root, event.clipboardData, editorImageAttachmentContext)) return;
       if (!removeSelectedEditorImage(root)) return;
       clearPendingTypingStyle();
       recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");

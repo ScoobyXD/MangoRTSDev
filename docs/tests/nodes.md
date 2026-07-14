@@ -132,6 +132,7 @@ N103 - Clicking a persisted editor annotation highlight with no active text sele
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
 N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
 N106 - Transient Node popup view mode is owned by the active popup instance, not canonical Node/board projections. Same-Node refresh or title reconciliation preserves fullscreen; only explicit user exit/close or opening a different Node may restore the normal saved non-fullscreen ratio.
+N107 - Full node shells use a shared responsive vertical viewport inset of 8px per browser edge where they are viewport-positioned. Home, app/sidebar, dock-restored, and Kanban/My Work non-fullscreen node windows default to the taller available height; Project critical-path inline and embedded node surfaces use the same maximum available-height rule inside their opener constraints. Explicit fullscreen retains its existing 8px inset and live-editor behavior.
 
 ## Scenarios
 
@@ -343,6 +344,7 @@ Business logic covered:
 - N48
 - N49
 - N50
+- N107
 - N61
 - N64
 - N85
@@ -379,6 +381,7 @@ Expected:
 - Replying to an attached email opens a complete bottom-docked composer immediately, keeps it visible while the email body scrolls above it, and lets the reply body expand upward as the reply grows.
 - Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries do not need to mount the unified node shell.
 - Home, app/sidebar, dock-restored, Updates, Kanban/My Work, Project inline node windows, and the Project Logic Gates / Nodes embedded node panel mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.
+- Viewport-positioned node shells leave only an 8px top and bottom gap by default, while constrained embedded surfaces grow to the same responsive available-height ceiling without breaking fullscreen restore behavior.
 
 ### Scenario N-S10: Node Attachments Do Not Bloat Projection Rows
 

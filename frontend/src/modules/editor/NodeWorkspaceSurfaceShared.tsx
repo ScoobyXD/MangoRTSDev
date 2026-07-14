@@ -99,12 +99,16 @@ export type TextBlockSelectionDraft = TextBlockSelectionAnchor & {
 export type TextBlockImageDraft = {
   blockID: string;
   dataURL: string;
+  attachmentID?: string;
+  filename?: string;
   mimeType: string;
   size: number;
   width: number;
   height: number;
   x: number;
   y: number;
+  downloadX: number;
+  downloadY: number;
 };
 
 export type TimelineGranularity = "day" | "week" | "month" | "year";

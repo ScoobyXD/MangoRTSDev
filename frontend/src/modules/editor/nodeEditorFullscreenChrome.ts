@@ -1,5 +1,6 @@
 export const NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX = 12;
 export const NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX = 8;
+export const NODE_EDITOR_STANDARD_VERTICAL_INSET_PX = NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2;
 export const EVENT_NODE_EDITOR_FULLSCREEN_CHROME_CHANGED = "mangorts:node-editor-fullscreen-chrome-changed";
 
 let nodeEditorFullscreenChromeCount = 0;

@@ -53,6 +53,18 @@ export function resolveUpdateSeenSuccessor(
     ?.rowKey ?? "";
 }
 
+export function resolveUpdateSeenPresentation(
+  orderedRows: readonly UpdateSeenRow[],
+  seenRowKey: string,
+  hiddenNotificationKeys: ReadonlySet<string>,
+): { previewRowKey: string; successorRowKey: string } {
+  const previewRowKey = orderedRows.some((row) => row.rowKey === seenRowKey) ? seenRowKey : "";
+  return {
+    previewRowKey,
+    successorRowKey: resolveUpdateSeenSuccessor(orderedRows, seenRowKey, hiddenNotificationKeys),
+  };
+}
+
 export function updatesNotificationEventRequiresReload(input: {
   activeCompanyID: string;
   eventCompanyID?: string;

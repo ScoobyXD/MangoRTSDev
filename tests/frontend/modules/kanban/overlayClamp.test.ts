@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getNodeEditorOverlayMinLeftPx } from "../../../../frontend/src/modules/kanban/KanbanContentModel.js";
+import { DEFAULT_NODE_EDITOR_OVERLAY_RATIO, clampNodeEditorOverlayRatio, getNodeEditorOverlayMinLeftPx } from "../../../../frontend/src/modules/kanban/KanbanContentModel.js";
 
 function rect(left: number, right: number, top = 0, bottom = 100): DOMRect {
   return {
@@ -63,4 +63,14 @@ test("node editor overlay minimum left leaves non-arena boards at their own left
   const kanbanBoard = element(rect(300, 1200));
 
   assert.equal(getNodeEditorOverlayMinLeftPx(kanbanBoard, false), 0);
+});
+
+test("non-fullscreen Kanban node shells use the taller shared viewport geometry", () => {
+  assert.deepEqual(DEFAULT_NODE_EDITOR_OVERLAY_RATIO, { left: 0.02, top: 0.01, width: 0.96, height: 0.98 });
+  assert.deepEqual(clampNodeEditorOverlayRatio({ top: 0, height: 1 }), {
+    left: 0.02,
+    top: 0.01,
+    width: 0.96,
+    height: 0.98,
+  });
 });

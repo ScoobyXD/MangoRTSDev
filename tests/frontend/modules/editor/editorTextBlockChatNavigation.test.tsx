@@ -109,6 +109,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       const text = this.toString();
       if (text === "alpha") return [rect(20, 20, 70, 40)];
       if (text === "beta") return [rect(100, 20, 145, 40)];
+      if (text === "nested") return [rect(46, 52, 108, 72)];
       return [];
     },
   });
@@ -303,6 +304,58 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       wrappedRequest && { quote: wrappedRequest.quote, startOffset: wrappedRequest.startOffset, endOffset: wrappedRequest.endOffset },
       { quote: "alpha\nbeta", startOffset: 0, endOffset: 10 },
     );
+
+    const nestedDocument = '<!-- mango-editor-html-v1 --><ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">outer<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">nested</li></ul></li></ul>';
+    const nestedEditorProps = {
+      blockID: "block-nested",
+      editable: true,
+      nodeID: "node-1",
+      apiBase: "",
+      companyID: "company-1",
+      currentUserID: "user-1",
+      companyUsers: [],
+      documentValue: nestedDocument,
+      contentChanges: [],
+      activeChatAnchorMessageID: "",
+      chatNavigationRequest: null,
+      surfaceText: "#111827",
+      accent: "#7c3aed",
+      outlineStyle: "automatic-outline-numbering" as const,
+      indentGuideColor: "#94a3b8",
+      scrollbarTrack: "#e2e8f0",
+      onFocus: noop,
+      onBlur: noop,
+      onDocumentChange: noop,
+      onDocumentFlush: noop,
+      onChangeSeen: noop,
+      onChatHighlightActivate: noop,
+      onSelectionChatRequest: noop,
+      onImageChatRequest: noop,
+      onImageNodeRequest: noop,
+    };
+    await act(async () => root.render(
+      <NodeTextBlockEditor
+        {...nestedEditorProps}
+        chatMessages={[]}
+        pendingChatSelectionAnchor={{ blockID: "block-nested", quote: "nested", startOffset: 6, endOffset: 12 }}
+      />,
+    ));
+    const nestedEditor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-nested"]');
+    assert.ok(nestedEditor);
+    nestedEditor.getBoundingClientRect = () => rect(0, 0, 400, 220);
+    nestedEditor.parentElement!.getBoundingClientRect = () => rect(0, 0, 400, 220);
+    await flushFrames();
+    assert.ok(container.querySelector('[data-mango-chat-message-id="pending-chat-selection"]'), "nested source text remains highlighted while the chat composer is open");
+
+    await act(async () => root.render(
+      <NodeTextBlockEditor
+        {...nestedEditorProps}
+        pendingChatSelectionAnchor={undefined}
+        chatMessages={[message({ id: "comment-nested", blockID: "block-nested", selectionQuote: "nested", selectionStart: 6, selectionEnd: 12 })]}
+      />,
+    ));
+    await flushFrames();
+    assert.ok(container.querySelector('[data-mango-chat-message-id="comment-nested"]'), "the source annotation persists after chat creation succeeds");
 
     const threadedMessages = [
       message({ id: "parent", message: "Parent comment" }),

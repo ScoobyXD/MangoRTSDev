@@ -253,6 +253,49 @@ export function writeImageToSystemClipboard(src: string, html: string, plainText
   }
 }
 
+export type EditorImageClipboardBlobLoader = () => Promise<Blob>;
+
+function editorImageBlobDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("failed_to_read_editor_image"));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function writeEditorImageToSystemClipboard(
+  ownerDocument: Document,
+  data: EditorImageData,
+  loadBlob?: EditorImageClipboardBlobLoader,
+): boolean {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+  if (!clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  const immediateBlob = createEditorImageBlob(data.src);
+  const blobPromise = immediateBlob ? Promise.resolve(immediateBlob) : loadBlob?.();
+  if (!blobPromise) return writeImageToSystemClipboard(data.src, createEditorImageClipboardHTML(ownerDocument, data), data.filename);
+
+  const supportsType = (ClipboardItem as unknown as { supports?: (type: string) => boolean }).supports;
+  const declaredImageType = (data.mimeType || immediateBlob?.type || "").trim().toLowerCase();
+  const payload: Record<string, Blob | Promise<Blob>> = {
+    "text/html": blobPromise.then(async (blob) => {
+      const portableSource = await editorImageBlobDataURL(blob);
+      return new Blob([createStandaloneImageClipboardHTML(portableSource, data.filename || "Image")], { type: "text/html" });
+    }),
+    "text/plain": Promise.resolve(new Blob([data.filename?.trim() || "Image"], { type: "text/plain" })),
+  };
+  if (/^image\/(?:png|jpe?g|gif|webp)$/i.test(declaredImageType)
+    && (typeof supportsType !== "function" || supportsType(declaredImageType))) {
+    payload[declaredImageType] = blobPromise;
+  }
+  try {
+    void clipboard.write([new ClipboardItem(payload)]).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type EditorImageTransferHTMLKind = "none" | "single-image" | "other";
 
 export function shouldUseEditorImageFileTransferShortcut(

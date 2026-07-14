@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getKanbanGroupValues, getKanbanPriorityFromGroupKey, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn, type KanbanGroupField } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION, KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED, KANBAN_DEFAULT_GROUPINGS } from "../../../../frontend/src/modules/kanban/shared.js";
 import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
@@ -403,4 +404,10 @@ test("kanban visual contract preserves column title casing and frame-header clea
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
   assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["person", "priority", "due_date", "account"]);
+});
+
+test("Kanban starts with Priority grouping and newest Date Added ordering", () => {
+  assert.deepEqual(KANBAN_DEFAULT_GROUPINGS, [{ field: "priority", direction: "asc" }]);
+  assert.equal(KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED, true);
+  assert.equal(KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION, "desc");
 });

@@ -10,6 +10,7 @@ import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } fr
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_STANDARD_VERTICAL_INSET_PX,
   NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
   fullscreenNodeEditorViewportRect,
   setNodeEditorFullscreenChromeActive,
@@ -63,8 +64,8 @@ const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
-const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
-const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
+const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX;
+const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v2";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
 const HOME_COMPACT_CONTEXT_MENU_WIDTH = 210;
 const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [

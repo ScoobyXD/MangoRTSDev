@@ -202,6 +202,15 @@ test("automatic numbering Tab changes a numeric item into an alphabetic child", 
   });
 });
 
+test("automatic numbering Tab at the start of an item preserves that row and every row below", () => {
+  const value = "1. parent\n2. second\n3. third";
+  const secondRowStart = value.indexOf("2. second");
+  const edit = insertEditorTabText(value, secondRowStart, secondRowStart, "automatic-outline-numbering", "indent");
+  assert.equal(edit.value, `1. parent\n${EDITOR_TAB_TEXT}a. second\n3. third`);
+  assert.equal(edit.selectionStart, `1. parent\n${EDITOR_TAB_TEXT}a. `.length);
+  assert.equal(edit.selectionEnd, edit.selectionStart);
+});
+
 test("automatic numbering Tab in ordinary text inserts at the caret", () => {
   const value = "plain block";
   const edit = insertEditorTabText(value, value.length, value.length, "automatic-outline-numbering", "indent");

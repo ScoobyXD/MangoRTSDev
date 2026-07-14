@@ -33,7 +33,7 @@ import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNes
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
 import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
@@ -506,7 +506,7 @@ export function UpdatesView({
     window.setTimeout(focusSelectedRow, 600);
   }, []);
 
-  const openUpdateNodePanel = useCallback((row: UpdateFeedRow) => {
+  const openUpdateNodePanel = useCallback((row: UpdateFeedRow, options: { focusRow?: boolean } = {}) => {
     const nodeID = updateRowNodeID(row);
     if (!nodeID) return;
     const details = resolveNodeDetails?.(nodeID) ?? null;
@@ -520,7 +520,7 @@ export function UpdatesView({
       notificationKey,
       row,
     });
-    focusUpdateRow(row.rowKey);
+    if (options.focusRow !== false) focusUpdateRow(row.rowKey);
     onOpenNode(nodeID, informationID);
   }, [focusUpdateRow, onOpenNode, resolveNodeDetails]);
 
@@ -569,15 +569,15 @@ export function UpdatesView({
     selectUpdateRow(visibleUpdateRows[nextIndex], undefined, { open: true, focus: true });
   }, [selectUpdateRow, visibleUpdateRows]);
 
-  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceFromRowKey?: string } = {}) => {
+  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceFromRowKey?: string; previewRow?: UpdateFeedRow } = {}) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
     const notificationIDs = uniqueItems.map((item) => item.notification_id?.trim() ?? "").filter(Boolean);
     if (notificationIDs.length === 0) return;
     if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
     const hiddenKeys = uniqueItems.map(updateNotificationSelectionKey);
     const hiddenKeySet = new Set(hiddenKeys);
-    const nextRowKey = options.advanceFromRowKey
-      ? resolveUpdateSeenSuccessor(
+    const seenPresentation = options.advanceFromRowKey
+      ? resolveUpdateSeenPresentation(
         visibleUpdateRows.map((row) => ({
           rowKey: row.rowKey,
           notificationKey: updateNotificationSelectionKey(row.item),
@@ -585,7 +585,12 @@ export function UpdatesView({
         options.advanceFromRowKey,
         hiddenKeySet,
       )
-      : "";
+      : { previewRowKey: "", successorRowKey: "" };
+    const openedClickedNode = Boolean(options.previewRow
+      && seenPresentation.previewRowKey === options.previewRow.rowKey
+      && updateRowNodeID(options.previewRow));
+    if (options.previewRow && openedClickedNode) openUpdateNodePanel(options.previewRow, { focusRow: false });
+    const nextRowKey = seenPresentation.successorRowKey;
     const nextRow = nextRowKey ? visibleUpdateRows.find((row) => row.rowKey === nextRowKey) ?? null : null;
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
@@ -602,16 +607,13 @@ export function UpdatesView({
       setSelectedNotificationKey(nextKey);
       setSelectedNotificationKeys(new Set([nextKey]));
       setSelectionAnchorNotificationKey(nextKey);
-      if (updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow);
-      else {
-        setActiveNodePanel(null);
-        focusUpdateRow(nextRow.rowKey);
-      }
+      if (!openedClickedNode && updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow);
+      else focusUpdateRow(nextRow.rowKey);
     } else if (options.advanceFromRowKey || hiddenKeys.includes(selectedNotificationKey)) {
       setSelectedNotificationKey("");
       setSelectedNotificationKeys(new Set());
       setSelectionAnchorNotificationKey("");
-      setActiveNodePanel(null);
+      if (!openedClickedNode) setActiveNodePanel(null);
     }
     setContextMenu(null);
     void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
@@ -625,7 +627,7 @@ export function UpdatesView({
   }, [companyID, focusUpdateRow, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
 
   const markUpdateSeen = useCallback((row: UpdateFeedRow) => {
-    removeSeenUpdates([row.item], "", { advanceFromRowKey: row.rowKey });
+    removeSeenUpdates([row.item], "", { advanceFromRowKey: row.rowKey, previewRow: row });
   }, [removeSeenUpdates]);
 
   const markSelectedUpdatesSeen = useCallback(() => {
