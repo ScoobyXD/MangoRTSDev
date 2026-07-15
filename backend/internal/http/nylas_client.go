@@ -427,13 +427,29 @@ func (c *NylasRESTClient) DeleteGrant(ctx context.Context, grantID string) error
 }
 
 func (c *NylasRESTClient) ListFolders(ctx context.Context, grantID string) ([]NylasFolder, error) {
-	var response struct {
-		Data []NylasFolder `json:"data"`
+	values := url.Values{}
+	folders := make([]NylasFolder, 0)
+	seenPageTokens := map[string]struct{}{}
+	for {
+		var response struct {
+			Data          []NylasFolder `json:"data"`
+			NextCursor    string        `json:"next_cursor,omitempty"`
+			NextPageToken string        `json:"next_page_token,omitempty"`
+		}
+		if err := c.do(ctx, http.MethodGet, grantPath(grantID, "folders"), values, nil, &response, true); err != nil {
+			return nil, err
+		}
+		folders = append(folders, response.Data...)
+		nextPageToken := firstNonBlank(response.NextPageToken, response.NextCursor)
+		if nextPageToken == "" {
+			return folders, nil
+		}
+		if _, repeated := seenPageTokens[nextPageToken]; repeated {
+			return nil, NylasAPIError{StatusCode: http.StatusBadGateway, Code: "invalid_folders_pagination"}
+		}
+		seenPageTokens[nextPageToken] = struct{}{}
+		values.Set("page_token", nextPageToken)
 	}
-	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "folders"), nil, nil, &response, true); err != nil {
-		return nil, err
-	}
-	return response.Data, nil
 }
 
 func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error) {

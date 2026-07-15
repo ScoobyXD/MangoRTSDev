@@ -26,6 +26,7 @@ import {
   uploadMangoAttachment,
 } from "../../modules/attachments/attachmentApi";
 import { downloadEmailAttachment, parseEmailAddressList, respondToCalendarInvite, type CalendarInviteRSVPStatus, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
@@ -4781,7 +4782,7 @@ const composeRichToolbarStyle: React.CSSProperties = {
 const composeRichEditorStyle: React.CSSProperties = {
   ...mailPanelTextareaStyle,
   minHeight: 180,
-  height: "min(280px, 34vh)",
+  height: "100%",
   overflowY: "auto",
   outline: "none",
   color: "#111827",
@@ -4790,11 +4791,10 @@ const composeRichEditorStyle: React.CSSProperties = {
 };
 
 function composePanelStyle(replyMode: boolean): React.CSSProperties {
-  if (!replyMode) return composeStyle;
   return {
     ...composeStyle,
     height: "100%",
-    gridTemplateRows: "auto minmax(0, 1fr) auto",
+    gridTemplateRows: replyMode ? "auto minmax(0, 1fr) auto" : "auto minmax(0, 1fr)",
     alignContent: "stretch",
     overflow: "hidden",
   };
@@ -4874,6 +4874,15 @@ const composeReplyDockStyle: React.CSSProperties = {
   gap: 8,
   alignContent: "end",
 };
+
+const composeNewMessageDockStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto auto auto auto auto minmax(180px, 1fr) auto",
+  gap: 8,
+  overflowY: "auto",
+};
+
 
 const composeReplyResizeHandleStyle: React.CSSProperties = {
   height: 10,
@@ -5506,7 +5515,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           <iframe title="Original email" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={composeReplyOriginalFrameStyle} />
         </div>
       )}
-      <div style={isReplyMode ? composeReplyDockStyle : undefined}>
+      <div style={isReplyMode ? composeReplyDockStyle : composeNewMessageDockStyle}>
         {!isReplyMode && renderRecipientInput("to", "To")}
         {!isReplyMode && renderRecipientInput("cc", "Cc")}
         {!isReplyMode && renderRecipientInput("bcc", "Bcc")}
@@ -6101,7 +6110,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
 }) {
   const allAttachments = React.useMemo(
-    () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim()),
+    () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || emailAttachmentHasResolvableContent(attachment)),
     [message.attachments],
   );
   const messageDate = formatMessageDate(message.date);

@@ -1754,6 +1754,35 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if responseAttachment.Content != "" || responseAttachment.AttachmentID != inlineAttachmentID || responseAttachment.ContentID != inlineContentID || !responseAttachment.IsInline {
 		t.Fatalf("response attachment = %+v, want metadata-only Mango inline attachment", responseAttachment)
 	}
+	sentResourceID := communicationsSentMessageResourceID(user.UserID, "", inlineSendResponse.Message.ID)
+	sentLinks, err := repo.ListResourceAttachments(companyID, "email_message", sentResourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sentInlineLink *domain.ResourceAttachment
+	for index := range sentLinks {
+		if sentLinks[index].AttachmentID == inlineAttachmentID {
+			sentInlineLink = &sentLinks[index]
+			break
+		}
+	}
+	if sentInlineLink == nil || sentInlineLink.RelationshipKind != store.AttachmentRelationshipEmailInline {
+		t.Fatalf("sent attachment links = %+v, want durable inline email_message link", sentLinks)
+	}
+	if err := repo.SoftDeleteCommunicationsEmailDraft(store.CommunicationsEmailDraftDeleteInput{
+		CompanyID: companyID, DraftID: "draft-inline", PersonalUserID: user.UserID,
+		PersonalAccountEmail: user.Email, UpdatedByUserID: user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sentInlineRequest := httptest.NewRequest(http.MethodGet, "/v1/attachments/"+url.PathEscape(inlineAttachmentID)+"/content?company_id="+url.QueryEscape(companyID)+"&variant=original", nil)
+	sentInlineRequest.Header.Set("Authorization", token)
+	sentInlineContent := httptest.NewRecorder()
+	handler.ServeHTTP(sentInlineContent, sentInlineRequest)
+	if sentInlineContent.Code != http.StatusOK || sentInlineContent.Body.String() != "png-bytes" {
+		t.Fatalf("sent inline content after draft cleanup status=%d body=%q", sentInlineContent.Code, sentInlineContent.Body.String())
+	}
+
 	missingInlinePayload, err := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"to":         []map[string]string{{"email": "friend@example.com"}},

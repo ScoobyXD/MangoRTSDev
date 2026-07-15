@@ -90,6 +90,7 @@ ED65 - Unified-editor attachment hydration owns setup and cleanup in the same la
 ED66 - In every unified rich editor surface from ED2, Tab is an editor indentation command and never browser focus navigation. Plain text and table-cell text receive one editor indent; structural list items nest through the shared list command. Shift+Tab performs the corresponding shared outdent or a prevented no-op when no outdent is possible. Tab must not accept a mention-menu item, move between table cells, leave the editor, or focus another app control.
 ED67 - Selecting an inline image, opening its chat action, or focusing and blurring an otherwise unchanged node/project text block is not a document edit and must not flush a projection save. A real document mutation still flushes through the existing debounce/blur/teardown guarantees.
 ED68 - An editable Node with at least one loaded text box must select and publish a deterministic text-block formatting target during initial hydration without moving browser focus. The outer toolbar is therefore enabled, clickable, and hover-responsive immediately; clicking a different text box retargets it normally. Read-only/permission-disabled nodes, hidden document modes, nodes with no text box, and the attached-email reply focus boundary in ED41 remain disabled.
+ED69 - Attachment hydration cleanup is tied to actual editor lifecycle/context/value replacement, not every controlled `value` rerender. A local input update that serializes the same live DOM keeps the active hydration owner, image element, decoded object URL, and selection intact; StrictMode replay and unmount still restart or dispose exactly once and revoke every owned URL.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1256,3 +1257,17 @@ Expected:
 - Scrolling the editor moves the inline download action by the same amount as the image frame and hides it while the image is outside the editor viewport.
 - Tab and Shift+Tab are always prevented from navigating browser focus; the shared editor indents or outdents the current text/list context and never uses Tab to accept a mention or move to another table cell.
 - Image selection and an untouched focus/blur cycle issue no projection save, while subsequent real edits retain normal save behavior.
+
+### Scenario ED-S15: Inline Images Stay Stable While Typing
+
+Business logic covered:
+- ED65
+- ED69
+
+Given:
+- A unified mail editor has eagerly hydrated one durable Mango image and reports each input through its controlled value.
+- The user types characters before and after the image, then the editor is unmounted.
+
+Expected:
+- Controlled rerenders retain the same image DOM node and object URL, issue no replacement fetch, and never show a one-frame blank or broken thumbnail.
+- Real unmount/context replacement still aborts pending work, restores the durable source, and revokes the owned object URL without weakening sanitization or original-image authorization.

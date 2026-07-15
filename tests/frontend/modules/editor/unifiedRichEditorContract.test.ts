@@ -1402,9 +1402,9 @@ test("signature attachment previews restart after editor lifecycle replay and ex
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
   assert.match(unified, /attachmentHydrationContextKeyRef\.current === attachmentHydrationContextKey[\s\S]{0,160}attachmentHydrationCleanupRef\.current/);
-  assert.match(unified, /const hydrationCleanup = attachmentHydrationCleanupRef\.current/);
-  assert.match(unified, /return \(\) => \{[\s\S]{0,180}hydrationCleanup\?\.\(\)[\s\S]{0,180}attachmentHydrationCleanupRef\.current = null/);
-  assert.doesNotMatch(unified, /useEffect\(\(\) => \(\) => \{\s*attachmentHydrationCleanupRef/);
+  assert.doesNotMatch(unified, /const hydrationCleanup = attachmentHydrationCleanupRef\.current/);
+  assert.match(unified, /useLayoutEffect\(\(\) => \(\) => \{\s*attachmentHydrationCleanupRef\.current\?\.\(\);\s*attachmentHydrationCleanupRef\.current = null;/);
+  assert.doesNotMatch(unified, /scheduleIndentGuideUpdate\(readEditorDocumentText\(editor\)\);\s*if \(selectionOffsets\)[\s\S]{0,120}return \(\) =>/);
   assert.match(unified, /onError: \(\) => editorImageAttachmentErrorRef\.current/);
   assert.match(homeParts, /eagerEditorImageHydration/);
 

@@ -85,6 +85,24 @@ test("triage thread controls and reply resize pointer lifecycle are explicit", (
   assert.match(homePage, /requiredReplyAllRecipients/);
   assert.match(homePage, /mergeEmailAddressDrafts\(\[existingDraft\.cc, requiredReplyAllRecipients\.cc\], \[to\]\)/);
 });
+test("sent triage preserves the three-button header and new-message compose fills the available detail height", () => {
+  const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
+  const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+
+  assert.match(homeWorkspace, /const triageAdvanceVisible = triageAdvanceEnabled \|\| \(isArchivableListView && mailbox === "sent"\)/);
+  assert.match(homeWorkspace, /style=\{triageAdvanceVisible \? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle\}/);
+  assert.match(homeWorkspace, /\{triageAdvanceVisible && \(/);
+  assert.match(homeWorkspace, /disabled=\{!triageAdvanceEnabled \|\| advanceDisabled\}/);
+
+  assert.match(homeParts, /height: "100%"/);
+  assert.match(homeParts, /gridTemplateRows: replyMode \? "auto minmax\(0, 1fr\) auto" : "auto minmax\(0, 1fr\)"/);
+  assert.match(homeParts, /const composeNewMessageDockStyle/);
+  assert.match(homeParts, /minmax\(180px, 1fr\)/);
+  assert.match(homeParts, /isReplyMode \? composeReplyDockStyle : composeNewMessageDockStyle/);
+  assert.doesNotMatch(homeParts, /height: "min\(280px, 34vh\)"/);
+  assert.match(homeParts, /emailAttachmentHasResolvableContent\(attachment\)/);
+});
+
 
 test("triage email selection, history, and archive prefetch preserve the foreground detail path", () => {
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");

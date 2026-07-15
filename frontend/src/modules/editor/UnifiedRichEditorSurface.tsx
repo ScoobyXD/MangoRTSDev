@@ -170,7 +170,6 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
         ),
       });
     }
-    const hydrationCleanup = attachmentHydrationCleanupRef.current;
     attachmentHydrationContextKeyRef.current = attachmentHydrationContextKey;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     pendingFontSizeRef.current = null;
@@ -181,13 +180,12 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
-    return () => {
-      hydrationCleanup?.();
-      if (attachmentHydrationCleanupRef.current === hydrationCleanup) {
-        attachmentHydrationCleanupRef.current = null;
-      }
-    };
   }, [attachmentHydrationContextKey, eagerEditorImageHydration, scheduleIndentGuideUpdate, value]);
+
+  useLayoutEffect(() => () => {
+    attachmentHydrationCleanupRef.current?.();
+    attachmentHydrationCleanupRef.current = null;
+  }, []);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -292,7 +290,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   }, [formattingController, formattingControllerRef]);
 
   return (
-    <div style={{ position: "relative", minWidth: 0 }}>
+    <div style={{ position: "relative", minWidth: 0, minHeight: 0, height: style?.height }}>
       <EditorDocumentSurface
         documentRef={editorRef}
         editable={editable}
