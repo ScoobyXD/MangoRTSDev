@@ -74,6 +74,10 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
   Object.defineProperty(dom.window, "ResizeObserver", { configurable: true, value: TestResizeObserver });
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
   Object.defineProperty(dom.window.Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [{ left: 0, right: 10, top: 0, bottom: 10, width: 10, height: 10 }],
+  });
   Object.defineProperty(dom.window.Range.prototype, "getBoundingClientRect", {
     configurable: true,
     value: () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }),
@@ -81,10 +85,11 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { NodeTextBlockEditor }, { EditorTabBar }] = await Promise.all([
+    const [{ createRoot }, { NodeTextBlockEditor }, { EditorTabBar }, { AppModalPortal }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
+      import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
     const controllerRef = { current: null as any };
     const savedDocuments: string[] = [];
@@ -522,6 +527,77 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.match(firstCell.textContent ?? "", /^ {5}first$/, "table-cell Tab indents the cell text");
     assert.equal(secondCell.textContent, "second");
     assert.ok(firstCell.contains(dom.window.document.getSelection()?.anchorNode ?? null), "the caret remains in the current table cell");
+
+    await act(async () => root.render(
+      <AppModalPortal ownerDocument={dom.window.document}>
+        {editor}
+        <button type="button" data-testid="trapped-chat-button">Chat</button>
+      </AppModalPortal>,
+    ));
+    await flushAsyncWork();
+    const trappedEditor = dom.window.document.querySelector<HTMLElement>('[data-node-text-block-id="format-test"]');
+    const trappedChatButton = dom.window.document.querySelector<HTMLButtonElement>('[data-testid="trapped-chat-button"]');
+    assert.ok(trappedEditor);
+    assert.ok(trappedChatButton);
+
+    const tabText = "     ";
+    const automaticValue = `1. root\n${tabText}a. alpha\n${tabText.repeat(2)}i. one\n${tabText.repeat(2)}ii. two`;
+    const automaticText = dom.window.document.createTextNode(automaticValue);
+    const inlineImage = dom.window.document.createElement("span");
+    inlineImage.setAttribute("data-mango-editor-image", "true");
+    inlineImage.innerHTML = '<img src="data:image/png;base64,preview">';
+    trappedEditor.replaceChildren(automaticText, inlineImage);
+    const automaticEnd = dom.window.document.createRange();
+    automaticEnd.setStart(automaticText, automaticText.data.length);
+    automaticEnd.collapse(true);
+    trappedEditor.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(automaticEnd);
+    const trappedTab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => trappedEditor.dispatchEvent(trappedTab));
+    assert.equal(trappedTab.defaultPrevented, true);
+    assert.equal(dom.window.document.activeElement, trappedEditor, "the modal focus trap must not steal an editor-owned Tab");
+    assert.notEqual(dom.window.document.activeElement, trappedChatButton, "Tab cannot advance focus to Chat after indenting");
+    assert.equal(
+      trappedEditor.textContent,
+      `1. root\n${tabText}a. alpha\n${tabText.repeat(2)}i. one\n${tabText.repeat(3)}1. two`,
+      "automatic numbering still advances to the next marker family",
+    );
+    assert.ok(trappedEditor.contains(dom.window.document.getSelection()?.anchorNode ?? null), "the caret remains in the indented automatic item");
+    assert.ok(trappedEditor.querySelector('[data-mango-editor-image="true"]'), "Tab preserves unrelated inline images");
+
+    const dashText = dom.window.document.createTextNode("-");
+    trappedEditor.replaceChildren(dashText, inlineImage);
+    const dashEnd = dom.window.document.createRange();
+    dashEnd.setStart(dashText, 1);
+    dashEnd.collapse(true);
+    trappedEditor.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(dashEnd);
+    const dashSpace = new dom.window.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: " " });
+    await act(async () => Simulate.beforeInput(trappedEditor, { data: " ", inputType: "insertText", nativeEvent: dashSpace } as never));
+    const bulletItem = trappedEditor.querySelector<HTMLLIElement>('ul[data-mango-editor-list="bullet"] > li[data-mango-editor-list-item="bullet"]');
+    assert.ok(bulletItem, "dash-space creates a structural bullet item in automatic-numbering mode");
+    assert.equal(bulletItem.textContent, "");
+    assert.equal(dom.window.document.activeElement, trappedEditor);
+    assert.ok(bulletItem.contains(dom.window.document.getSelection()?.anchorNode ?? null), "dash-space keeps the caret in the bullet item");
+    assert.ok(trappedEditor.querySelector('[data-mango-editor-image="true"]'), "dash-space preserves unrelated inline images");
+
+    trappedEditor.innerHTML = '<table data-mango-editor-table="true"><tbody><tr><td data-mango-editor-table-cell="true">-</td></tr></tbody></table>';
+    const dashCell = trappedEditor.querySelector<HTMLTableCellElement>("td");
+    const dashCellText = dashCell?.firstChild;
+    assert.ok(dashCell);
+    assert.ok(dashCellText);
+    const dashCellEnd = dom.window.document.createRange();
+    dashCellEnd.setStart(dashCellText, 1);
+    dashCellEnd.collapse(true);
+    trappedEditor.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(dashCellEnd);
+    const tableDashSpace = new dom.window.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: " " });
+    await act(async () => Simulate.beforeInput(trappedEditor, { data: " ", inputType: "insertText", nativeEvent: tableDashSpace } as never));
+    assert.ok(dashCell.querySelector('ul[data-mango-editor-list="bullet"]'), "dash-space creates a structural bullet inside a table cell");
+    assert.ok(dashCell.contains(dom.window.document.getSelection()?.anchorNode ?? null));
 
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());

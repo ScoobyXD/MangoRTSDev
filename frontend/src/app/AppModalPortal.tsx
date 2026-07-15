@@ -210,7 +210,9 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
         onRequestCloseRef.current?.();
         return;
       }
-      if (!trapFocus || event.key !== "Tab") return;
+      // Inner controls such as the unified editor own Tab after preventing its
+      // default action. The modal trap must only cycle focus for unclaimed Tab.
+      if (!trapFocus || event.key !== "Tab" || event.defaultPrevented) return;
       const focusable = appModalFocusableElements(layer);
       if (focusable.length === 0) {
         event.preventDefault();

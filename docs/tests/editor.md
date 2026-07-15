@@ -87,10 +87,11 @@ ED62 - A single-clicked node/project inline image exposes a small download butto
 ED63 - Creating a node text box with the + action scrolls the new block into the visible workspace, focuses its rich editor, and places a usable caret at its end.
 ED64 - Turning selected text into chat keeps the source quote visibly annotated as soon as the chat composer opens and after the durable chat is created. The same canonical offset/quote fallback applies inside nested bullet and alphanumeric structures.
 ED65 - Unified-editor attachment hydration owns setup and cleanup in the same layout lifecycle. Cleanup replay cannot leave a durable `mango-attachment:` source stranded behind an already-applied-value guard: the authenticated hydration restarts whenever no active owner remains. Durable frames expose loading/ready/error state, hide native broken-image glyphs, use contain sizing, preserve the stored reference on failure, and retain double-click original-image viewing through its separately authorized loader.
-ED66 - In every unified rich editor surface from ED2, Tab is an editor indentation command and never browser focus navigation. Plain text and table-cell text receive one editor indent; structural list items nest through the shared list command. Shift+Tab performs the corresponding shared outdent or a prevented no-op when no outdent is possible. Tab must not accept a mention-menu item, move between table cells, leave the editor, or focus another app control.
+ED66 - In every unified rich editor surface from ED2, Tab is an editor indentation command and never browser focus navigation. Plain text and table-cell text receive one editor indent; structural list items nest through the shared list command. Shift+Tab performs the corresponding shared outdent or a prevented no-op when no outdent is possible. Tab must not accept a mention-menu item, move between table cells, leave the editor, or focus another app control. An enclosing modal focus trap must ignore the editor's already-default-prevented Tab event instead of cycling focus to Chat or another node-window control.
 ED67 - Selecting an inline image, opening its chat action, or focusing and blurring an otherwise unchanged node/project text block is not a document edit and must not flush a projection save. A real document mutation still flushes through the existing debounce/blur/teardown guarantees.
 ED68 - An editable Node with at least one loaded text box must select and publish a deterministic text-block formatting target during initial hydration without moving browser focus. The outer toolbar is therefore enabled, clickable, and hover-responsive immediately; clicking a different text box retargets it normally. Read-only/permission-disabled nodes, hidden document modes, nodes with no text box, and the attached-email reply focus boundary in ED41 remain disabled.
 ED69 - Attachment hydration cleanup is tied to actual editor lifecycle/context/value replacement, not every controlled `value` rerender. A local input update that serializes the same live DOM keeps the active hydration owner, image element, decoded object URL, and selection intact; StrictMode replay and unmount still restart or dispose exactly once and revoke every owned URL.
+ED70 - Typing a dash followed by one space at the otherwise-empty current line start converts that line immediately into an empty structural bullet-list item in every unified editor surface, independent of the selected outline style. The shortcut consumes the dash and space, keeps focus and the caret in the new item, works inside a table cell, preserves unrelated inline images/rich DOM, and does not activate inside an existing structural list item or in the middle of ordinary text.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -418,9 +419,9 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 | Bullet/Checklist mode outside a structural list | Creates a new structural list at the insertion point; a whitespace-only line becomes the first item | Inserts a soft newline and copies the current leading whitespace | Inserts five spaces | Removes leading whitespace from the active line |
 | Existing Mango bullet/checklist item | Splits a nonempty item; an item classified as empty exits the list | Inserts a soft newline inside the same item | Nests the current item under its previous sibling | Moves the current item outward by one structural list level |
 | Root Mango list item without a previous sibling | Normal list Enter behavior | Soft newline | Tab is prevented but cannot indent, so it is a swallowed no-op | Shift+Tab is prevented but cannot outdent, so it is a swallowed no-op |
-| Table cell | Inserts a `<br>`; Bullet/Checklist mode may convert the entire cell to a list | Inserts a `<br>` | Moves to the next cell; Tab from the last cell creates a row up to the 20-row limit | Moves to the previous cell; the first cell remains selected |
-| List inside a table cell | Enter gets special list handling | Soft line break | Table navigation wins, so the list cannot indent | Table navigation wins, so the list cannot outdent |
-| Mention menu open | Accepts the highlighted mention | Also accepts the mention because Shift is not distinguished | Accepts the mention | Also accepts the mention |
+| Table cell | Inserts a `<br>`; Bullet/Checklist mode may convert the entire cell to a list | Inserts a `<br>` | Inserts one editor indent in the current cell and keeps focus/caret there | Performs the shared outdent or a prevented no-op and keeps focus/caret in the current cell |
+| List inside a table cell | Enter gets special list handling | Soft line break | Nests the current structural item without navigating cells | Outdents the current structural item without navigating cells |
+| Mention menu open | Accepts the highlighted mention | Also accepts the mention because Shift is not distinguished | Runs the current editor indent and does not accept the mention | Runs the current editor outdent and does not accept the mention |
 | Selected image | General Enter behavior; there is no dedicated image Enter contract | General Shift+Enter behavior | General Tab behavior after the image selection is cleared | General Shift+Tab behavior |
 | Pasted native ordered-list item | Generic text Enter rather than structural list splitting | Generic text newline | Inserts spaces instead of nesting the native ordered item | Runs plain-text outdent rather than structural list lifting |
 
@@ -491,7 +492,7 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 - Pasted and legacy plain-text URLs are linkified only for HTTP(S) URLs.
 - Typing a URL does not generally create a link automatically.
 - Clicking an existing link opens it in a new tab rather than placing the caret in it.
-- Mention Enter/Tab acceptance takes priority over newline and indentation behavior.
+- Mention Enter acceptance takes priority over newline behavior; Tab never accepts a mention and remains owned by editor indentation.
 - Mention/entity nodes are noneditable atomic spans that retain their identity and appearance while behaving as one character at their before/after boundaries. Navigation, range selection, Backspace/Delete, Enter, line joining/splitting, lists, adjacent entities, and undo must not create dead zones or first downgrade an entity to ordinary text.
 - Images are noneditable frames. Clicking selects them and exposes a bottom-right download button, dragging moves them, edge/corner dragging resizes them, double-click opens the stable dark fullscreen preview with its square node-style red X and image download button, and Delete/Backspace removes a selected image.
 - Image insertion always adds a clear break and a caret node after the frame.
@@ -1244,6 +1245,7 @@ Business logic covered:
 - ED62
 - ED66
 - ED67
+- ED70
 
 Given:
 - A node or project text block contains an attachment-backed inline image.
@@ -1257,6 +1259,7 @@ Expected:
 - Scrolling the editor moves the inline download action by the same amount as the image frame and hides it while the image is outside the editor viewport.
 - Tab and Shift+Tab are always prevented from navigating browser focus; the shared editor indents or outdents the current text/list context and never uses Tab to accept a mention or move to another table cell.
 - Image selection and an untouched focus/blur cycle issue no projection save, while subsequent real edits retain normal save behavior.
+- Typing `- ` on an otherwise-empty line replaces the shortcut characters with a structural bullet item, keeps the caret in that item even inside a table cell, and preserves unrelated inline images.
 
 ### Scenario ED-S15: Inline Images Stay Stable While Typing
 

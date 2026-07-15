@@ -868,6 +868,7 @@ test("blocking editor and node overlays use the app modal layer above feature st
   assert.match(modalPortal, /createPortal\([\s\S]*targetDocument\.body/);
   assert.match(modalPortal, /export function useAppOverlayPortalTarget/);
   assert.match(modalPortal, /data-mango-modal-focus-trap=\{trapFocus \? "true" : "false"\}/);
+  assert.match(modalPortal, /event\.key !== "Tab" \|\| event\.defaultPrevented/);
   assert.match(modalPortal, /const trappingLayers = layers\.filter[\s\S]*const activeLayers = trappingLayers\.length > 0 \? trappingLayers : layers/);
   assert.match(modalPortal, /export function appOverlayCanHandleEscape[\s\S]*const activeLayer = activeAppModalLayer\(ownerDocument\)[\s\S]*element\?\.closest<HTMLElement>\(APP_MODAL_LAYER_SELECTOR\) === activeLayer/);
   assert.match(modalPortal, /activeElement\.closest<HTMLElement>\('\[role="menu"\]'\)[\s\S]*:scope > button\[aria-haspopup\]/);

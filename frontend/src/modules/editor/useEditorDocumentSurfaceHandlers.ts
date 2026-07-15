@@ -2034,6 +2034,24 @@ function startEditorListFromBlankLine(root: HTMLElement, kind: EditorListKind, c
   return insertEditorListAtSelection(root, kind, insertedText) !== null;
 }
 
+function startEditorBulletListFromDashShortcut(
+  root: HTMLElement,
+  currentText: string,
+  selectionStart: number,
+  selectionEnd: number,
+  insertedText: string,
+): boolean {
+  if (insertedText !== " " || selectionStart !== selectionEnd) return false;
+  const { lineStart, lineEnd, line } = readPlainTextLineBounds(currentText, selectionStart);
+  const relativeCaret = selectionStart - lineStart;
+  const beforeCaret = line.slice(0, relativeCaret);
+  const afterCaret = line.slice(relativeCaret);
+  if (!/^[ \t\u00a0]*-$/.test(beforeCaret) || !/^[ \t\u00a0]*$/.test(afterCaret)) return false;
+  if (!deleteTextByOffsets(root, lineStart, lineEnd, { preserveTrailingNewline: currentText.endsWith("\n") })) return false;
+  setEditorSelectionByPlainTextOffsets(root, lineStart);
+  return insertEditorListAtSelection(root, "bullet") !== null;
+}
+
 function insertEditorListFromEnter(root: HTMLElement, kind: EditorListKind, currentText: string, selectionStart: number, selectionEnd: number): boolean {
   const blankLineBounds = listStarterLineBounds(currentText, selectionStart, selectionEnd);
   if (blankLineBounds) {
@@ -2139,6 +2157,28 @@ function startEditorTableCellListFromText(root: HTMLElement, cell: HTMLTableCell
   if (!range || !range.collapsed || !cell.contains(range.startContainer)) return false;
   if (!editorTableCellEditableContentIsEmpty(cell)) return false;
   return replaceEditorTableCellEditableContentWithList(root, cell, kind, { initialText: text }) !== null;
+}
+
+function startEditorTableCellBulletListFromDashShortcut(
+  root: HTMLElement,
+  cell: HTMLTableCellElement,
+  insertedText: string,
+): boolean {
+  if (insertedText !== " ") return false;
+  const range = getEditorSelectionRange(root);
+  if (!range || !range.collapsed || !cell.contains(range.startContainer)) return false;
+  const beforeCaret = root.ownerDocument.createRange();
+  const afterCaret = root.ownerDocument.createRange();
+  try {
+    beforeCaret.selectNodeContents(cell);
+    beforeCaret.setEnd(range.startContainer, range.startOffset);
+    afterCaret.selectNodeContents(cell);
+    afterCaret.setStart(range.startContainer, range.startOffset);
+  } catch {
+    return false;
+  }
+  if (!/^[ \t\u00a0]*-$/.test(beforeCaret.toString()) || !/^[ \t\u00a0]*$/.test(afterCaret.toString())) return false;
+  return replaceEditorTableCellEditableContentWithList(root, cell, "bullet", { initialText: "" }) !== null;
 }
 
 function insertEditorTableCellListFromEnter(root: HTMLElement, cell: HTMLTableCellElement, kind: EditorListKind): boolean {
@@ -4501,7 +4541,17 @@ export function useEditorDocumentSurfaceHandlers({
           if (pendingHighlightColor !== undefined) onSelectionHighlightColorChange?.(pendingHighlightColor);
         };
 
+        const activeEditorListItem = getCurrentEditorListItem(root);
         const activeTableCell = getCurrentEditorTableCell(root);
+        if (!activeEditorListItem && activeTableCell) {
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+          if (startEditorTableCellBulletListFromDashShortcut(root, activeTableCell, inputEvent.data)) {
+            event.preventDefault();
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            return;
+          }
+        }
         const tableEditorListKind = activeTableCell ? editorListKindForOutlineStyle(outlineStyle) : null;
         if (activeTableCell && tableEditorListKind) {
           const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
@@ -4514,7 +4564,6 @@ export function useEditorDocumentSurfaceHandlers({
           }
         }
 
-        const activeEditorListItem = getCurrentEditorListItem(root);
         if (activeEditorListItem && editorListItemContentIsEmpty(activeEditorListItem)) {
           event.preventDefault();
           const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
@@ -4524,6 +4573,20 @@ export function useEditorDocumentSurfaceHandlers({
             commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
           return;
+        }
+
+        if (!activeEditorListItem && !activeTableCell) {
+          const offsets = getEditorSelectionOffsets(root);
+          if (offsets) {
+            const currentText = readEditorDocumentText(root);
+            const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+            if (startEditorBulletListFromDashShortcut(root, currentText, offsets.start, offsets.end, inputEvent.data)) {
+              event.preventDefault();
+              recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+              commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+              return;
+            }
+          }
         }
 
         if (outlineStyle === "automatic-outline-numbering") {
