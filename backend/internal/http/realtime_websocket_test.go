@@ -57,6 +57,44 @@ func TestRealtimeWebSocketSignedTicketWorksAcrossServerInstances(t *testing.T) {
 	}
 }
 
+func TestRealtimeWebSocketHeartbeatUsesProtocolPingBeforeIdleTimeout(t *testing.T) {
+	if realtimeWebSocketHeartbeatInterval >= time.Minute {
+		t.Fatalf("realtime heartbeat interval = %s, want less than the load balancer idle timeout", realtimeWebSocketHeartbeatInterval)
+	}
+
+	serverConn, clientConn := net.Pipe()
+	realtimeConn := &realtimeConnection{conn: serverConn}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		runRealtimeWebSocketHeartbeat(realtimeConn, 100*time.Millisecond, done)
+	}()
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	frame, err := readWebSocketFrame(bufio.NewReader(clientConn), false)
+	if err != nil {
+		t.Fatalf("read heartbeat frame: %v", err)
+	}
+	if frame.opcode != webSocketOpcodePing {
+		t.Fatalf("heartbeat opcode = %d, want protocol ping %d", frame.opcode, webSocketOpcodePing)
+	}
+	if len(frame.payload) != 0 {
+		t.Fatalf("heartbeat payload = %q, want empty", string(frame.payload))
+	}
+
+	close(done)
+	_ = clientConn.Close()
+	realtimeConn.close()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat goroutine did not stop")
+	}
+}
+
 func TestRealtimeWebSocketNormalAccessTokenQueryRejected(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888011"
