@@ -65,6 +65,8 @@ type Repository interface {
 	KanbanRepository
 	ProjectManagementRepository
 	NotificationRepository
+	RealtimeOutboxRepository
+	EditorCollaborationRepository
 	DomainEventRepository
 }
 
@@ -956,6 +958,22 @@ type DomainEventRepository interface {
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
+}
+
+type RealtimeOutboxRepository interface {
+	EnqueueRealtimeOutbox(input RealtimeOutboxInput) (RealtimeOutboxEvent, error)
+	ClaimRealtimeOutbox(query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error)
+	MarkRealtimeOutboxPublished(eventID, claimToken string) error
+	MarkRealtimeOutboxFailed(eventID, claimToken, category string) error
+	ListPublishedRealtimeOutboxAfter(sequence int64, limit int) ([]RealtimeOutboxEvent, error)
+	CurrentPublishedRealtimeOutboxSequence() (int64, error)
+}
+
+type EditorCollaborationRepository interface {
+	GetEditorCollaborationSnapshot(ref EditorDocumentRef) (EditorCollaborationSnapshot, error)
+	CommitEditorCollaborationOperation(input EditorCollaborationOperationInput) (EditorCollaborationCommit, error)
+	UpdateEditorCollaborationMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error)
+	DeleteEditorCollaborationDocument(input EditorCollaborationDeleteInput) (EditorCollaborationCommit, error)
 }
 
 type DeleteCompanyUserResult struct {

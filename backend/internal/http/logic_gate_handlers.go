@@ -265,6 +265,10 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
+			if strings.EqualFold(strings.TrimSpace(req.Type), "Text box") {
+				writeError(w, http.StatusConflict, "editor_collaboration_required")
+				return
+			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
 			item, err := s.repo.UpsertLogicGateProjection(store.LogicGateProjectionInput{
 				CompanyID:        req.CompanyID,
@@ -478,6 +482,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, "failed_to_restore_logic_gate_save_version")
 			return
 		}
+		s.wakeRealtimeSpine()
 		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_editor_save_version_restored", map[string]any{"logic_gate_id": logicGateID, "save_id": version.SaveID})
 		writeJSON(w, http.StatusOK, version)
 		return
@@ -505,6 +510,14 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
+		}
+		if projections, listErr := s.repo.ListLogicGateProjections(companyID, logicGateID); listErr == nil {
+			for _, projection := range projections {
+				if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
+					writeError(w, http.StatusConflict, "editor_collaboration_required")
+					return
+				}
+			}
 		}
 		// Same contract as nodes: clear the latest value without manufacturing
 		// blank history rows on high-volume UI or agent writes.

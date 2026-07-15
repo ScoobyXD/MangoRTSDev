@@ -24,8 +24,9 @@ const (
 	webSocketGUID                              = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 	maxRealtimeMessageBytes                    = 1 << 20
 	maxRealtimeScopeBytes                      = 384
-	maxRealtimeSubscriptionsPerConnection      = 16
-	realtimeWebSocketWriteTimeout              = 2 * time.Second
+	maxRealtimeSubscriptionsPerConnection      = 128
+	realtimeWebSocketWriteTimeout              = 5 * time.Second
+	realtimeWebSocketOutboundQueueDepth        = 64
 	realtimeWebSocketHeartbeatInterval         = 25 * time.Second
 	webSocketOpcodeText                   byte = 0x1
 	webSocketOpcodeClose                  byte = 0x8
@@ -39,6 +40,7 @@ const (
 	realtimeSharedMailboxScopePrefix   = "mailbox:shared:"
 	realtimeChatScopePrefix            = "chat:node:"
 	realtimeBoardScopePrefix           = "board:"
+	realtimeEditorScopePrefix          = "editor:"
 )
 
 const (
@@ -55,34 +57,51 @@ const (
 	realtimeMessageKanbanChanged         = "kanban.changed"
 	realtimeMessageMailboxMessageChanged = "mailbox.message.changed"
 	realtimeMessageMailboxFolderChanged  = "mailbox.folder.changed"
+	realtimeMessageEditorDeltaCommitted  = "editor.delta.committed"
+	realtimeMessageEditorDocumentDeleted = "editor.document.deleted"
+	realtimeMessageHeartbeatChallenge    = "heartbeat.challenge"
+	realtimeMessageHeartbeatResponse     = "heartbeat.response"
+	realtimeMessageHeartbeatConfirmed    = "heartbeat.confirmed"
 	realtimeMessagePing                  = "ping"
 	realtimeMessagePong                  = "pong"
 	realtimeMessageError                 = "error"
 )
 
+type realtimeOutboundFrame struct {
+	opcode  byte
+	payload []byte
+}
+
 type realtimeConnection struct {
-	id        string
-	companyID string
-	userID    string
-	actor     ActorContext
-	conn      net.Conn
-	reader    *bufio.Reader
-	writeMu   sync.Mutex
-	closeOnce sync.Once
+	id               string
+	companyID        string
+	userID           string
+	actor            ActorContext
+	conn             net.Conn
+	reader           *bufio.Reader
+	writeMu          sync.Mutex
+	closeOnce        sync.Once
+	outbound         chan realtimeOutboundFrame
+	closed           chan struct{}
+	heartbeatMu      sync.Mutex
+	pendingHeartbeat string
 }
 
 type realtimeClientMessage struct {
 	Type  string `json:"type"`
 	Scope string `json:"scope,omitempty"`
+	Nonce string `json:"nonce,omitempty"`
 }
 
 type realtimeServerMessage struct {
-	Type         string `json:"type"`
-	CompanyID    string `json:"company_id,omitempty"`
-	UserID       string `json:"user_id,omitempty"`
-	ConnectionID string `json:"connection_id,omitempty"`
-	Scope        string `json:"scope,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Type         string    `json:"type"`
+	CompanyID    string    `json:"company_id,omitempty"`
+	UserID       string    `json:"user_id,omitempty"`
+	ConnectionID string    `json:"connection_id,omitempty"`
+	Scope        string    `json:"scope,omitempty"`
+	Nonce        string    `json:"nonce,omitempty"`
+	ServerTime   time.Time `json:"server_time,omitempty"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type realtimeChatMessage struct {
@@ -149,7 +168,10 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		actor:     actor,
 		conn:      conn,
 		reader:    reader,
+		outbound:  make(chan realtimeOutboundFrame, realtimeWebSocketOutboundQueueDepth),
+		closed:    make(chan struct{}),
 	}
+	go realtimeConn.runWriter()
 	s.realtimeRegistry.addConnection(realtimeConn)
 	s.recordRealtimeActiveConnections()
 	log.Printf("realtime_connection_open company_id=%s user_id=%s connection_id=%s", companyID, realtimeConn.userID, realtimeConn.id)
@@ -169,6 +191,9 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 	}); err != nil {
 		return
 	}
+	if err := realtimeConn.issueApplicationHeartbeat(); err != nil {
+		return
+	}
 	heartbeatDone := make(chan struct{})
 	go runRealtimeWebSocketHeartbeat(realtimeConn, realtimeWebSocketHeartbeatInterval, heartbeatDone)
 	defer close(heartbeatDone)
@@ -186,10 +211,13 @@ func runRealtimeWebSocketHeartbeat(conn *realtimeConnection, interval time.Durat
 		case <-done:
 			return
 		case <-ticker.C:
-			// A protocol-level ping is handled by the browser networking stack, so
-			// background-tab timer throttling cannot turn an idle connection into
-			// an application reconnect and canonical-refetch cycle.
+			// Protocol Ping/Pong keeps intermediaries awake. The application
+			// challenge/response/confirmation proves Mango's authenticated backend
+			// path and is the only heartbeat that may return the UI to green.
 			if err := conn.writeFrame(webSocketOpcodePing, nil); err != nil {
+				return
+			}
+			if err := conn.issueApplicationHeartbeat(); err != nil {
 				return
 			}
 		}
@@ -306,6 +334,13 @@ func (s *Server) handleRealtimeMessage(conn *realtimeConnection, payload []byte)
 			s.realtimeRegistry.unsubscribe(conn.id, conn.companyID, scope)
 			s.recordRealtimeActiveSubscriptions()
 		}
+	case realtimeMessageHeartbeatResponse:
+		nonce := strings.TrimSpace(message.Nonce)
+		if !conn.confirmApplicationHeartbeat(nonce) {
+			_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageError, Error: "invalid_heartbeat_nonce"})
+			return
+		}
+		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageHeartbeatConfirmed, Nonce: nonce, ServerTime: time.Now().UTC()})
 	case realtimeMessagePing:
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessagePong})
 	default:
@@ -384,6 +419,9 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
 	}
+	if document, ok := realtimeEditorDocumentFromScope(companyID, scope); ok {
+		return s.authorizeRealtimeEntityScope(actor, companyID, document.ResourceType, document.ResourceID, store.EntityPermissionEdit)
+	}
 	if realtimeKnownScopePrefix(scope) {
 		return false, "invalid_scope", nil
 	}
@@ -422,6 +460,8 @@ func (s *Server) realtimeEntityExists(companyID, resourceType, resourceID string
 		_, err = s.repo.GetNode(companyID, resourceID)
 	case store.EntityTypeLogicGate:
 		_, err = s.repo.GetLogicGate(companyID, resourceID)
+	case store.EntityTypeProject:
+		_, err = s.repo.GetProject(companyID, resourceID)
 	case store.EntityTypeSharedInbox:
 		item, loadErr := s.repo.GetCommunicationsSharedInboxFolder(companyID, resourceID)
 		if loadErr == nil {
@@ -437,6 +477,30 @@ func (s *Server) realtimeEntityExists(companyID, resourceType, resourceID string
 	return err == nil, err
 }
 
+func realtimeEditorScope(ref store.EditorDocumentRef) string {
+	return store.EditorRealtimeScope(ref)
+}
+
+func realtimeEditorDocumentFromScope(companyID, scope string) (store.EditorDocumentRef, bool) {
+	scope = strings.TrimSpace(scope)
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, realtimeEditorScopePrefix) {
+		return store.EditorDocumentRef{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(scope, realtimeEditorScopePrefix), ":")
+	if len(parts) != 3 || !isCanonicalUUID(parts[1]) || !isCanonicalUUID(parts[2]) {
+		return store.EditorDocumentRef{}, false
+	}
+	ref := store.EditorDocumentRef{
+		CompanyID: strings.TrimSpace(companyID), ResourceType: parts[0], ResourceID: parts[1], DocumentID: parts[2],
+	}
+	if ref.ResourceType != store.EntityTypeNode && ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject {
+		return store.EditorDocumentRef{}, false
+	}
+	if realtimeEditorScope(ref) != scope {
+		return store.EditorDocumentRef{}, false
+	}
+	return ref, true
+}
 func realtimeBoardScope(boardID string) string {
 	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
 	if !isCanonicalUUID(logicGateID) {
@@ -548,6 +612,7 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimeSharedMailboxScopePrefix,
 		realtimeChatScopePrefix,
 		realtimeBoardScopePrefix,
+		realtimeEditorScopePrefix,
 	} {
 		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
 			return true
@@ -570,6 +635,9 @@ func realtimeScopeType(scope string) string {
 	if realtimeBoardIDFromScope(scope) != "" {
 		return "board"
 	}
+	if _, ok := realtimeEditorDocumentFromScope("00000000-0000-0000-0000-000000000000", scope); ok {
+		return "editor"
+	}
 	return ""
 }
 
@@ -585,9 +653,30 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board"} {
+	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
+}
+func (c *realtimeConnection) issueApplicationHeartbeat() error {
+	nonce := newRealtimeConnectionID()
+	c.heartbeatMu.Lock()
+	c.pendingHeartbeat = nonce
+	c.heartbeatMu.Unlock()
+	return c.sendJSON(realtimeServerMessage{Type: realtimeMessageHeartbeatChallenge, Nonce: nonce, ServerTime: time.Now().UTC()})
+}
+
+func (c *realtimeConnection) confirmApplicationHeartbeat(nonce string) bool {
+	nonce = strings.TrimSpace(nonce)
+	if nonce == "" {
+		return false
+	}
+	c.heartbeatMu.Lock()
+	defer c.heartbeatMu.Unlock()
+	if c.pendingHeartbeat != nonce {
+		return false
+	}
+	c.pendingHeartbeat = ""
+	return true
 }
 func (c *realtimeConnection) sendJSON(value any) error {
 	payload, err := json.Marshal(value)
@@ -602,6 +691,45 @@ func (c *realtimeConnection) sendText(payload []byte) error {
 }
 
 func (c *realtimeConnection) writeFrame(opcode byte, payload []byte) error {
+	if c == nil || c.conn == nil {
+		return net.ErrClosed
+	}
+	// Directly constructed test connections keep the synchronous path.
+	// Production websocket connections initialize the bounded queue before
+	// entering the registry.
+	if c.outbound == nil || c.closed == nil {
+		return c.writeFrameNow(opcode, payload)
+	}
+	frame := realtimeOutboundFrame{opcode: opcode, payload: append([]byte(nil), payload...)}
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	case c.outbound <- frame:
+		return nil
+	default:
+		c.close()
+		return errors.New("realtime outbound queue full")
+	}
+}
+
+func (c *realtimeConnection) runWriter() {
+	if c == nil || c.outbound == nil || c.closed == nil {
+		return
+	}
+	for {
+		select {
+		case <-c.closed:
+			return
+		case frame := <-c.outbound:
+			if err := c.writeFrameNow(frame.opcode, frame.payload); err != nil {
+				c.close()
+				return
+			}
+		}
+	}
+}
+
+func (c *realtimeConnection) writeFrameNow(opcode byte, payload []byte) error {
 	if c == nil || c.conn == nil {
 		return net.ErrClosed
 	}
@@ -646,6 +774,9 @@ func (c *realtimeConnection) close() {
 		return
 	}
 	c.closeOnce.Do(func() {
+		if c.closed != nil {
+			close(c.closed)
+		}
 		_ = c.conn.Close()
 	})
 }

@@ -5,11 +5,13 @@ import test from "node:test";
 
 import { TerminalAuthFailureError } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { createCoalescedCanonicalRefresh } from "../../../../frontend/src/modules/realtime/coalescedCanonicalRefresh.js";
+import { shouldBlockRealtimeMutation, type RealtimeHealthStatus } from "../../../../frontend/src/modules/realtime/realtimeHealth.js";
 import {
   computeRealtimeReconnectDelayMs,
   isSupportedRealtimeScope,
   MangoRealtimeClient,
   parseRealtimeMessage,
+  realtimeEditorScope,
   realtimePersonalMailboxScope,
   realtimeSharedMailboxScope,
   realtimeWebSocketURL,
@@ -92,13 +94,46 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(mailboxFolder.shared_inbox_id, "shared-1");
 });
 
+test("parses exact editor deltas, tombstones, and application heartbeats", () => {
+  const delta = parseRealtimeMessage(JSON.stringify({
+    type: "editor.delta.committed",
+    company_id: "company-1",
+    scope: "editor:node:node-1:document-1",
+    event_id: "event-1",
+    resource_type: "node",
+    resource_id: "node-1",
+    document_id: "document-1",
+    resource_revision: 2,
+    operation_id: "operation-1",
+    client_id: "client-1",
+    delta: { inserts: [{ id: "atom-1", value: "A" }] },
+  }));
+  assert.equal(delta.type, "editor.delta.committed");
+  assert.equal(delta.scope, "editor:node:node-1:document-1");  const snapshotRequired = parseRealtimeMessage(JSON.stringify({
+    type: "editor.snapshot.required",
+    company_id: "company-1",
+    scope: "editor:node:node-1:document-1",
+    event_id: "event-restore-1",
+    resource_type: "node",
+    resource_id: "node-1",
+    document_id: "document-1",
+    resource_revision: 3,
+    operation_id: "restore-operation-1",
+    client_id: "server-save-version",
+    reason: "canonical_snapshot_replaced",
+  }));
+  assert.equal(snapshotRequired.type, "editor.snapshot.required");
+  assert.equal("delta" in snapshotRequired, false, "snapshot replacement events never fan out a full document delta");
+  const heartbeat = parseRealtimeMessage(JSON.stringify({ type: "heartbeat.confirmed", nonce: "nonce-1" }));
+  assert.equal(heartbeat.type, "heartbeat.confirmed");
+});
 test("rejects deleted broad protocol messages", () => {
   for (const type of ["projection.delta", "workspace.event", "communications.event", "snapshot.refetch", "permission.revoked"]) {
     assert.throws(() => parseRealtimeMessage(JSON.stringify({ type, company_id: "company-1", scope: "board:A" })), /unknown_realtime_message_type/);
   }
 });
 
-test("allows only narrow notification, mailbox, node-chat, and board scope families", () => {
+test("allows only exact notification, mailbox, node-chat, board, and editor scope families", () => {
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
@@ -111,7 +146,10 @@ test("allows only narrow notification, mailbox, node-chat, and board scope famil
   assert.equal(realtimeSharedMailboxScope(" shared-1 "), "mailbox:shared:shared-1");
   assert.equal(isSupportedRealtimeScope("workspace:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("communications:user:user-1"), false);
+  assert.equal(isSupportedRealtimeScope("editor:node:node-1:document-1"), true);
+  assert.equal(realtimeEditorScope("node", " node-1 ", " document-1 "), "editor:node:node-1:document-1");
   assert.equal(isSupportedRealtimeScope("editor:node:node-1"), false);
+  assert.equal(isSupportedRealtimeScope("editor:node:node-1:document-1:extra"), false);
   assert.equal(isSupportedRealtimeScope("board:"), false);
 });
 
@@ -298,6 +336,79 @@ test("one client shares a socket and dispatches compact messages to exact scopes
   }
 });
 
+test("application heartbeat stays non-green through subscription recovery and drives all mutation-gating states", async () => {
+  const sockets: FakeHealthWebSocket[] = [];
+  class FakeHealthWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeHealthWebSocket.CONNECTING;
+    sent: string[] = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.readyState = FakeHealthWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+      });
+    }
+
+    send(message: string): void { this.sent.push(message); }
+    close(): void {
+      if (this.readyState === FakeHealthWebSocket.CLOSED) return;
+      this.readyState = FakeHealthWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  let finishRecovery: (() => void) | undefined;
+  const recovery = new Promise<void>((resolveRecovery) => { finishRecovery = resolveRecovery; });
+  const client = new MangoRealtimeClient("https://health.example.test", "health-company", {
+    WebSocketCtor: FakeHealthWebSocket as unknown as typeof WebSocket,
+    getTicket: async () => undefined,
+    reconnectDelayMs: 60_000,
+    heartbeatGraceMs: 1_000,
+    attemptingAfterMs: 0,
+    disconnectedAfterMs: 25,
+  });
+  const statuses: RealtimeHealthStatus[] = [];
+  const unsubscribeEditor = client.subscribe("editor:node:node-health:document-health", { onRecover: () => recovery });
+  const unsubscribeHealth = client.subscribeHealth((snapshot) => { statuses.push(snapshot.status); });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+
+  assert.equal(sockets.length, 1);
+  const socket = sockets[0];
+  socket.onmessage?.({ data: JSON.stringify({ type: "heartbeat.challenge", nonce: "health-nonce" }) });
+  assert.deepEqual(JSON.parse(socket.sent[socket.sent.length - 1] ?? "{}"), { type: "heartbeat.response", nonce: "health-nonce" });
+  socket.onmessage?.({ data: JSON.stringify({ type: "heartbeat.confirmed", nonce: "health-nonce" }) });
+  socket.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "editor:node:node-health:document-health" }) });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  assert.notEqual(statuses[statuses.length - 1], "connected", "socket open plus heartbeat is not green before mounted-document recovery");
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-health"), true);
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/editor-collaboration/node/node-health/documents/document-health"), false);
+
+  finishRecovery?.();
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  assert.equal(statuses[statuses.length - 1], "connected");
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-health"), false);
+
+  socket.close();
+  assert.equal(statuses[statuses.length - 1], "reconnecting");
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+  assert.equal(statuses[statuses.length - 1], "attempting");
+  assert.equal(shouldBlockRealtimeMutation("DELETE", "/v1/nodes/node-health"), true);
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+  assert.equal(statuses[statuses.length - 1], "disconnected");
+
+  unsubscribeEditor();
+  unsubscribeHealth();
+  client.close();
+});
 test("terminal authentication failure does not reconnect", async () => {
   let ticketRequests = 0;
   const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
@@ -372,8 +483,6 @@ test("frontend source inventory contains only retained narrow scope families", (
     "project_management:user:",
     "communications:user:",
     "mailbox:personal:user:",
-    "editor:node:",
-    "editor:logic_gate:",
     "projection.delta",
     "workspace.event",
     "communications.event",
@@ -384,7 +493,7 @@ test("frontend source inventory contains only retained narrow scope families", (
   }
   assert.equal(existsSync(resolve(sourceRoot, "modules/workspace/workspaceRealtime.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/communications/communicationsStream.ts")), false);
-  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorCollaboration.ts")), false);
+  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorCollaboration.ts")), true);
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorProjectionDeltas.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/kanban/kanbanProjectionDeltas.ts")), false);
 
@@ -392,10 +501,11 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-  assert.equal(subscriptionSources.length, 5);
+  assert.equal(subscriptionSources.length, 6);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/NotificationRealtimeBridge.tsx",
     "modules/editor/EditorContent.tsx",
+    "modules/editor/editorCollaboration.ts",
     "modules/kanban/KanbanContent.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/HomePage.tsx",

@@ -407,7 +407,7 @@ func (r *PostgresRepo) addInitialLogicGateInformationTx(ctx context.Context, tx 
 		query = `insert into logic_gate_projection_table
 		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
 		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
+		 on conflict (company_id, logic_gate_id, information_id)
 		 do update set
 		   information=excluded.information,
 		   updated_timestamp=now()

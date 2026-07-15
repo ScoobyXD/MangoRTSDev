@@ -32,10 +32,9 @@ import { createRequestJSON } from "../api/requestJSON.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
-  buildEditorTextBlockContentPayload,
+  buildEditorTextBlockMetadataPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
-  EDITOR_TEXT_BLOCK_TYPE,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
   parseEditorTextBlockChats,
@@ -57,7 +56,7 @@ import {
   transferTextBlockImageToChatDraft,
 } from "../editor/nodeTextBlockAttachments.js";
 import { prepareTextBlockImageFile } from "../editor/nodeTextBlockImageFiles.js";
-import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "../editor/editorTypes.js";
+import { generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
@@ -624,15 +623,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const configuredScope = projectSaveScope;
     projectTextBlockSaveController.configure({
       saveBlock: async ({ blockID, content, sentVersion }) => {
-        const information = buildEditorTextBlockContentPayload(content);
         const savedTimestamp = new Date().toISOString();
-        await addProjectInformation({
-          companyID,
-          projectID,
-          informationID: blockID,
-          type: EDITOR_TEXT_BLOCK_TYPE,
-          information,
-        });
+        await attachmentRequestJSON(
+          `/v1/editor-collaboration/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+          { method: "PATCH", body: JSON.stringify(buildEditorTextBlockMetadataPayload(content)) },
+        );
         if (projectSaveScopeRef.current !== configuredScope) return;
         const snapshot = projectTextBlockSaveController.getSnapshot(blockID);
         if (!snapshot || snapshot.localVersion !== sentVersion) return;
@@ -649,7 +644,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         setError(saveError instanceof Error ? saveError.message : "Failed to save project text");
       },
     });
-  }, [companyID, projectID, projectSaveScope, projectTextBlockSaveController]);
+  }, [attachmentRequestJSON, companyID, projectID, projectSaveScope, projectTextBlockSaveController]);
 
   const updateProjectTextBlockContent = useCallback((
     blockID: string,
@@ -683,18 +678,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return nextContent;
   }, [projectTextBlockSaveController]);
 
-  const scheduleProjectTextBlockSave = useCallback((blockID: string, updates: Partial<EditorTextBlockContent>) => {
-    updateProjectTextBlockContent(blockID, updates);
-    setError("");
-    const existingTimer = projectTextBlockSaveTimersRef.current.get(blockID);
-    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
-    const timer = window.setTimeout(() => {
-      projectTextBlockSaveTimersRef.current.delete(blockID);
-      projectTextBlockSaveController.startLatestContentSave(blockID);
-    }, EDITOR_AUTOSAVE_DELAY_MS);
-    projectTextBlockSaveTimersRef.current.set(blockID, timer);
-  }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
-
+  const applyProjectCollaborativeDocument = useCallback((blockID: string, document: string) => {
+    const existing = projectTextBlockContentRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
+    if (existing.document === document) return;
+    projectTextBlockContentRef.current.set(blockID, { ...existing, document });
+    projectTextBlockContentRevisionRef.current += 1;
+    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, document } : block));
+  }, []);
   const flushProjectTextBlockSave = useCallback(async (
     blockID: string,
     updates: Partial<EditorTextBlockContent> = {},
@@ -753,7 +743,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setError("");
     try {
       await Promise.all([
-        deleteProjectProjection({ companyID, projectID, informationID: blockID }),
+        attachmentRequestJSON(`/v1/editor-collaboration/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`, {
+          method: "DELETE",
+          body: JSON.stringify({ operation_id: generateStableInformationID(), client_id: `project-delete:${currentUserID || "browser"}` }),
+        }),
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
       ]);
     } catch (deleteError) {
@@ -780,7 +773,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       });
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project text");
     }
-  }, [attachedEmails, blocks, chatMessages, companyID, projectID, projectTextBlockSaveController]);
+  }, [attachedEmails, attachmentRequestJSON, blocks, chatMessages, companyID, currentUserID, projectID, projectTextBlockSaveController]);
 
   const addTextBlockAttachments = useCallback(async (block: ProjectTextBlockDraft, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
@@ -1915,14 +1908,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         window.setTimeout(refreshProjectSelectionFormat, 0);
                       }}
                       onBlur={() => undefined}
-                      onDocumentChange={(document) => scheduleProjectTextBlockSave(block.id, { document })}
-                      onDocumentFlush={(document) => {
-                        void flushProjectTextBlockSave(block.id, { document }).catch(() => undefined);
-                      }}
-                      onDocumentConflict={() => {
-                        setError("This project text box changed elsewhere while you were editing. Mango kept and saved your local version.");
-                        void flushProjectTextBlockSave(block.id).catch(() => undefined);
-                      }}
+                      onDocumentChange={(document) => applyProjectCollaborativeDocument(block.id, document)}
+                      onDocumentFlush={(document) => applyProjectCollaborativeDocument(block.id, document)}
+                      onDocumentConflict={() => setError("Mango is recovering this project text box from its committed collaboration snapshot.")}
                       onChangeSeen={() => undefined}
                       onChatHighlightActivate={(messageID) => {
                         setFocusedTextBlockID(block.id);

@@ -243,14 +243,21 @@ func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	stalledConn := &realtimeConnection{id: "stalled-scope-connection", companyID: companyID, conn: stalledNetworkConn}
+	stalledConn := &realtimeConnection{
+		id: "stalled-scope-connection", companyID: companyID, conn: stalledNetworkConn,
+		outbound: make(chan realtimeOutboundFrame, realtimeWebSocketOutboundQueueDepth), closed: make(chan struct{}),
+	}
 	healthyNetworkConn := &recordingRealtimeNetConn{}
-	healthyConn := &realtimeConnection{id: "healthy-scope-connection", companyID: companyID, conn: healthyNetworkConn}
+	healthyConn := &realtimeConnection{
+		id: "healthy-scope-connection", companyID: companyID, conn: healthyNetworkConn,
+		outbound: make(chan realtimeOutboundFrame, realtimeWebSocketOutboundQueueDepth), closed: make(chan struct{}),
+	}
+	go stalledConn.runWriter()
+	go healthyConn.runWriter()
 	server.realtimeRegistry.subscribe(stalledConn, stalledScope)
 	server.realtimeRegistry.subscribe(healthyConn, healthyScope)
 	defer stalledConn.close()
 	defer healthyConn.close()
-
 	stalledDone := make(chan struct{})
 	go func() {
 		server.publishRealtimeMessage(companyID, stalledScope, map[string]any{"scope": "stalled"})
@@ -272,11 +279,18 @@ func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("unrelated healthy scope was head-of-line blocked by stalled publish")
 	}
-	messages := healthyNetworkConn.messages(t)
+	var messages []map[string]any
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		messages = healthyNetworkConn.messages(t)
+		if len(messages) == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if len(messages) != 1 || messages[0]["scope"] != "healthy" {
 		t.Fatalf("healthy scope messages=%+v, want immediate healthy delivery", messages)
 	}
-
 	close(stalledNetworkConn.release)
 	select {
 	case <-stalledDone:
@@ -433,6 +447,132 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 	}
 }
 
+func TestRealtimeEditorOutboxCrossesBackendInstancesWithExactBoundedAudienceAndRevocation(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "42424242-4242-4242-8242-424242424242"
+	repo.EnsureCompany(companyID, "Cross-instance collaboration")
+	firstUser := mustRealtimeAuthUser(t, repo, companyID, "cross-instance-first", domain.RoleCompanyUser)
+	secondUser := mustRealtimeAuthUser(t, repo, companyID, "cross-instance-second", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Cross-instance collaborative node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: firstUser.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: secondUser.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	metricsB := NewInMemoryMetricsRecorder()
+	backendA := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	backendB := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true, Metrics: metricsB})
+	defer backendA.Close()
+	defer backendB.Close()
+
+	ref := store.EditorDocumentRef{
+		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID,
+		DocumentID: "43434343-4343-4343-8343-434343434343",
+	}
+	scope := store.EditorRealtimeScope(ref)
+	newSubscriber := func(id, userID string) (*realtimeConnection, *recordingRealtimeNetConn) {
+		networkConn := &recordingRealtimeNetConn{}
+		conn := &realtimeConnection{id: id, companyID: companyID, userID: userID, conn: networkConn}
+		backendB.realtimeRegistry.subscribe(conn, scope)
+		return conn, networkConn
+	}
+	firstTab, firstTabNetwork := newSubscriber("first-user-tab-a", firstUser.UserID)
+	secondTab, secondTabNetwork := newSubscriber("first-user-tab-b", firstUser.UserID)
+	otherUserTab, otherUserNetwork := newSubscriber("second-user-tab", secondUser.UserID)
+	defer firstTab.close()
+	defer secondTab.close()
+	defer otherUserTab.close()
+
+	unrelatedNetworks := make([]*recordingRealtimeNetConn, 0, 100)
+	for index := 0; index < 100; index++ {
+		networkConn := &recordingRealtimeNetConn{}
+		conn := &realtimeConnection{
+			id: fmt.Sprintf("unrelated-editor-%d", index), companyID: companyID,
+			userID: firstUser.UserID, conn: networkConn,
+		}
+		unrelatedRef := ref
+		unrelatedRef.DocumentID = fmt.Sprintf("45454545-4545-4454-8454-%012d", index+1)
+		backendB.realtimeRegistry.subscribe(conn, store.EditorRealtimeScope(unrelatedRef))
+		defer conn.close()
+		unrelatedNetworks = append(unrelatedNetworks, networkConn)
+	}
+
+	commit, err := repo.CommitEditorCollaborationOperation(store.EditorCollaborationOperationInput{
+		Document: ref, OperationID: "cross-instance-op-1", ClientID: "cross-instance-client",
+		ActorUserID: firstUser.UserID, BaseRevision: 0,
+		Delta: store.EditorCollaborationDelta{Inserts: []store.EditorCollaborationAtom{{ID: "cross-instance-op-1:0", Value: "A"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendA.wakeRealtimeSpine()
+
+	waitForMessageCount := func(name string, networkConn *recordingRealtimeNetConn, count int) []map[string]any {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			messages := networkConn.messages(t)
+			if len(messages) >= count {
+				return messages
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		messages := networkConn.messages(t)
+		t.Fatalf("%s message count=%d, want %d", name, len(messages), count)
+		return nil
+	}
+	for name, networkConn := range map[string]*recordingRealtimeNetConn{
+		"first tab": firstTabNetwork, "second tab": secondTabNetwork, "second user": otherUserNetwork,
+	} {
+		messages := waitForMessageCount(name, networkConn, 1)
+		if messages[0]["event_id"] != commit.EventID || messages[0]["scope"] != scope {
+			t.Fatalf("%s event=%+v, want event %s in exact scope %s", name, messages[0], commit.EventID, scope)
+		}
+	}
+	for index, networkConn := range unrelatedNetworks {
+		if messages := networkConn.messages(t); len(messages) != 0 {
+			t.Fatalf("unrelated editor %d received exact-document event: %+v", index, messages)
+		}
+	}
+	attemptedKey := OperationalMetricKey{Name: "realtime.delivery_attempt_count", ScopeType: "editor"}
+	if got := metricsB.Snapshot().Operational[attemptedKey]; got.TotalValue != 3 {
+		t.Fatalf("cross-instance exact delivery attempts=%d, want 3 despite 100 unrelated subscribers", got.TotalValue)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: firstUser.UserID, AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.CommitEditorCollaborationOperation(store.EditorCollaborationOperationInput{
+		Document: ref, OperationID: "cross-instance-op-2", ClientID: "cross-instance-client",
+		ActorUserID: firstUser.UserID, BaseRevision: 1,
+		Delta: store.EditorCollaborationDelta{Inserts: []store.EditorCollaborationAtom{{ID: "cross-instance-op-2:0", AfterID: "cross-instance-op-1:0", Value: "B"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendA.wakeRealtimeSpine()
+	waitForMessageCount("first tab after revocation", firstTabNetwork, 2)
+	waitForMessageCount("second tab after revocation", secondTabNetwork, 2)
+	time.Sleep(150 * time.Millisecond)
+	if messages := otherUserNetwork.messages(t); len(messages) != 1 {
+		t.Fatalf("revoked user message count=%d, want first event only", len(messages))
+	}
+}
 func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscribers(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &recordingKanbanProjectionLookupRepo{Repository: base}

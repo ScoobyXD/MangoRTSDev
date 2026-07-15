@@ -97,7 +97,7 @@ func upsertPostgresLogicGateTextProjection(ctx context.Context, tx *sql.Tx, inpu
 		row = tx.QueryRowContext(ctx, `insert into logic_gate_projection_table
  (company_id, logic_gate_id, information_id, type, information, revision, created_timestamp, updated_timestamp)
  values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, 1, now(), now())
- on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type do update
+ on conflict (company_id, logic_gate_id, information_id) do update
  set information_id=excluded.information_id, information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=now()
  where logic_gate_projection_table.is_deleted
  returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp`,

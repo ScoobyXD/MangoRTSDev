@@ -183,7 +183,20 @@ func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersion
 	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != memoryNodeTextBlockInformation(t, "beta") {
 		t.Fatalf("restored projections = %+v, want beta projection restored at stable ID", projections)
 	}
-
+	collaborationSnapshot, err := repo.GetEditorCollaborationSnapshot(EditorDocumentRef{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: informationID,
+	})
+	if err != nil || collaborationSnapshot.HTML != "beta" || collaborationSnapshot.Revision != 1 {
+		t.Fatalf("restored collaboration snapshot=%+v err=%v, want beta at revision 1", collaborationSnapshot, err)
+	}
+	outbox, err := repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 10})
+	if err != nil || len(outbox) != 1 || outbox[0].EventType != EditorCollaborationSnapshotRequiredEventType || outbox[0].Scope != EditorRealtimeScope(collaborationSnapshot.Document) {
+		t.Fatalf("restore outbox=%+v err=%v", outbox, err)
+	}
+	var restoreEvent map[string]any
+	if err := json.Unmarshal(outbox[0].Payload, &restoreEvent); err != nil || restoreEvent["type"] != EditorCollaborationSnapshotRequiredEventType || restoreEvent["delta"] != nil || restoreEvent["document"] != nil {
+		t.Fatalf("restore event=%+v err=%v, want bounded snapshot-required signal without document body", restoreEvent, err)
+	}
 	details, err = repo.GetNodeDetails(companyID, node.NodeID)
 	if err != nil {
 		t.Fatalf("GetNodeDetails after save failed: %v", err)

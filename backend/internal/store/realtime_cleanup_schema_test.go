@@ -15,12 +15,23 @@ func TestRealtimeCleanupCanonicalSchemaAndForwardMigration(t *testing.T) {
 	for _, forbidden := range []string{
 		"create table if not exists event_rows",
 		"notification_domain_event_projection_checkpoints",
-		"published_timestamp",
 		"company_projection_sequences",
 		"mangorts_trg_bump_logic_gate_work_from_projection_sequence",
 	} {
 		if strings.Contains(schema, forbidden) {
 			t.Fatalf("canonical schema retains removed realtime storage %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"create table if not exists realtime_outbox",
+		"create table if not exists editor_collaboration_documents",
+		"create table if not exists editor_collaboration_operations",
+		"idx_realtime_outbox_claim",
+		"idx_realtime_outbox_published_sequence",
+		"drop index if exists idx_logic_gate_projection_table_one_text_box",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Fatalf("canonical schema missing unified realtime storage %q", required)
 		}
 	}
 
@@ -40,8 +51,25 @@ func TestRealtimeCleanupCanonicalSchemaAndForwardMigration(t *testing.T) {
 			t.Fatalf("realtime simplification migration missing %q", required)
 		}
 	}
+
+	unifiedBytes, err := os.ReadFile("../../db/migrations/20260715_unified_realtime_collaboration.sql")
+	if err != nil {
+		t.Fatalf("ReadFile unified realtime migration: %v", err)
+	}
+	unified := strings.ToLower(string(unifiedBytes))
+	for _, required := range []string{
+		"create table if not exists realtime_outbox",
+		"create table if not exists editor_collaboration_documents",
+		"create table if not exists editor_collaboration_operations",
+		"idx_realtime_outbox_claim",
+	} {
+		if !strings.Contains(unified, required) {
+			t.Fatalf("unified realtime migration missing %q", required)
+		}
+	}
 }
-func TestRealtimeCleanupStoreSourceHasNoEventQueue(t *testing.T) {
+
+func TestRealtimeCleanupStoreSourceHasNoObsoleteEventQueue(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("ReadDir store: %v", err)

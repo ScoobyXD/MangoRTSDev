@@ -73,20 +73,6 @@ export type EditorTextBlockContent = {
   attachments?: EditorChatAttachment[];
 };
 
-export function buildNewEditorTextBlockProjectionPayload(input: {
-  companyID: string;
-  informationID: string;
-  information: string;
-}) {
-  return {
-    company_id: input.companyID,
-    type: EDITOR_TEXT_BLOCK_TYPE,
-    information: input.information,
-    information_id: input.informationID,
-    expected_revision: 0,
-  };
-}
-
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
   const updated = (a.updated_timestamp ?? "").localeCompare(b.updated_timestamp ?? "");
   if (updated !== 0) return updated;
@@ -211,18 +197,15 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
   };
 }
 
-export function buildEditorTextBlockContentPayload(input: EditorTextBlockContent): string {
-  const title = input.title.trim();
-  const document = input.document.trim() ? input.document : "";
-  const attachments = normalizeChatAttachments(input.attachments ?? []);
-  if (!title && !document && attachments.length === 0) return "";
-  return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({
-    title,
-    document,
-    attachments: attachments.map(editorAttachmentReferencePayload),
-  })}`;
+export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockContent): {
+  title: string;
+  attachments: Record<string, unknown>[];
+} {
+  return {
+    title: input.title.trim(),
+    attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
+  };
 }
-
 function parsePayload(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;

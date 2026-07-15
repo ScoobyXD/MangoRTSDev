@@ -419,7 +419,9 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 		{scope: "gvic_matrix:user:" + user.UserID, error: "unsupported_scope"},
 		{scope: "project_management:user:" + user.UserID, error: "unsupported_scope"},
 		{scope: "communications:user:" + user.UserID, error: "unsupported_scope"},
-		{scope: "editor:node:" + node.NodeID, error: "unsupported_scope"},
+		// Editor scopes are supported only when they include the exact
+		// independently editable document identity.
+		{scope: "editor:node:" + node.NodeID, error: "invalid_scope"},
 	}
 	for _, test := range forbidden {
 		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": test.scope})
@@ -1250,23 +1252,59 @@ func (c *realtimeWSClientForTest) writeFrame(opcode byte, payload []byte) error 
 
 func (c *realtimeWSClientForTest) readJSON(t *testing.T) map[string]any {
 	t.Helper()
-	frame, ok := c.readFrame(t, time.Second)
-	if !ok {
-		t.Fatal("timed out waiting for websocket JSON message")
+	for attempts := 0; attempts < 16; attempts++ {
+		frame, ok := c.readFrame(t, time.Second)
+		if !ok {
+			t.Fatal("timed out waiting for websocket JSON message")
+		}
+		if frame.opcode == webSocketOpcodePing {
+			_ = c.writeFrame(webSocketOpcodePong, frame.payload)
+			continue
+		}
+		if frame.opcode != webSocketOpcodeText {
+			t.Fatalf("websocket opcode = %d, want text", frame.opcode)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(frame.payload, &payload); err != nil {
+			t.Fatalf("decode websocket JSON: %v payload=%s", err, string(frame.payload))
+		}
+		typeName, _ := payload["type"].(string)
+		if typeName == realtimeMessageHeartbeatChallenge {
+			c.writeJSON(t, map[string]any{"type": realtimeMessageHeartbeatResponse, "nonce": payload["nonce"]})
+			continue
+		}
+		if typeName == realtimeMessageHeartbeatConfirmed {
+			continue
+		}
+		return payload
 	}
-	if frame.opcode != webSocketOpcodeText {
-		t.Fatalf("websocket opcode = %d, want text", frame.opcode)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(frame.payload, &payload); err != nil {
-		t.Fatalf("decode websocket JSON: %v payload=%s", err, string(frame.payload))
-	}
-	return payload
+	t.Fatal("too many heartbeat frames before websocket JSON message")
+	return nil
 }
 
 func (c *realtimeWSClientForTest) assertNoMessage(t *testing.T) {
 	t.Helper()
-	if frame, ok := c.readFrame(t, 50*time.Millisecond); ok {
+	deadline := time.Now().Add(50 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		frame, ok := c.readFrame(t, time.Until(deadline))
+		if !ok {
+			return
+		}
+		if frame.opcode == webSocketOpcodePing {
+			_ = c.writeFrame(webSocketOpcodePong, frame.payload)
+			continue
+		}
+		var payload map[string]any
+		if frame.opcode == webSocketOpcodeText && json.Unmarshal(frame.payload, &payload) == nil {
+			typeName, _ := payload["type"].(string)
+			if typeName == realtimeMessageHeartbeatChallenge {
+				c.writeJSON(t, map[string]any{"type": realtimeMessageHeartbeatResponse, "nonce": payload["nonce"]})
+				continue
+			}
+			if typeName == realtimeMessageHeartbeatConfirmed {
+				continue
+			}
+		}
 		t.Fatalf("unexpected websocket message opcode=%d payload=%s", frame.opcode, string(frame.payload))
 	}
 }

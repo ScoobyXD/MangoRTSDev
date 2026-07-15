@@ -15,6 +15,7 @@ import {
   forgotPassword,
   hasStoredToken,
   isAuthEnabled,
+  readAuthConfig,
   loginWithPassword,
   logout,
   resetPassword,
@@ -26,6 +27,7 @@ import { isAuthPath, nextPathAfterAuthentication, nextPathForAuthState } from ".
 import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
+import { RealtimeHealthChrome } from "../modules/realtime/RealtimeHealthChrome";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
@@ -1527,6 +1529,7 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
   };
   return (
     <div style={shellStyle}>
+      <RealtimeHealthChrome apiBase={readAuthConfig().apiBase} companyID={getActiveCompanyID()} />
       <button
         type="button"
         aria-label="Recycle Bin"

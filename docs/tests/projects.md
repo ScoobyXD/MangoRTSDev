@@ -4,7 +4,7 @@ Last updated: 2026-07-13
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the sole shared rich editor host, shared highlight/formatting controller, project attached-reply attachment context, reply-focus invalidation, focused hydration/conflict behavior, EmailPickerModal attach-only boundary, and both Project node-shell adapters including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project envelopes; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project-to-Logic-Gate return route, project-matched work-panel history marker, fresh-entry fallback, and opener wiring; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers safe Backspace; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; remaining project-specific persistence and access rules are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`editor_collaboration`, realtime transport, and unified rich-editor suites cover exact Project document identities, bounded structured deltas, durable recovery plumbing, metadata/body separation, and mounted Project host wiring; project grouping, route, node-shell, attachment, and rich-editor suites retain their existing focused coverage).
 
 ## Business Logic
 
@@ -23,7 +23,7 @@ P12 - Empty critical-path resource cells use an Add node action, not a drag/drop
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
 P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
-P16 - Project text-box persistence remains project-owned: project text boxes save to project information/projection state, not node information/projection state.
+P16 - Project text-box document bodies commit through their exact Project collaboration documents; title and attachment metadata remain Project-owned, and Node documents opened inside Projects remain Node-owned.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
@@ -48,9 +48,9 @@ P37 - The grouped-row view preserves the local node-panel and Logic Gate openers
 P38 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Turning fullscreen on expands the same live node editor across the browser viewport; turning it off restores that editor to the right-hand Logic Gates / Nodes region without resetting the Project grouping stack, collapse state, or selected node.
 P39 - Opening a Logic Gate from the Project detail work panel records the exact canonical Project route, `/projects/{project_id}`, and the current Project work-panel tab on that return history entry before pushing `/logic-gates/{logic_gate_id}`. Changing the toggle updates that entry, so Browser Back and an unmodified Backspace pressed outside editable content return to that exact Project with its latest Critical Path or Logic Gates / Nodes selection. The marker is accepted only for its matching Project and does not change the fresh-entry default in P11; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
 P40 - Status grouping is shared by Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized workflow order is In Progress, Review, Pending, Requested, Backlog, Done. `Verify`, `Verification`, and `Verified` normalize to Review; Request/Requests normalize to Requested; Backlogs/Back Logs/Backlogged normalize to Backlog; completed/closed/archived aliases normalize to Done. Descending reverses the nonterminal recognized groups, while Done remains the final group in both directions. Unknown nonblank statuses sort after recognized nonterminal statuses; No status has a collision-proof group identity, is trailing, and remains before Done.
-P41 - Project text-block saves are project-scoped, serialized, and latest-content preserving. Every save writes one coherent title/document/attachments envelope; edits arriving during a save coalesce into one follow-up containing the newest full envelope, and a stale completion cannot mark newer content saved.
-P42 - Project reloads and text-block deletion cannot race project text-block edits. A reload started before a local revision or pending save must not overwrite that local content, deletion waits for any in-progress save, and changing project or unmounting drains changed blocks from the old project scope.
-P43 - Focused project text blocks use the shared deferred external-hydration and conflict behavior: untouched local content accepts the deferred remote value on blur without a stale flush, while a locally edited conflict keeps and saves the local value and reports the conflict.
+P41 - Every Project text box has an independent exact collaboration scope, revision stream, snapshot, and durable operation queue. Normal document typing sends structured micro-batched operations only; title/attachment changes use the metadata PATCH and cannot overwrite the collaboration body.
+P42 - Project reload/reconnect subscribes first, buffers committed events, validates the canonical snapshot/ETag, applies above-snapshot revisions in order, and reapplies durable pending operations. Tombstone is terminal and a late operation cannot recreate the text box.
+P43 - Remote Project text-box operations apply live to the exact mounted document without echo-saving or a focus-time whole-document conflict. Selection is preserved by the shared hydration boundary; duplicates are ignored and gaps recover automatically through a full snapshot.
 P44 - Replies to email attached to a project text block use the project as attachment resource owner, retain the originating project information ID, and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer project text-block formatting controller so only the reply toolbar can format text.
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
 P46 - Project dialogs/previews and the Logic Gates / Nodes embedded node panel mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking dialogs/previews trap and restore focus; the embedded panel remains modeless while anchored and becomes a focus-trapping modal in fullscreen. Moving it into or out of fullscreen preserves its live editor and Project grouping/selection state.
@@ -304,7 +304,7 @@ Expected:
 - Unmodified Backspace outside editable content performs the same history-back action.
 - Backspace inside editable content edits text and never triggers Project navigation.
 
-### Scenario P-S13: Project Text-Block Save And Hydration Races
+### Scenario P-S13: Project Text-Block Collaboration And Recovery
 
 Business logic covered:
 - P16
@@ -313,13 +313,13 @@ Business logic covered:
 - P43
 
 Given:
-- A user changes a project text-block title, document, and attachment list while a projection save is in progress.
-- A project reload or external projection update arrives while the project text block is focused.
-- The user deletes the block, closes the project, or switches to another project while a save or debounced edit remains.
+- Two authorized users or tabs edit one exact Project text box while another Project text box and unrelated scopes are mounted.
+- One browser disconnects with a durable local operation, then reconnects while remote operations have committed.
+- The user also changes title/attachment metadata and later deletes the text box.
 
 Expected:
-- At most one save for the block is in progress, and edits made during it coalesce into one follow-up containing the latest title, document, and attachment references together.
-- A completed older version cannot mark a newer local envelope saved.
-- A reload started before the local revision or pending save does not overwrite the dirty local block.
-- Deletion waits for the in-progress save before deleting the projection, and project teardown drains changed blocks from the old scope.
-- An untouched focused DOM accepts the deferred external value on blur without flushing stale HTML; a locally edited conflict keeps and saves the local value and reports the conflict.
+- Each real document mutation becomes a bounded structured operation; title/attachment metadata uses a separate body-free PATCH and cannot overwrite document content.
+- Both exact subscribers converge through server-ordered revisions without refresh or echo-saving, while the other text box and unrelated scopes receive nothing.
+- Reconnect subscribes first, loads the full canonical snapshot/ETag, orders buffered events, reapplies/resubmits stable pending operations, and returns green only after acknowledgement.
+- Duplicate operation/event delivery is harmless; a gap requests a full snapshot rather than showing a merge conflict.
+- Delete commits an exact tombstone after the intended local flush, unsubscribes the terminal document, and a late operation cannot recreate it.

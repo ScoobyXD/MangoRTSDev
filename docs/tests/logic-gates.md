@@ -7,7 +7,7 @@ Detailed Logic Gate Kanban board behavior, including subgrouping, request card f
 Coverage Status:
 - Shared `@`/`!` people-picker palette key, fallback, and contrast behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/editor_projection_revisions_test.go` and `backend/internal/http/projection_revision_http_test.go` cover monotonic Logic Gate revisions, stale update/delete rejection, same-base concurrency, authorized canonical 409 data, and Node/Logic Gate isolation; `tests/frontend/modules/editor/editorProjectionSync.test.ts`, `editorProjection.test.ts`, `editorDocumentSaveQueue.test.ts`, and `nodeTextBlockProjectionSaves.test.ts` cover durable user/company/tab scopes, refresh restoration, bounded retry, multi-tab conflict blocking, revision-zero create payloads, initial edit gating, ACK-only saved state, and failed-save retention; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers shared rich-editor behavior; shared editor attachment tests cover durable rich-editor image attachment references)
+- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/editor_collaboration_test.go`, `backend/internal/http/editor_collaboration_handlers_test.go`, and `backend/internal/http/realtime_delivery_test.go` cover structured convergence, idempotency, snapshots/ETags, authorization, exact cross-instance fan-out, revocation, compact saved-version recovery, and derived-snapshot materialization; `tests/frontend/modules/editor/editorCollaboration.test.ts`, `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`, and `unifiedRichEditorContract.test.ts` cover bounded rich-text deltas, legacy cleanup, one shared connection/health recovery, and Logic Gate host wiring).
 
 ## Business Logic
 
@@ -29,10 +29,10 @@ LG15 - Logic Gate editor Bold, Underline, Italic, and Strikethrough controls mus
 LG16 - Inserting a table from the shared Logic Gate editor toolbar must insert it at the current caret/selection location, not at the top-left or beginning of the editor. A table must not inject cell-level alignment-icon controls because alignment remains in the shared header toolbar.
 LG17 - Live Logic Gate editor typing writes the current text state to the Logic Gate editor projection table and must not append a full rich-text document row to `logic_gate_information` on every keystroke autosave.
 LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
-LG19 - Clicking Save in the Logic Gate editor flushes pending projection saves first, then creates a manual saved editor version in `logic_gate_information`.
+LG19 - Clicking Save flushes and acknowledges pending collaboration operations, materializes the canonical collaboration head, then creates one manual saved version in `logic_gate_information`.
 LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose editor projection has changed, and must never scan or save every Logic Gate in the system.
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
-LG22 - Logic Gate editor projection saves must use one-save-at-a-time, target-safe latest-content behavior: while a save is in progress, later edits update the latest queued content for their own document target without starting an overlapping persistence request. A pending value for one Logic Gate/document target must not be erased by editing another target, and queued targets drain serially in deterministic first-target order.
+LG22 - Logic Gate typing uses ordered 160 ms structured-operation micro-batches on one exact document queue. Stable operation IDs and server revisions serialize commit acknowledgement without overlapping whole-document projection writes or cross-target queue replacement.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action in the shared **More editor actions** menu, not as a persistent checkbox, fifth GVIC card, or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no write, and only Yes applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
@@ -56,11 +56,11 @@ LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount th
 LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.
 LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
 LG45 - A Node popup opened from Logic Gate Arena owns its transient half/fullscreen mode locally. Realtime acceptance and canonical summary/work/view projection reconciliation may update Node/board data and titles, but reopening/reconciling the same Node must preserve fullscreen until the user exits fullscreen or closes it; opening a different Node starts from the normal saved half-view ratio.
-LG46 - Every Logic Gate `Text box` projection has a positive, monotonically increasing server revision. A never-created projection is written with `expected_revision: 0`; every update and delete carries the exact loaded revision. Delete advances a hidden revision tombstone, and explicit revision-zero recreation continues from that sequence.
-LG47 - Logic Gate revision comparison and mutation are one transaction: exactly one same-base concurrent write wins. A stale authorized update/delete returns `409 projection_revision_conflict` with canonical current projection/revision data; authorization occurs before disclosure, and the client never automatically rebases a stale full-document overwrite.
-LG48 - Logic Gate editor base revision and durable unsynced draft state are scoped by authenticated user, company, Logic Gate, browser tab, and information ID. Base/saved state advances only after backend ACK; persistence rejection stays failed/dirty in the serial queue, refresh restores only the exact matching tab scope, an ACK or resolution clears only that tab's retained key, and automatic saved-version creation remains disabled.
-LG49 - A dirty Logic Gate editor with a confirmed failed write, revision conflict, or terminal authentication failure displays a large non-dismissible sync-loss modal and blocks editing. Transient delivery failures use bounded retry/backoff; resolution explicitly loads the server version or rechecks the latest revision before retrying the retained local draft, without auto-refresh or auto-logout.
-LG50 - A Logic Gate document stays non-editable/loading until current identity, edit permission, and the initial projection/revision are loaded. Late hydration must not replace a locally dirty/restored draft.
+LG46 - Each Logic Gate independently editable body is an exact collaboration document with its own server-ordered revision, snapshot, ETag, pending queue, and `editor:logic_gate:{logic_gate_id}:{document_id}` scope.
+LG47 - Concurrent valid Logic Gate operations integrate automatically and converge in deterministic order; an older valid base is not rejected merely because another collaborator committed first. Stable operation IDs deduplicate retries, and no end-user whole-document conflict workflow exists.
+LG48 - Unacknowledged Logic Gate operations are durable under user/company/document/client/operation identity and survive unmount, refresh, disconnect, and reconnect. Saved state advances only after backend commit acknowledgement/deduplication.
+LG49 - Exact committed Logic Gate deltas reach every healthy exact subscriber through the shared outbox/backplane/spine and apply once without echo-saving. Gaps, reconnect, or saved-version replacement trigger a canonical full snapshot plus automatic pending-operation reapplication.
+LG50 - A Logic Gate document is fully healthy only after identity/Edit authorization, exact subscription acceptance, confirmed heartbeat, canonical snapshot recovery, buffered-event ordering, and pending acknowledgements complete. Orange permits durable queued typing; global red states gate interactions.
 
 ## Scenarios
 
@@ -178,25 +178,17 @@ Business logic covered:
 Given:
 - A user has edit access to a Logic Gate.
 - The user types in the Logic Gate editor.
-- The user switches between document targets while a projection save is in progress.
+- The user switches between exact document targets while one collaboration operation is awaiting acknowledgement.
 - The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
 
 Expected:
-- Regular typing updates `logic_gate_projection_table` for the current editor state instead of appending repeated full-document rows to `logic_gate_information`.
-- Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
-- Manual Save first flushes pending projection updates, then writes one saved-version batch to `logic_gate_information`.
-- Automatic saved-version creation does not run in the background during the emergency slowness fix.
-- Restoring a saved version asks for confirmation and replaces the current Logic Gate editor projection with the selected saved content.
-- When a user types a paragraph, the editor updates immediately and marks the editor projection as `has changed`.
-- After the debounce delay, the editor starts at most one projection save for that Logic Gate editor document.
-- If the user keeps typing while that save is in progress, the editor keeps the newest content in memory, marks `save needed after current save`, and does not start overlapping saves.
-- When the in-progress save finishes, the editor marks the projection `has not changed` only if the completed save version is still the latest local version.
-- If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
-- Pending latest content for each edited document target remains queued; switching targets cannot replace another target's pending save, and the queue persists targets serially in first-target order.
-- Keep the editor non-editable while identity, permissions, and the initial projection revision load; a late response cannot replace a restored or locally dirty document.
-- Open one Logic Gate document in two tabs that share local storage at the same base revision and save different text concurrently; exactly one succeeds, while the stale tab retains its tab-specific local draft behind the blocking modal and cannot overwrite without an explicit latest-revision recheck. Saving or resolving one tab does not clear the other tab's retained draft.
-- Fail a dirty write and verify bounded transient retry, failed-queue retention, refresh restoration for the same user/company only, terminal-auth blocking, and saved/`has not changed` state only after backend ACK.
-- A stale update or delete receives canonical current data only after edit authorization; a current delete hides the projection and preserves monotonic revision history for later explicit recreation.
+- Regular typing renders immediately and becomes a short ordered structured-operation micro-batch on the exact Logic Gate document.
+- Backend Edit authorization, collaboration integration, next revision, canonical state, and outbox event commit atomically; only the acknowledgement marks Saved.
+- Every healthy exact subscriber, including another tab/user/backend instance, applies the committed operation once without refresh or echo-save; unrelated scopes receive nothing.
+- Manual Save flushes pending acknowledgements, materializes the canonical head, then writes one saved-version batch; automatic background version creation remains disabled.
+- Confirmed restore commits a canonical replacement and compact snapshot-required event; subscribers recover the full snapshot without a whole-body socket payload.
+- Disconnect/reconnect subscribes first, validates the full snapshot/ETag, orders buffered events, reapplies durable pending operations, and returns green only after convergence.
+- Deletion uses an exact tombstone and a late operation cannot recreate the document. No expected-revision conflict modal, server-version choice, or retained full-body draft exists.
 - Opening Metadata, History, or Save Settings hides the document and disables its formatting commands without disabling the navigation tabs needed to return.
 
 ### Scenario LG-S6: Logic Gate GVIC Apply To Assigned Nodes Action

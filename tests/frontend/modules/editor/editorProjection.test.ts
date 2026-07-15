@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildEditorAttachedEmailPayload,
-  buildNewEditorTextBlockProjectionPayload,
-  buildEditorTextBlockContentPayload,
+  buildEditorTextBlockMetadataPayload,
   buildEditorTextBlockChatPayload,
   canDeleteEditorTextBlockChatMessage,
+  EDITOR_TEXT_BLOCK_CONTENT_PREFIX,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
   parseEditorTextBlockContent,
@@ -13,20 +13,17 @@ import {
   selectCurrentEditorTextProjection,
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
 
-test("new text-box projections explicitly use revision zero", () => {
-  assert.deepEqual(buildNewEditorTextBlockProjectionPayload({
-    companyID: "company-a",
-    informationID: "information-a",
-    information: "draft",
-  }), {
-    company_id: "company-a",
-    type: "Text box",
-    information: "draft",
-    information_id: "information-a",
-    expected_revision: 0,
+test("text-block metadata payloads cannot carry a full document or attachment bytes", () => {
+  const payload = buildEditorTextBlockMetadataPayload({
+    title: " Decision notes ",
+    document: "stale body must not be serialized",
+    attachments: [{ id: "local", attachmentID: "attachment-1", name: "diagram.png", type: "image/png", size: 128, dataURL: "data:image/png;base64,AAAA" }],
   });
+  assert.equal(payload.title, "Decision notes");
+  assert.equal(JSON.stringify(payload).includes("stale body"), false);
+  assert.equal(JSON.stringify(payload).includes("base64"), false);
+  assert.equal(payload.attachments[0].attachment_id, "attachment-1");
 });
-
 test("selects the newest text-box projection for the single editor document", () => {
   const selected = selectCurrentEditorTextProjection([
     { information_id: "older", type: "Text box", information: "old text", updated_timestamp: "2026-05-04T01:00:00.000Z" },
@@ -159,11 +156,11 @@ test("chat message deletion is limited to the author", () => {
 });
 
 test("parses titled node text block content payloads with legacy fallback", () => {
-  const payload = buildEditorTextBlockContentPayload({
+  const payload = `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
-    attachments: [{ id: "local-draft-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128 }],
-  });
+    attachments: [{ id: "attachment-2", attachment_id: "attachment-2", name: "diagram.png", type: "image/png", size: 128 }],
+  })}`;
   assert.equal(payload.includes("attachment_id"), true);
   assert.equal(payload.includes("data_url"), false);
 

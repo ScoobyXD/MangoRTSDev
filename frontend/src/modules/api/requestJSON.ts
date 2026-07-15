@@ -4,6 +4,7 @@ import {
   isTerminalAuthFailureActive,
   markTerminalAuthFailure,
 } from "../../auth/cognitoAuth.js";
+import { RealtimeMutationBlockedError, shouldBlockRealtimeMutation } from "../realtime/realtimeHealth.js";
 
 export type RequestJSONInit = RequestInit & {
   json?: unknown;
@@ -12,6 +13,7 @@ export type RequestJSONInit = RequestInit & {
   getAccessToken?: () => Promise<string>;
   fetchImpl?: typeof fetch;
   throwOnHTTPError?: boolean;
+  allowDuringRealtimeDegraded?: boolean;
 };
 
 export type BoundRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
@@ -60,6 +62,7 @@ export async function requestJSON<T>(apiBase: string, path: string, init: Reques
 
 export async function requestJSONWithMeta<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<RequestJSONResponse<T>> {
   const {
+    allowDuringRealtimeDegraded = false,
     auth = true,
     fetchImpl = globalThis.fetch.bind(globalThis),
     getAccessToken = getApiAccessToken,
@@ -69,6 +72,9 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     ...requestInit
   } = init;
   const method = (requestInit.method ?? "GET").toUpperCase();
+  if (!allowDuringRealtimeDegraded && shouldBlockRealtimeMutation(method, path)) {
+    throw new RealtimeMutationBlockedError();
+  }
   const headers = new Headers(requestInit.headers);
   let body = requestInit.body;
   const isFormDataBody = typeof FormData !== "undefined" && body instanceof FormData;

@@ -2,7 +2,98 @@
 
 Last updated: 2026-07-15
 
-Status: approved product and architecture direction; implementation has not started.
+Status: implementation delivered and the complete repository gate passes; Definition of Done remains open on the two acceptance gaps recorded below.
+
+## Implementation Record
+
+This section is the live project-management record. It is updated as implementation and verification advance; the charter below remains the approved product destination.
+
+### Phase checklist
+
+- [x] Worker bootstrap and canonical branch creation.
+- [x] Read this charter, `AGENTS.md`, the database-agent access contract, current owner docs, and the committed realtime/editor sources.
+- [x] Inventory current retained realtime lanes, editor hosts, legacy full-document persistence, schema, and verification surfaces.
+- [x] Resolve the initial backplane, collaboration model, batching, heartbeat, and bounded reconstruction choices from repository evidence.
+- [x] Phase 0: reconciled owner contracts and deleted contradictory legacy expectations for the migrated surfaces.
+- [ ] Phase 1: durable outbox, shared cross-instance consumption, common envelope, exact local publication, and retained-family routing are implemented; retained-family canonical mutation plus outbox insertion is not yet one database transaction at every producer.
+- [x] Phase 2: implemented confirmed application heartbeat, the central health state machine, Key Views indicator, and global mutation gate.
+- [x] Phase 3: implemented exact editor-document identities, structured operations, revisions, idempotent commit, snapshots/ETags, and durable pending operations.
+- [x] Phase 4: cut over Logic Gate, Node, individual Node text boxes, and Project text boxes and deleted the old save/conflict system atomically.
+- [ ] Phase 5: reconnect/gap recovery, compaction, metrics, browser health rendering, and full verification are implemented; the charter's complete multi-browser rich-text interaction matrix still needs an automated browser harness.
+- [x] Ran `node scripts/run_all_tests.mjs`, inspected the complete diff/status, and recorded exact proof here. The intended changes are committed locally at worker completion.
+
+### Baseline source inventory
+
+- Shared frontend transport: `frontend/src/modules/realtime/realtimeWebSocket.ts`. It already refcounts exact scopes locally and owns ticket acquisition/reconnect, but it currently has no application-visible confirmed heartbeat or editor event family.
+- Backend transport/registry/publication: `backend/internal/http/realtime_ticket.go`, `realtime_ws.go`, `realtime_registry.go`, and `realtime_publish.go`. The registry is exact by company/scope/connection, but current publication is process-local and synchronous socket writes can still let one stalled connection delay fan-out in this checkout.
+- Retained live producers: notification handlers, Node chat projection create/delete, mounted Kanban domain-event hints, and exact mailbox stream/webhook hints. All currently call the local publisher directly after their feature mutation.
+- Existing durable event foundation: `domain_events`, `postgres_domain_events.go`, and memory equivalents already provide transaction-local domain-event append and per-stream ordering, but they do not provide claim/retry/publication state or per-instance consumption. They remain business-domain history rather than being overloaded as the realtime outbox.
+- Legacy editor root path: `EditorContent.tsx` plus `useEditorDocumentPersistence.ts`, `editorDocumentSaveQueue.ts`, `editorProjectionSync.ts`, and `EditorSyncBlockingModal.tsx` retain full bodies, require expected revisions, restore `draft_restored`, and expose end-user version-choice/retry UI.
+- Legacy per-text-box paths: `NodeWorkspaceSurface.tsx`, `NodeWorkspaceSurfaceParts.tsx`, `nodeTextBlockProjectionSaves.ts`, and `ProjectSummaryContent.tsx` serialize a full text-box payload through per-block save controllers. Node/Logic Gate HTTP handlers and `postgres_editor_projection_revisions.go` implement one-winner whole-document revision conflicts; Project projection persistence has no equivalent collaboration revision.
+- Shared rich editor mutation source: `useEditorDocumentSurfaceHandlers.ts` commits every supported text/format/list/table/image DOM mutation through one `scheduleDocumentSave(serializedHTML)` callback. This is the atomic integration point for generating structured collaboration operations without rewriting every formatting command.
+- Rich-text storage boundary: root editor projections can contain raw sanitized rich HTML; Node/Project text-box projections wrap the independently editable `document` in `<!-- mango-node-text-block-v1 -->` JSON beside title and durable attachment references. Collaboration owns only the `document` body; title, attachments, relationships, and other metadata remain command-specific.
+- App-shell placement: `AuthGate.tsx` renders `AccountBar`; its Recycle Bin button is the requested trash icon. The connection indicator will be inserted immediately before it. `AppModalPortal.tsx` is the shared portal boundary, but the health blocker needs an explicitly higher global layer than Kanban's `99999` feature overlay.
+- Required owner-contract reconciliation: `docs/v4-architecture-doc.md`, `docs/tests/REST API & WebSocket.md`, `editor.md`, `nodes.md`, `logic-gates.md`, `projects.md`, `key-views.md`, `attachments.md`, `attachment-streaming.md`, and the addendum in `live-feed-audit.md`.
+
+### Resolved implementation decisions
+
+1. **Shared backplane: PostgreSQL durable outbox plus published-event log, with in-memory deterministic adapter.** The API already requires PostgreSQL and `database/sql`/pgx. A dedicated realtime outbox will use a global sequence, bounded claims with expiring leases, retry metadata, stable event IDs, and published timestamps. Every backend instance independently consumes published rows after its own cursor and applies only its local exact registry. This provides cross-instance delivery without sticky sessions or a new production service; polling is backed by immediate local wakeups and a short bounded interval. Domain events are not repurposed because they lack delivery state and contain broader business payloads.
+2. **Collaboration engine: a replicated growable array (RGA) sequence CRDT over Unicode/serialized rich-document atoms.** Stable atom IDs and predecessor IDs integrate concurrent inserts deterministically; tombstoned stable IDs make concurrent deletion and retry safe. Operations contain inserted atoms and deleted atom IDs, never a replacement body. All supported rich HTML structures remain serializable, but attachment safety validation rejects bytes/data URLs/presigned credentials before commit. This is an established sequence-CRDT model rather than offset patches against browser-normalized `innerHTML`.
+3. **Micro-batch defaults: 160 ms and 64 KiB maximum encoded delta.** Local DOM rendering remains immediate. The interval is short enough to feel live and long enough to coalesce ordinary typing; structural/format commands preserve invocation order and explicit flush boundaries.
+4. **Snapshot/compaction: bounded replay after an exact snapshot.** A document begins with an imported/full revision-zero CRDT snapshot. The server compacts after 128 committed operations since the physical snapshot or 512 KiB of accumulated delta JSON, whichever occurs first. Snapshot reads reconstruct at most 127 normal operations (or the smaller byte threshold), report the exact head revision/ETag, and never require a browser to replay history. User-visible saved versions remain separate.
+5. **Pending operations: IndexedDB primary store, scoped by user/company/document/client/operation, with a structured-operation local-storage fallback only when IndexedDB is unavailable.** The legacy full-body keys are deleted once and never read. A record is removed only after commit acknowledgement/deduplication.
+6. **Heartbeat/retry defaults:** application challenge/response travels on the existing socket immediately after connect and every 25 seconds alongside protocol Ping/Pong. A 35-second confirmation grace enters orange; one failed/overdue short recovery enters blinking red while background exponential reconnect continues; eight failed attempts or 60 seconds without confirmed recovery enters solid red. Socket open alone remains syncing until exact subscriptions, mounted-document recovery, pending acknowledgements, and a server-confirmed heartbeat complete.
+7. **No presence/cursors in the first release.** Correct content convergence, selection preservation while applying remote content, saved-state proof, and recovery ship first; collaborator presence is not required by the charter.
+
+### Implemented source inventory
+
+- The migration and canonical schema add the realtime outbox plus collaboration documents, operations, physical snapshots, leases, retry state, and indexes. No live database was changed.
+- Store and HTTP collaboration paths implement RGA integration, stable operation idempotency, ordered revisions, bounded snapshots/ETags, compaction, tombstones, exact authorization, saved-version materialization, and an editor-state/outbox transaction.
+- The shared realtime spine implements durable claim/lease/retry/publication, per-instance published-sequence consumption, local wakeups, cross-instance delivery, application heartbeat, bounded socket queues, and one final exact local-registry boundary.
+- Frontend collaboration implements structured deltas, 160 ms micro-batching, durable pending operations, duplicate/gap recovery, exact refcounted scopes, health/mutation gating, and atomic Node/Logic Gate/Project/text-box cutover without the obsolete whole-document conflict system.
+
+### Deleted legacy system
+
+- `EditorSyncBlockingModal.tsx`, `editorProjectionSync.ts`, `editorDocumentSaveQueue.ts`, and their obsolete conflict/checkpoint tests are deleted.
+- Migrated projection write endpoints fail closed rather than providing a whole-document fallback. Metadata writes cannot carry the document body.
+- Cutover removes but never hydrates `mango-editor-projection-draft-v2` and `mango-editor-projection-tab-v1`; pending work uses stable structured operations instead.
+- Owner contracts and the current architecture document now describe the unified model; the preserved live-feed audit is explicitly historical.
+
+### Problems, failed approaches, and resolutions
+
+- **Publication authorization race:** delivery now takes the exact-scope publication lock and re-resolves only current candidate users immediately before the local registry boundary.
+- **Saved-version stale projection:** save-version creation materializes the collaboration head first; restore commits a replacement snapshot/tombstone and publishes only `editor.snapshot.required`, never a full body.
+- **Replacement versus pending operations:** replacement snapshots retain the immediately prior live atoms as tombstones, preserving pending-operation anchors while keeping repeated replacement bounded.
+- **Recovery races:** recovery requests another pass for snapshot/tombstone events arriving mid-recovery, orders buffered events above the accepted revision, and never rolls confirmed revision backward from a stale acknowledgement.
+- **Browser render loop:** the initial browser smoke found a React maximum-update-depth loop from an unstable collaboration result object. Persistence now depends on the hook's stable callbacks; a clean browser reload showed no recurrence.
+- **Windows sandbox:** Vite/esbuild child-process startup failed with `spawn EPERM` inside the restricted launcher. Focused and full commands were rerun outside that restriction; the failure occurred before project code executed.
+- **Git-case gate:** the first full gate correctly rejected the referenced migration while it was untracked. Staging the migration made the source-audit path provable; the complete rerun passed.
+
+### Verification evidence
+
+- `go test ./internal/store -count=1` — passed.
+- `go test ./internal/http -count=1` — passed.
+- `go test ./... -count=1` — passed before the final gate.
+- `npm.cmd run test:node-relationships` — passed.
+- `npm.cmd run build -- --emptyOutDir=false` — passed after recovery hardening and again after the browser-loop fix.
+- In-app Chromium smoke against the actual Vite-loaded component proved: Connected green with heartbeat pulse and no modal; Reconnecting orange with no modal; Attempting blinking red with one accessible global `aria-modal` at `z-index: 2147483000`; Disconnected solid red with the global modal and Refresh browser button. The Mango shell rendered after the callback fix without the prior maximum-update-depth error.
+- `node scripts/run_all_tests.mjs` — final exit code 0 on 2026-07-15: frontend feature/DOM suites passed, production build passed (`265 modules transformed`), all backend Go packages including source audit passed, infrastructure attachment contracts passed, and the runner printed `All test suites passed.`
+
+### Database migration and human rollout
+
+1. A human must review and run `backend/db/migrations/20260715_unified_realtime_collaboration.sql` through the normal environment migration workflow before deploying code that uses these tables.
+2. Deploy all backend instances with the shared schema available; monitor outbox pending depth/age, claim/publish failures, consume lag, exact delivery failures, heartbeat failures, and editor commit/snapshot metrics.
+3. Deploy the frontend only with the matching backend protocol. Browser cleanup is automatic; there is no dual-read or dual-write window.
+4. No agent applied a migration or accessed or changed production infrastructure or a live database.
+
+### Genuine remaining acceptance gaps
+
+1. **Retained-family transaction boundary:** notifications, Node chat, Kanban, and active-mailbox hints enqueue durably and reach every backend instance through the shared outbox, but their existing feature mutations complete before the HTTP publication helper inserts the outbox row. The editor path is atomic; the four retained producer families still need repository-level transaction ownership or an equivalent database-enforced bridge.
+2. **Complete rich-editor browser matrix:** CRDT, HTTP, cross-instance, exact fan-out/revocation, heartbeat, DOM editor, rich-text, attachment, and shell browser evidence passes, but the exhaustive simultaneous multi-browser rich-text typing/list/format/image/undo/caret/reconnect matrix is not encoded in an automated real-browser harness.
+
+These gaps are why Phase 1, Phase 5, and the Definition of Done remain open despite the passing repository gate. They must be closed before this charter can truthfully be marked complete.
+
+
 
 This document is the durable implementation charter for Mango realtime delivery, collaborative Node/Logic Gate/Project editors, connection health, reconnect recovery, and browser-side protection of unacknowledged work. It records the decisions made before implementation so future Codex agents do not create competing livestream systems or fall back to whole-document last-write-wins behavior.
 
@@ -17,7 +108,7 @@ This charter supersedes only the following earlier decisions:
 
 The earlier live-feed simplification remains authoritative in every other respect. Do not restore broad workspace, Company Explorer, graph, GVIC/My Work, Project Management, permission, generic projection, or company-wide content streams. This charter adds exact collaborative-editor scopes and a shared cross-instance delivery backbone; it does not reopen generalized browser replication.
 
-Before implementation is considered complete, reconcile this charter with the current source-of-truth owner documents, including:
+The implementation reconciled this charter with the current source-of-truth owner documents, including:
 
 - `docs/v4-architecture-doc.md`;
 - `docs/tests/REST API & WebSocket.md`;
@@ -29,7 +120,7 @@ Before implementation is considered complete, reconcile this charter with the cu
 - `docs/tests/attachments.md` and `docs/tests/attachment-streaming.md` where inline images cross the attachment boundary; and
 - `docs/important tasks/live-feed-audit.md`, with a short current addendum that points here instead of rewriting its preserved historical audit.
 
-Current rules such as RW10, ED44, N107-N111, LG46-LG49, and the editor coverage note that cross-user document freshness is navigation/reopen-only describe the pre-collaboration system. They must be deliberately replaced or narrowed during implementation rather than left contradicting the new behavior.
+Pre-cutover rules such as RW10, ED44, N107-N111, LG46-LG49, and the navigation/reopen-only coverage note described the obsolete system; the owner documents now replace or narrow them with the collaboration behavior recorded above.
 
 ### Mandatory deletion of the legacy editor save/sync patch
 
@@ -924,22 +1015,16 @@ Notifications/Updates, Node chat, mounted Kanban, exact active mailbox, and edit
 
 Given a platform with tens of thousands of companies and large employee directories, only a small number of healthy browser connections are actively viewing one exact editor document. A committed operation is delivered live to every one of those exact subscribers and to no other connection. Adding unrelated companies, employees, open connections, or subscriptions does not increase that event's browser recipients. Closing the last local view removes the exact network subscription, and permission revocation stops later delivery.
 
-## Explicitly Open Decisions
+## Resolved Implementation Choices
 
-The following choices were intentionally not made in the product discussion and must not be implied as approved:
-
-- the concrete shared backplane technology;
-- the physical database table/schema names for operations, snapshots, and outbox rows;
-- the selected OT/CRDT/collaboration library;
-- the micro-batch duration and size thresholds;
-- the physical full-snapshot/compaction cadence;
-- the heartbeat grace duration beyond the 25-second cadence;
-- the exact orange-to-blinking-red timing;
-- the background retry budget/backoff before solid red;
-- whether collaborator presence/cursors ship in the first editor collaboration release; and
-- the final user experience for extremely rare terminal local-recovery failures.
-
-These choices must satisfy this charter and be documented with evidence when selected.
+- PostgreSQL `realtime_outbox` is the durable shared backplane log; every instance claims/publishes and consumes published sequence rows.
+- `editor_collaboration_documents`, `editor_collaboration_operations`, and `editor_collaboration_snapshots` are the physical collaboration tables.
+- The collaboration engine is an RGA sequence CRDT over serialized rich-document atoms.
+- Client micro-batching defaults to 160 ms with a 64 KiB encoded-delta ceiling.
+- Physical compaction occurs after 128 operations or 512 KiB of delta JSON, bounding reconstruction to at most 127 normal operations.
+- Heartbeats run roughly every 25 seconds; confirmation grace is 35 seconds, attempting is entered after the short recovery threshold, and disconnected is entered after eight failures or 60 seconds.
+- Presence/cursors do not ship in this release.
+- Rare terminal local recovery remains protected by durable pending operations, a solid-red manual-refresh instruction, and automatic reapplication after refresh; the product does not expose a merge screen.
 
 ## Non-Goals
 
@@ -972,6 +1057,13 @@ This charter is implemented only when all of the following are true:
 11. Legacy tests and source-of-truth rules are deleted or replaced with unified-model expectations, with no contradictory old behavior remaining.
 12. Focused verification and `node scripts/run_all_tests.mjs` pass.
 13. Any database migration and rollout requirements are reported explicitly, and production changes remain human-controlled under the repository security contract.
+
+### Completion audit
+
+- Complete with passing evidence: items 2-7 and 9-13.
+- Incomplete: item 1 for the four retained producer transaction boundaries described above.
+- Incomplete: item 8 for the full automated real-browser multi-user rich-text matrix; cross-instance, crash/retry, duplicate, gap, stalled-client, authorization, exact fan-out, DOM-rich-editor, and manual browser health evidence pass.
+- Therefore the charter is not marked complete, even though the delivered implementation and complete repository gate pass.
 
 ## Final Invariant
 
