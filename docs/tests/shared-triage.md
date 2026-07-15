@@ -198,6 +198,8 @@ ST169 - Shared Triage conversation headers show only the subject. Collapsed mess
 ST170 - Ordinary shared-inbox compose/reply, due scheduled-draft execution, and collaboration shared-draft send all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green action row appears in the established triage notice area with a right-to-left countdown; accessible Send now dispatches only that attempt immediately through the exact shared grant and existing collaboration claim/idempotency path, while Undo sends no provider request and preserves the durable draft/revision. For a due scheduled draft, Undo also clears the persisted send time so the scheduler cannot retry it; expiry dispatches once when neither action has already settled the attempt.
 ST171 - Shared Triage uses the same responsive mail-control row as My Triage: compact search controls on the left, visible unread count plus Unread only and accessible Newest/Oldest ordering on the right, and clean wrapping at narrow widths. Newest first is the default. Ordering applies only to the current filtered/condensed page, does not change provider request identity or archive-page membership, and remains exact-shared-inbox scoped while search and unread-only filtering compose normally.
 ST172 - Shared Triage loads every folder-metadata page before deriving Inbox/Starred counters and uses the same full-height new-message body plus stable three-slot Sent header as My Triage. The disabled Archive page/go-next control remains visible in Sent, exact shared-inbox authorization is unchanged, sent Mango inline images receive an independent shared-inbox/message link, and controlled typing never reloads an unchanged hydrated image.
+ST173 - A shared-inbox signature's display derivative may hydrate Settings/compose, but send requires current Edit authorization and validates only that inbox signature's coherent original bucket/key/size/SHA record before CID multipart. Success promotes the exact shared-inbox/message inline link for Sent; missing/corrupt original state never falls back to display or a browser object URL.
+ST174 - Shared timer-expiry and Send now dispatches use the same company-owned grant and backend closure once and surface the same failure. A failed signature-image send preserves the current shared compose/draft or collaboration revision, reports no false success, and exposes only the classified public code plus sanitized server correlation.
 
 ## Scenarios
 
@@ -929,3 +931,20 @@ Given:
 Expected:
 - Exact shared-mailbox counters include later folder pages, compose uses the available detail height, and ordinary typing produces no image refetch or flash.
 - Sent retains Compose/Sent/Archive-page geometry with archive disabled, and the inline image remains authorized through the shared-inbox/message link after draft cleanup.
+
+### Scenario ST-S25: Shared Signature Send Integrity And Failure Recovery
+
+Business logic covered:
+- ST165
+- ST170
+- ST172
+- ST173
+- ST174
+
+Given:
+- An editable shared inbox has a saved signature image with distinct display and original objects.
+- The user sends through timer expiry and Send now, then exercises an original open/stream failure.
+
+Expected:
+- Each choice dispatches once through the same exact shared grant; success sends the checksum-validated original as CID and Sent resolves it through the promoted shared-inbox/message link.
+- Failure returns the same safe backend result, retains the shared draft/revision and compose, does not claim success, and can be correlated without logging filenames, bodies, bytes, credentials, or storage/provider details.

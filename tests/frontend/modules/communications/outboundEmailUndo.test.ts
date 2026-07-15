@@ -77,6 +77,35 @@ test("send now dispatches only the selected attempt immediately and cancels its 
   assert.equal(dispatchCount, 1);
 });
 
+test("expiry and send now each dispatch once and preserve the same backend failure", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  undoAllOutboundEmailSends();
+  const backendError = Object.assign(new Error("attachment_storage_failed"), { code: "attachment_storage_failed" });
+  let delayedDispatches = 0;
+  let immediateDispatches = 0;
+  const delayed = scheduleOutboundEmailDispatch(async () => {
+    delayedDispatches += 1;
+    throw backendError;
+  }, { label: "Delayed failure" });
+  const immediate = scheduleOutboundEmailDispatch(async () => {
+    immediateDispatches += 1;
+    throw backendError;
+  }, { label: "Immediate failure" });
+
+  const [, immediatePending] = getPendingOutboundEmailSends();
+  assert.ok(immediatePending);
+  assert.equal(sendOutboundEmailNow(immediatePending.id), true);
+  await assert.rejects(immediate, (error: unknown) => error === backendError);
+  assert.equal(immediateDispatches, 1);
+  assert.equal(delayedDispatches, 0);
+
+  t.mock.timers.tick(10_000);
+  await assert.rejects(delayed, (error: unknown) => error === backendError);
+  assert.equal(delayedDispatches, 1);
+  assert.equal(immediateDispatches, 1);
+  assert.deepEqual(getPendingOutboundEmailSends(), []);
+});
+
 test("multiple sends remain independently undoable", async () => {
   undoAllOutboundEmailSends();
   let dispatchCount = 0;

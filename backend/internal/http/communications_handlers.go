@@ -987,7 +987,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		if isNylasOutboundAttachmentFailure(err) {
-			writeAttachmentStorageError(w, err)
+			writeCommunicationsSendAttachmentError(w, r, connection, cleanCompanyID, sendReq.Attachments, err)
 			return
 		}
 		s.writeNylasError(w, r, connection, err)
@@ -2287,7 +2287,9 @@ func communicationsSendHasAttachmentReference(items []NylasAttachment) bool {
 	return false
 }
 
-func validCommunicationsSendAttachmentContent(content store.AttachmentContentRead, companyID, attachmentID string) bool {
+func validCommunicationsSendAttachmentContent(content store.AttachmentContentRead, companyID, attachmentID, storageBucket string) bool {
+	sha256Hex := strings.ToLower(strings.TrimSpace(content.SHA256))
+	originalSHA256Hex := strings.ToLower(strings.TrimSpace(content.OriginalSHA256))
 	return strings.EqualFold(strings.TrimSpace(content.CompanyID), companyID) &&
 		strings.EqualFold(strings.TrimSpace(content.AttachmentID), attachmentID) &&
 		store.NormalizeAttachmentVariantType(content.RequestedVariant) == store.AttachmentVariantOriginal &&
@@ -2295,7 +2297,13 @@ func validCommunicationsSendAttachmentContent(content store.AttachmentContentRea
 		content.ByteSize >= 0 &&
 		content.OriginalByteSize >= 0 &&
 		content.ByteSize == content.OriginalByteSize &&
-		strings.TrimSpace(content.StorageKey) != ""
+		strings.TrimSpace(content.StorageKey) != "" &&
+		strings.TrimSpace(content.StorageKey) == strings.TrimSpace(content.OriginalStorageKey) &&
+		strings.TrimSpace(content.StorageBucket) != "" &&
+		strings.EqualFold(strings.TrimSpace(content.StorageBucket), strings.TrimSpace(content.OriginalStorageBucket)) &&
+		strings.EqualFold(strings.TrimSpace(content.StorageBucket), strings.TrimSpace(storageBucket)) &&
+		validAttachmentSHA256Hex(sha256Hex) &&
+		sha256Hex == originalSHA256Hex
 }
 
 func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *http.Request, companyID string, items []NylasAttachment) ([]NylasAttachment, []NylasOutboundAttachment, bool) {
@@ -2350,7 +2358,7 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 				writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 				return nil, nil, false
 			}
-			if !validCommunicationsSendAttachmentContent(content, companyID, attachmentID) {
+			if !validCommunicationsSendAttachmentContent(content, companyID, attachmentID, storage.Bucket()) {
 				writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 				return nil, nil, false
 			}
@@ -2390,6 +2398,7 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 			ContentType: metadata.ContentType,
 			ContentID:   metadata.ContentID,
 			Size:        metadata.Size,
+			SHA256:      strings.ToLower(strings.TrimSpace(content.SHA256)),
 			Open: func(ctx context.Context) (NylasOutboundAttachmentContent, error) {
 				output, err := storage.GetObject(ctx, AttachmentGetObjectInput{Key: storageKey})
 				if err != nil {
@@ -2403,6 +2412,62 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 		})
 	}
 	return cleaned, outbound, true
+}
+
+func writeCommunicationsSendAttachmentError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID string, attachments []NylasAttachment, err error) {
+	if r.Context().Err() != nil {
+		return
+	}
+
+	attachmentIndex, failureClass := nylasOutboundAttachmentFailureDetails(err)
+	statusCode := http.StatusBadGateway
+	publicCode := "attachment_storage_failed"
+	switch {
+	case errors.Is(err, ErrAttachmentObjectNotFound):
+		failureClass = "object_not_found"
+		statusCode = http.StatusNotFound
+		publicCode = "attachment_content_not_found"
+	case errors.Is(err, ErrAttachmentStorageUnavailable):
+		failureClass = "storage_unavailable"
+		statusCode = http.StatusServiceUnavailable
+		publicCode = "attachment_storage_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		failureClass = "storage_timeout"
+		statusCode = http.StatusServiceUnavailable
+		publicCode = "attachment_storage_unavailable"
+	case errors.Is(err, errNylasOutboundAttachmentContentLengthMismatch),
+		errors.Is(err, errNylasOutboundAttachmentShort),
+		errors.Is(err, errNylasOutboundAttachmentLong):
+		publicCode = "attachment_content_length_mismatch"
+	}
+
+	attachmentID := "-"
+	if attachmentIndex > 0 && attachmentIndex <= len(attachments) {
+		if candidate := communicationsAttachmentID(attachments[attachmentIndex-1]); candidate != "" {
+			attachmentID = candidate
+		}
+	}
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	scope := "personal"
+	if sharedInboxID != "" {
+		scope = "shared"
+	}
+	log.Printf(
+		"communications outbound attachment failed request_id=%q method=%q path=%q company_id=%q user_id=%q scope=%q shared_inbox_id=%q attachment_id=%q attachment_index=%d attachment_count=%d failure_class=%q public_code=%q",
+		requestCorrelationID(r),
+		r.Method,
+		r.URL.Path,
+		strings.TrimSpace(companyID),
+		strings.TrimSpace(connection.UserID),
+		scope,
+		sharedInboxID,
+		attachmentID,
+		attachmentIndex,
+		len(attachments),
+		failureClass,
+		publicCode,
+	)
+	writeError(w, statusCode, publicCode)
 }
 
 func (s *Server) canSendAttachmentThroughResourceLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment, accessByResource map[string]bool) bool {

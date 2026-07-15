@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -359,6 +361,7 @@ type NylasOutboundAttachment struct {
 	ContentType string
 	ContentID   string
 	Size        int64
+	SHA256      string
 	Open        NylasOutboundAttachmentOpener
 }
 
@@ -378,7 +381,51 @@ var (
 	errNylasOutboundAttachmentShort                 = errors.New("Nylas outbound attachment stream shorter than declared size")
 	errNylasOutboundAttachmentLong                  = errors.New("Nylas outbound attachment stream longer than declared size")
 	errNylasOutboundAttachmentRead                  = errors.New("failed to read Nylas outbound attachment")
+	errNylasOutboundAttachmentChecksumMismatch      = errors.New("Nylas outbound attachment checksum mismatch")
 )
+
+type nylasOutboundAttachmentFailure struct {
+	AttachmentIndex int
+	Class           string
+	Err             error
+}
+
+func (e *nylasOutboundAttachmentFailure) Error() string {
+	return e.Err.Error()
+}
+
+func (e *nylasOutboundAttachmentFailure) Unwrap() error {
+	return e.Err
+}
+
+func wrapNylasOutboundAttachmentFailure(index int, class string, err error) error {
+	return &nylasOutboundAttachmentFailure{AttachmentIndex: index, Class: class, Err: err}
+}
+
+func nylasOutboundAttachmentFailureDetails(err error) (int, string) {
+	var failure *nylasOutboundAttachmentFailure
+	if errors.As(err, &failure) {
+		return failure.AttachmentIndex, failure.Class
+	}
+	switch {
+	case errors.Is(err, errNylasOutboundAttachmentInvalid):
+		return 0, "invalid_stream"
+	case errors.Is(err, errNylasOutboundAttachmentOpen):
+		return 0, "open_failed"
+	case errors.Is(err, errNylasOutboundAttachmentContentLengthMismatch):
+		return 0, "content_length_mismatch"
+	case errors.Is(err, errNylasOutboundAttachmentShort):
+		return 0, "short_stream"
+	case errors.Is(err, errNylasOutboundAttachmentLong):
+		return 0, "long_stream"
+	case errors.Is(err, errNylasOutboundAttachmentRead):
+		return 0, "read_failed"
+	case errors.Is(err, errNylasOutboundAttachmentChecksumMismatch):
+		return 0, "checksum_mismatch"
+	default:
+		return 0, "unknown"
+	}
+}
 
 type NylasEvent struct {
 	ID         string `json:"id"`
@@ -852,33 +899,38 @@ func (s *nylasMultipartStream) write(ctx context.Context, pipeWriter *io.PipeWri
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
-			return fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err)
+			return wrapNylasOutboundAttachmentFailure(index+1, "open_failed", fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err))
 		}
 		if content.Body == nil {
-			return fmt.Errorf("%w: attachment %d has no body", errNylasOutboundAttachmentInvalid, index+1)
+			return wrapNylasOutboundAttachmentFailure(index+1, "invalid_stream", fmt.Errorf("%w: attachment %d has no body", errNylasOutboundAttachmentInvalid, index+1))
 		}
 		if content.ContentLength != attachment.Size {
 			_ = content.Body.Close()
-			return fmt.Errorf("%w: attachment %d reported %d bytes, expected %d", errNylasOutboundAttachmentContentLengthMismatch, index+1, content.ContentLength, attachment.Size)
+			return wrapNylasOutboundAttachmentFailure(index+1, "content_length_mismatch", fmt.Errorf("%w: attachment %d reported %d bytes, expected %d", errNylasOutboundAttachmentContentLengthMismatch, index+1, content.ContentLength, attachment.Size))
 		}
 		if err := s.setActive(content.Body); err != nil {
 			return err
 		}
 		part, partErr := writer.CreatePart(nylasMultipartAttachmentHeader(index, attachment))
 		if partErr == nil {
-			partErr = copyNylasOutboundAttachmentExact(ctx, part, content.Body, attachment.Size, buffer)
+			partErr = copyNylasOutboundAttachmentExact(ctx, part, content.Body, attachment.Size, attachment.SHA256, buffer)
 		}
 		_ = s.closeActive(content.Body)
 		if partErr != nil {
+			if ctx.Err() == nil && isNylasOutboundAttachmentFailure(partErr) {
+				_, class := nylasOutboundAttachmentFailureDetails(partErr)
+				return wrapNylasOutboundAttachmentFailure(index+1, class, partErr)
+			}
 			return partErr
 		}
 	}
 	return writer.Close()
 }
 
-func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io.Reader, size int64, buffer []byte) error {
+func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io.Reader, size int64, expectedSHA256 string, buffer []byte) error {
 	remaining := size
 	emptyReads := 0
+	hasher := sha256.New()
 	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -892,6 +944,7 @@ func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io
 			return fmt.Errorf("%w: invalid reader count %d", errNylasOutboundAttachmentRead, n)
 		}
 		if n > 0 {
+			_, _ = hasher.Write(buffer[:n])
 			if err := writeNylasMultipartBytes(ctx, dst, buffer[:n]); err != nil {
 				return err
 			}
@@ -909,7 +962,7 @@ func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io
 			}
 			if errors.Is(readErr, io.EOF) {
 				if remaining == 0 {
-					return nil
+					return validateNylasOutboundAttachmentChecksum(hasher.Sum(nil), expectedSHA256)
 				}
 				return fmt.Errorf("%w: missing %d bytes", errNylasOutboundAttachmentShort, remaining)
 			}
@@ -935,7 +988,7 @@ func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io
 				return ctxErr
 			}
 			if errors.Is(readErr, io.EOF) {
-				return nil
+				return validateNylasOutboundAttachmentChecksum(hasher.Sum(nil), expectedSHA256)
 			}
 			return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, readErr)
 		}
@@ -944,6 +997,17 @@ func copyNylasOutboundAttachmentExact(ctx context.Context, dst io.Writer, src io
 			return fmt.Errorf("%w: %w", errNylasOutboundAttachmentRead, io.ErrNoProgress)
 		}
 	}
+}
+
+func validateNylasOutboundAttachmentChecksum(actual []byte, expected string) error {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if expected == "" {
+		return nil
+	}
+	if !validAttachmentSHA256Hex(expected) || hex.EncodeToString(actual) != expected {
+		return errNylasOutboundAttachmentChecksumMismatch
+	}
+	return nil
 }
 
 func writeNylasMultipartBytes(ctx context.Context, dst io.Writer, content []byte) error {
@@ -972,7 +1036,8 @@ func isNylasOutboundAttachmentFailure(err error) bool {
 		errors.Is(err, errNylasOutboundAttachmentContentLengthMismatch) ||
 		errors.Is(err, errNylasOutboundAttachmentShort) ||
 		errors.Is(err, errNylasOutboundAttachmentLong) ||
-		errors.Is(err, errNylasOutboundAttachmentRead)
+		errors.Is(err, errNylasOutboundAttachmentRead) ||
+		errors.Is(err, errNylasOutboundAttachmentChecksumMismatch)
 }
 
 func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nylasMultipartPlan, out any, idempotencyKey string) error {

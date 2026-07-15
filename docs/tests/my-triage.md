@@ -171,6 +171,8 @@ MT143 - My Triage conversation headers show only the subject. Collapsed messages
 MT144 - Personal New, Reply, Reply All, Forward, and due scheduled-draft sends all enter EMAIL90's centralized ten-second pre-dispatch gate. The elevated non-green action row appears in the existing triage notice area with a right-to-left countdown; accessible Send now dispatches only that attempt immediately through the exact personal-account path, while Undo sends no provider request and keeps the durable draft/source available. For a due scheduled draft, Undo also clears the persisted send time so the scheduler cannot retry it; expiry dispatches once when neither action has already settled the attempt.
 MT145 - My Triage uses one responsive mail-control row: a compact left-aligned search field and Search button, with the visible unread count, Unread only checkbox, and list-order control aligned to the right and wrapping cleanly at narrow widths. The list opens Newest first; the accessible icon/button exposes the current Newest/Oldest state and alternate action. Ordering is presentation-only over the current fixed page and composes with exact-account search and unread filtering without changing provider request identity, thread condensation, selection, or archive-page membership.
 MT146 - My Triage loads all provider folder pages before deriving Inbox/Starred counters, keeps new-message compose body height responsive to the remaining detail workspace, and preserves the three-slot Compose/Sent/Archive-page header in Sent with the archive control disabled. Personal Sent messages keep signature/inline Mango images through an exact user/message attachment link after draft cleanup, and typing beside any hydrated inline image does not reload or flash it.
+MT147 - A personal signature's display derivative may hydrate Settings/compose, but send authorizes and validates only the exact account's original bucket/key/size/SHA record, rewrites it to CID, and promotes its attachment metadata/link for Sent rendering. Missing/corrupt original state fails instead of sending display bytes or a temporary object URL.
+MT148 - Personal timer-expiry and Send now dispatches use the same exact-account request once and surface the same backend failure. Any failed signature-image send leaves the current compose/reply and durable draft intact with an error, performs no success notice or draft deletion, and can be retried after the classified backend/storage issue is corrected.
 
 ## Scenarios
 
@@ -769,3 +771,20 @@ Given:
 Expected:
 - Both provider-backed counters remain visible, the compose body consumes the available height without clipping its controls, and typing never blanks or reloads the image.
 - Sent preserves the ordinary three-button layout, disables Archive page/go-next, and renders the sent CID image after the source draft has been deleted.
+
+### Scenario MT-S20: Personal Signature Send Integrity And Failure Recovery
+
+Business logic covered:
+- MT139
+- MT144
+- MT146
+- MT147
+- MT148
+
+Given:
+- The active personal account has a saved signature image with separate display and original bytes.
+- The user sends once after the delay and once with Send now, then the original open/stream validation fails.
+
+Expected:
+- Each attempt dispatches once through the same exact-account backend path; success sends the validated original as CID and Sent resolves it through the promoted user/message link.
+- Failure identifies the safe backend class, does not report success, and keeps the current compose plus durable draft and Mango reference available for retry.

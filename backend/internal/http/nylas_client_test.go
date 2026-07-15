@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -806,12 +808,15 @@ func TestNylasRESTClientMultipartSupportsZeroSizeAttachment(t *testing.T) {
 
 func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources(t *testing.T) {
 	readFailure := errors.New("source read failure")
+	wrongDigest := sha256.Sum256([]byte("different bytes"))
 	testCases := []struct {
 		name           string
 		size           int64
 		reported       int64
+		expectedSHA256 string
 		newReader      func() io.Reader
 		want           error
+		wantClass      string
 		wantUnderlying error
 		wantZeroReads  bool
 	}{
@@ -821,6 +826,7 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 			reported:      4,
 			newReader:     func() io.Reader { return strings.NewReader("abc") },
 			want:          errNylasOutboundAttachmentContentLengthMismatch,
+			wantClass:     "content_length_mismatch",
 			wantZeroReads: true,
 		},
 		{
@@ -829,6 +835,7 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 			reported:  4,
 			newReader: func() io.Reader { return strings.NewReader("abc") },
 			want:      errNylasOutboundAttachmentShort,
+			wantClass: "short_stream",
 		},
 		{
 			name:      "long source",
@@ -836,6 +843,7 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 			reported:  3,
 			newReader: func() io.Reader { return strings.NewReader("abcd") },
 			want:      errNylasOutboundAttachmentLong,
+			wantClass: "long_stream",
 		},
 		{
 			name:           "source read failure",
@@ -843,7 +851,17 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 			reported:       4,
 			newReader:      func() io.Reader { return &nylasFailingReader{content: []byte("ab"), err: readFailure} },
 			want:           errNylasOutboundAttachmentRead,
+			wantClass:      "read_failed",
 			wantUnderlying: readFailure,
+		},
+		{
+			name:           "checksum mismatch",
+			size:           3,
+			reported:       3,
+			expectedSHA256: hex.EncodeToString(wrongDigest[:]),
+			newReader:      func() io.Reader { return strings.NewReader("abc") },
+			want:           errNylasOutboundAttachmentChecksumMismatch,
+			wantClass:      "checksum_mismatch",
 		},
 	}
 
@@ -867,6 +885,7 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 					Filename:    "invalid.bin",
 					ContentType: "application/octet-stream",
 					Size:        testCase.size,
+					SHA256:      testCase.expectedSHA256,
 					Open: func(context.Context) (NylasOutboundAttachmentContent, error) {
 						return NylasOutboundAttachmentContent{ContentLength: testCase.reported, Body: source}, nil
 					},
@@ -874,6 +893,10 @@ func TestNylasRESTClientMultipartRejectsInvalidAttachmentLengthsAndClosesSources
 			})
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("error = %v, want errors.Is(%v)", err, testCase.want)
+			}
+			attachmentIndex, failureClass := nylasOutboundAttachmentFailureDetails(err)
+			if attachmentIndex != 1 || failureClass != testCase.wantClass {
+				t.Fatalf("failure details = index %d class %q, want 1 %q", attachmentIndex, failureClass, testCase.wantClass)
 			}
 			if testCase.wantUnderlying != nil && !errors.Is(err, testCase.wantUnderlying) {
 				t.Fatalf("error = %v, want wrapped source error %v", err, testCase.wantUnderlying)
@@ -1040,6 +1063,7 @@ func TestNylasRESTClientMultipartProviderEarlyFailureClosesActiveSource(t *testi
 }
 
 func TestNylasRESTClientMultipartCleanupCloseErrorDoesNotOverrideAcceptedMessage(t *testing.T) {
+	imageDigest := sha256.Sum256([]byte("image"))
 	source := &nylasCloseErrorReadCloser{
 		Reader:   strings.NewReader("image"),
 		closeErr: context.Canceled,
@@ -1060,7 +1084,7 @@ func TestNylasRESTClientMultipartCleanupCloseErrorDoesNotOverrideAcceptedMessage
 		Body:        "<p>Hello<img src=\"cid:signature-image\"></p>",
 		Attachments: []NylasAttachment{{Filename: "image.png", ContentType: "image/png", ContentID: "signature-image", IsInline: true, Size: 5}},
 		OutboundAttachments: []NylasOutboundAttachment{{
-			Filename: "image.png", ContentType: "image/png", ContentID: "signature-image", Size: 5,
+			Filename: "image.png", ContentType: "image/png", ContentID: "signature-image", Size: 5, SHA256: hex.EncodeToString(imageDigest[:]),
 			Open: func(context.Context) (NylasOutboundAttachmentContent, error) {
 				return NylasOutboundAttachmentContent{ContentLength: 5, Body: source}, nil
 			},
