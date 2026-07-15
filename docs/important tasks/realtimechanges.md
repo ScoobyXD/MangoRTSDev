@@ -101,6 +101,18 @@ The product promise is:
 12. A visible global connection indicator and mutation gate protect the user when Mango cannot prove that its live connection is healthy.
 13. Unacknowledged local editor work survives reconnect and manual browser refresh.
 14. No attachment file bytes, base64 bodies, presigned URLs, provider credentials, or secrets travel through realtime events.
+15. Every healthy browser currently viewing the same exact editor document sees other users' committed edits appear live without refreshing, reopening, or navigating away and back.
+16. Editor realtime fan-out is bounded by exact active document subscriptions, not by total company membership, total registered users, or the total number of companies in Mango.
+
+### Explicit live visibility and bounded fan-out invariant
+
+An editor subscription is a persistent live subscription for as long as that exact editor document is mounted and authorized. When any collaborator commits a micro-batched operation, every healthy browser connection subscribed to that exact editor document applies the committed change promptly as a remote transaction. This includes different users and multiple browsers or tabs belonging to the same user. Remote collaboration must feel live; refresh, reopen, navigation, polling, or manual reconciliation is not part of the normal viewing experience.
+
+The editor scope must include the company boundary and one exact collaborative document identity. Opening one Logic Gate body, Node body, Project text box, or individual Node text box subscribes only to that document. Viewing another resource, another text box in the same Node, another editor in the same company, or any resource in another company does not subscribe that browser to this document's changes.
+
+This is the required scale boundary. Mango may eventually serve tens of thousands of companies with hundreds or more employees each, but those stored companies and users are not automatically realtime recipients. For an editor event, browser delivery cardinality is proportional to the healthy active browser connections currently subscribed to that exact document. A document with nine active viewer connections has nine browser delivery targets; thousands or millions of unrelated users add zero browser deliveries. No company-wide editor stream, wildcard editor subscription, user-directory broadcast, or fan-out to inactive employees is permitted.
+
+The frontend shares one network subscription when multiple mounted local consumers need the same exact scope and fans out locally to those consumers. It subscribes when the exact editor becomes active, retains the subscription while required, and unsubscribes when the last local consumer unmounts, access is revoked, or the document becomes terminal. The backend registry and publication boundary deliver only to matching authorized connections. Shared-backplane transport across backend instances must not widen the browser audience.
 
 ## Current Foundation And Current Gap
 
@@ -838,6 +850,8 @@ Every phase must leave one coherent direction. Do not add compatibility code tha
 - Micro-batching preserves typing/format ordering and flush boundaries.
 - Separate text boxes in one Node/Project do not contend.
 - Same text box opened through different surfaces uses one editor document identity.
+- Every healthy exact subscriber renders another user's committed operation live without refresh, reopen, navigation, or polling.
+- Large numbers of unrelated companies, employees, connections, and editor scopes do not increase the browser delivery count for one exact-document event.
 
 ### Rich editor browser-level behavior
 
@@ -905,6 +919,10 @@ An image paste uploads through the attachment system, then commits an image-refe
 ### Scenario 12: Existing live families stay on one spine
 
 Notifications/Updates, Node chat, mounted Kanban, exact active mailbox, and editor collaboration all use the shared backplane and local registry. Source inventory tests reject any feature-owned second socket/backplane/heartbeat manager.
+
+### Scenario 13: Large platform, bounded exact-document fan-out
+
+Given a platform with tens of thousands of companies and large employee directories, only a small number of healthy browser connections are actively viewing one exact editor document. A committed operation is delivered live to every one of those exact subscribers and to no other connection. Adding unrelated companies, employees, open connections, or subscriptions does not increase that event's browser recipients. Closing the last local view removes the exact network subscription, and permission revocation stops later delivery.
 
 ## Explicitly Open Decisions
 
