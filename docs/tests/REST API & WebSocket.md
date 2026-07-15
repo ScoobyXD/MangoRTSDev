@@ -518,3 +518,24 @@ Expected:
 - The backend sends a protocol-level ping every 25 seconds and the browser answers below JavaScript.
 - The quiet connection stays open without ticket, token, notification-summary, Logic Gate work, or Node-view HTTP requests.
 - A genuine transport failure still causes one bounded reconnect followed by the existing scoped canonical recovery.
+
+#### Why the heartbeat is 25 seconds
+
+The 25-second cadence is intentionally conventional rather than Mango-specific. Common realtime stacks use keepalive defaults in the same range: Microsoft SignalR uses 15 seconds, Socket.IO uses 25 seconds, and Cloudflare Agents uses 30 seconds. These are reference defaults, not a statistically rigorous industry-wide mean, but their median is 25 seconds and they establish a normal operating range of roughly 15–30 seconds.
+
+Mango's deployed Application Load Balancer uses the AWS default 60-second idle timeout. A 25-second server heartbeat leaves 35 seconds of margin before that cutoff and remains below the common rule that the heartbeat interval should be no more than half the enclosing idle timeout. NGINX likewise documents a 60-second default WebSocket proxy timeout and recommends periodic WebSocket ping frames as the alternative to increasing that timeout.
+
+Transport and traffic requirements:
+- The heartbeat is an empty RFC 6455 WebSocket Ping control frame (opcode `0x9`), not an application message.
+- The browser networking stack automatically answers with Pong; no React effect, JavaScript interval, page reload, Fetch/XHR request, access-token refresh, or realtime-ticket request is involved.
+- Ping/Pong traffic must not invoke notification summary, Logic Gate work, Node view, mailbox, or other canonical API reads.
+- Only an actual socket close or transport failure enters the bounded reconnect path, obtains a new ticket, and performs the existing one-time scoped canonical recovery.
+- If an infrastructure idle timeout changes, keep the heartbeat comfortably below the smallest timeout on the path and retain an automated assertion that the production heartbeat is below 60 seconds.
+
+Reference defaults:
+- [AWS Application Load Balancer attributes](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)
+- [Microsoft SignalR keepalive interval](https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.signalr.huboptions.keepaliveinterval)
+- [Socket.IO ping interval](https://socket.io/docs/v4/server-options/#pinginterval)
+- [Cloudflare Agents keepalive interval](https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/)
+- [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
+- [RFC 6455 Ping and Pong](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2)
