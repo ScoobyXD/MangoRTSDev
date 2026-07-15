@@ -20,6 +20,10 @@ func memoryNodeTextBlockInformation(t *testing.T, document string) string {
 	return editorTextBlockContentPrefix + string(payload)
 }
 
+func memoryRevision(value int64) *int64 {
+	return &value
+}
+
 func TestMemoryRepoUpsertAuthUserPreservesDisplayNameOnBlankOrEmailClaims(t *testing.T) {
 	repo := NewMemoryRepo()
 	const subject = "display-name-preserve-subject"
@@ -111,6 +115,7 @@ func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersion
 		InformationID:    informationID,
 		ActorUserID:      actorID,
 		ActorDisplayName: "Ada Lovelace",
+		ExpectedRevision: memoryRevision(0),
 	}); err != nil {
 		t.Fatalf("initial UpsertNodeProjectionWithActor failed: %v", err)
 	}
@@ -122,6 +127,7 @@ func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersion
 		InformationID:    informationID,
 		ActorUserID:      actorID,
 		ActorDisplayName: "Ada Lovelace",
+		ExpectedRevision: memoryRevision(1),
 	}); err != nil {
 		t.Fatalf("second UpsertNodeProjectionWithActor failed: %v", err)
 	}
@@ -152,12 +158,13 @@ func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersion
 	}
 
 	if _, err := repo.UpsertNodeProjectionWithActor(NodeInformationInput{
-		CompanyID:     companyID,
-		NodeID:        node.NodeID,
-		Type:          "Text box",
-		Information:   memoryNodeTextBlockInformation(t, "gamma"),
-		InformationID: informationID,
-		ActorUserID:   actorID,
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "gamma"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ExpectedRevision: memoryRevision(2),
 	}); err != nil {
 		t.Fatalf("third UpsertNodeProjectionWithActor failed: %v", err)
 	}
@@ -579,7 +586,9 @@ func TestMemoryRepo_DeleteNodeProjection_ClearsLatestDocumentWithoutDeletingHist
 	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", "payload", stableProjectionID); err != nil {
 		t.Fatalf("AddNodeInformation failed: %v", err)
 	}
-	if err := repo.DeleteNodeProjection(companyID, node.NodeID, stableProjectionID); err != nil {
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: companyID, NodeID: node.NodeID, InformationID: stableProjectionID, ExpectedRevision: memoryRevision(1),
+	}); err != nil {
 		t.Fatalf("DeleteNodeProjection failed: %v", err)
 	}
 
@@ -730,6 +739,7 @@ func TestMemoryRepo_LogicGateProjectionAutosaveDoesNotAppendInformationAndSaveVe
 		InformationID:    informationID,
 		ActorUserID:      actorID,
 		ActorDisplayName: "Ada Lovelace",
+		ExpectedRevision: memoryRevision(0),
 	}); err != nil {
 		t.Fatalf("initial UpsertLogicGateProjection failed: %v", err)
 	}
@@ -741,6 +751,7 @@ func TestMemoryRepo_LogicGateProjectionAutosaveDoesNotAppendInformationAndSaveVe
 		InformationID:    informationID,
 		ActorUserID:      actorID,
 		ActorDisplayName: "Ada Lovelace",
+		ExpectedRevision: memoryRevision(1),
 	}); err != nil {
 		t.Fatalf("second UpsertLogicGateProjection failed: %v", err)
 	}
@@ -768,12 +779,13 @@ func TestMemoryRepo_LogicGateProjectionAutosaveDoesNotAppendInformationAndSaveVe
 	}
 
 	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
-		CompanyID:     companyID,
-		LogicGateID:   logicGate.LogicGateID,
-		Type:          "Text box",
-		Information:   "<p>gamma</p>",
-		InformationID: informationID,
-		ActorUserID:   actorID,
+		CompanyID:        companyID,
+		LogicGateID:      logicGate.LogicGateID,
+		Type:             "Text box",
+		Information:      "<p>gamma</p>",
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ExpectedRevision: memoryRevision(2),
 	}); err != nil {
 		t.Fatalf("third UpsertLogicGateProjection failed: %v", err)
 	}
@@ -863,7 +875,12 @@ func TestMemoryRepo_DeleteLogicGateProjection_ClearsLatestDocumentWithoutDeletin
 	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "payload", stableProjectionID); err != nil {
 		t.Fatalf("AddLogicGateInformation failed: %v", err)
 	}
-	if err := repo.DeleteLogicGateProjection(companyID, logicGate.LogicGateID, stableProjectionID); err != nil {
+	if err := repo.DeleteLogicGateProjection(LogicGateProjectionDeleteInput{
+		CompanyID:        companyID,
+		LogicGateID:      logicGate.LogicGateID,
+		InformationID:    stableProjectionID,
+		ExpectedRevision: memoryRevision(1),
+	}); err != nil {
 		t.Fatalf("DeleteLogicGateProjection failed: %v", err)
 	}
 

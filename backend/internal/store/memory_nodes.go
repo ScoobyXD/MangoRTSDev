@@ -549,10 +549,15 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	existing, ok := r.nodeText[k][keyValue]
 	created := item.CreatedTimestamp
 	previous := (*domain.NodeProjection)(nil)
+	revision := int64(1)
 	if ok {
 		created = existing.CreatedTimestamp
 		existingCopy := existing
 		previous = &existingCopy
+		if existingCopy.Revision < 1 {
+			existingCopy.Revision = 1
+		}
+		revision = existingCopy.Revision + 1
 	}
 	projection := domain.NodeProjection{
 		CompanyID:        companyID,
@@ -561,6 +566,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		Information:      input.Information,
 		InformationID:    keyValue,
 		CreatedTimestamp: created,
+		Revision:         revision,
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
 	r.nodeText[k][keyValue] = projection
@@ -588,6 +594,9 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 	}
 	items := make([]domain.NodeProjection, 0)
 	for _, item := range r.nodeText[key(companyID, nodeID)] {
+		if isEditorTextBoxType(item.Type) && item.IsDeleted {
+			continue
+		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -624,7 +633,20 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		return ErrProtectedEmailCollaborationResource
 	}
 	k := key(companyID, nodeID)
-	if existing, ok := r.nodeText[k][informationID]; ok && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
+	existing, projectionExists := r.nodeText[k][informationID]
+	if projectionExists && isEditorTextBoxType(existing.Type) {
+		if existing.Revision < 1 {
+			existing.Revision = 1
+		}
+		if input.ExpectedRevision == nil {
+			return ErrProjectionRevisionRequired
+		}
+		if existing.IsDeleted || *input.ExpectedRevision != existing.Revision {
+			current := existing
+			return &ProjectionRevisionConflictError{NodeCurrent: &current}
+		}
+	}
+	if projectionExists && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
 		existingCopy := existing
 		r.recordNodeContentChangesLocked(buildNodeContentChanges(
 			companyID,
@@ -637,8 +659,15 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 			time.Now().UTC(),
 		))
 	}
-	if _, ok := r.nodeText[k][informationID]; ok {
-		delete(r.nodeText[k], informationID)
+	if projectionExists {
+		if isEditorTextBoxType(existing.Type) {
+			existing.IsDeleted = true
+			existing.Revision++
+			existing.UpdatedTimestamp = time.Now().UTC()
+			r.nodeText[k][informationID] = existing
+		} else {
+			delete(r.nodeText[k], informationID)
+		}
 		r.bumpNodeViewVersionLocked(companyID, nodeID)
 	}
 	return nil

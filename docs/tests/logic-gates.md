@@ -7,7 +7,7 @@ Detailed Logic Gate Kanban board behavior, including subgrouping, request card f
 Coverage Status:
 - Shared `@`/`!` people-picker palette key, fallback, and contrast behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the sole rich-editor host, shared formatting controller, highlight controls/sanitization wiring, selection-preserving hydration, hidden-document toolbar state, and target-safe persistence mounting; `tests/frontend/modules/editor/editorDocumentSaveQueue.test.ts` covers per-target latest-save retention and deterministic serial draining; shared editor attachment tests cover durable rich-editor image attachment references; Logic Gate-specific projection/persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/editor_projection_revisions_test.go` and `backend/internal/http/projection_revision_http_test.go` cover monotonic Logic Gate revisions, stale update/delete rejection, same-base concurrency, authorized canonical 409 data, and Node/Logic Gate isolation; `tests/frontend/modules/editor/editorProjectionSync.test.ts`, `editorDocumentSaveQueue.test.ts`, and `nodeTextBlockProjectionSaves.test.ts` cover durable user/company scopes, refresh restoration, bounded retry, multi-tab conflict blocking, initial edit gating, ACK-only saved state, and failed-save retention; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers shared rich-editor behavior; shared editor attachment tests cover durable rich-editor image attachment references)
 
 ## Business Logic
 
@@ -56,6 +56,11 @@ LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount th
 LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.
 LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
 LG45 - A Node popup opened from Logic Gate Arena owns its transient half/fullscreen mode locally. Realtime acceptance and canonical summary/work/view projection reconciliation may update Node/board data and titles, but reopening/reconciling the same Node must preserve fullscreen until the user exits fullscreen or closes it; opening a different Node starts from the normal saved half-view ratio.
+LG46 - Every Logic Gate `Text box` projection has a positive, monotonically increasing server revision. A never-created projection is written with `expected_revision: 0`; every update and delete carries the exact loaded revision. Delete advances a hidden revision tombstone, and explicit revision-zero recreation continues from that sequence.
+LG47 - Logic Gate revision comparison and mutation are one transaction: exactly one same-base concurrent write wins. A stale authorized update/delete returns `409 projection_revision_conflict` with canonical current projection/revision data; authorization occurs before disclosure, and the client never automatically rebases a stale full-document overwrite.
+LG48 - Logic Gate editor base revision and durable unsynced draft state are scoped by authenticated user, company, Logic Gate, and information ID. Base/saved state advances only after backend ACK; persistence rejection stays failed/dirty in the serial queue, refresh restores only the exact matching scope, and automatic saved-version creation remains disabled.
+LG49 - A dirty Logic Gate editor with a confirmed failed write, revision conflict, or terminal authentication failure displays a large non-dismissible sync-loss modal and blocks editing. Transient delivery failures use bounded retry/backoff; resolution explicitly loads the server version or rechecks the latest revision before retrying the retained local draft, without auto-refresh or auto-logout.
+LG50 - A Logic Gate document stays non-editable/loading until current identity, edit permission, and the initial projection/revision are loaded. Late hydration must not replace a locally dirty/restored draft.
 
 ## Scenarios
 
@@ -163,6 +168,11 @@ Business logic covered:
 - LG21
 - LG22
 - LG23
+- LG46
+- LG47
+- LG48
+- LG49
+- LG50
 - LG39
 
 Given:
@@ -183,6 +193,10 @@ Expected:
 - When the in-progress save finishes, the editor marks the projection `has not changed` only if the completed save version is still the latest local version.
 - If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
 - Pending latest content for each edited document target remains queued; switching targets cannot replace another target's pending save, and the queue persists targets serially in first-target order.
+- Keep the editor non-editable while identity, permissions, and the initial projection revision load; a late response cannot replace a restored or locally dirty document.
+- Open one Logic Gate document in two tabs at the same base revision and save different text concurrently; exactly one succeeds, while the stale tab retains its local draft behind the blocking modal and cannot overwrite without an explicit latest-revision recheck.
+- Fail a dirty write and verify bounded transient retry, failed-queue retention, refresh restoration for the same user/company only, terminal-auth blocking, and saved/`has not changed` state only after backend ACK.
+- A stale update or delete receives canonical current data only after edit authorization; a current delete hides the projection and preserves monotonic revision history for later explicit recreation.
 - Opening Metadata, History, or Save Settings hides the document and disables its formatting commands without disabling the navigation tabs needed to return.
 
 ### Scenario LG-S6: Logic Gate GVIC Apply To Assigned Nodes Action

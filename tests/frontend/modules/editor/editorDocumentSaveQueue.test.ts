@@ -97,3 +97,30 @@ test("replacing a target's queued request keeps its original cross-target positi
     { target: "B", text: "B1" },
   ]);
 });
+
+test("persistence rejection stays blocked with the exact latest request until retry succeeds", async () => {
+  const attempted: SaveRequest[] = [];
+  let shouldFail = true;
+  const queue = createEditorDocumentSaveQueue<SaveRequest>();
+  queue.configure({
+    targetKey: (request) => request.target,
+    sameRequest: (left, right) => Boolean(left && right && left.target === right.target && left.text === right.text),
+    persist: async (request) => {
+      attempted.push(request);
+      if (shouldFail) throw new Error("delivery failed");
+    },
+  });
+
+  queue.enqueue({ target: "A", text: "draft-1" });
+  await assert.rejects(() => queue.waitForIdle(), /delivery failed/);
+  assert.equal(queue.getState().inFlight, false);
+  assert.deepEqual(queue.getState().failedRequest, { target: "A", text: "draft-1" });
+
+  queue.enqueue({ target: "A", text: "latest-draft" });
+  assert.deepEqual(queue.getState().failedRequest, { target: "A", text: "latest-draft" });
+  shouldFail = false;
+  queue.retryFailed();
+  await queue.waitForIdle();
+  assert.deepEqual(attempted, [{ target: "A", text: "draft-1" }, { target: "A", text: "latest-draft" }]);
+  assert.equal(queue.getState().failedRequest, null);
+});

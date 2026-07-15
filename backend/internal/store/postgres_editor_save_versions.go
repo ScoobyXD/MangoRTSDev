@@ -63,6 +63,9 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 		return domain.NodeProjection{}, err
 	}
 
+	if isEditorTextBoxType(infoType) {
+		return upsertPostgresNodeTextProjection(ctx, tx, input, companyID, nodeID, informationID, infoType)
+	}
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {
 		return domain.NodeProjection{}, err
@@ -77,8 +80,9 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 		 do update set
 		   type=excluded.type,
 		   information=excluded.information,
-		   updated_timestamp=now()
-		 returning company_id::text, node_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`,
+		   updated_timestamp=now(),
+		   revision=node_projection_table.revision+1
+		 returning company_id::text, node_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
 		companyID, nodeID, informationID, infoType, input.Information,
 	).Scan(
 		&projection.CompanyID,
@@ -86,6 +90,7 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 		&projection.InformationID,
 		&projection.Type,
 		&projection.Information,
+		&projection.Revision,
 		&projection.CreatedTimestamp,
 		&projection.UpdatedTimestamp,
 	); err != nil {
@@ -142,6 +147,9 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 	if !exists {
 		return domain.LogicGateProjection{}, ErrNotFound
 	}
+	if isEditorTextBoxType(infoType) {
+		return upsertPostgresLogicGateTextProjection(ctx, tx, input, companyID, logicGateID, informationID)
+	}
 
 	query := `insert into logic_gate_projection_table
 		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
@@ -150,8 +158,9 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 		 do update set
 		   type=excluded.type,
 		   information=excluded.information,
-		   updated_timestamp=now()
-		 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`
+		   updated_timestamp=now(),
+		   revision=logic_gate_projection_table.revision+1
+		 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`
 	if isEditorTextBoxType(infoType) {
 		query = `insert into logic_gate_projection_table
 		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
@@ -170,6 +179,7 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 		&projection.InformationID,
 		&projection.Type,
 		&projection.Information,
+		&projection.Revision,
 		&projection.CreatedTimestamp,
 		&projection.UpdatedTimestamp,
 	); err != nil {
@@ -260,12 +270,12 @@ func (r *PostgresRepo) createEditorSaveVersion(input EditorSaveVersionInput, res
 func selectCurrentEditorTextProjectionsTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) ([]domain.EditorSaveVersionItem, error) {
 	query := `select information_id::text, type::text, information, created_timestamp, updated_timestamp
 		  from node_projection_table
-		 where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type
+		 where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type and not is_deleted
 		 order by created_timestamp asc, information_id asc`
 	if resourceType == EntityTypeLogicGate {
 		query = `select information_id::text, type::text, information, created_timestamp, updated_timestamp
 			  from logic_gate_projection_table
-			 where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type
+			 where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type and not is_deleted
 			 order by updated_timestamp desc, created_timestamp desc, information_id desc`
 	}
 	rows, err := tx.QueryContext(ctx, query, companyID, resourceID)
@@ -429,7 +439,7 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 
 	if resourceType == EntityTypeNode {
 		if _, err := tx.ExecContext(ctx,
-			`delete from node_projection_table
+			`update node_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=now()
 			  where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type`,
 			companyID, resourceID,
 		); err != nil {
@@ -437,7 +447,7 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx,
-			`delete from logic_gate_projection_table
+			`update logic_gate_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=now()
 			  where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type`,
 			companyID, resourceID,
 		); err != nil {
@@ -457,22 +467,26 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 			var projection domain.NodeProjection
 			if err := tx.QueryRowContext(ctx,
 				`insert into node_projection_table
-				 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-				 returning company_id::text, node_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`,
+				 (company_id, node_id, information_id, type, information, revision, created_timestamp, updated_timestamp)
+				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, 1, now(), now())
+				 on conflict (company_id, node_id, information_id) do update set
+				 type=excluded.type, information=excluded.information, is_deleted=false, revision=node_projection_table.revision+1, updated_timestamp=now()
+				 returning company_id::text, node_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
 				companyID, resourceID, sourceID, item.Type, item.Information,
-			).Scan(&projection.CompanyID, &projection.NodeID, &projection.InformationID, &projection.Type, &projection.Information, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
+			).Scan(&projection.CompanyID, &projection.NodeID, &projection.InformationID, &projection.Type, &projection.Information, &projection.Revision, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
 				return domain.EditorSaveVersion{}, err
 			}
 		} else {
 			var projection domain.LogicGateProjection
 			if err := tx.QueryRowContext(ctx,
 				`insert into logic_gate_projection_table
-				 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-				 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`,
+				 (company_id, logic_gate_id, information_id, type, information, revision, created_timestamp, updated_timestamp)
+				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, 1, now(), now())
+				 on conflict (company_id, logic_gate_id, type) where type='Text box'::information_type do update set
+				 information_id=excluded.information_id, information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=now()
+				 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
 				companyID, resourceID, sourceID, item.Type, item.Information,
-			).Scan(&projection.CompanyID, &projection.LogicGateID, &projection.InformationID, &projection.Type, &projection.Information, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
+			).Scan(&projection.CompanyID, &projection.LogicGateID, &projection.InformationID, &projection.Type, &projection.Information, &projection.Revision, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
 				return domain.EditorSaveVersion{}, err
 			}
 		}

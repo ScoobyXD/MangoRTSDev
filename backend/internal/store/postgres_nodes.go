@@ -1056,6 +1056,8 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		 do update set
 		   type=excluded.type,
 		   information=excluded.information,
+		   is_deleted=false,
+		   revision=node_projection_table.revision+1,
 		   updated_timestamp=now()
 		 returning company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.NodeID, keyValue, item.Type, input.Information,
@@ -1099,7 +1101,7 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 func postgresNodeProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID string) (domain.NodeProjection, bool, error) {
 	var item domain.NodeProjection
 	err := tx.QueryRowContext(ctx,
-		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		`select company_id, node_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
 		   from node_projection_table
 		  where company_id=$1 and node_id=$2 and information_id=$3`,
 		companyID, nodeID, informationID,
@@ -1109,6 +1111,8 @@ func postgresNodeProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		&item.InformationID,
 		&item.Type,
 		&item.Information,
+		&item.IsDeleted,
+		&item.Revision,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
@@ -1174,9 +1178,10 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		`select company_id, node_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
 		   from node_projection_table
 		  where company_id=$1 and node_id=$2
+		    and not is_deleted
 		  order by created_timestamp asc, information_id asc`,
 		companyID, nodeID,
 	)
@@ -1194,6 +1199,8 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 			&item.InformationID,
 			&item.Type,
 			&item.Information,
+			&item.IsDeleted,
+			&item.Revision,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
 		); err != nil {
@@ -1248,6 +1255,9 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {
 		return err
+	}
+	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
+		return deletePostgresNodeTextProjection(ctx, tx, input, previous, previousFound)
 	}
 	if previousFound && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
 		previousCopy := previous

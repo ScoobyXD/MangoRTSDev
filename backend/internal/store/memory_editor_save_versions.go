@@ -31,10 +31,30 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 	now := time.Now().UTC()
 	created := now
 	previous := (*domain.NodeProjection)(nil)
+	revision := int64(1)
 	if existing, ok := r.nodeText[k][informationID]; ok {
 		created = existing.CreatedTimestamp
 		existingCopy := existing
+		if existingCopy.Revision < 1 {
+			existingCopy.Revision = 1
+		}
 		previous = &existingCopy
+		revision = existingCopy.Revision + 1
+	}
+	if isEditorTextBoxType(infoType) {
+		if input.ExpectedRevision == nil {
+			return domain.NodeProjection{}, ErrProjectionRevisionRequired
+		}
+		if *input.ExpectedRevision < 0 {
+			return domain.NodeProjection{}, ErrInvalid
+		}
+		if previous == nil && *input.ExpectedRevision != 0 {
+			return domain.NodeProjection{}, &ProjectionRevisionConflictError{}
+		}
+		if previous != nil && !(previous.IsDeleted && *input.ExpectedRevision == 0) && *input.ExpectedRevision != previous.Revision {
+			current := *previous
+			return domain.NodeProjection{}, &ProjectionRevisionConflictError{NodeCurrent: &current}
+		}
 	}
 	projection := domain.NodeProjection{
 		CompanyID:        companyID,
@@ -42,6 +62,7 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 		Type:             infoType,
 		Information:      input.Information,
 		InformationID:    informationID,
+		Revision:         revision,
 		CreatedTimestamp: created,
 		UpdatedTimestamp: now,
 	}
@@ -80,20 +101,47 @@ func (r *MemoryRepo) UpsertLogicGateProjection(input LogicGateProjectionInput) (
 		r.logicGateText[k] = map[string]domain.LogicGateProjection{}
 	}
 	projectionID := informationID
+	previous := (*domain.LogicGateProjection)(nil)
 	if isEditorTextBoxType(infoType) {
 		if existingTextKey := newestLogicGateTextProjectionKey(r.logicGateText[k]); existingTextKey != "" {
 			projectionID = existingTextKey
-			for keyValue, projection := range r.logicGateText[k] {
-				if keyValue != projectionID && isEditorTextBoxType(projection.Type) {
-					delete(r.logicGateText[k], keyValue)
-				}
+			existing := r.logicGateText[k][projectionID]
+			if existing.Revision < 1 {
+				existing.Revision = 1
 			}
+			existingCopy := existing
+			previous = &existingCopy
 		}
 	}
 	now := time.Now().UTC()
 	created := now
-	if existing, ok := r.logicGateText[k][projectionID]; ok {
-		created = existing.CreatedTimestamp
+	revision := int64(1)
+	if previous != nil {
+		created = previous.CreatedTimestamp
+		revision = previous.Revision + 1
+	}
+	if isEditorTextBoxType(infoType) {
+		if input.ExpectedRevision == nil {
+			return domain.LogicGateProjection{}, ErrProjectionRevisionRequired
+		}
+		if *input.ExpectedRevision < 0 {
+			return domain.LogicGateProjection{}, ErrInvalid
+		}
+		if previous == nil && *input.ExpectedRevision != 0 {
+			return domain.LogicGateProjection{}, &ProjectionRevisionConflictError{}
+		}
+		if previous != nil && !(previous.IsDeleted && *input.ExpectedRevision == 0) && *input.ExpectedRevision != previous.Revision {
+			current := *previous
+			return domain.LogicGateProjection{}, &ProjectionRevisionConflictError{LogicGateCurrent: &current}
+		}
+		if previous != nil && previous.IsDeleted && *input.ExpectedRevision == 0 {
+			projectionID = informationID
+		}
+		for keyValue, projection := range r.logicGateText[k] {
+			if keyValue != projectionID && isEditorTextBoxType(projection.Type) {
+				delete(r.logicGateText[k], keyValue)
+			}
+		}
 	}
 	projection := domain.LogicGateProjection{
 		CompanyID:        companyID,
@@ -101,6 +149,7 @@ func (r *MemoryRepo) UpsertLogicGateProjection(input LogicGateProjectionInput) (
 		Type:             infoType,
 		Information:      input.Information,
 		InformationID:    projectionID,
+		Revision:         revision,
 		CreatedTimestamp: created,
 		UpdatedTimestamp: now,
 	}
@@ -245,6 +294,10 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 	now := time.Now().UTC()
 	for _, existing := range beforeText {
 		if isEditorTextBoxType(existing.Type) {
+			existing.IsDeleted = true
+			existing.Revision++
+			existing.UpdatedTimestamp = now
+			r.nodeText[k][existing.InformationID] = existing
 			continue
 		}
 		r.nodeText[k][existing.InformationID] = existing
@@ -254,12 +307,20 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 		if sourceID == "" {
 			sourceID = strings.TrimSpace(item.InformationID)
 		}
+		revision := int64(1)
+		if existing, exists := beforeText[sourceID]; exists {
+			if existing.Revision < 1 {
+				existing.Revision = 1
+			}
+			revision = existing.Revision + 1
+		}
 		projection := domain.NodeProjection{
 			CompanyID:        companyID,
 			NodeID:           nodeID,
 			Type:             item.Type,
 			Information:      item.Information,
 			InformationID:    sourceID,
+			Revision:         revision,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
@@ -287,6 +348,10 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 	now := time.Now().UTC()
 	for _, existing := range beforeText {
 		if isEditorTextBoxType(existing.Type) {
+			existing.IsDeleted = true
+			existing.Revision++
+			existing.UpdatedTimestamp = now
+			r.logicGateText[k][existing.InformationID] = existing
 			continue
 		}
 		r.logicGateText[k][existing.InformationID] = existing
@@ -296,12 +361,20 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 		if sourceID == "" {
 			sourceID = strings.TrimSpace(item.InformationID)
 		}
+		revision := int64(1)
+		if existing, exists := beforeText[sourceID]; exists {
+			if existing.Revision < 1 {
+				existing.Revision = 1
+			}
+			revision = existing.Revision + 1
+		}
 		projection := domain.LogicGateProjection{
 			CompanyID:        companyID,
 			LogicGateID:      logicGateID,
 			Type:             item.Type,
 			Information:      item.Information,
 			InformationID:    sourceID,
+			Revision:         revision,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
@@ -313,7 +386,7 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 func memoryEditorTextNodeProjections(items map[string]domain.NodeProjection) []domain.NodeProjection {
 	out := make([]domain.NodeProjection, 0)
 	for _, item := range items {
-		if isEditorTextBoxType(item.Type) {
+		if isEditorTextBoxType(item.Type) && !item.IsDeleted {
 			out = append(out, item)
 		}
 	}
@@ -330,7 +403,7 @@ func memoryEditorTextLogicGateProjections(items map[string]domain.LogicGateProje
 	out := make([]domain.LogicGateProjection, 0)
 	latestTextKey := newestLogicGateTextProjectionKey(items)
 	for keyValue, item := range items {
-		if isEditorTextBoxType(item.Type) && keyValue == latestTextKey {
+		if isEditorTextBoxType(item.Type) && !item.IsDeleted && keyValue == latestTextKey {
 			out = append(out, item)
 		}
 	}

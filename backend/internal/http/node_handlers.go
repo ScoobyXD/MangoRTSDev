@@ -357,10 +357,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method == http.MethodPost {
 			var req struct {
-				CompanyID     string `json:"company_id"`
-				Type          string `json:"type"`
-				Information   string `json:"information"`
-				InformationID string `json:"information_id"`
+				CompanyID        string `json:"company_id"`
+				Type             string `json:"type"`
+				Information      string `json:"information"`
+				InformationID    string `json:"information_id"`
+				ExpectedRevision *int64 `json:"expected_revision"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
@@ -389,6 +390,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				InformationID:    req.InformationID,
 				ActorUserID:      actorUserID,
 				ActorDisplayName: actorLabel,
+				ExpectedRevision: req.ExpectedRevision,
 			}
 			var item domain.NodeProjection
 			var explicitMentionedUserIDs []string
@@ -411,8 +413,17 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			} else {
 				item, err = s.repo.UpsertNodeProjectionWithActor(writeInput)
 			}
+			var revisionConflict *store.ProjectionRevisionConflictError
+			if errors.As(err, &revisionConflict) {
+				writeProjectionRevisionConflict(w, revisionConflict)
+				return
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrProjectionRevisionRequired) {
+				writeError(w, http.StatusBadRequest, "expected_revision_required")
 				return
 			}
 			if errors.Is(err, store.ErrInvalid) {
@@ -648,6 +659,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "information_id_required")
 			return
 		}
+		expectedRevision, revisionErr := parseOptionalExpectedRevision(r)
+		if revisionErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_expected_revision")
+			return
+		}
 		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
@@ -665,11 +681,18 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			InformationID:    informationID,
 			ActorUserID:      actorUserID,
 			ActorDisplayName: actorLabel,
+			ExpectedRevision: expectedRevision,
 		}); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		} else if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
 			writeError(w, http.StatusConflict, "email_collaboration_attached_email_managed")
+			return
+		} else if revisionConflict := (*store.ProjectionRevisionConflictError)(nil); errors.As(err, &revisionConflict) {
+			writeProjectionRevisionConflict(w, revisionConflict)
+			return
+		} else if errors.Is(err, store.ErrProjectionRevisionRequired) {
+			writeError(w, http.StatusBadRequest, "expected_revision_required")
 			return
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_node_projection")

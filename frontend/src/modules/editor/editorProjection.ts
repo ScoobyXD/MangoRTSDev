@@ -2,6 +2,8 @@ export type EditorProjectionItem = {
   information_id: string;
   type: string;
   information: string;
+  is_deleted?: boolean;
+  revision?: number;
   created_timestamp?: string;
   updated_timestamp?: string;
 };

@@ -928,8 +928,13 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 		}
 	}
 	created := item.CreatedTimestamp
+	revision := int64(1)
 	if existing, ok := r.logicGateText[k][projectionID]; ok {
 		created = existing.CreatedTimestamp
+		if existing.Revision < 1 {
+			existing.Revision = 1
+		}
+		revision = existing.Revision + 1
 	}
 	projection := domain.LogicGateProjection{
 		CompanyID:        companyID,
@@ -938,6 +943,7 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 		Information:      information,
 		InformationID:    projectionID,
 		CreatedTimestamp: created,
+		Revision:         revision,
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
 	r.logicGateText[k][projectionID] = projection
@@ -956,6 +962,9 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 		if isEditorTextBoxType(item.Type) && projectionID != latestTextKey {
 			continue
 		}
+		if isEditorTextBoxType(item.Type) && item.IsDeleted {
+			continue
+		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -964,15 +973,38 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 	return items, nil
 }
 
-func (r *MemoryRepo) DeleteLogicGateProjection(companyID, logicGateID, informationID string) error {
+func (r *MemoryRepo) DeleteLogicGateProjection(input LogicGateProjectionDeleteInput) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	companyID := strings.TrimSpace(input.CompanyID)
+	logicGateID := strings.TrimSpace(input.LogicGateID)
+	informationID := strings.TrimSpace(input.InformationID)
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return ErrNotFound
 	}
 	k := key(companyID, logicGateID)
-	if _, ok := r.logicGateText[k][informationID]; ok {
-		delete(r.logicGateText[k], informationID)
+	existing, projectionExists := r.logicGateText[k][informationID]
+	if projectionExists && isEditorTextBoxType(existing.Type) {
+		if existing.Revision < 1 {
+			existing.Revision = 1
+		}
+		if input.ExpectedRevision == nil {
+			return ErrProjectionRevisionRequired
+		}
+		if existing.IsDeleted || *input.ExpectedRevision != existing.Revision {
+			current := existing
+			return &ProjectionRevisionConflictError{LogicGateCurrent: &current}
+		}
+	}
+	if projectionExists {
+		if isEditorTextBoxType(existing.Type) {
+			existing.IsDeleted = true
+			existing.Revision++
+			existing.UpdatedTimestamp = time.Now().UTC()
+			r.logicGateText[k][informationID] = existing
+		} else {
+			delete(r.logicGateText[k], informationID)
+		}
 	}
 	return nil
 }

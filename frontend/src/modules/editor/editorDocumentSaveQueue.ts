@@ -2,6 +2,8 @@ export type EditorDocumentSaveQueueState<TRequest> = {
   inFlight: boolean;
   activeRequest: TRequest | null;
   queuedRequests: readonly TRequest[];
+  failedRequest: TRequest | null;
+  failure: unknown;
 };
 
 export type EditorDocumentSaveQueueOptions<TRequest> = {
@@ -14,26 +16,28 @@ export type EditorDocumentSaveQueueOptions<TRequest> = {
 export type EditorDocumentSaveQueue<TRequest> = {
   configure: (options: EditorDocumentSaveQueueOptions<TRequest>) => void;
   enqueue: (request: TRequest) => void;
+  retryFailed: (requestOverride?: TRequest) => void;
+  discardFailed: () => void;
   waitForIdle: () => Promise<void>;
   getState: () => EditorDocumentSaveQueueState<TRequest>;
 };
 
-/**
- * Runs document saves one at a time while retaining the latest queued value for
- * every target. Replacing a queued value does not move that target behind other
- * targets, so cross-target ordering remains deterministic.
- */
+/** Runs document saves one at a time and retains the exact failed/latest request until deliberate retry or discard. */
 export function createEditorDocumentSaveQueue<TRequest>(): EditorDocumentSaveQueue<TRequest> {
   const queuedByTarget = new Map<string, TRequest>();
   let options: EditorDocumentSaveQueueOptions<TRequest> | null = null;
   let activeRequest: TRequest | null = null;
+  let failedRequest: TRequest | null = null;
+  let failure: unknown = null;
   let drainPromise: Promise<void> | null = null;
 
   function getState(): EditorDocumentSaveQueueState<TRequest> {
     return {
-      inFlight: activeRequest !== null || drainPromise !== null || queuedByTarget.size > 0,
+      inFlight: activeRequest !== null || drainPromise !== null,
       activeRequest,
       queuedRequests: [...queuedByTarget.values()],
+      failedRequest,
+      failure,
     };
   }
 
@@ -50,31 +54,35 @@ export function createEditorDocumentSaveQueue<TRequest>(): EditorDocumentSaveQue
   }
 
   async function drainQueuedRequests(): Promise<void> {
-    while (queuedByTarget.size > 0) {
+    while (!failedRequest && queuedByTarget.size > 0) {
       const nextEntry = queuedByTarget.entries().next().value as [string, TRequest] | undefined;
       if (!nextEntry) break;
       const [targetKey, request] = nextEntry;
       queuedByTarget.delete(targetKey);
       activeRequest = request;
       emitState();
-
       const persist = options?.persist;
       if (!persist) throw new Error("editor_document_save_queue_not_configured");
-      await persist(request);
+      try {
+        await persist(request);
+      } catch (cause) {
+        failedRequest = request;
+        failure = cause;
+        activeRequest = null;
+        emitState();
+        throw cause;
+      }
       activeRequest = null;
       emitState();
     }
   }
 
   function startDrainIfNeeded(): void {
-    if (drainPromise || queuedByTarget.size === 0) return;
+    if (drainPromise || failedRequest || queuedByTarget.size === 0) return;
     const nextDrain = drainQueuedRequests();
     drainPromise = nextDrain;
     emitState();
-    void nextDrain.then(
-      () => settleDrain(nextDrain),
-      () => settleDrain(nextDrain),
-    );
+    void nextDrain.then(() => settleDrain(nextDrain), () => settleDrain(nextDrain));
   }
 
   return {
@@ -86,33 +94,42 @@ export function createEditorDocumentSaveQueue<TRequest>(): EditorDocumentSaveQue
     enqueue(request) {
       if (!options) throw new Error("editor_document_save_queue_not_configured");
       const targetKey = options.targetKey(request);
-
-      // If the latest value returns to the request already being persisted,
-      // discard any superseded queued value for that target.
+      if (failedRequest && options.targetKey(failedRequest) === targetKey) {
+        failedRequest = request;
+        emitState();
+        return;
+      }
       if (options.sameRequest(activeRequest, request)) {
         queuedByTarget.delete(targetKey);
         emitState();
         return;
       }
-
-      // Map#set replaces the value without changing insertion order. This is
-      // the key distinction from a single queuedSaveRef: target B cannot erase
-      // a pending latest value for target A.
       queuedByTarget.set(targetKey, request);
+      emitState();
+      startDrainIfNeeded();
+    },
+    retryFailed(requestOverride) {
+      if (!options || !failedRequest) return;
+      const request = requestOverride ?? failedRequest;
+      failedRequest = null;
+      failure = null;
+      queuedByTarget.set(options.targetKey(request), request);
+      emitState();
+      startDrainIfNeeded();
+    },
+    discardFailed() {
+      failedRequest = null;
+      failure = null;
       emitState();
       startDrainIfNeeded();
     },
     async waitForIdle() {
       for (;;) {
+        if (failedRequest) throw failure ?? new Error("editor_document_save_failed");
         startDrainIfNeeded();
         const activeDrain = drainPromise;
         if (!activeDrain) return;
-        try {
-          await activeDrain;
-        } catch {
-          // Persistence owns user-facing error reporting. Match the existing
-          // hook behavior by waiting for any remaining targets to drain.
-        }
+        await activeDrain;
       }
     },
     getState,

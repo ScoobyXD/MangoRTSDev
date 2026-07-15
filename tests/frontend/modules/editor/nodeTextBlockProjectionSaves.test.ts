@@ -196,3 +196,32 @@ test("deleting a text block waits for the active save and suppresses follow-up s
   assert.equal(requests.length, 1);
   assert.equal(controller.getSnapshot("block-1"), null);
 });
+
+test("failed text block save remains dirty and saved state changes only after backend ACK", async () => {
+  const controller = createTextBlockProjectionSaveController<string>();
+  let attempts = 0;
+  let releaseAck: (() => void) | null = null;
+  controller.configure({
+    saveBlock: async ({ baseRevision }) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("persistence rejected");
+      await new Promise<void>((resolve) => { releaseAck = resolve; });
+      return { revision: baseRevision + 1 };
+    },
+  });
+  controller.replaceBlocksAsHasNotChanged([{ blockID: "block", content: "server", revision: 4 }]);
+  controller.markHasChanged("block", "local draft");
+  await assert.rejects(() => controller.saveLatestContent("block"), /persistence rejected/);
+  assert.equal(controller.getSnapshot("block")?.hasChanged, true);
+  assert.equal(controller.getSnapshot("block")?.baseRevision, 4);
+
+  const retry = controller.saveLatestContent("block");
+  await waitFor(() => releaseAck !== null);
+  assert.equal(controller.getSnapshot("block")?.hasChanged, true);
+  assert.equal(controller.getSnapshot("block")?.saveInProgress, true);
+  assert.equal(typeof releaseAck, "function");
+  (releaseAck as unknown as () => void)();
+  await retry;
+  assert.equal(controller.getSnapshot("block")?.hasChanged, false);
+  assert.equal(controller.getSnapshot("block")?.baseRevision, 5);
+});

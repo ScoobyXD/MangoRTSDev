@@ -1,4 +1,4 @@
-import type { SelectionIntent } from "../selectionCoordinator";
+import type { SelectionIntent } from "../selectionCoordinator.js";
 
 export type LinkedEntityKind = "node" | "logic_gate";
 
@@ -11,6 +11,7 @@ export type DocumentSaveTarget = {
 export type DocumentSaveRequest = {
   target: DocumentSaveTarget;
   text: string;
+  baseRevision: number;
 };
 
 export type LinkedSelection = {
@@ -28,7 +29,7 @@ export function documentTargetKey(target: DocumentSaveTarget): string {
 
 export function sameSaveRequest(a: DocumentSaveRequest | null, b: DocumentSaveRequest | null): boolean {
   if (!a || !b) return false;
-  return documentTargetKey(a.target) === documentTargetKey(b.target) && a.text === b.text;
+  return documentTargetKey(a.target) === documentTargetKey(b.target) && a.text === b.text && a.baseRevision === b.baseRevision;
 }
 
 export function generateStableInformationID(): string {
