@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-15
 
-Status: implementation delivered and the complete repository gate passes; Definition of Done remains open on the two acceptance gaps recorded below.
+Status: the architectural foundation is merged and the complete repository gate passes, but the system is not production-ready. Post-merge review confirmed visible-convergence, lost-acknowledgement recovery, large-paste, permission-contract cleanup, and browser-evidence work recorded below. Definition of Done remains open.
 
 ## Implementation Record
 
@@ -17,9 +17,9 @@ This section is the live project-management record. It is updated as implementat
 - [x] Phase 0: reconciled owner contracts and deleted contradictory legacy expectations for the migrated surfaces.
 - [ ] Phase 1: durable outbox, shared cross-instance consumption, common envelope, exact local publication, and retained-family routing are implemented; retained-family canonical mutation plus outbox insertion is not yet one database transaction at every producer.
 - [x] Phase 2: implemented confirmed application heartbeat, the central health state machine, Key Views indicator, and global mutation gate.
-- [x] Phase 3: implemented exact editor-document identities, structured operations, revisions, idempotent commit, snapshots/ETags, and durable pending operations.
-- [x] Phase 4: cut over Logic Gate, Node, individual Node text boxes, and Project text boxes and deleted the old save/conflict system atomically.
-- [ ] Phase 5: reconnect/gap recovery, compaction, metrics, browser health rendering, and full verification are implemented; the charter's complete multi-browser rich-text interaction matrix still needs an automated browser harness.
+- [ ] Phase 3: exact editor-document identities, structured operations, revisions, server idempotency, snapshots/ETags, and durable pending storage are implemented, but acknowledgement/broadcast ordering can leave the visible DOM stale and lost-acknowledgement recovery can fail while reconciling already-committed pending operations.
+- [x] Phase 4: Logic Gate, Node, individual Node text boxes, and Project text boxes were cut over and the old save/conflict system was deleted atomically. This check records the mechanical cutover and deletion only; it does not claim the migrated collaboration behavior is production-ready while Phase 3 and Phase 5 remain open.
+- [ ] Phase 5: reconnect/gap infrastructure, compaction, metrics, browser health rendering, and the repository gate are implemented, but confirmed collaboration defects and the complete automated multi-browser rich-text interaction matrix remain open.
 - [x] Ran `node scripts/run_all_tests.mjs`, inspected the complete diff/status, and recorded exact proof here. The intended changes are committed locally at worker completion.
 
 ### Baseline source inventory
@@ -39,9 +39,9 @@ This section is the live project-management record. It is updated as implementat
 
 1. **Shared backplane: PostgreSQL durable outbox plus published-event log, with in-memory deterministic adapter.** The API already requires PostgreSQL and `database/sql`/pgx. A dedicated realtime outbox will use a global sequence, bounded claims with expiring leases, retry metadata, stable event IDs, and published timestamps. Every backend instance independently consumes published rows after its own cursor and applies only its local exact registry. This provides cross-instance delivery without sticky sessions or a new production service; polling is backed by immediate local wakeups and a short bounded interval. Domain events are not repurposed because they lack delivery state and contain broader business payloads.
 2. **Collaboration engine: a replicated growable array (RGA) sequence CRDT over Unicode/serialized rich-document atoms.** Stable atom IDs and predecessor IDs integrate concurrent inserts deterministically; tombstoned stable IDs make concurrent deletion and retry safe. Operations contain inserted atoms and deleted atom IDs, never a replacement body. All supported rich HTML structures remain serializable, but attachment safety validation rejects bytes/data URLs/presigned credentials before commit. This is an established sequence-CRDT model rather than offset patches against browser-normalized `innerHTML`.
-3. **Micro-batch defaults: 160 ms and 64 KiB maximum encoded delta.** Local DOM rendering remains immediate. The interval is short enough to feel live and long enough to coalesce ordinary typing; structural/format commands preserve invocation order and explicit flush boundaries.
+3. **Micro-batch defaults: 160 ms; the 64 KiB encoded-delta ceiling is an internal request boundary, not an acceptable editor-size or paste-size boundary.** Local DOM rendering remains immediate. The interval is short enough to feel live and long enough to coalesce ordinary typing; structural/format commands preserve invocation order and explicit flush boundaries. The first atom-per-character representation can exceed 64 KiB after only a few hundred inserted characters because every atom carries long tracking identifiers. The next implementation pass must split large changes into ordered idempotent operations or adopt an equivalently safe compact representation. Ordinary large rich-text pastes comparable to mainstream document editors must succeed without truncation, partial loss, formatting loss, or exposing this transport boundary to users.
 4. **Snapshot/compaction: bounded replay after an exact snapshot.** A document begins with an imported/full revision-zero CRDT snapshot. The server compacts after 128 committed operations since the physical snapshot or 512 KiB of accumulated delta JSON, whichever occurs first. Snapshot reads reconstruct at most 127 normal operations (or the smaller byte threshold), report the exact head revision/ETag, and never require a browser to replay history. User-visible saved versions remain separate.
-5. **Pending operations: IndexedDB primary store, scoped by user/company/document/client/operation, with a structured-operation local-storage fallback only when IndexedDB is unavailable.** The legacy full-body keys are deleted once and never read. A record is removed only after commit acknowledgement/deduplication.
+5. **Pending operations: IndexedDB primary store, scoped by user/company/document/client/operation, with a structured-operation local-storage fallback only when IndexedDB is unavailable.** The legacy full-body keys are deleted once and never read. A record is removed only after commit acknowledgement/deduplication. Post-merge review found that a recovered snapshot can already contain an operation whose acknowledgement was lost while the browser still retains that operation as pending; reconciliation must recognize the committed operation before locally reapplying duplicate atom IDs and must retry with the stable operation ID when proof is still required.
 6. **Heartbeat/retry defaults:** application challenge/response travels on the existing socket immediately after connect and every 25 seconds alongside protocol Ping/Pong. A 35-second confirmation grace enters orange; one failed/overdue short recovery enters blinking red while background exponential reconnect continues; eight failed attempts or 60 seconds without confirmed recovery enters solid red. Socket open alone remains syncing until exact subscriptions, mounted-document recovery, pending acknowledgements, and a server-confirmed heartbeat complete.
 7. **No presence/cursors in the first release.** Correct content convergence, selection preservation while applying remote content, saved-state proof, and recovery ship first; collaborator presence is not required by the charter.
 
@@ -64,7 +64,7 @@ This section is the live project-management record. It is updated as implementat
 - **Publication authorization race:** delivery now takes the exact-scope publication lock and re-resolves only current candidate users immediately before the local registry boundary.
 - **Saved-version stale projection:** save-version creation materializes the collaboration head first; restore commits a replacement snapshot/tombstone and publishes only `editor.snapshot.required`, never a full body.
 - **Replacement versus pending operations:** replacement snapshots retain the immediately prior live atoms as tombstones, preserving pending-operation anchors while keeping repeated replacement bounded.
-- **Recovery races:** recovery requests another pass for snapshot/tombstone events arriving mid-recovery, orders buffered events above the accepted revision, and never rolls confirmed revision backward from a stale acknowledgement.
+- **Recovery races (reopened):** the initial recovery path requests another pass for snapshot/tombstone events arriving mid-recovery, orders buffered events above the accepted revision, and avoids rolling confirmed revision backward. Post-merge review found two remaining correctness failures: a commit acknowledgement can advance the internal revision with another collaborator's accepted state without updating the visible DOM, causing the later broadcast to be discarded; and a snapshot that already contains a locally pending operation can fail while the browser reapplies duplicate atom IDs after a lost acknowledgement.
 - **Browser render loop:** the initial browser smoke found a React maximum-update-depth loop from an unstable collaboration result object. Persistence now depends on the hook's stable callbacks; a clean browser reload showed no recurrence.
 - **Windows sandbox:** Vite/esbuild child-process startup failed with `spawn EPERM` inside the restricted launcher. Focused and full commands were rerun outside that restriction; the failure occurred before project code executed.
 - **Git-case gate:** the first full gate correctly rejected the referenced migration while it was untracked. Staging the migration made the source-audit path provable; the complete rerun passed.
@@ -78,6 +78,7 @@ This section is the live project-management record. It is updated as implementat
 - `npm.cmd run build -- --emptyOutDir=false` — passed after recovery hardening and again after the browser-loop fix.
 - In-app Chromium smoke against the actual Vite-loaded component proved: Connected green with heartbeat pulse and no modal; Reconnecting orange with no modal; Attempting blinking red with one accessible global `aria-modal` at `z-index: 2147483000`; Disconnected solid red with the global modal and Refresh browser button. The Mango shell rendered after the callback fix without the prior maximum-update-depth error.
 - `node scripts/run_all_tests.mjs` — final exit code 0 on 2026-07-15: frontend feature/DOM suites passed, production build passed (`265 modules transformed`), all backend Go packages including source audit passed, infrastructure attachment contracts passed, and the runner printed `All test suites passed.`
+- **Post-merge evidence correction:** the passing gate proves the covered source, unit, DOM, build, backend, and infrastructure contracts. It did not exercise acknowledgement-versus-broadcast ordering through the visible editor, browser recovery after commit with a lost acknowledgement, realistically large multi-operation paste, or the full simultaneous multi-browser matrix. The green gate must not be cited as proof that those behaviors already work.
 
 ### Database migration and human rollout
 
@@ -86,12 +87,31 @@ This section is the live project-management record. It is updated as implementat
 3. Deploy the frontend only with the matching backend protocol. Browser cleanup is automatic; there is no dual-read or dual-write window.
 4. No agent applied a migration or accessed or changed production infrastructure or a live database.
 
+### 2026-07-15 post-merge critique and final owner direction
+
+- The initial implementation was merged into local `main` at merge commit `9e1481ea82973f5a365c67e5a663448ef622c7e6` after `node scripts/run_all_tests.mjs` passed. A subsequent source-level review found the correctness and coverage problems below; the passing gate does not override them.
+- **Final permission invariant:** Mango has exactly two resource-access outcomes: `edit` or `no access`. There is no view-only access level. User, manager, and admin are roles, not a third resource permission. The Node and Logic Gate permission controls intentionally expose only edit versus no access, and the same invariant applies throughout Mango.
+- Any executable branch, schema/default, API contract, test, owner document, or user-facing copy that creates, accepts, returns, depends on, or describes a view-only resource permission contradicts the owner-approved product model and must be deleted or replaced. Editor snapshot, subscription, publication, and mutation admission require edit access; no read-only collaboration mode is to be invented.
+- **Immediate release-blocking priority 1:** guarantee that every accepted remote change reaches the visible editor regardless of whether an HTTP acknowledgement or realtime broadcast arrives first. Server state, internal collaboration state, revision state, and rendered DOM must converge together.
+- **Immediate release-blocking priority 2:** make commit-before-lost-acknowledgement recovery end-to-end idempotent. After a full snapshot, the client must identify pending stable operation IDs already committed, avoid duplicate local application, obtain commit/deduplication proof, clear only proven work, and recover automatically without duplicating content or remaining stuck.
+- **Immediate release-blocking priority 3:** support realistically large rich-text copy/paste through safe ordered operations without exposing the 64 KiB per-request boundary, silently truncating content, losing formatting/Unicode/list/table/attachment-reference order, or falling back to whole-document saves.
+- **Immediate release-blocking priority 4:** add automated real-browser coverage for visible multi-user and multi-tab convergence, acknowledgement/broadcast reordering, commit with lost acknowledgement, reconnect plus pending reconciliation, large multi-batch paste, exact document isolation, rich text, and authorized inline attachment references.
+- **Accepted limitation for now:** do not expand the immediate pass into a cursor, selection, IME, or undo-system redesign. Remote DOM replacement risks in those areas are known and may be revisited separately.
+- **Owner-accepted Phase 1 deferral:** do not currently prioritize moving notifications, Node chat, Kanban, and active-mailbox canonical mutations into the same repository transaction as their outbox insert. The crash window remains real and Phase 1 remains formally open.
+- **Owner-accepted retention deferral:** do not currently prioritize time/size retention or deletion for published realtime outbox rows and collaboration-operation history. Physical snapshot compaction bounds reconstruction but does not by itself bound stored history; this remains recorded operational debt.
+- Fixes must preserve the complete deletion of the old full-document checkpoint/conflict system. Recovery remains automatic through operations, stable IDs, snapshots, acknowledgements, and reconciliation; no end-user merge screen or legacy fallback may return.
+
 ### Genuine remaining acceptance gaps
 
-1. **Retained-family transaction boundary:** notifications, Node chat, Kanban, and active-mailbox hints enqueue durably and reach every backend instance through the shared outbox, but their existing feature mutations complete before the HTTP publication helper inserts the outbox row. The editor path is atomic; the four retained producer families still need repository-level transaction ownership or an equivalent database-enforced bridge.
-2. **Complete rich-editor browser matrix:** CRDT, HTTP, cross-instance, exact fan-out/revocation, heartbeat, DOM editor, rich-text, attachment, and shell browser evidence passes, but the exhaustive simultaneous multi-browser rich-text typing/list/format/image/undo/caret/reconnect matrix is not encoded in an automated real-browser harness.
+1. **Visible acknowledgement/broadcast convergence:** an acknowledgement can contain another collaborator's accepted state and advance the internal revision without applying that state to the visible editor; a later broadcast at that revision is then ignored. This is a release blocker.
+2. **Commit-before-lost-acknowledgement recovery:** a full snapshot can already contain a still-durable pending operation. Reapplying its stable atom IDs locally can fail before the backend's idempotent retry response proves the operation was committed. This is a release blocker.
+3. **Realistically large paste:** the atom-per-character representation can exceed the internal 64 KiB mutation ceiling after only a few hundred inserted characters. Large changes need lossless ordered batching or an equally safe compact representation. This is a release blocker.
+4. **Complete rich-editor browser matrix:** pure collaboration-state, HTTP, cross-instance, exact fan-out/revocation, heartbeat, individual DOM-editor, rich-text, attachment, and shell evidence exists, but the exhaustive simultaneous multi-browser interaction and recovery matrix is not automated. This is required evidence for the three release-blocking fixes above.
+5. **Edit-or-no-access cleanup:** the repository must be audited and every view-only permission branch, contract, test, schema/default, and documentation statement must be deleted or replaced. No read-only editor subscription model is permitted.
+6. **Retained-family transaction boundary (owner-deferred):** notifications, Node chat, Kanban, and active-mailbox hints enqueue durably and reach every backend instance through the shared outbox, but their existing feature mutations complete before the HTTP publication helper inserts the outbox row. The editor path is atomic; the four retained producer families still need repository-level transaction ownership or an equivalent database-enforced bridge when this deferred remainder is resumed.
+7. **Historical-row retention (owner-deferred):** published outbox rows and collaboration operations do not yet have a time/size cleanup policy. Snapshot compaction bounds browser reconstruction, not database growth.
 
-These gaps are why Phase 1, Phase 5, and the Definition of Done remain open despite the passing repository gate. They must be closed before this charter can truthfully be marked complete.
+These gaps are why Phase 1, Phase 3, Phase 5, and the Definition of Done remain open despite the passing repository gate. Phase 4 remains checked only for the completed cutover and legacy-system deletion. The system must not be described as production-ready until the release-blocking items and their browser evidence are complete.
 
 
 
@@ -1057,13 +1077,17 @@ This charter is implemented only when all of the following are true:
 11. Legacy tests and source-of-truth rules are deleted or replaced with unified-model expectations, with no contradictory old behavior remaining.
 12. Focused verification and `node scripts/run_all_tests.mjs` pass.
 13. Any database migration and rollout requirements are reported explicitly, and production changes remain human-controlled under the repository security contract.
+14. Mango exposes only `edit` or `no access`; no executable view-only permission branch, schema/default, API contract, test, owner document, or user-facing copy remains.
 
 ### Completion audit
 
-- Complete with passing evidence: items 2-7 and 9-13.
-- Incomplete: item 1 for the four retained producer transaction boundaries described above.
-- Incomplete: item 8 for the full automated real-browser multi-user rich-text matrix; cross-instance, crash/retry, duplicate, gap, stalled-client, authorization, exact fan-out, DOM-rich-editor, and manual browser health evidence pass.
-- Therefore the charter is not marked complete, even though the delivered implementation and complete repository gate pass.
+- Complete with passing evidence: items 2, 6, and 9-13. Item 12 records that the existing gate passes, not that its coverage is sufficient for open behaviors.
+- Incomplete: item 1 for the four retained producer transaction boundaries; this remainder is owner-deferred.
+- Incomplete: items 3 and 7 at the realistically large rich-text paste boundary.
+- Incomplete: items 4 and 5 for acknowledgement/broadcast visible convergence and commit-before-lost-acknowledgement pending-operation reconciliation.
+- Incomplete: item 8 for the automated real-browser multi-user/multi-tab interaction, reordering, recovery, and large-paste matrix.
+- Incomplete: item 14 until the repository-wide view-only permission audit and deletion proves the final edit-or-no-access invariant.
+- Therefore the charter is not marked complete and the merged foundation is not production-ready, even though the current repository gate passes.
 
 ## Final Invariant
 
