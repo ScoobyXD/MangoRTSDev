@@ -66,6 +66,24 @@ type fakeNylasUpdateCall struct {
 	Update    NylasMessageUpdate
 }
 
+func TestWriteNylasErrorIgnoresCanceledClientRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/attachment-1", nil).WithContext(ctx)
+	cancel()
+	recorder := httptest.NewRecorder()
+
+	(&Server{}).writeNylasError(recorder, req, domain.UserEmailConnection{
+		UserID: "user-1", Provider: "google",
+	}, context.Canceled)
+
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("canceled request response body = %q, want no proxy error response", recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "" {
+		t.Fatalf("canceled request content type = %q, want no response write", contentType)
+	}
+}
+
 type failOnceWebhookMembershipRepo struct {
 	store.Repository
 	mu       sync.Mutex

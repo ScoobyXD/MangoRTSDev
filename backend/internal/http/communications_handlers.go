@@ -1513,6 +1513,9 @@ func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor Actor
 }
 
 func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, err error) {
+	if errors.Is(err, context.Canceled) && errors.Is(r.Context().Err(), context.Canceled) {
+		return
+	}
 	var apiErr NylasAPIError
 	if errors.As(err, &apiErr) {
 		log.Printf("nylas API error user_id=%s provider=%s path=%s status=%d code=%s message=%s", connection.UserID, connection.Provider, r.URL.Path, apiErr.StatusCode, apiErr.Code, apiErr.Message)

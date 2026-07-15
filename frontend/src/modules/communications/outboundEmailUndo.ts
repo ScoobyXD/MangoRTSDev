@@ -13,6 +13,7 @@ export type OutboundEmailDispatchOptions = {
 
 type PendingOutboundEmailSendInternal = PendingOutboundEmailSend & {
   timer: ReturnType<typeof setTimeout>;
+  beginDispatch: () => void;
   reject: (reason: OutboundEmailUndoneError) => void;
 };
 
@@ -62,6 +63,13 @@ export function undoOutboundEmailSend(sendID: string): boolean {
   return true;
 }
 
+export function sendOutboundEmailNow(sendID: string): boolean {
+  const pending = pendingOutboundEmailSends.get(sendID);
+  if (!pending) return false;
+  pending.beginDispatch();
+  return true;
+}
+
 export function scheduleOutboundEmailDispatch<T>(
   dispatch: () => Promise<T>,
   options: OutboundEmailDispatchOptions = {},
@@ -76,6 +84,7 @@ export function scheduleOutboundEmailDispatch<T>(
       const pending = pendingOutboundEmailSends.get(id);
       if (!pending) return;
       pendingOutboundEmailSends.delete(id);
+      clearTimeout(pending.timer);
       publishPendingOutboundEmailSends();
       void Promise.resolve().then(dispatch).then(resolve, reject);
     };
@@ -86,6 +95,7 @@ export function scheduleOutboundEmailDispatch<T>(
       queuedAt,
       deadlineAt: queuedAt + undoWindowMs,
       timer,
+      beginDispatch,
       reject,
     });
     publishPendingOutboundEmailSends();

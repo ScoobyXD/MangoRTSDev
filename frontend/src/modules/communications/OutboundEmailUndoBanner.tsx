@@ -1,6 +1,7 @@
 import React from "react";
 import {
   getPendingOutboundEmailSends,
+  sendOutboundEmailNow,
   subscribePendingOutboundEmailSends,
   undoOutboundEmailSend,
 } from "./outboundEmailUndo.js";
@@ -62,26 +63,51 @@ export function OutboundEmailUndoBanner() {
                 }}
               />
             </span>
-            <button
-              type="button"
-              className="mango-elevated-action"
-              onClick={() => undoOutboundEmailSend(pending.id)}
-              style={{
-                minHeight: 26,
-                padding: "3px 11px",
-                border: "1px solid rgba(71,85,105,0.3)",
-                borderRadius: 6,
-                background: "#ffffff",
-                color: "#1e293b",
-                boxShadow: "3px 3px 8px rgba(148,163,184,0.26), -2px -2px 7px rgba(255,255,255,0.96)",
-                font: "inherit",
-                fontSize: 11,
-                fontWeight: 850,
-                cursor: "pointer",
-              }}
-            >
-              Undo
-            </button>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="mango-elevated-action"
+                aria-label={`Send ${pending.label} now`}
+                title="Send now"
+                onClick={() => sendOutboundEmailNow(pending.id)}
+                style={{
+                  minHeight: 26,
+                  padding: "3px 11px",
+                  border: "1px solid rgba(14,165,233,0.42)",
+                  borderRadius: 6,
+                  background: "#ffffff",
+                  color: "#0369a1",
+                  boxShadow: "3px 3px 8px rgba(148,163,184,0.26), -2px -2px 7px rgba(255,255,255,0.96)",
+                  font: "inherit",
+                  fontSize: 11,
+                  fontWeight: 850,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Send now
+              </button>
+              <button
+                type="button"
+                className="mango-elevated-action"
+                onClick={() => undoOutboundEmailSend(pending.id)}
+                style={{
+                  minHeight: 26,
+                  padding: "3px 11px",
+                  border: "1px solid rgba(71,85,105,0.3)",
+                  borderRadius: 6,
+                  background: "#ffffff",
+                  color: "#1e293b",
+                  boxShadow: "3px 3px 8px rgba(148,163,184,0.26), -2px -2px 7px rgba(255,255,255,0.96)",
+                  font: "inherit",
+                  fontSize: 11,
+                  fontWeight: 850,
+                  cursor: "pointer",
+                }}
+              >
+                Undo
+              </button>
+            </span>
           </div>
         );
       })}
