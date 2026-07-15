@@ -5102,6 +5102,43 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      // Chrome can route React contenteditable text through a TextEvent whose
+      // native payload has no inputType. Own the Markdown-style shortcut at
+      // keydown as well so a physical Space key always reaches the editor rule;
+      // onBeforeInput remains the non-keyboard/mobile fallback.
+      if (
+        event.key === " "
+        && !event.altKey
+        && !event.ctrlKey
+        && !event.metaKey
+        && !event.nativeEvent.isComposing
+      ) {
+        const activeEditorListItem = getCurrentEditorListItem(root);
+        if (!activeEditorListItem) {
+          const activeTableCell = getCurrentEditorTableCell(root);
+          const undoBefore = snapshotEditorDocumentRoot(root);
+          let startedBulletList = false;
+          if (activeTableCell) {
+            startedBulletList = startEditorTableCellBulletListFromDashShortcut(root, activeTableCell, " ");
+          } else {
+            const offsets = getEditorSelectionOffsets(root);
+            if (offsets) {
+              const currentText = readEditorDocumentText(root);
+              startedBulletList = startEditorBulletListFromDashShortcut(root, currentText, offsets.start, offsets.end, " ");
+            }
+          }
+          if (startedBulletList) {
+            event.preventDefault();
+            pendingNativeUndoSnapshotRef.current = null;
+            clearEditorImageSelection(root);
+            setActiveTableContextMenu(null);
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            return;
+          }
+        }
+      }
+
       const activeTableCell = getCurrentEditorTableCell(root);
       if (activeTableCell) {
         if (event.key === "Enter") {

@@ -574,8 +574,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     trappedEditor.focus();
     dom.window.document.getSelection()?.removeAllRanges();
     dom.window.document.getSelection()?.addRange(dashEnd);
-    const dashSpace = new dom.window.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: " " });
-    await act(async () => Simulate.beforeInput(trappedEditor, { data: " ", inputType: "insertText", nativeEvent: dashSpace } as never));
+    const dashSpace = new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    await act(async () => trappedEditor.dispatchEvent(dashSpace));
+    assert.equal(dashSpace.defaultPrevented, true, "the real Space key is consumed by the dash shortcut");
     const bulletItem = trappedEditor.querySelector<HTMLLIElement>('ul[data-mango-editor-list="bullet"] > li[data-mango-editor-list-item="bullet"]');
     assert.ok(bulletItem, "dash-space creates a structural bullet item in automatic-numbering mode");
     assert.equal(bulletItem.textContent, "");
@@ -594,8 +595,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     trappedEditor.focus();
     dom.window.document.getSelection()?.removeAllRanges();
     dom.window.document.getSelection()?.addRange(dashCellEnd);
-    const tableDashSpace = new dom.window.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: " " });
-    await act(async () => Simulate.beforeInput(trappedEditor, { data: " ", inputType: "insertText", nativeEvent: tableDashSpace } as never));
+    const tableDashSpace = new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    await act(async () => trappedEditor.dispatchEvent(tableDashSpace));
+    assert.equal(tableDashSpace.defaultPrevented, true, "table-cell dash shortcuts also use the real Space key path");
     assert.ok(dashCell.querySelector('ul[data-mango-editor-list="bullet"]'), "dash-space creates a structural bullet inside a table cell");
     assert.ok(dashCell.contains(dom.window.document.getSelection()?.anchorNode ?? null));
 
