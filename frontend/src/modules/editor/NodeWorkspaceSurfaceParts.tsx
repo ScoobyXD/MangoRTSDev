@@ -300,6 +300,7 @@ type NodeTextBlockEditorProps = {
   onImageChatRequest: (image: TextBlockImageDraft) => void;
   onImageNodeRequest: (image: TextBlockImageDraft) => void;
   formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
+  formattingControllerActive?: boolean;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
@@ -779,6 +780,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onImageChatRequest,
   onImageNodeRequest,
   formattingControllerRef,
+  formattingControllerActive = false,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
@@ -1085,6 +1087,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     publishedFormattingControllerRef.current = formattingController;
     formattingControllerRef.current = formattingController;
   }, [editable, formattingController, formattingControllerRef]);
+
+  useEffect(() => {
+    if (!formattingControllerActive) return;
+    activateFormattingController();
+  }, [activateFormattingController, formattingControllerActive]);
 
   useEffect(() => {
     const previousController = publishedFormattingControllerRef.current;

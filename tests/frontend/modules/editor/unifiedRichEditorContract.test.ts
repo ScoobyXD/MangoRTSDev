@@ -413,9 +413,14 @@ test("the active node or project text block keeps its formatting controller curr
   assert.match(activeEditorSurface, /onFocus=\{\(\) => \{\s*activateFormattingController\(\)/);
   assert.match(workspaceAvailability, /const formattingControllerAvailable = canEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
   assert.match(workspaceAvailability, /onFormattingControllerAvailabilityChange\?\.\(formattingControllerAvailable\)/);
+  assert.match(nodeWorkspaceSurface, /const \[focusedTextBlockID, setFocusedTextBlockID\] = useState<string \| null>\(null\)/);
+  assert.match(nodeWorkspaceSurface, /setFocusedTextBlockID\(\(current\) => \{\s*if \(nodeChanged \|\| current === null\) return textBlocks\[0\]\?\.id \?\? "";\s*return blockIDs\.has\(current\) \? current : "";\s*\}\)/);
   assert.match(editorContent, /const \[nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable\] = useState\(false\)/);
   assert.match(editorContent, /onFormattingControllerAvailabilityChange=\{setNodeFormattingControllerAvailable\}/);
   assert.match(editorContent, /formattingDisabled=\{documentIsolation\.pointerEvents !== "auto" \|\| !linkedEntityCanEdit \|\| \(linkedEntityKind === "node" && !nodeFormattingControllerAvailable\)\}/);
+  assert.match(nodeWorkspaceParts, /formattingControllerActive\?: boolean/);
+  assert.match(nodeWorkspaceParts, /if \(!formattingControllerActive\) return;\s*activateFormattingController\(\)/);
+  assert.match(workspaceTextBlock, /formattingControllerActive=\{textBlockIsFocused\}/);
   assert.match(workspaceTextBlock, /onFocus=\{\(\) => \{\s*setFocusedTextBlockID\(block\.id\)/);
   assert.match(workspaceTextBlock, /onBlur=\{\(\) => \{\s*\/\/ Keep the last focused editor active while toolbar inputs own browser focus\./);
   assert.doesNotMatch(workspaceTextBlock, /onBlur=[\s\S]*setFocusedTextBlockID\(""\)/);

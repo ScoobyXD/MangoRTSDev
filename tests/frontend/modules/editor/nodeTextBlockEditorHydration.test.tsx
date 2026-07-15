@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React, { act } from "react";
 import { JSDOM } from "jsdom";
+import type { EditorDocumentFormattingController } from "../../../../frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts";
 
 type Restore = () => void;
 
@@ -189,6 +190,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const flushedDocuments: string[] = [];
     const emptyChanges: never[] = [];
     const emptyMessages: never[] = [];
+    const formattingControllerRef: React.MutableRefObject<EditorDocumentFormattingController | null> = { current: null };
     const baseProps = {
       blockID: "block-1",
       editable: true,
@@ -215,6 +217,8 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       onSelectionChatRequest: noop,
       onImageChatRequest: noop,
       onImageNodeRequest: noop,
+      formattingControllerRef,
+      formattingControllerActive: true,
     };
     const renderEditor = (documentValue: string) => (
       <React.StrictMode>
@@ -237,6 +241,8 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const firstImage = editor?.querySelector("img");
     assert.ok(editor);
     assert.ok(firstImage);
+    assert.ok(formattingControllerRef.current, "the initial formatting target publishes its controller before editor focus");
+    assert.notEqual(dom.window.document.activeElement, editor, "publishing the initial controller must not steal browser focus");
     assert.equal(firstImage.getAttribute("src"), "blob:test-1");
     assert.equal(activeObservers, 1);
     assert.equal(maximumActiveObservers, 1);
@@ -303,6 +309,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     });
     mountedRoot = null;
     assert.equal(activeObservers, 0);
+    assert.equal(formattingControllerRef.current, null);
     assert.equal(secondImage.getAttribute("src"), "mango-attachment:attachment-2");
     assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
     assert.equal(animationFrames.size, 0);
