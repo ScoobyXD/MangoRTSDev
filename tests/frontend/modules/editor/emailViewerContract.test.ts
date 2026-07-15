@@ -28,6 +28,11 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /\{isExpanded && \(useRichThreadBody/);
   assert.match(nodeParts, /\{isExpanded && \(\s*<EmailMessageAttachments/);
   assert.match(nodeParts, /<EmailBodyFrame/);
+  assert.match(nodeParts, /splitEmailQuotedHistory\(fullThreadBody\)/);
+  assert.match(nodeParts, /body=\{displayThreadBody\}/);
+  assert.match(nodeParts, /data-email-timeline-item="true"/);
+  assert.match(nodeParts, /Show quoted history/);
+  assert.match(nodeParts, /Hide quoted history/);
   assert.match(nodeParts, /onSelectionChange=\{canUseEmailSelection/);
   assert.match(nodeParts, /rewriteEmailCIDImages/);
   assert.match(nodeParts, /Download image/);

@@ -18,6 +18,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/accounts/accountsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/outboundEmailUndo.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailQuotedContent.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailCollaborationContracts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/grouping/universalStatusGrouping.test.js"),
@@ -146,6 +147,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/unifiedRichEditorContract"', '"../../../../frontend/src/modules/editor/unifiedRichEditorContract.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/richTextEditing"', '"../../../../frontend/src/modules/editor/richTextEditing.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/communications/emailQuotedContent"', '"../../../../frontend/src/modules/communications/emailQuotedContent.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorUndoHistory"', '"../../../../frontend/src/modules/editor/editorUndoHistory.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorProjection"', '"../../../../frontend/src/modules/editor/editorProjection.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorTextBlockChatHighlights"', '"../../../../frontend/src/modules/editor/editorTextBlockChatHighlights.js"');

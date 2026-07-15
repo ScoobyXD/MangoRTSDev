@@ -39,6 +39,8 @@
     "../modules/communications/outboundEmailUndo.test.ts",
     "../../../frontend/src/modules/communications/communicationsApi.ts",
     "../modules/communications/communicationsApi.test.ts",
+    "../../../frontend/src/modules/communications/emailQuotedContent.ts",
+    "../modules/communications/emailQuotedContent.test.ts",
     "../modules/communications/emailCollaborationContracts.test.ts",
     "../../../frontend/src/modules/notifications/notificationsApi.ts",
     "../modules/notifications/notificationsApi.test.ts",

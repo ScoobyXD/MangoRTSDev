@@ -557,6 +557,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
 test("mail thread detail supports exact-message replies, saved editor sizing, and one scroll surface", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
 
   assert.match(homeParts, /sortEmailConversationMessagesNewestFirst/);
   assert.match(homeParts, /aria-label="Email conversation order"/);
@@ -573,9 +574,15 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /frame\.style\.minHeight = "0px"/);
   assert.match(homeParts, /frame\.style\.height = "0px"/);
   assert.match(homeParts, /fillAvailableHeight \? "100%" : minHeight/);
-  assert.match(homeParts, /gridTemplateRows: fill \? "auto minmax\(0, 1fr\)" : "auto"/);
+  assert.match(homeStyles, /gridTemplateRows: fill \? "auto minmax\(0, 1fr\)" : "auto"/);
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
+  assert.match(homeParts, /splitEmailQuotedHistory\(body\)/);
+  assert.match(homeParts, /data-email-timeline-item="true"/);
+  assert.match(homeParts, /data-message-direction=\{sent \? "sent" : "received"\}/);
+  assert.match(homeParts, /mailConversationCardStyle\(expanded, sent, fill\)/);
+  assert.match(homeParts, /Show quoted history/);
+  assert.match(homeParts, /Earlier quoted messages are hidden from this reply/);
   assert.match(homeParts, /saveMailReplyEditorHeight/);
   assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
   assert.match(homePage, /saveCurrentComposeDraft\(\{ quiet: true \}\);\s*setCompose\(emptyCompose\);/);

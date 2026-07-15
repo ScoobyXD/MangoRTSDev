@@ -2195,6 +2195,49 @@ export const toolbarStyle: React.CSSProperties = {
   gap: 6,
 };
 
+export function mailConversationCardStyle(expanded: boolean, sent: boolean, fill: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: fill ? "100%" : undefined,
+    height: fill ? "100%" : undefined,
+    display: "grid",
+    gridTemplateRows: fill ? "auto minmax(0, 1fr)" : "auto",
+    gap: 10,
+    alignContent: fill ? "stretch" : "start",
+    padding: expanded ? 12 : "10px 12px",
+    border: expanded ? "1px solid transparent" : `1px solid ${HOME_KEY_SOFT_BORDER}`,
+    borderRadius: 14,
+    background: expanded
+      ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
+      : HOME_KEY_SURFACE,
+    boxShadow: expanded
+      ? `${HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
+      : HOME_KEY_SHADOW,
+    borderLeftColor: expanded ? "transparent" : sent ? "rgba(124, 58, 237, 0.18)" : "rgba(14, 165, 233, 0.18)",
+    overflow: "hidden",
+    transition: "background 140ms ease, box-shadow 160ms ease, border-color 140ms ease, transform 140ms ease",
+  };
+}
+
+export function mailConversationTimelineDotStyle(expanded: boolean, sent: boolean): React.CSSProperties {
+  const color = sent ? "#7c3aed" : "#0ea5e9";
+  return {
+    position: "absolute",
+    zIndex: 1,
+    top: 13,
+    left: 3,
+    width: 13,
+    height: 13,
+    border: "3px solid rgba(248, 250, 252, 0.96)",
+    borderRadius: "50%",
+    background: expanded ? color : "#cbd5e1",
+    boxShadow: expanded
+      ? `0 0 0 2px ${homeColorWithAlpha(color, 0.24)}, 2px 2px 7px rgba(15, 23, 42, 0.18)`
+      : "2px 2px 6px rgba(148, 163, 184, 0.24), -2px -2px 6px rgba(255, 255, 255, 0.86)",
+    boxSizing: "border-box",
+  };
+}
+
 export const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
