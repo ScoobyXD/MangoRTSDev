@@ -479,6 +479,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const renameNodeCommitInFlightRef = useRef(false);
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
+  const nodeEditorOverlayRef = useRef<NodeEditorOverlayState | null>(nodeEditorOverlay);
   const nodeEditorOverlayRatioRef = useRef(nodeEditorOverlayRatio);
   const nodeEditorOverlayRestoreRatioRef = useRef<NodeEditorOverlayRatio | null>(null);
   const arenaBoardLeftResizeBaselineRef = useRef<{ sessionID: number; ratio: NodeEditorOverlayRatio; startKanbanWidthPx: number } | null>(null);
@@ -634,6 +635,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [arenaMode, companyID, frameBoardID]);
 
   useEffect(() => {
+    nodeEditorOverlayRef.current = nodeEditorOverlay;
+  }, [nodeEditorOverlay]);
+
+  useEffect(() => {
     nodeEditorOverlayRatioRef.current = nodeEditorOverlayRatio;
   }, [nodeEditorOverlayRatio]);
 
@@ -763,18 +768,20 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const openNodeEditorOverlay = useCallback((nodeID: string, nodeTitle: string, notifyRoute = true) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
-    if (shouldResetNodeEditorOverlayViewMode(nodeEditorOverlay, cleanNodeID)) restoreNodeEditorOverlayRatio();
+    if (shouldResetNodeEditorOverlayViewMode(nodeEditorOverlayRef.current, cleanNodeID)) restoreNodeEditorOverlayRatio();
     const cleanNodeTitle = humanLabelOrFallback(nodeTitle, cleanNodeID);
+    nodeEditorOverlayRef.current = { nodeID: cleanNodeID, nodeTitle: cleanNodeTitle };
     setNodeEditorOverlay((current) => (
       current?.nodeID === cleanNodeID && current.nodeTitle === cleanNodeTitle
         ? current
         : { nodeID: cleanNodeID, nodeTitle: cleanNodeTitle }
     ));
     if (notifyRoute) onNodeEditorOverlayOpen?.(cleanNodeID);
-  }, [nodeEditorOverlay, onNodeEditorOverlayOpen, restoreNodeEditorOverlayRatio]);
+  }, [onNodeEditorOverlayOpen, restoreNodeEditorOverlayRatio]);
 
   const closeNodeEditorOverlay = useCallback((notifyRoute = true) => {
     restoreNodeEditorOverlayRatio();
+    nodeEditorOverlayRef.current = null;
     setNodeEditorOverlay(null);
     if (notifyRoute) onNodeEditorOverlayClose?.();
   }, [onNodeEditorOverlayClose, restoreNodeEditorOverlayRatio]);
