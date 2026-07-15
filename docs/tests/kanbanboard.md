@@ -162,6 +162,7 @@ KB124 - Every successful Kanban Node rename, and a Kanban board title rename tha
 KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announces the exact source and destination board IDs only after commit. Mounted boards route both local command events and authorized `kanban.changed` hints through the same debounced single-flight canonical work loader, so the source card disappears immediately, destination/current projections converge, duplicate hints coalesce, and a failed command cannot leave false optimistic board state.
 KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked View access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
 KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
+KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
 
 ## Scenarios
 
@@ -425,6 +426,7 @@ Business logic covered:
 - KB100
 - KB107
 - KB127
+- KB128
 
 Given:
 - A user opens a node editor popup from a Kanban board card.
@@ -440,6 +442,8 @@ Expected:
 - The Explorer search box is hidden while the fullscreen node editor is active, and the previous search query is still present after fullscreen is restored.
 - Deactivating fullscreen restores the previous popup size and position.
 - Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.
+- Opening the popup from a route-controlled Logic Gate Kanban card does not briefly close and reopen it while the node route catches up.
+- Closing that popup does not briefly reopen it while the route removes the selected node.
 
 ### Scenario KB-S9: Direct Email Drop Into Logic Gate Kanban Column
 
