@@ -335,6 +335,10 @@ func (s *Server) handleProjectInformation(w http.ResponseWriter, r *http.Request
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(req.Type), "Text box") {
+		writeError(w, http.StatusConflict, "editor_collaboration_required")
+		return
+	}
 	if rejectDurableInlineFileBytes(w, "project_information", req.Information) {
 		return
 	}
@@ -384,6 +388,14 @@ func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Requ
 	}
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
+	}
+	if projections, listErr := s.repo.ListProjectProjections(companyID, projectID); listErr == nil {
+		for _, projection := range projections {
+			if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
+				writeError(w, http.StatusConflict, "editor_collaboration_required")
+				return
+			}
+		}
 	}
 	actor, _ := authenticatedActor(r)
 	if err := s.repo.DeleteProjectProjection(store.ProjectProjectionDeleteInput{

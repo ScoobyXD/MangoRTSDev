@@ -54,6 +54,8 @@ import {
 } from "./useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
+import { createRequestJSON } from "../api/requestJSON.js";
+import { useCollaborativeEditorDocument } from "./useCollaborativeEditorDocument.js";
 import {
   createStandaloneImageClipboardHTML,
   findEditorImageFrame,
@@ -947,13 +949,42 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     owner?.cleanup();
   }, []);
 
+  const collaborationRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const applyCollaborativeDocument = useCallback((nextDocument: string) => {
+    const editor = editorRef.current;
+    const selection = editor && document.activeElement === editor ? getEditorSelectionOffsets(editor) : null;
+    lastAppliedDocumentRef.current = nextDocument;
+    userEditedDocumentRef.current = false;
+    onDocumentChange(nextDocument);
+    if (editor) {
+      const nextHTML = deserializeEditorDocumentHTML(nextDocument);
+      if (editor.innerHTML !== nextHTML) editor.innerHTML = nextHTML;
+      if (selection) setEditorSelectionByOffsets(editor, selection.start, selection.end);
+      scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(editor));
+    }
+  }, [onDocumentChange, scheduleTextBlockIndentGuideUpdate]);
+  const collaboration = useCollaborativeEditorDocument({
+    enabled: editable && Boolean(companyID.trim() && currentUserID.trim() && attachmentResourceID?.trim() && blockID.trim()),
+    apiBase,
+    companyID,
+    currentUserID,
+    resourceType: surfaceKind === "project" ? "project" : "node",
+    resourceID: attachmentResourceID?.trim() || nodeID.replace(/^project:/, ""),
+    documentID: blockID,
+    initialHTML: documentValue,
+    requestJSON: collaborationRequestJSON,
+    onHTML: applyCollaborativeDocument,
+    onDeleted: () => applyCollaborativeDocument(""),
+    onError: () => onDocumentConflict?.(),
+  });
+
   const scheduleNodeDocumentSave = useCallback((nextDocument: string, immediate = false) => {
     if (!editable) return;
     userEditedDocumentRef.current = true;
     lastAppliedDocumentRef.current = nextDocument;
     onDocumentChange(nextDocument);
-    if (immediate) onDocumentFlush(nextDocument);
-  }, [editable, onDocumentChange, onDocumentFlush]);
+    collaboration.scheduleDocumentSave(nextDocument, immediate);
+  }, [collaboration, editable, onDocumentChange]);
 
   const flushNodeDocumentSave = useCallback((fallbackDocument?: string) => {
     if (!editable) return;
@@ -961,12 +992,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       suppressNextDocumentFlushRef.current = false;
       return;
     }
-    if (!userEditedDocumentRef.current) return;
     const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
-    lastAppliedDocumentRef.current = nextDocument;
-    onDocumentFlush(nextDocument);
+    if (userEditedDocumentRef.current) {
+      onDocumentFlush(nextDocument);
+      collaboration.scheduleDocumentSave(nextDocument, true);
+    }
+    void collaboration.flushPendingDocumentSave().catch(() => onDocumentConflict?.());
     userEditedDocumentRef.current = false;
-  }, [documentValue, editable, onDocumentFlush]);
+  }, [collaboration, editable, onDocumentConflict, onDocumentFlush]);
 
   const editorImageAttachmentContext = useMemo(() => (
     attachmentRequestJSON && attachmentResourceType && attachmentResourceID

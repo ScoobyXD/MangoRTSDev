@@ -355,25 +355,24 @@ test("all unified rich editors use one contentEditable host and one formatting-c
   assert.match(homeParts, /<UnifiedRichEditorSurface/);
 });
 
-test("project text blocks serialize latest full-envelope saves through the shared queue", () => {
+test("project text bodies use exact-document collaboration while metadata keeps its serialized queue", () => {
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const collaboration = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorCollaboration.ts"), "utf8");
 
   assert.match(projectSummary, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\)/);
-  assert.match(projectSummary, /useMemo<TextBlockProjectionSaveController<EditorTextBlockContent>>\([\s\S]*\[projectSaveScope\]/);
-  assert.match(projectSummary, /projectTextBlockContentRef = useRef\(new Map<string, EditorTextBlockContent>\(\)\)/);
   assert.match(projectSummary, /projectTextBlockSaveController\.configure\(\{/);
-  assert.match(projectSummary, /saveBlock: async \(\{ blockID, content, sentVersion \}\)/);
-  assert.match(projectSummary, /projectTextBlockContentRef\.current\.get\(blockID\)/);
-  assert.match(projectSummary, /projectTextBlockSaveController\.markHasChanged\(blockID, nextContent\)/);
-  assert.match(projectSummary, /onDocumentChange=\{\(document\) => scheduleProjectTextBlockSave\(block\.id, \{ document \}\)\}/);
-  assert.match(projectSummary, /onDocumentFlush=\{\(document\) => \{[\s\S]*flushProjectTextBlockSave\(block\.id, \{ document \}\)/);
-  assert.match(projectSummary, /const latest = projectTextBlockContentRef\.current\.get\(block\.id\)[\s\S]*flushProjectTextBlockSave\(block\.id, \{ attachments: nextAttachments \}\)/);
-  assert.match(projectSummary, /await projectTextBlockSaveController\.waitForInProgressSaveThenRemoveBlock\(blockID\)/);
-  assert.match(projectSummary, /return \(\) => \{[\s\S]*projectTextBlockSaveController\.flushChangedBlocks\(\)/);
-  assert.doesNotMatch(projectSummary, /projectTextBlockSaveController\.clear\(\)/);
-  assert.doesNotMatch(projectSummary, /saveTextBlock\(block, \{ (?:document|attachments)/);
+  assert.match(projectSummary, /applyProjectCollaborativeDocument/);
+  assert.match(projectSummary, /onDocumentChange=\{\(document\) => applyProjectCollaborativeDocument\(block\.id, document\)\}/);
+  assert.doesNotMatch(projectSummary, /scheduleProjectTextBlockSave/);
+  assert.match(projectSummary, /flushProjectTextBlockSave\(block\.id, \{ attachments: nextAttachments \}\)/);
+  assert.match(nodeWorkspaceParts, /useCollaborativeEditorDocument\(\{/);
+  assert.match(nodeWorkspaceParts, /resourceType: surfaceKind === "project" \? "project" : "node"/);
+  assert.match(nodeWorkspaceParts, /collaboration\.scheduleDocumentSave\(nextDocument, immediate\)/);
+  assert.match(collaboration, /mango-editor-collaboration-pending-v1/);
+  assert.match(collaboration, /microBatchMs \?\? 160/);
+  assert.doesNotMatch(collaboration, /mango-editor-projection-draft-v2:[^"\]]/);
 });
-
 test("the active node or project text block keeps its formatting controller current across rerenders", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const nodeWorkspaceSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");

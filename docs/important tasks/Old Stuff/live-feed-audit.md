@@ -1,8 +1,13 @@
 # Live Feed And Realtime Fan-Out Audit And One-Shot Removal Charter
 
-Last updated: 2026-07-13
+Last updated: 2026-07-15
 
 Status: historical audit plus current addendum. The 2026-07-12 broad-stream deletion remains complete, but its decision that mail was entirely non-live was superseded by the deliberately narrow active-mailbox contract on 2026-07-13. `docs/v4-architecture-doc.md` is the current source of truth. Everything from **Historical 2026-07-12 Audit** onward is preserved evidence, not an active implementation instruction.
+
+## 2026-07-15 Unified Realtime Supersession
+
+docs/important tasks/realtimechanges.md and docs/v4-architecture-doc.md now supersede this audit's process-local limitation, four-surface cap, and future-Huddle coediting deferral. The retained narrow notification, Node-chat, mounted-board, and exact-mailbox scopes now share a PostgreSQL transactional outbox/backplane with exact collaborative editor scopes. The historical body below remains deletion rationale only: do not restore broad workspace replication, the deleted whole-document pseudo-collaboration relay, or any feature-owned socket/registry/heartbeat/reconnect loop.
+
 
 ## Implementation Completion Record
 
@@ -79,7 +84,7 @@ Original audit base: 5747e73f7fbb4c8795870c8be9f014b1ba7ca5fe. The one-shot char
 
 ## Historical 2026-07-12 Audit (Superseded Where Noted)
 
-The remainder of this file is intentionally preserved as the audit, deletion rationale, execution charter, and copy-paste prompt used for the 2026-07-12 simplification. Statements below that say “exactly three,” “mail non-live,” “communications deleted,” or “only notifications/chat/board” describe that historical decision and are superseded by the current four-surface addendum above. They must not be copied into new implementation work as current requirements. The broad workspace/projection/event-row deletions, process-local limitation, same-browser title distinction, and future-Huddle deferral remain valid.
+The remainder of this file is intentionally preserved as the audit, deletion rationale, execution charter, and copy-paste prompt used for the 2026-07-12 simplification. Statements below that say “exactly three,” “mail non-live,” “communications deleted,” or “only notifications/chat/board” describe that historical decision and are superseded by the current four-surface addendum above. They must not be copied into new implementation work as current requirements. The broad workspace/projection/event-row deletions and same-browser title distinction remain valid. The process-local limitation and future-Huddle coediting deferral are superseded by the 2026-07-15 addendum above.
 
 ## Executive Decision
 

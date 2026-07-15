@@ -598,7 +598,7 @@ func TestGetNodeDefaultsToLightweightDetails(t *testing.T) {
 	}
 }
 
-func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T) {
+func TestLegacyProjectionDeleteRequiresCollaborationAndCollaborationTombstoneClearsDocument(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -625,11 +625,19 @@ func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T)
 		t.Fatalf("POST node information status = %d, want %d body=%s", postRec.Code, http.StatusCreated, postRec.Body.String())
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+stableProjectionID+"?company_id="+companyID+"&expected_revision=1", nil)
+	legacyDeleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+stableProjectionID+"?company_id="+companyID+"&expected_revision=1", nil)
+	legacyDeleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(legacyDeleteRec, legacyDeleteReq)
+	if legacyDeleteRec.Code != http.StatusConflict || !strings.Contains(legacyDeleteRec.Body.String(), "editor_collaboration_required") {
+		t.Fatalf("legacy DELETE node projection status = %d body=%s, want collaboration-required conflict", legacyDeleteRec.Code, legacyDeleteRec.Body.String())
+	}
+
+	deleteBody, _ := json.Marshal(map[string]string{"operation_id": "delete-operation", "client_id": "headless-client"})
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/editor-collaboration/node/"+node.NodeID+"/documents/"+stableProjectionID+"?company_id="+companyID, bytes.NewReader(deleteBody))
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("DELETE node projection status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+		t.Fatalf("DELETE collaborative document status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
 	}
 
 	projectionReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+node.NodeID+"/projection?company_id="+companyID, nil)

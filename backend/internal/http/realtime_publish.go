@@ -27,6 +27,19 @@ func realtimeAllowedUserIDs(userIDs []string) map[string]struct{} {
 	return allowedUserIDs
 }
 
+func realtimeAllowedUserIDList(userIDs map[string]struct{}) []string {
+	if userIDs == nil {
+		return nil
+	}
+	allowed := make([]string, 0, len(userIDs))
+	for userID := range userIDs {
+		if userID = strings.TrimSpace(userID); userID != "" {
+			allowed = append(allowed, userID)
+		}
+	}
+	return allowed
+}
+
 func (s *Server) publishRealtimeMessageToCurrentEntityAudience(companyID, scope, resourceType, resourceID, permission string, message any) int {
 	delivered, _ := s.publishRealtimeMessageToCurrentEntityAudienceResult(companyID, scope, resourceType, resourceID, permission, message)
 	return delivered
@@ -35,24 +48,30 @@ func (s *Server) publishRealtimeMessageToCurrentEntityAudience(companyID, scope,
 func (s *Server) publishRealtimeMessageToCurrentEntityAudienceResult(companyID, scope, resourceType, resourceID, permission string, message any) (int, error) {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
+	resourceType = strings.TrimSpace(resourceType)
 	resourceID = strings.TrimSpace(resourceID)
-	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" || resourceID == "" {
+	permission = strings.TrimSpace(permission)
+	if s == nil || companyID == "" || scope == "" || resourceType == "" || resourceID == "" {
 		return 0, store.ErrInvalid
 	}
-	// Serialize the authorization lookup with delivery for this exact scope.
-	// Otherwise a queued event could retain an audience captured before access
-	// was revoked while it waited behind an earlier stalled write.
-	unlockPublishScope := s.realtimeRegistry.lockPublishScope(companyID, scope)
-	defer unlockPublishScope()
-	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
-		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0, nil
-	}
-	allowedUserIDs, err := s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourceType, resourceID, permission)
+	payload, eventType, err := realtimeMessagePayload(message)
 	if err != nil {
 		return 0, err
 	}
-	return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, allowedUserIDs, message), nil
+	var preauthorized map[string]struct{}
+	if s.realtimeRegistry.hasSubscribers(companyID, scope) {
+		unlock := s.realtimeRegistry.lockPublishScope(companyID, scope)
+		preauthorized, err = s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourceType, resourceID, permission)
+		unlock()
+		if err != nil {
+			return 0, err
+		}
+	}
+	_, delivered, err := s.enqueueRealtimeOutboxAndFlush(store.RealtimeOutboxInput{
+		CompanyID: companyID, Scope: scope, EventType: eventType, ResourceType: resourceType,
+		ResourceID: resourceID, Permission: permission, Payload: payload,
+	}, preauthorized)
+	return delivered, err
 }
 
 func (s *Server) resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourceType, resourceID, permission string) (map[string]struct{}, error) {
@@ -74,17 +93,52 @@ func (s *Server) resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourc
 func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
-	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
+	if s == nil || companyID == "" || scope == "" {
 		return 0
 	}
-	unlockPublishScope := s.realtimeRegistry.lockPublishScope(companyID, scope)
-	defer unlockPublishScope()
-	return s.publishRealtimeMessageWithAudienceUnlocked(companyID, scope, allowedUserIDs, message)
+	payload, eventType, err := realtimeMessagePayload(message)
+	if err != nil {
+		log.Printf("failed to marshal realtime message company_id=%s scope_type=%s: %v", companyID, realtimeScopeType(scope), err)
+		return 0
+	}
+	_, delivered, err := s.enqueueRealtimeOutboxAndFlush(store.RealtimeOutboxInput{
+		CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
+		AllowedUserIDs: realtimeAllowedUserIDList(allowedUserIDs), AudienceRestricted: allowedUserIDs != nil,
+	}, nil)
+	if err != nil {
+		return 0
+	}
+	return delivered
 }
 
-// publishRealtimeMessageWithAudienceUnlocked publishes one event while the
-// caller holds this exact scope's publication lock.
+func realtimeMessagePayload(message any) (json.RawMessage, string, error) {
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return nil, "", err
+	}
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(payload, &envelope)
+	eventType := strings.TrimSpace(envelope.Type)
+	if eventType == "" {
+		eventType = "realtime.event"
+	}
+	return payload, eventType, nil
+}
+
+// publishRealtimeMessageWithAudienceUnlocked is the final local-registry boundary.
+// The caller must hold this exact scope's publication lock. New mutations enqueue
+// into the shared outbox; only the shared spine calls this local delivery path.
 func (s *Server) publishRealtimeMessageWithAudienceUnlocked(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
+	payload, _, err := realtimeMessagePayload(message)
+	if err != nil {
+		return 0
+	}
+	return s.publishRealtimePayloadWithAudienceUnlocked(companyID, scope, allowedUserIDs, payload)
+}
+
+func (s *Server) publishRealtimePayloadWithAudienceUnlocked(companyID, scope string, allowedUserIDs map[string]struct{}, payload []byte) int {
 	restrictedAudience := allowedUserIDs != nil
 	if restrictedAudience && len(allowedUserIDs) == 0 {
 		s.recordOperationalMetric("realtime.publish_skipped_no_authorized_subscribers_count", realtimeScopeType(scope), 1, 0)
@@ -92,11 +146,6 @@ func (s *Server) publishRealtimeMessageWithAudienceUnlocked(companyID, scope str
 	}
 	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
-	}
-	payload, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("failed to marshal realtime message company_id=%s scope=%s: %v", companyID, scope, err)
 		return 0
 	}
 	result := realtimePublishResult{}
@@ -128,7 +177,6 @@ func (s *Server) publishRealtimeMessageWithAudienceUnlocked(companyID, scope str
 	}
 	return result.delivered
 }
-
 func nodeChatProjectionDetails(items []domain.NodeProjection, messageID string) (string, bool) {
 	messageID = strings.TrimSpace(messageID)
 	for _, item := range items {

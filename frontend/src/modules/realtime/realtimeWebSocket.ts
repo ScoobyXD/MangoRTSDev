@@ -5,6 +5,13 @@ import {
 } from "../../auth/cognitoAuth.js";
 import { isTerminalAuthFailureError, requestJSON } from "../api/requestJSON.js";
 import type { NotificationItem } from "../notifications/notificationsApi.js";
+import {
+  realtimeHealthKey,
+  setRealtimeHealthClientActive,
+  subscribeRealtimeHealthState,
+  updateRealtimeHealth,
+  type RealtimeHealthSnapshot,
+} from "./realtimeHealth.js";
 
 type RealtimeMessageType =
   | "ready"
@@ -18,6 +25,11 @@ type RealtimeMessageType =
   | "kanban.changed"
   | "mailbox.message.changed"
   | "mailbox.folder.changed"
+  | "editor.delta.committed"
+  | "editor.snapshot.required"
+  | "editor.document.deleted"
+  | "heartbeat.challenge"
+  | "heartbeat.confirmed"
   | "ping"
   | "pong"
   | "error";
@@ -127,6 +139,68 @@ export type RealtimeErrorMessage = RealtimeBaseMessage & {
   message?: string;
 };
 
+export type RealtimeEditorAtom = {
+  id: string;
+  after_id?: string;
+  value: string;
+};
+
+export type RealtimeEditorDelta = {
+  inserts?: RealtimeEditorAtom[];
+  delete_ids?: string[];
+};
+
+export type RealtimeEditorDeltaCommittedMessage = RealtimeBaseMessage & {
+  type: "editor.delta.committed";
+  company_id: string;
+  scope: string;
+  event_id: string;
+  resource_type: "node" | "logic_gate" | "project";
+  resource_id: string;
+  document_id: string;
+  resource_revision: number;
+  operation_id: string;
+  client_id: string;
+  committed_at?: string;
+  delta: RealtimeEditorDelta;
+};
+
+export type RealtimeEditorSnapshotRequiredMessage = RealtimeBaseMessage & {
+  type: "editor.snapshot.required";
+  company_id: string;
+  scope: string;
+  event_id: string;
+  resource_type: "node" | "logic_gate" | "project";
+  resource_id: string;
+  document_id: string;
+  resource_revision: number;
+  operation_id: string;
+  client_id: string;
+  committed_at?: string;
+  reason?: string;
+};
+
+export type RealtimeEditorDocumentDeletedMessage = RealtimeBaseMessage & {
+  type: "editor.document.deleted";
+  company_id: string;
+  scope: string;
+  event_id: string;
+  resource_type: "node" | "logic_gate" | "project";
+  resource_id: string;
+  document_id: string;
+  resource_revision: number;
+  operation_id: string;
+  client_id: string;
+  committed_at?: string;
+};
+
+type RealtimeHeartbeatMessage = RealtimeBaseMessage & {
+  type: "heartbeat.challenge" | "heartbeat.confirmed";
+  nonce: string;
+  server_time?: string;
+};
+
+
 type RealtimeInboundMessage =
   | RealtimeReadyMessage
   | RealtimeSubscriptionAcceptedMessage
@@ -139,6 +213,10 @@ type RealtimeInboundMessage =
   | RealtimeKanbanChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
+  | RealtimeEditorDeltaCommittedMessage
+  | RealtimeEditorSnapshotRequiredMessage
+  | RealtimeEditorDocumentDeletedMessage
+  | RealtimeHeartbeatMessage
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
@@ -153,6 +231,10 @@ type RealtimeSubscriptionHandlers = {
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
+  onEditorDeltaCommitted?: (message: RealtimeEditorDeltaCommittedMessage) => void;
+  onEditorSnapshotRequired?: (message: RealtimeEditorSnapshotRequiredMessage) => void;
+  onEditorDocumentDeleted?: (message: RealtimeEditorDocumentDeletedMessage) => void;
+  onRecover?: () => void | Promise<void>;
   onError?: (message: RealtimeErrorMessage) => void;
 };
 
@@ -161,6 +243,9 @@ type RealtimeClientOptions = {
   getTicket?: () => Promise<void>;
   WebSocketCtor?: typeof WebSocket;
   reconnectDelayMs?: number;
+  heartbeatGraceMs?: number;
+  attemptingAfterMs?: number;
+  disconnectedAfterMs?: number;
 };
 
 type RealtimeTicketResponse = {
@@ -298,6 +383,37 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         ts: stringValue(payload.ts) || undefined,
       };
     }
+    case "editor.delta.committed":
+    case "editor.snapshot.required":
+    case "editor.document.deleted": {
+      const scoped = scopedMessageBase(payload, type);
+      const eventID = stringValue(payload.event_id);
+      const resourceType = stringValue(payload.resource_type) as "node" | "logic_gate" | "project";
+      const resourceID = stringValue(payload.resource_id);
+      const documentID = stringValue(payload.document_id);
+      const operationID = stringValue(payload.operation_id);
+      const clientID = stringValue(payload.client_id);
+      const resourceRevision = optionalNumber(payload.resource_revision);
+      if (!eventID || !["node", "logic_gate", "project"].includes(resourceType) || !resourceID || !documentID || !operationID || !clientID || resourceRevision === undefined) {
+        throw new Error("realtime_editor_event_required");
+      }
+      const common = {
+        ...scoped, type, event_id: eventID, resource_type: resourceType, resource_id: resourceID,
+        document_id: documentID, resource_revision: resourceRevision, operation_id: operationID,
+        client_id: clientID, committed_at: stringValue(payload.committed_at) || undefined,
+      };
+      if (type === "editor.document.deleted") return common as RealtimeEditorDocumentDeletedMessage;
+      if (type === "editor.snapshot.required") return { ...common, reason: stringValue(payload.reason) || undefined } as RealtimeEditorSnapshotRequiredMessage;
+      const delta = recordValue(payload.delta);
+      if (!delta) throw new Error("realtime_editor_delta_required");
+      return { ...common, delta: delta as RealtimeEditorDelta } as RealtimeEditorDeltaCommittedMessage;
+    }
+    case "heartbeat.challenge":
+    case "heartbeat.confirmed": {
+      const nonce = stringValue(payload.nonce);
+      if (!nonce) throw new Error("realtime_heartbeat_nonce_required");
+      return { ...base, type, nonce, server_time: stringValue(payload.server_time) || undefined };
+    }
     case "error":
       return { ...base, type, error: stringValue(payload.error) || undefined, message: stringValue(payload.message) || undefined };
     case "ping":
@@ -309,7 +425,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
@@ -322,6 +438,13 @@ export function realtimePersonalMailboxScope(userID: string, accountEmail: strin
 export function realtimeSharedMailboxScope(sharedInboxID: string): string {
   const cleanSharedInboxID = sharedInboxID.trim();
   return cleanSharedInboxID ? `mailbox:shared:${cleanSharedInboxID}` : "";
+}
+
+export function realtimeEditorScope(resourceType: "node" | "logic_gate" | "project", resourceID: string, documentID: string): string {
+  const cleanResourceID = resourceID.trim();
+  const cleanDocumentID = documentID.trim();
+  if (!cleanResourceID || cleanResourceID.includes(":") || !cleanDocumentID || cleanDocumentID.includes(":")) return "";
+  return `editor:${resourceType}:${cleanResourceID}:${cleanDocumentID}`;
 }
 
 export function realtimeWebSocketURL(apiBase: string, companyID: string): string {
@@ -343,27 +466,45 @@ async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string
 export class MangoRealtimeClient {
   private readonly apiBase: string;
   private readonly companyID: string;
+  private readonly healthKey: string;
   private readonly getAccessToken: () => Promise<string>;
   private readonly getTicket: () => Promise<void>;
   private readonly WebSocketCtor: typeof WebSocket;
   private readonly reconnectDelayMs: number;
+  private readonly heartbeatGraceMs: number;
+  private readonly attemptingAfterMs: number;
+  private readonly disconnectedAfterMs: number;
   private readonly subscriptions = new Map<string, Set<RealtimeSubscriptionHandlers>>();
   private readonly acceptedScopes = new Set<string>();
   private socket: WebSocket | null = null;
   private opening = false;
   private manualClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private heartbeatWatchdog: ReturnType<typeof setInterval> | undefined;
+  private attemptingTimer: ReturnType<typeof setTimeout> | undefined;
+  private disconnectedTimer: ReturnType<typeof setTimeout> | undefined;
   private openAttemptID = 0;
+  private recoveredAttemptID = 0;
   private reconnectAttempts = 0;
+  private healthRefCount = 0;
+  private serverReady = false;
+  private heartbeatConfirmed = false;
+  private lastHeartbeatConfirmedAt: number | undefined;
+  private outageStartedAt: number | undefined;
+  private recoveryPromise: Promise<void> | undefined;
 
   constructor(apiBase: string, companyID: string, options: RealtimeClientOptions = {}) {
     ensureTerminalAuthFailureRealtimeListener();
     this.apiBase = apiBase;
     this.companyID = companyID;
+    this.healthKey = realtimeHealthKey(apiBase, companyID);
     this.getAccessToken = options.getAccessToken ?? getApiAccessToken;
     this.getTicket = options.getTicket ?? (() => requestRealtimeWebSocketTicket(this.apiBase, this.companyID, this.getAccessToken));
     this.WebSocketCtor = options.WebSocketCtor ?? WebSocket;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 1_000;
+    this.heartbeatGraceMs = Math.max(1_000, options.heartbeatGraceMs ?? 35_000);
+    this.attemptingAfterMs = Math.max(0, options.attemptingAfterMs ?? 10_000);
+    this.disconnectedAfterMs = Math.max(this.attemptingAfterMs, options.disconnectedAfterMs ?? 60_000);
   }
 
   subscribe(scope: string, handlers: RealtimeSubscriptionHandlers = {}): () => void {
@@ -374,36 +515,62 @@ export class MangoRealtimeClient {
     const firstForScope = bucket.size === 0;
     bucket.add(subscription);
     this.subscriptions.set(cleanScope, bucket);
-    this.ensureOpen();
+    this.activate();
     if (this.acceptedScopes.has(cleanScope)) {
       subscription.onAccepted?.({ type: "subscription.accepted", scope: cleanScope });
+      if (subscription.onRecover) {
+        this.recoveredAttemptID = 0;
+        this.setHealth("reconnecting");
+      }
     }
-    if (firstForScope && this.socket?.readyState === WebSocket.OPEN) this.sendSubscribe(cleanScope);
+    if (firstForScope && this.socket?.readyState === WebSocket.OPEN) {
+      this.recoveredAttemptID = 0;
+      this.setHealth("reconnecting");
+      this.sendSubscribe(cleanScope);
+    }
+    this.maybeFinishRecovery();
     return () => {
       const current = this.subscriptions.get(cleanScope);
       current?.delete(subscription);
       if (current && current.size > 0) return;
       this.subscriptions.delete(cleanScope);
       this.acceptedScopes.delete(cleanScope);
-      if (this.subscriptions.size === 0) {
+      if (!this.hasConsumers()) {
         this.close();
         return;
       }
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
+      this.recoveredAttemptID = 0;
+      this.maybeFinishRecovery();
+    };
+  }
+
+  subscribeHealth(listener: (snapshot: RealtimeHealthSnapshot) => void): () => void {
+    this.healthRefCount += 1;
+    this.activate();
+    const unsubscribeState = subscribeRealtimeHealthState(this.healthKey, listener);
+    return () => {
+      unsubscribeState();
+      this.healthRefCount = Math.max(0, this.healthRefCount - 1);
+      if (!this.hasConsumers()) this.close();
     };
   }
 
   ensureOpen(): void {
-    if (isTerminalAuthFailureActive()) return;
+    if (!this.hasConsumers() || isTerminalAuthFailureActive()) return;
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
+    this.serverReady = false;
+    this.heartbeatConfirmed = false;
+    this.recoveredAttemptID = 0;
     this.acceptedScopes.clear();
+    this.markOutage();
     const attemptID = this.openAttemptID + 1;
     this.openAttemptID = attemptID;
     void this.getTicket()
       .then(() => {
-        if (this.manualClose || attemptID !== this.openAttemptID) return;
+        if (this.manualClose || attemptID !== this.openAttemptID || !this.hasConsumers()) return;
         const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID));
         this.socket = socket;
         socket.onopen = () => {
@@ -412,21 +579,31 @@ export class MangoRealtimeClient {
             return;
           }
           this.opening = false;
-          this.reconnectAttempts = 0;
+          this.startHeartbeatWatchdog(socket);
           for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
         };
         socket.onmessage = (event) => {
           if (this.socket === socket) this.handleMessage(typeof event.data === "string" ? event.data : "");
         };
         socket.onerror = () => {
-          if (this.socket === socket) this.dispatchError({ type: "error", error: "websocket_error" });
+          if (this.socket === socket) {
+            this.dispatchError({ type: "error", error: "websocket_error" });
+            this.markOutage();
+          }
         };
         socket.onclose = () => {
           if (this.socket !== socket) return;
           this.socket = null;
           this.opening = false;
+          this.serverReady = false;
+          this.heartbeatConfirmed = false;
+          this.recoveredAttemptID = 0;
           this.acceptedScopes.clear();
-          if (!this.manualClose && this.subscriptions.size > 0) this.scheduleReconnect();
+          this.stopHeartbeatWatchdog();
+          if (!this.manualClose && this.hasConsumers()) {
+            this.markOutage();
+            this.scheduleReconnect();
+          }
         };
       })
       .catch((cause) => {
@@ -437,6 +614,7 @@ export class MangoRealtimeClient {
           return;
         }
         this.dispatchError({ type: "error", error: "websocket_auth_failed" });
+        this.markOutage();
         this.scheduleReconnect();
       });
   }
@@ -444,16 +622,30 @@ export class MangoRealtimeClient {
   close(): void {
     this.manualClose = true;
     this.openAttemptID += 1;
-    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
+    this.clearReconnectTimer();
+    this.clearOutageTimers();
+    this.stopHeartbeatWatchdog();
     this.socket?.close();
     this.socket = null;
     this.opening = false;
+    this.serverReady = false;
+    this.heartbeatConfirmed = false;
     this.acceptedScopes.clear();
+    setRealtimeHealthClientActive(this.healthKey, false);
+  }
+
+  private activate(): void {
+    setRealtimeHealthClientActive(this.healthKey, true);
+    if (!this.lastHeartbeatConfirmedAt) this.setHealth("reconnecting");
+    this.ensureOpen();
+  }
+
+  private hasConsumers(): boolean {
+    return this.healthRefCount > 0 || this.subscriptions.size > 0;
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== undefined || this.manualClose || this.subscriptions.size === 0 || isTerminalAuthFailureActive()) return;
+    if (this.reconnectTimer !== undefined || this.manualClose || !this.hasConsumers() || isTerminalAuthFailureActive()) return;
     const delayMs = computeRealtimeReconnectDelayMs(this.reconnectAttempts, { baseDelayMs: this.reconnectDelayMs });
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
@@ -462,16 +654,26 @@ export class MangoRealtimeClient {
     }, delayMs);
   }
 
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
   stopForTerminalAuthFailure(): void {
     this.manualClose = true;
     this.openAttemptID += 1;
-    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
+    this.clearReconnectTimer();
+    this.clearOutageTimers();
+    this.stopHeartbeatWatchdog();
     this.socket?.close();
     this.socket = null;
     this.opening = false;
+    this.serverReady = false;
+    this.heartbeatConfirmed = false;
     this.acceptedScopes.clear();
     this.reconnectAttempts = 0;
+    this.setHealth("disconnected");
+    setRealtimeHealthClientActive(this.healthKey, false);
   }
 
   private sendSubscribe(scope: string): void {
@@ -491,7 +693,21 @@ export class MangoRealtimeClient {
       this.socket?.send(JSON.stringify({ type: "pong" }));
       return;
     }
-    if (message.type === "ready") return;
+    if (message.type === "heartbeat.challenge") {
+      this.socket?.send(JSON.stringify({ type: "heartbeat.response", nonce: message.nonce }));
+      return;
+    }
+    if (message.type === "heartbeat.confirmed") {
+      this.heartbeatConfirmed = true;
+      this.lastHeartbeatConfirmedAt = Date.now();
+      this.maybeFinishRecovery();
+      return;
+    }
+    if (message.type === "ready") {
+      this.serverReady = true;
+      this.maybeFinishRecovery();
+      return;
+    }
     if (message.type === "error") {
       this.dispatchError(message);
       return;
@@ -535,8 +751,103 @@ export class MangoRealtimeClient {
         case "mailbox.folder.changed":
           sub.onMailboxFolderChanged?.(message);
           break;
+        case "editor.delta.committed":
+          sub.onEditorDeltaCommitted?.(message);
+          break;
+        case "editor.snapshot.required":
+          sub.onEditorSnapshotRequired?.(message);
+          break;
+        case "editor.document.deleted":
+          sub.onEditorDocumentDeleted?.(message);
+          break;
       }
     }
+    if (message.type === "subscription.accepted" || message.type === "subscription.rejected") this.maybeFinishRecovery();
+  }
+
+  private maybeFinishRecovery(): void {
+    if (!this.serverReady || !this.heartbeatConfirmed || this.recoveryPromise) return;
+    for (const scope of this.subscriptions.keys()) {
+      if (!this.acceptedScopes.has(scope)) return;
+    }
+    if (this.recoveredAttemptID === this.openAttemptID) {
+      this.setHealth("connected", this.lastHeartbeatConfirmedAt);
+      return;
+    }
+    const attemptID = this.openAttemptID;
+    const recoveries: Array<Promise<void>> = [];
+    for (const bucket of this.subscriptions.values()) {
+      for (const subscription of bucket) {
+        if (!subscription.onRecover) continue;
+        recoveries.push(Promise.resolve().then(() => subscription.onRecover?.()));
+      }
+    }
+    this.recoveryPromise = Promise.all(recoveries).then(() => undefined);
+    void this.recoveryPromise
+      .then(() => {
+        if (attemptID !== this.openAttemptID || !this.serverReady || !this.heartbeatConfirmed) return;
+        for (const scope of this.subscriptions.keys()) {
+          if (!this.acceptedScopes.has(scope)) return;
+        }
+        this.recoveredAttemptID = attemptID;
+        this.reconnectAttempts = 0;
+        this.outageStartedAt = undefined;
+        this.clearOutageTimers();
+        this.setHealth("connected", this.lastHeartbeatConfirmedAt);
+      })
+      .catch(() => {
+        if (attemptID !== this.openAttemptID) return;
+        this.dispatchError({ type: "error", error: "realtime_recovery_failed" });
+        this.markOutage();
+        this.socket?.close();
+      })
+      .finally(() => {
+        this.recoveryPromise = undefined;
+      });
+  }
+
+  private startHeartbeatWatchdog(socket: WebSocket): void {
+    this.stopHeartbeatWatchdog();
+    this.heartbeatWatchdog = setInterval(() => {
+      if (this.socket !== socket || !this.lastHeartbeatConfirmedAt) return;
+      if (Date.now() - this.lastHeartbeatConfirmedAt <= this.heartbeatGraceMs) return;
+      this.markOutage();
+      socket.close();
+    }, Math.min(1_000, Math.max(100, Math.round(this.heartbeatGraceMs / 5))));
+  }
+
+  private stopHeartbeatWatchdog(): void {
+    if (this.heartbeatWatchdog !== undefined) clearInterval(this.heartbeatWatchdog);
+    this.heartbeatWatchdog = undefined;
+  }
+
+  private markOutage(): void {
+    if (!this.hasConsumers()) return;
+    if (this.outageStartedAt === undefined) this.outageStartedAt = Date.now();
+    this.setHealth("reconnecting", this.lastHeartbeatConfirmedAt);
+    if (this.attemptingTimer === undefined) {
+      this.attemptingTimer = setTimeout(() => {
+        this.attemptingTimer = undefined;
+        if (this.outageStartedAt !== undefined) this.setHealth("attempting", this.lastHeartbeatConfirmedAt);
+      }, this.attemptingAfterMs);
+    }
+    if (this.disconnectedTimer === undefined) {
+      this.disconnectedTimer = setTimeout(() => {
+        this.disconnectedTimer = undefined;
+        if (this.outageStartedAt !== undefined) this.setHealth("disconnected", this.lastHeartbeatConfirmedAt);
+      }, this.disconnectedAfterMs);
+    }
+  }
+
+  private clearOutageTimers(): void {
+    if (this.attemptingTimer !== undefined) clearTimeout(this.attemptingTimer);
+    if (this.disconnectedTimer !== undefined) clearTimeout(this.disconnectedTimer);
+    this.attemptingTimer = undefined;
+    this.disconnectedTimer = undefined;
+  }
+
+  private setHealth(status: RealtimeHealthSnapshot["status"], lastConfirmedAt = this.lastHeartbeatConfirmedAt): void {
+    updateRealtimeHealth(this.healthKey, { status, lastConfirmedAt });
   }
 
   private dispatchError(message: RealtimeErrorMessage): void {
@@ -545,7 +856,6 @@ export class MangoRealtimeClient {
     }
   }
 }
-
 function ensureTerminalAuthFailureRealtimeListener(): void {
   if (terminalAuthFailureRealtimeUnsubscribe || typeof window === "undefined") return;
   terminalAuthFailureRealtimeUnsubscribe = addAuthTerminalFailureListener(() => {
@@ -554,7 +864,7 @@ function ensureTerminalAuthFailureRealtimeListener(): void {
 }
 
 function getMangoRealtimeClient(apiBase: string, companyID: string, options: RealtimeClientOptions = {}): MangoRealtimeClient {
-  const key = `${apiBase}:${companyID}`;
+  const key = realtimeHealthKey(apiBase, companyID);
   const existing = realtimeClients.get(key);
   if (existing) return existing;
   const client = new MangoRealtimeClient(apiBase, companyID, options);
@@ -565,4 +875,12 @@ function getMangoRealtimeClient(apiBase: string, companyID: string, options: Rea
 export function subscribeRealtimeScope(apiBase: string, companyID: string, scope: string, handlers: RealtimeSubscriptionHandlers): () => void {
   if (!companyID.trim() || !scope.trim()) return () => undefined;
   return getMangoRealtimeClient(apiBase, companyID).subscribe(scope, handlers);
+}
+export function subscribeRealtimeHealth(
+  apiBase: string,
+  companyID: string,
+  listener: (snapshot: RealtimeHealthSnapshot) => void,
+): () => void {
+  if (!companyID.trim()) return () => undefined;
+  return getMangoRealtimeClient(apiBase, companyID).subscribeHealth(listener);
 }

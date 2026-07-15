@@ -1279,7 +1279,7 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 			`insert into logic_gate_projection_table
 			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
 			 values ($1, $2, $3, $4::information_type, $5, now(), now())
-			 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
+			 on conflict (company_id, logic_gate_id, information_id)
 			 do update set
 			   information=excluded.information,
 			   is_deleted=false,

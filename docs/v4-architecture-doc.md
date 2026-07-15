@@ -1,119 +1,108 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-15
 
 # MangoRTS Current Data And Realtime Architecture
 
-Status: current architecture contract. This document supersedes the former broad projection-delta and workspace-fan-out design.
+Status: current architecture contract. This document supersedes the former process-local four-surface contract and the deleted broad workspace/projection fan-out designs. The complete implementation record and rationale live in `docs/important tasks/realtimechanges.md`.
 
-## Sources Of Truth
+## Core Data Rule
 
-Authenticated HTTP commands are the only write path for product data. Source tables and projection/read tables are committed before a successful response is returned. The initiating browser uses that committed response, existing local command-result events, and its mounted caches to update immediately.
+Authenticated HTTP commands are the only product write path. A successful collaborative editor command means the backend has authorized the exact company/resource/document and atomically committed the accepted operation, next document revision, canonical collaboration state, and transactional realtime outbox event. WebSocket frames are never an uncommitted write path or durable source of truth.
 
-Canonical HTTP reads remain the recovery and activation path. Projection/read tables, `workspace_read_versions`, conditional ETags, and independently required `domain_events` consumers remain part of the data architecture. Realtime messages are compact wake-ups; they are never the durable source of truth.
+Canonical HTTP reads remain recovery truth. Ordinary feature wake-ups reconcile their existing canonical reads. Collaborative editors use exact full snapshots and ETags for open, refresh, reconnect, revision gaps, divergence, and explicit canonical replacement; normal typing uses structured operations rather than full-body writes or fan-out.
 
-## Product Realtime Contract
+## One Shared Realtime Spine
 
-MangoRTS has four approved live product surfaces. The active-mailbox surface uses two exact scope patterns because personal accounts and shared inboxes have different authorization models:
+Every approved live event follows one architecture:
 
-| Scope | Mounted consumer | Message purpose | Canonical recovery |
+```text
+committed mutation
+  -> realtime_outbox
+  -> PostgreSQL published-event backplane
+  -> every backend instance
+  -> existing local exact-scope registry
+  -> current authorized browser connections
+```
+
+The production dispatcher claims bounded outbox batches with leases, stable event IDs, retry metadata, and restart recovery. Each backend instance consumes published rows in global sequence and delivers only through its local registry. An immediate local wake/flush reduces latency; correctness does not depend on the HTTP mutation and WebSocket landing on the same instance or on target-group stickiness.
+
+The frontend reuses one physical WebSocket per API/company boundary and refcounts logical scopes across duplicate mounted consumers. It owns the sole ticket, heartbeat, reconnect, accepted-scope, and recovery state machine. Features may own payload interpretation and canonical recovery, but may not create another socket, broker, registry, heartbeat manager, or reconnect loop.
+
+## Approved Exact Scopes
+
+| Scope | Mounted consumer | Live payload | Canonical recovery |
 | --- | --- | --- | --- |
-| `notifications:user:{user_id}` | App-lifetime `NotificationRealtimeBridge` | Notification created, deleted, or cleared | On first subscription acceptance and every reconnect acceptance, coalesce one canonical notification-summary refresh; queue one Updates feed refresh behind an active load only while Updates is open |
-| `chat:node:{node_id}` | Open Node chat | Durable Node chat message created or deleted | On first subscription acceptance and every reconnect acceptance, run a single-flight canonical durable Node-chat refresh with at most one queued final refresh |
-| `board:{board_id}` | Mounted Logic Gate Kanban board | `kanban.changed` after a committed card/column-visible change | On first subscription acceptance, reconnect acceptance, or a compact hint, run a single-flight canonical Logic Gate work/board read with at most one queued final refresh |
-| `mailbox:personal:account:{user_id}:{normalized_account_email}` | The selected personal account while My Triage is displaying mail | Provider message/folder change for that exact account | First acceptance, reconnect acceptance, and relevant compact hints share one exact-mailbox coalescer. Canonical folders/list data is refreshed; selected detail is refreshed only when its message/thread is named by the hint |
-| `mailbox:shared:{shared_inbox_id}` | The exact selected mail-bearing Shared Triage inbox | Provider message/folder change for that exact shared inbox | The same exact-mailbox reconciliation rules apply under current shared-inbox authorization. Shared Triage root, headings, grouping rows, and plain folders have no mailbox subscription |
+| `notifications:user:{user_id}` | App-lifetime notification bridge | Created/deleted/cleared notification hints | Coalesced notification summary; Updates feed only for real mounted feed changes |
+| `chat:node:{node_id}` | Mounted Node chat | Committed chat create/delete identifiers | Coalesced exact Node projection/chat read |
+| `board:{board_id}` | Mounted Logic Gate Kanban | Compact `kanban.changed` hint | Coalesced exact board/work read |
+| `mailbox:personal:account:{user_id}:{account}` | Exact selected personal mailbox | Compact provider message/folder hint | Exact mailbox folder/list/detail reads |
+| `mailbox:shared:{shared_inbox_id}` | Exact selected mail-bearing shared inbox | Compact provider message/folder hint | Exact shared-mailbox reads |
+| `editor:{node|logic_gate|project}:{resource_id}:{document_id}` | Exact mounted collaborative body | Committed structured delta, tombstone, or compact snapshot-required signal | Exact collaboration snapshot/ETag plus durable pending-operation recovery |
 
-The frontend reuses one physical WebSocket per API/company and multiplexes these logical subscriptions. The backend retains ticket validation, connection registry, per-scope authorization, subscribe/unsubscribe, ping/pong, reconnect, and error handling. The server sends a protocol-level ping every 25 seconds, below the load balancer's 60-second idle timeout; browsers answer in the networking stack rather than a JavaScript timer, so quiet or backgrounded tabs stay connected without HTTP polling, token refresh, or new realtime tickets. Delivery is process-local. The committed dev and prod Terraform roots each default `backend_desired_count` to 2, and the target groups configure no stickiness; without a broker, a mutation HTTP request and the recipient's WebSocket may land on different tasks, so cross-user live delivery is nondeterministic whenever two tasks run.
+Broad company/workspace/user-directory/editor wildcard streams remain forbidden. Company Explorer, graphs/maps, GVIC/My Work, Project Management, permissions, generic projections, broad communications, and title caches do not receive generalized backend replication. Same-browser committed-title convergence remains the targeted local command-result/cache mechanism documented in the owner contracts.
 
-The shared client tracks acceptance per live scope. A later mounted handler joining an already accepted scope receives immediate local acceptance so it performs its own load-to-subscribe reconciliation; acceptance is cleared on connection loss, rejection, or removal of the last local handler.
+## Collaborative Documents
 
-Backend WebSocket writes have a bounded deadline. A publish batch uses at most 16 concurrent writers while preserving per-connection write safety and process-local publish order, so stalled clients do not multiply webhook latency serially. Failed writes close and remove dead connections. Operational metrics distinguish attempted, delivered, failed, no-subscriber, and no-authorized-subscriber outcomes.
+Every independently editable Node, Logic Gate, or Project rich-text body is a separate document. Its identity includes company, resource type, resource ID, and document ID. Node text boxes, Logic Gate root/body and independent text boxes, and Project text boxes never share revision streams or pending queues merely because they appear in one surface.
 
-Publication-time resource authorization is deadline-bounded and evaluates only distinct users actually subscribed to that exact process-local scope. A missing resource or no currently authorized subscriber is a successful empty result; repository failure or timeout is an error. Retained ordinary events fail closed, and a signed shared-mailbox webhook converts that error into a retryable response instead of acknowledging a lost wake-up.
-Retryable webhook receipt state retains the signed payload's first-seen timestamp for its bounded deduplication window. A repeated `message.opened` signal with that identical timestamp merges idempotently, so an audience-infrastructure retry cannot inflate read evidence.
+The collaboration engine is an RGA sequence CRDT over Unicode atoms representing the serialized sanitized rich document. Operations carry stable inserted atom IDs/predecessors and deleted atom IDs. Deterministic sibling ordering integrates concurrent valid operations, including operations based on an older still-valid state. Stable operation IDs provide retry/deduplication after a lost acknowledgement. Users never choose between complete local and server documents.
 
+Local DOM rendering is immediate. Compatible rapid changes micro-batch for 160 ms, with a 64 KiB/10,000-atom operation bound. The backend commits one transaction per accepted micro-batch, not per keystroke. Remote committed operations apply once and are marked as remote so they cannot echo into another save. `Saved` means backend acknowledgement, never local rendering or socket delivery.
 
-Subscription admission is intentionally bounded and ephemeral. Scope syntax and length are validated, every resource-backed scope must resolve an existing same-company resource even when an administrator has an authorization override, and one connection may retain at most 16 distinct subscriptions. Duplicate subscriptions are idempotent and do not consume another slot. No subscription rows are stored durably.
+A physical snapshot is compacted after 128 operations since the prior snapshot or 512 KiB of accumulated deltas. Snapshot reconstruction is therefore bounded. Explicit saved-version restore is a canonical snapshot replacement; its outbox event contains no body/delta and tells subscribers to fetch the full snapshot. The replacement snapshot retains the immediately prior live atom IDs as tombstones so durable pending operations can still reapply without unbounded historical retention.
 
-## Authorization
+Projection tables remain derived compatibility/read models. They may be materialized on initial commit, bounded compaction, metadata change, explicit save-version creation/restore, or another explicit snapshot boundary. They are not the normal typing authority. Title and attachment metadata use a body-free metadata command that reconstructs the canonical collaboration body server-side and cannot overwrite it.
 
-- A notification subscription must match the authenticated user.
-- A Node chat subscription requires effective Edit access to an existing same-company Node. Chat create/delete HTTP commands retain their own write authorization, and publication resolves the current Edit audience again so a user whose access was revoked after subscribing receives no later hint.
-- A board subscription requires effective View access to the existing same-company owning Logic Gate. Publication resolves that current audience again so a user whose access was revoked after subscribing receives no later board hint.
-- A personal mailbox subscription must match both the authenticated user and one currently connected account identified by its normalized account email. The former user-wide personal scope is invalid.
-- A shared mailbox subscription requires the exact existing mail-bearing shared inbox and current View access. Shared publication rechecks the current audience, so revoked viewers are excluded without reconnecting.
-- A committed Logic Gate deletion is the narrow board-publication exception: it captures the currently authorized local mounted-board audience before deletion and sends the compact `resource_deleted` tombstone after commit. It never broadens delivery, while avoiding a post-delete existence check that would make the event undeliverable.
-- HTTP authorization remains authoritative. There is no generic permission-change socket message.
+## Durable Pending Operations And Recovery
 
-## Immediate And Non-Live Freshness
+Before an unacknowledged mutation can be lost, the browser stores its structured operation under authenticated user, company, exact resource/document, browser client, and stable operation ID. IndexedDB and the synchronous structured-operation mirror use the same record model. Legacy full-body keys are deleted once and never read.
 
-The user who performs a mutation sees the committed response immediately in concrete mounted surfaces. After every successful Node or Logic Gate rename entry point, one concrete same-window committed-title event patches concurrently mounted Company Explorer, Kanban, Editor, Node Map, Logic Gate Map, Home/My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock tabs and popup-parent labels, visible Node/Logic Gate sidebar-pin names, AppTimeline current/history labels, and Project Management timeline/workspace/project-detail caches as applicable. Logic Gate titles also update Updates saved Logic Gate grouping headers and sort values, while stored notification title/body prose stays historical. Passive convergence changes labels only: it does not write pin rows, change dock-tab recency, or create a cross-user/cross-tab server plane.
+Open/reconnect recovery establishes or restores the exact subscription, buffers committed events, fetches/validates the full snapshot, accepts revision R, discards duplicates at or below R, orders events above R, reapplies/resubmits durable pending operations with their original IDs, waits for acknowledgement/deduplication, and only then reports the document healthy. Events or tombstones arriving during an active recovery request another canonical recovery pass so the load-to-subscribe race cannot be lost.
 
-Title convergence updates committed labels without replacing dirty, debounced, or in-flight editor text. An event for an actively edited Editor or map `contentEditable` title is deferred until title editing ends, preserving the live DOM draft and caret. This same-browser convergence is a local command-result mechanism, not a backend cross-user realtime surface. Cross-user live delivery is attempted only for the four approved surfaces above and remains subject to the process-local limitation.
+A tombstone terminates the mounted document and removes its exact subscription. Recoverable unacknowledged local operations are not silently deleted. Ordinary unrelated Mango mutations are not made offline-capable by this editor queue.
 
-The shared committed-title registry retains the latest normalized Node or Logic Gate title per company/type/resource together with a monotonic version. Wired async title-bearing reads capture that version before awaiting and fold only newer local commits into the response before storing it. At publication time, the app-lifetime committed-title cache reconciliation coordinator also synchronously patches or invalidates the affected communications workspace slice, project-relationship cache, Kanban board/content cache, My Work matrix cache, entity record store, workspace snapshot, and Node or Logic Gate graph cache. Request-start version folding and targeted cache generation/invalidation guards prevent a request begun before the commit from repopulating an older title. This covers cache hits and remounts while preserving the rule that a genuine request begun after the commit remains authoritative canonical truth rather than being permanently masked. Request-start overlays remain wired across Home, Company Explorer/GVIC/search, Editor entity details, NodeWorkspace assigned Logic Gate/options/search, Kanban, maps, My Work, and Project Management. Persisted sidebar-pin names are the deliberate denormalized exception and fold all latest same-window commits after fetch/create/reorder/rollback so stale stored pin names cannot restore an old visible label. These mechanisms complement, rather than replace, the active Editor/map title buffers above.
+## Application Heartbeat And Mutation Gate
 
-Company Explorer, Home workspace/GVIC, My Work, maps and graphs, Project Management, Logic Gate Arena titles, generic editor/document state, permissions, broad communications state, and broad Kanban workspace state do not subscribe to backend realtime. The only mail exception is the exact actively viewed mailbox described below. These other surfaces load canonical data on open/navigation/manual refresh, and temporary cross-user staleness until then is accepted.
+Protocol Ping/Pong remains for transport liveness. Product health uses application heartbeat challenge/response/confirmation on Mango's authenticated backend path at roughly 25 seconds with jitter grace.
 
-Document autosave remains durable HTTP behavior. The former whole-document collaboration relay was not safe coediting and has been removed. A future Huddle may introduce an explicit CRDT/OT session, presence, ordering, and persistence design; no current compatibility path is retained for it.
+The top-left Key Views brand row, immediately before the trash control, shows accessible color and text:
 
-## Notifications
+- Green / Connected pulses only after confirmed heartbeat, authorization, all exact subscription acceptances, mounted-document snapshot/buffer recovery, and pending acknowledgements.
+- Orange / Reconnecting reconnects immediately; collaborative typing remains local and durable, while risky mutations are gated.
+- Blinking red / Attempting to reconnect mounts one global body-level blocking portal above every feature overlay while background retry continues.
+- Solid red / Disconnected - refresh your browser requests manual refresh; pending editor operations survive it.
 
-The immediate request-path notification projector creates durable notification rows and then publishes a user-targeted wake-up. `NotificationRealtimeBridge` owns the notification subscription and summary reconciliation. First subscription acceptance, reconnect acceptance, and notification hints share one coalescer. A pending local delete/clear marker records HTTP and socket observation separately. The first successful observer emits the one canonical update and the matching second observer emits nothing; after both observers claim, the marker is removed so a distinct later clear is not suppressed. A socket-first commit uses the canonical non-local source, so a lost/rejected HTTP response still reconciles mounted Updates while duplicate socket frames remain suppressed until the pending marker expires. An HTTP failure with no socket observation emits no update and releases its marker. The Updates view registers only while open, queues one final refresh behind an active load, and performs no feed request while closed.
+The shared API request boundary enforces the mutation gate. Only the exact collaborative operation POST remains allowed while orange because the operation was durably queued; metadata, deletes, and unrelated side effects remain gated.
 
-There is no notification domain-event checkpoint, periodic company scan, or replay/catch-up worker. A failed immediate projection is logged; canonical notification rows and reads remain the product source.
+## Authorization And Delivery Bounds
 
-## Node Chat
+Subscription admission validates authenticated user, company, exact resource existence, and current required permission. Editor admission/publication requires current Edit access. Publication reauthorizes only distinct users with local connections on that exact scope; revocation therefore stops later delivery. Administrator overrides never bypass wrong-company or missing-resource checks.
 
-Node chat continues to use its existing durable editor information/projection storage. After persistence, create/delete handlers publish a compact message only to `chat:node:{node_id}`. The mounted chat uses one active refresh plus one queued-final bit for first subscription acceptance, reconnect acceptance, and hints, closing the load-to-subscribe race without overlapping or invalidating an in-flight canonical read. Project chat is not a retained realtime surface. Chat publication never emits workspace, board, Explorer, graph, GVIC, or document messages.
+One editor event's browser work is proportional to active connections on that exact document. Adding unrelated companies, employees, open connections, stored documents, or other scopes does not increase its recipient count. One connection may hold at most 128 exact scopes; duplicate subscriptions are idempotent. Each connection has a bounded FIFO writer and deadline, so a stalled recipient is isolated and removed without delaying healthy subscribers.
 
-## Mounted Logic Gate Kanban
+## Attachment And Payload Safety
 
-Committed Node-card title changes, card add/remove/move/reorder, column changes, and other card-visible mutations publish `kanban.changed` to each affected mounted `board:{board_id}` scope. The initiating user applies the HTTP result locally; another mounted viewer routes first subscription acceptance, reconnect acceptance, and compact hints through one active refresh plus one queued-final bit, so an in-flight board read is neither overlapped nor aborted/restarted. Ordinary `node_updated` publication does not query Kanban projection rows when there are no relevant local board subscribers. There is no projection sequence, replay log, workspace echo, or permanent browser-replication queue.
+Collaborative rich text preserves durable attachment-backed image references, formatting, lists, mentions, tables, and pasted sanitized structure. Realtime and collaboration validation reject attachment bytes, base64/data URLs, presigned URLs, AWS/provider credentials, secrets, and oversized payloads. Authorized attachment content continues through the existing HTTP/S3 boundary.
 
-Logic Gate deletion captures the exact authorized local mounted-board audience while the resource still exists, commits the deletion, and then sends `resource_deleted` directly to that captured audience. This tombstone-only path is distinct from ordinary hints, which continue to resolve existence and current View access at publication time.
+Mailbox hints likewise contain only exact scope, trigger, and compact provider identifiers, never message bodies, provider credentials, or attachment bytes.
 
-## Actively Viewed Mailbox
+## Retained Feature Recovery
 
-Home owns at most one mailbox subscription: the selected personal account in My Triage or the exact selected mail-bearing Shared Triage inbox. Navigating to that mailbox performs the normal canonical load and installs its exact subscription; navigating to another account, inbox, plain folder, root, heading, grouping row, Drafts, or non-mail Home surface cancels pending timers/work and removes the old subscription. No fallback personal subscription is installed for a non-mail-bearing Shared Triage row, and an inactive mailbox hint issues no provider HTTP request.
-
-Mailbox work has distinct ownership domains. Folder metadata belongs to company plus the exact personal-account/shared-inbox scope. Message list/detail ownership may additionally include tab, search, unread-only, and selection state. A provider mark-read timer is captured mutation intent and is not disposable list-refresh work.
-
-Every first `subscription.accepted` and every reconnect acceptance performs one coalesced canonical folder/list reconciliation. This closes the interval between the initial list response and subscription acceptance. Acceptance and event bursts use one active request plus at most one necessary queued final request; delayed work captures the mailbox request key that scheduled it and is discarded if navigation makes that key obsolete.
-
-A presentation-filter change may invalidate list/detail work but keeps a valid exact-scope folder response and any folder reconciliation already queued. An exact mailbox-scope change invalidates both. Reconciliation that began under an old list filter may retain folder work only; it cannot apply the old list or detail result.
-
-Ordinary navigation may use exact-mailbox caches, but acceptance and hint reconciliation perform authoritative exact-key refreshes. A refresh joins or queues behind same-key in-flight work, bypasses reusable cache entries, and advances an exact-key generation so provider work begun before invalidation cannot repopulate stale folder, page, message, or thread state.
-
-Backend provider folder, page, and detail reads use generation-fenced singleflight. Every joined caller waits through its own context-aware select: canceling that caller returns promptly and releases only its admission, while the shared leader continues for remaining callers and caches only if its exact generation is still current.
-
-Provider `message.created`, `message.updated` (including moves), and `message.deleted` hints reconcile the active displayed list and folder metadata. `folder.created`, `folder.updated`, and `folder.deleted` hints reconcile folder metadata. A `message.opened` receipt hint refreshes only directly identified selected message/thread detail and never refreshes the list or folders. Other hints also refresh selected detail only when they identify that selected message or thread, so an unrelated new message does not refetch the open detail. Cache invalidation is limited to the exact company, account/shared inbox, message, thread, pages, and folders represented by the hint.
-
-Opening an unread message may optimistically update the captured exact mailbox and queue provider mark-read. Ordinary navigation can suppress stale visible-state application but cannot cancel the provider command while retaining a false read overlay; terminal session suppression releases both ownership and overlay state.
-
-Personal read-receipt summaries use `user_id:normalized_account_email`. Cutover data keyed only by user is merged into an exact scope only for a user with one stored personal connection. Multi-account and no-account broad rows are deliberately removed as ambiguous history rather than guessed or retained as unreachable data.
-
-Compose attachment preparation and upload/link share a per-draft mutation lease. Empty-draft failure cleanup waits for the final concurrent lease and runs only if every mutation failed; any successful mutation latches the draft as live for that group.
-
-Mailbox messages carry only scope, trigger, and compact provider identifiers. They never carry provider credentials, message bodies, attachment bytes, or durable mail state. Canonical HTTP reads remain authoritative. Delivery remains process-local; no Redis, broker, distributed pub/sub, replay, or polling loop is introduced.
+Notifications, Node chat, mounted Kanban, and exact active mailbox retain their feature-owned canonical reconciliation and coalescing rules. They use the same durable spine and shared socket but do not become editor-style operation streams. Email-collaboration shared drafts retain their separate optimistic HTTP revision contract; this project does not turn every email draft into an editor collaboration document.
 
 ## Deleted Architecture
 
-The following are intentionally absent and must not be reintroduced without a new explicit product contract:
+The current system does not contain or permit:
 
-- `event_rows`, its producer helpers, event worker, leases, retries, affected scopes, projection sequences, and queue schema;
-- generic workspace browser fan-out, effective-user expansion, PostgreSQL workspace notifications/listener, replay, and snapshot-refetch messages;
-- Company Explorer, graph, GVIC/My Work, Project Management, broad communications, permission, generic editor, and document-collaboration scopes;
-- notification checkpoint and catch-up/replay machinery;
-- frontend global workspace/projection/communications freshness bridges and server-event CustomEvent rebroadcasts.
+- broad workspace/projection/communications replication or wildcard editor streams;
+- the legacy `mango-editor-projection-draft-v2` full-body checkpoint or `mango-editor-projection-tab-v1` tab identity;
+- restored-draft/whole-document conflict modals and server/local version-choice actions;
+- migrated `Text box` fallback writes through legacy projection POST/DELETE routes;
+- feature-owned editor sockets, registries, brokers, heartbeats, or reconnect loops;
+- per-keystroke database transactions, normal full-body fan-out, or attachment bytes in realtime; or
+- sticky-session dependence for cross-instance delivery.
 
-Future realtime features must define one narrow resource or user scope, explicit subscription authorization, a compact post-commit message, and a canonical HTTP fallback. They must not revive generic workspace replication.
+## Operations And Rollout
 
-## Deliberate Deferrals
+Apply `backend/db/migrations/20260715_unified_realtime_collaboration.sql` before deploying the matching backend/frontend. The migration creates the realtime outbox, collaboration document/operation storage, claim/published indexes, and multi-text-box Logic Gate boundary, and updates the canonical schema. Do not apply it to production from an agent session; the human rollout follows `AGENTS.md` and `docs/security/database-agent-access-contract.md`.
 
-The following are explicitly outside the current realtime implementation:
-
-- process-local delivery with committed dev/prod task-count defaults of 2 leaves cross-task live delivery nondeterministic; adding a cross-instance broker or stickiness and changing backend task counts are deliberately deferred;
-- no `domain_events` retention or archive cleanup is included;
-- the workspace-derived 200-company catch-up limit is unchanged;
-- no replay log, gap protocol, recovery worker, generalized event history, or notification recovery plane is added; and
-- exact multi-user document coediting remains a future Huddle/CRDT/OT project.
+Deploy all backend instances on the matching schema, then the coordinated frontend, and require pre-cutover tabs to refresh. Monitor outbox lag/claim/publish failures, commit-to-fan-out latency, no-subscriber outcomes, connection/subscription counts, deadline failures, collaboration gaps/snapshot recovery, reconnect states, and pending recovery without logging editor content or secrets.

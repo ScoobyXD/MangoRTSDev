@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -165,7 +166,7 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 		query = `insert into logic_gate_projection_table
 		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
 		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
+		 on conflict (company_id, logic_gate_id, information_id)
 		 do update set
 		   information=excluded.information,
 		   updated_timestamp=now()
@@ -199,6 +200,55 @@ func (r *PostgresRepo) CreateLogicGateEditorSaveVersion(input EditorSaveVersionI
 	return r.createEditorSaveVersion(input, EntityTypeLogicGate)
 }
 
+func materializePostgresEditorCollaborationDocumentsForSaveTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string, now time.Time) error {
+	rows, err := tx.QueryContext(ctx, `
+		select document_id::text
+		from editor_collaboration_documents
+		where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid and not is_deleted
+		order by document_id
+		for update`, companyID, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	documentIDs := make([]string, 0)
+	for rows.Next() {
+		var documentID string
+		if err := rows.Scan(&documentID); err != nil {
+			rows.Close()
+			return err
+		}
+		documentIDs = append(documentIDs, documentID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, documentID := range documentIDs {
+		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, DocumentID: documentID}
+		document, found, err := loadPostgresEditorCollaborationDocumentTx(ctx, tx, ref, false)
+		if err != nil {
+			return err
+		}
+		if !found || document.Deleted {
+			continue
+		}
+		state, _, err := reconstructPostgresEditorStateTx(ctx, tx, document)
+		if err != nil {
+			return err
+		}
+		html, err := MaterializeEditorCollaborationState(state)
+		if err != nil {
+			return err
+		}
+		if err := materializePostgresEditorProjectionTx(ctx, tx, ref, html, document.Revision, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *PostgresRepo) createEditorSaveVersion(input EditorSaveVersionInput, resourceType string) (domain.EditorSaveVersion, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -222,6 +272,9 @@ func (r *PostgresRepo) createEditorSaveVersion(input EditorSaveVersionInput, res
 		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, resourceID); err != nil {
 			return domain.EditorSaveVersion{}, err
 		}
+	}
+	if err := materializePostgresEditorCollaborationDocumentsForSaveTx(ctx, tx, companyID, resourceType, resourceID, time.Now().UTC()); err != nil {
+		return domain.EditorSaveVersion{}, err
 	}
 
 	projections, err := selectCurrentEditorTextProjectionsTx(ctx, tx, companyID, resourceType, resourceID)
@@ -420,6 +473,7 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 	companyID := cleanUUIDText(input.CompanyID)
 	resourceID := cleanUUIDText(input.ResourceID)
 	saveID := cleanUUIDText(input.SaveID)
+	actorUserID := cleanUUIDText(input.ActorUserID)
 	if companyID == "" || resourceID == "" || saveID == "" {
 		return domain.EditorSaveVersion{}, ErrInvalid
 	}
@@ -437,58 +491,73 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
 
-	if resourceType == EntityTypeNode {
-		if _, err := tx.ExecContext(ctx,
-			`update node_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=now()
-			  where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type`,
-			companyID, resourceID,
-		); err != nil {
+	currentQuery := `select information_id::text from node_projection_table
+		where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type and not is_deleted
+		for update`
+	if resourceType == EntityTypeLogicGate {
+		currentQuery = `select information_id::text from logic_gate_projection_table
+			where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type and not is_deleted
+			for update`
+	}
+	rows, err := tx.QueryContext(ctx, currentQuery, companyID, resourceID)
+	if err != nil {
+		return domain.EditorSaveVersion{}, err
+	}
+	currentIDs := make([]string, 0)
+	for rows.Next() {
+		var informationID string
+		if err := rows.Scan(&informationID); err != nil {
+			rows.Close()
 			return domain.EditorSaveVersion{}, err
 		}
-	} else {
-		if _, err := tx.ExecContext(ctx,
-			`update logic_gate_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=now()
-			  where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type`,
-			companyID, resourceID,
-		); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
+		currentIDs = append(currentIDs, cleanUUIDText(informationID))
+	}
+	if err := rows.Close(); err != nil {
+		return domain.EditorSaveVersion{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return domain.EditorSaveVersion{}, err
 	}
 
+	desired := make(map[string]domain.EditorSaveVersionItem, len(version.Items))
 	for _, item := range version.Items {
 		sourceID := cleanUUIDText(item.SourceInformationID)
 		if sourceID == "" {
 			sourceID = cleanUUIDText(item.InformationID)
 		}
-		if sourceID == "" || strings.TrimSpace(item.Information) == "" {
+		if sourceID == "" || !isEditorTextBoxType(item.Type) {
 			continue
 		}
+		desired[sourceID] = item
+	}
+	now := time.Now().UTC()
+	for _, informationID := range currentIDs {
+		if _, keep := desired[informationID]; keep {
+			continue
+		}
+		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, DocumentID: informationID}
+		operationID := fmt.Sprintf("restore-delete:%s:%s", saveID, newUUIDv7String())
+		if err := tombstonePostgresEditorCollaborationDocumentTx(ctx, tx, ref, operationID, "server-save-version", actorUserID, now); err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+	}
+	for sourceID, item := range desired {
+		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, DocumentID: sourceID}
+		html := editorDocumentHTMLFromProjectionInformation(item.Information)
+		operationID := fmt.Sprintf("restore:%s:%s", saveID, newUUIDv7String())
+		if err := replacePostgresEditorCollaborationSnapshotTx(ctx, tx, ref, html, operationID, "server-save-version", actorUserID, now); err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+		information := editorProjectionInformationWithDocument(item.Information, html)
 		if resourceType == EntityTypeNode {
-			var projection domain.NodeProjection
-			if err := tx.QueryRowContext(ctx,
-				`insert into node_projection_table
-				 (company_id, node_id, information_id, type, information, revision, created_timestamp, updated_timestamp)
-				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, 1, now(), now())
-				 on conflict (company_id, node_id, information_id) do update set
-				 type=excluded.type, information=excluded.information, is_deleted=false, revision=node_projection_table.revision+1, updated_timestamp=now()
-				 returning company_id::text, node_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
-				companyID, resourceID, sourceID, item.Type, item.Information,
-			).Scan(&projection.CompanyID, &projection.NodeID, &projection.InformationID, &projection.Type, &projection.Information, &projection.Revision, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
-				return domain.EditorSaveVersion{}, err
-			}
+			_, err = tx.ExecContext(ctx, `update node_projection_table set information=$4
+				where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid`, companyID, resourceID, sourceID, information)
 		} else {
-			var projection domain.LogicGateProjection
-			if err := tx.QueryRowContext(ctx,
-				`insert into logic_gate_projection_table
-				 (company_id, logic_gate_id, information_id, type, information, revision, created_timestamp, updated_timestamp)
-				 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, 1, now(), now())
-				 on conflict (company_id, logic_gate_id, type) where type='Text box'::information_type do update set
-				 information_id=excluded.information_id, information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=now()
-				 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
-				companyID, resourceID, sourceID, item.Type, item.Information,
-			).Scan(&projection.CompanyID, &projection.LogicGateID, &projection.InformationID, &projection.Type, &projection.Information, &projection.Revision, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
-				return domain.EditorSaveVersion{}, err
-			}
+			_, err = tx.ExecContext(ctx, `update logic_gate_projection_table set information=$4
+				where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid`, companyID, resourceID, sourceID, information)
+		}
+		if err != nil {
+			return domain.EditorSaveVersion{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {

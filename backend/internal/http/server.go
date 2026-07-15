@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -38,6 +39,12 @@ type Server struct {
 	repo                                    store.Repository
 	realtimeRegistry                        *realtimeSubscriptionRegistry
 	realtimeTickets                         *realtimeTicketStore
+	realtimeSpineCancel                     context.CancelFunc
+	realtimeSpineWake                       chan struct{}
+	realtimeSpinePollInterval               time.Duration
+	realtimeSpineDisabled                   bool
+	realtimeSpineMu                         sync.Mutex
+	realtimeSpineCursor                     int64
 	notifications                           *notifications.Service
 	kanban                                  *kanban.Service
 	workspaceDerivedCatchupCancel           context.CancelFunc
@@ -93,6 +100,8 @@ type ServerOptions struct {
 	AttachmentStorage                       AttachmentObjectStorage
 	AttachmentVariantEnsurer                AttachmentImageVariantEnsurer
 	RealtimeTicketSecret                    string
+	RealtimeSpinePollInterval               time.Duration
+	DisableRealtimeSpine                    bool
 	MaxRequestBodyBytes                     int64
 	LegacyMapRoutesEnabled                  bool
 	WorkspaceDerivedCatchupInterval         time.Duration
@@ -169,6 +178,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		repo:                                    repo,
 		realtimeRegistry:                        newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                         newRealtimeTicketStore(realtimeTicketSecret),
+		realtimeSpineWake:                       make(chan struct{}, 1),
+		realtimeSpinePollInterval:               options.RealtimeSpinePollInterval,
+		realtimeSpineDisabled:                   options.DisableRealtimeSpine,
 		notifications:                           notifications.NewService(repo),
 		kanban:                                  kanban.NewService(repo),
 		workspaceDerivedCatchupInterval:         workspaceDerivedCatchupInterval,
@@ -210,10 +222,14 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationCleanup()
 	server.startCommunicationsArchiveWorker()
+	server.startRealtimeSpine()
 	return server
 }
 
 func (s *Server) Close() {
+	if s.realtimeSpineCancel != nil {
+		s.realtimeSpineCancel()
+	}
 	if s.attachmentUploadCleanupCancel != nil {
 		s.attachmentUploadCleanupCancel()
 	}
@@ -291,6 +307,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
+	mux.HandleFunc("/v1/editor-collaboration/", s.handleEditorCollaboration)
 	mux.HandleFunc("/v1/company-explorer/roots", s.handleCompanyExplorerRoots)
 	mux.HandleFunc("/v1/company-explorer/children", s.handleCompanyExplorerChildren)
 	mux.HandleFunc("/v1/company-explorer/search", s.handleCompanyExplorerSearch)

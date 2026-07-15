@@ -34,13 +34,13 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
-  buildNewEditorTextBlockProjectionPayload,
-  buildEditorTextBlockContentPayload,
+  buildEditorTextBlockMetadataPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
+import { editorCollaborationDeltaForHTML, newEditorCollaborationState } from "./editorCollaboration";
 import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
@@ -95,15 +95,6 @@ import {
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import { EditorSyncBlockingModal } from "./EditorSyncBlockingModal";
-import {
-  clearEditorProjectionDraft,
-  getEditorProjectionDraftTabID,
-  listEditorProjectionDrafts,
-  readEditorProjectionDraft,
-  retainEditorProjectionDraft,
-  type EditorSyncBlock,
-} from "./editorProjectionSync";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
@@ -627,8 +618,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [saveVersionsLoading, setSaveVersionsLoading] = useState(false);
   const [currentUserID, setCurrentUserID] = useState("");
   const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
-  const [syncBlock, setSyncBlock] = useState<EditorSyncBlock | null>(null);
-  const editorProjectionDraftTabID = useMemo(() => getEditorProjectionDraftTabID(typeof window === "undefined" ? null : window.sessionStorage), []);
   const [selectedSaveVersionID, setSelectedSaveVersionID] = useState("");
   const [saveVersionIntervalMinutes, setSaveVersionIntervalMinutes] = useState(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
   const [saveVersionsSortAscending, setSaveVersionsSortAscending] = useState(false);
@@ -700,7 +689,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const hasLinkedDocument = linkedNodeID.trim().length > 0 && !linkedEntityAccessDenied;
   const linkedEditorLoaded = linkedEntityKind === "node"
     ? nodeWorkspaceLoadedNodeID === linkedNodeID : editorSnapshotLoadedScope === editorSnapshotScope("logic_gate", linkedNodeID);
-  const editorWriteEnabled = linkedEntityCanEdit && linkedEditorLoaded && currentUserLoaded && Boolean(currentUserID) && syncBlock === null;
+  const editorWriteEnabled = linkedEntityCanEdit && linkedEditorLoaded && currentUserLoaded && Boolean(currentUserID);
   const { accounts: companyAccounts } = useCompanyAccounts(companyID, linkedEntityKind === "node" && hasLinkedDocument);
   const nodeAccountOptions = useMemo(() => mergeAccountLists(companyAccounts, nodeAccounts), [companyAccounts, nodeAccounts]);
 
@@ -716,9 +705,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    setSyncBlock(null);
-  }, [companyID, linkedEntityKind, linkedNodeID]);
 
 
   useEffect(() => {
@@ -846,12 +832,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
   }, [apiBase, companyID]);
 
-  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow, discardFailedSave } = useEditorDocumentPersistence({
+  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow } = useEditorDocumentPersistence({
+    apiBase,
     currentUserID,
     companyID,
-    draftTabID: editorProjectionDraftTabID,
     linkedEntityKind,
     linkedEntityID: linkedNodeID,
+    documentInformationID,
+    editorDocumentRef,
     documentDraftRef,
     persistedDocumentRef,
     documentRevisionRef,
@@ -864,7 +852,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     saveInFlightRef,
     setDocumentInformationID,
     setError,
-    onSyncBlocked: setSyncBlock,
     requestJSON,
     invalidateDocumentTargetCaches,
   });
@@ -1002,13 +989,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string, revision: number) => {
-    const retainedDrafts = currentUserID ? listEditorProjectionDrafts(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID }) : [];
-    const restoredEntry = informationID ? retainedDrafts.find((entry) => entry.informationID === informationID) : retainedDrafts[retainedDrafts.length - 1];
-    const resolvedInformationID = informationID || restoredEntry?.informationID || "";
+    const resolvedInformationID = informationID || (entityKind === "logic_gate" ? generateStableInformationID() : "");
     const targetKey = resolvedInformationID ? documentTargetKey({ entityKind, entityID, informationID: resolvedInformationID }) : `${entityKind}:${entityID}:`;
-    const retained = restoredEntry?.draft ?? (resolvedInformationID ? readEditorProjectionDraft(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID }) : null);
-    const loadedText = retained?.text ?? text;
-    const baseRevision = retained?.baseRevision ?? (Number.isInteger(revision) && revision >= 0 ? revision : 0);
+    const loadedText = text;
+    const baseRevision = Number.isInteger(revision) && revision >= 0 ? revision : 0;
     const element = editorDocumentRef.current;
     const preserveSelection = currentDocumentTargetKeyRef.current === targetKey;
     if (element && preserveSelection) restoreDocumentSelectionForHydrationRef.current?.(element);
@@ -1021,13 +1005,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setDocumentInformationID(resolvedInformationID);
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
-    if (retained && resolvedInformationID) setSyncBlock({
-      reason: "draft_restored",
-      target: { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID },
-      localText: loadedText,
-      current: informationID ? { information_id: informationID, type: EDITOR_TEXT_BLOCK_TYPE, information: text, revision } : null,
-      message: "An unsynced draft was restored after refresh. Review it, then retry the save deliberately.",
-    });
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
     setSelectionHighlightColor(null);
@@ -1054,7 +1031,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     restoreEditorDocumentScroll(targetKey);
     window.requestAnimationFrame(() => { restoringScrollRef.current = false; });
     if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [apiBase, companyID, currentUserID, editorProjectionDraftTabID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
+  }, [apiBase, companyID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -1386,7 +1363,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_related_node");
     }
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string; blockTitle?: string }) => {
     if (!linkedEntityCanEdit) return;
@@ -1429,20 +1406,26 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const node = response.nodes?.[0];
     if (!node) throw new Error("image_node_batch_create_missing_node");
     const informationID = generateStableInformationID();
-    await requestJSON<unknown>(`/v1/nodes/${node.node_id}/projection`, {
+    const operationID = generateStableInformationID();
+    await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
       method: "POST",
-      body: JSON.stringify(buildNewEditorTextBlockProjectionPayload({
-        companyID,
-        informationID,
-        information: buildEditorTextBlockContentPayload({ title: blockTitle, document }),
-      })),
+      body: JSON.stringify({
+        operation_id: operationID,
+        client_id: `editor-image-node:${currentUserID}`,
+        base_revision: 0,
+        delta: editorCollaborationDeltaForHTML(newEditorCollaborationState(""), document, operationID),
+      }),
+    });
+    await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
+      method: "PATCH",
+      body: JSON.stringify(buildEditorTextBlockMetadataPayload({ title: blockTitle, document })),
     });
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
     if (!linkedEntityCanEdit) return;
@@ -2522,43 +2505,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
-  const retryBlockedDocumentSave = useCallback(() => {
-    if (!syncBlock) return;
-    const localText = syncBlock.localText;
-    discardFailedSave();
-    setSyncBlock(null);
-    void saveDocumentNow(localText).catch(() => undefined);
-  }, [discardFailedSave, saveDocumentNow, syncBlock]);
-
-  const useServerDocumentVersion = useCallback(() => {
-    if (!syncBlock?.current) return;
-    const current = syncBlock.current;
-    discardFailedSave();
-    clearEditorProjectionDraft(window.localStorage, syncBlock.target);
-    setSyncBlock(null);
-    applyLoadedDocument(syncBlock.target.entityKind, syncBlock.target.entityID, current.information_id, current.is_deleted ? "" : current.information, current.revision ?? 1);
-  }, [applyLoadedDocument, discardFailedSave, syncBlock]);
-
-  const keepLocalDocumentAgainstLatest = useCallback(async () => {
-    if (!syncBlock) return;
-    const target = syncBlock.target;
-    const path = target.entityKind === "logic_gate"
-      ? `/v1/logic-gates/${target.entityID}/projection?company_id=${encodeURIComponent(companyID)}`
-      : `/v1/nodes/${target.entityID}/projection?company_id=${encodeURIComponent(companyID)}`;
-    try {
-      const payload = await requestJSON<{ items?: Array<{ information_id: string; type: string; revision?: number }> }>(path);
-      const current = (payload.items ?? []).find((item) => item.information_id === target.informationID && item.type === EDITOR_TEXT_BLOCK_TYPE);
-      const latestRevision = current?.revision ?? 0;
-      documentRevisionRef.current = latestRevision;
-      retainEditorProjectionDraft(window.localStorage, target, { text: syncBlock.localText, baseRevision: latestRevision, updatedAt: new Date().toISOString() });
-      discardFailedSave();
-      setSyncBlock(null);
-      void saveDocumentNow(syncBlock.localText).catch(() => undefined);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "failed_to_refresh_document_revision");
-    }
-  }, [companyID, discardFailedSave, requestJSON, saveDocumentNow, syncBlock]);
-
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions" || activeTab === "save-settings";
@@ -2978,13 +2924,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           </div>
         )}
         {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
-        <EditorSyncBlockingModal
-          block={syncBlock}
-          accent={accent}
-          onRetry={retryBlockedDocumentSave}
-          onUseServer={useServerDocumentVersion}
-          onKeepLocalAgainstLatest={() => { void keepLocalDocumentAgainstLatest(); }}
-        />
       </div>
     </div>
   );

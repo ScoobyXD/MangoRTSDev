@@ -381,6 +381,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
+			if strings.EqualFold(strings.TrimSpace(req.Type), "Text box") {
+				writeError(w, http.StatusConflict, "editor_collaboration_required")
+				return
+			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
 			writeInput := store.NodeInformationInput{
 				CompanyID:        req.CompanyID,
@@ -639,6 +643,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_restore_node_save_version")
 			return
 		}
+		s.wakeRealtimeSpine()
 		s.publishWorkspaceEvent(req.CompanyID, "node_editor_save_version_restored", map[string]any{"node_id": nodeID, "save_id": version.SaveID})
 		writeJSON(w, http.StatusOK, version)
 		return
@@ -672,6 +677,12 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		chatBlockID := ""
 		deletingChat := false
 		if projections, listErr := s.repo.ListNodeProjections(companyID, nodeID); listErr == nil {
+			for _, projection := range projections {
+				if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
+					writeError(w, http.StatusConflict, "editor_collaboration_required")
+					return
+				}
+			}
 			chatBlockID, deletingChat = nodeChatProjectionDetails(projections, informationID)
 		}
 		actorUserID, actorLabel := nodeChangeActorPayload(r)

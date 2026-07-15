@@ -84,6 +84,10 @@ type MemoryRepo struct {
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	logicGateShortcuts             map[string]domain.UserLogicGateShortcut
 	domainEvents                   map[string]domain.DomainEvent
+	realtimeOutbox                 map[string]RealtimeOutboxEvent
+	realtimeOutboxSequence         int64
+	editorCollaborationDocuments   map[string]memoryEditorCollaborationDocument
+	editorCollaborationOperations  map[string][]memoryEditorCollaborationOperation
 	effectiveAccessErr             error
 	workspaceReadVersions          map[string]int64
 	domainEventAppendErr           error
@@ -168,6 +172,9 @@ func NewMemoryRepo() *MemoryRepo {
 		emailCollaborationParticipants: map[string]domain.CommunicationsEmailCollaborationParticipant{},
 		logicGateShortcuts:             map[string]domain.UserLogicGateShortcut{},
 		domainEvents:                   map[string]domain.DomainEvent{},
+		realtimeOutbox:                 map[string]RealtimeOutboxEvent{},
+		editorCollaborationDocuments:   map[string]memoryEditorCollaborationDocument{},
+		editorCollaborationOperations:  map[string][]memoryEditorCollaborationOperation{},
 		workspaceReadVersions:          map[string]int64{},
 		notifications:                  map[string]domain.Notification{},
 		recycleBin:                     map[string]memoryRecycleBinItem{},
