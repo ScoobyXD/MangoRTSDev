@@ -1282,6 +1282,8 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 			 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
 			 do update set
 			   information=excluded.information,
+			   is_deleted=false,
+			   revision=logic_gate_projection_table.revision+1,
 			   updated_timestamp=now()
 			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
@@ -1305,6 +1307,8 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 			 do update set
 			   type=excluded.type,
 			   information=excluded.information,
+			   is_deleted=false,
+			   revision=logic_gate_projection_table.revision+1,
 			   updated_timestamp=now()
 			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
@@ -1342,15 +1346,16 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 
 	rows, err := r.db.QueryContext(ctx,
 		`with ranked as (
-		   select company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp,
+		   select company_id, logic_gate_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp,
 		          row_number() over (
 		            partition by type
 		            order by updated_timestamp desc, created_timestamp desc, information_id desc
 		          ) as rn
 		   from logic_gate_projection_table
 		   where company_id=$1 and logic_gate_id=$2
+		     and not is_deleted
 		 )
-		 select company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		 select company_id, logic_gate_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
 		 from ranked
 		 where type <> 'Text box'::information_type or rn = 1
 		 order by updated_timestamp asc`,
@@ -1370,6 +1375,8 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 			&item.InformationID,
 			&item.Type,
 			&item.Information,
+			&item.IsDeleted,
+			&item.Revision,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
 		); err != nil {
@@ -1383,13 +1390,16 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 	return items, nil
 }
 
-func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informationID string) error {
+func (r *PostgresRepo) DeleteLogicGateProjection(input LogicGateProjectionDeleteInput) error {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	companyID := strings.TrimSpace(input.CompanyID)
+	logicGateID := strings.TrimSpace(input.LogicGateID)
+	informationID := strings.TrimSpace(input.InformationID)
 
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
@@ -1400,6 +1410,13 @@ func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informa
 	}
 	if !exists {
 		return ErrNotFound
+	}
+	previous, previousFound, err := postgresLogicGateProjectionTx(ctx, tx, companyID, logicGateID, informationID)
+	if err != nil {
+		return err
+	}
+	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
+		return deletePostgresLogicGateTextProjection(ctx, tx, input, previous, previousFound)
 	}
 	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gate_projection_table

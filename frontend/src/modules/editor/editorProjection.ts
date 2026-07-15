@@ -2,6 +2,8 @@ export type EditorProjectionItem = {
   information_id: string;
   type: string;
   information: string;
+  is_deleted?: boolean;
+  revision?: number;
   created_timestamp?: string;
   updated_timestamp?: string;
 };
@@ -70,6 +72,20 @@ export type EditorTextBlockContent = {
   document: string;
   attachments?: EditorChatAttachment[];
 };
+
+export function buildNewEditorTextBlockProjectionPayload(input: {
+  companyID: string;
+  informationID: string;
+  information: string;
+}) {
+  return {
+    company_id: input.companyID,
+    type: EDITOR_TEXT_BLOCK_TYPE,
+    information: input.information,
+    information_id: input.informationID,
+    expected_revision: 0,
+  };
+}
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
   const updated = (a.updated_timestamp ?? "").localeCompare(b.updated_timestamp ?? "");

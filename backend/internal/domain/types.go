@@ -603,7 +603,9 @@ type NodeProjection struct {
 	NodeID           string    `json:"node_id"`
 	Type             string    `json:"type"`
 	Information      string    `json:"information"`
+	IsDeleted        bool      `json:"is_deleted"`
 	InformationID    string    `json:"information_id"`
+	Revision         int64     `json:"revision"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
@@ -750,7 +752,9 @@ type LogicGateProjection struct {
 	LogicGateID      string    `json:"logic_gate_id"`
 	Type             string    `json:"type"`
 	Information      string    `json:"information"`
+	IsDeleted        bool      `json:"is_deleted"`
 	InformationID    string    `json:"information_id"`
+	Revision         int64     `json:"revision"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }

@@ -31,7 +31,16 @@ var (
 	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
 	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
 	ErrUploadPayloadConflict         = errors.New("attachment upload idempotency payload conflict")
+	ErrProjectionRevisionRequired    = errors.New("projection revision required")
 )
+
+type ProjectionRevisionConflictError struct {
+	NodeCurrent      *domain.NodeProjection
+	LogicGateCurrent *domain.LogicGateProjection
+}
+
+func (e *ProjectionRevisionConflictError) Error() string { return "projection revision conflict" }
+func (e *ProjectionRevisionConflictError) Unwrap() error { return ErrVersionConflict }
 
 type Repository interface {
 	IdentityRepository
@@ -492,7 +501,7 @@ type LogicGateRepository interface {
 	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	UpsertLogicGateProjection(input LogicGateProjectionInput) (domain.LogicGateProjection, error)
-	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
+	DeleteLogicGateProjection(input LogicGateProjectionDeleteInput) error
 	CreateLogicGateEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
 	ListLogicGateEditorSaveVersions(companyID, logicGateID string) ([]domain.EditorSaveVersion, error)
 	RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
@@ -2095,6 +2104,7 @@ type NodeInformationInput struct {
 	SaveBatchID         string
 	SaveKind            string
 	SourceInformationID string
+	ExpectedRevision    *int64
 }
 
 type LogicGateProjectionInput struct {
@@ -2105,6 +2115,7 @@ type LogicGateProjectionInput struct {
 	InformationID    string
 	ActorUserID      string
 	ActorDisplayName string
+	ExpectedRevision *int64
 }
 
 type EditorSaveVersionInput struct {
@@ -2129,6 +2140,14 @@ type NodeProjectionDeleteInput struct {
 	InformationID    string
 	ActorUserID      string
 	ActorDisplayName string
+	ExpectedRevision *int64
+}
+
+type LogicGateProjectionDeleteInput struct {
+	CompanyID        string
+	LogicGateID      string
+	InformationID    string
+	ExpectedRevision *int64
 }
 
 type NodeContentChangeListInput struct {

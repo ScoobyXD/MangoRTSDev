@@ -49,6 +49,18 @@ import {
   type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "./editorProjection";
+import { EditorSyncBlockingModal } from "./EditorSyncBlockingModal";
+import {
+  clearEditorProjectionDraft,
+  editorSyncBlockReason,
+  getEditorProjectionDraftTabID,
+  listEditorProjectionDrafts,
+  parseEditorProjectionConflict,
+  retainEditorProjectionDraft,
+  runEditorWriteWithBoundedRetry,
+  type EditorProjectionDraftScope,
+  type EditorSyncBlock,
+} from "./editorProjectionSync";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
 import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
@@ -365,6 +377,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRegisterSaveController,
   onError,
 }) => {
+  const editorProjectionDraftTabID = useMemo(() => getEditorProjectionDraftTabID(typeof window === "undefined" ? null : window.sessionStorage), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
@@ -428,7 +441,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [assigningProjectID, setAssigningProjectID] = useState("");
   const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
   const [projectAssignStatus, setProjectAssignStatus] = useState("");
-  const formattingControllerAvailable = canEdit && blocks.some((block) => block.id === focusedTextBlockID);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     if (update.companyID !== companyID || update.entityType !== "logic_gate") return;
     const resourceID = update.resourceID.trim();
@@ -440,15 +452,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setProjectLogicGateOptions((current) => reconcileCommittedLogicGateRecordTitles(current, update));
   }), [companyID, lastAssignedLogicGateID]);
 
+  const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
+  const [dropActive, setDropActive] = useState(false);
+  const [author, setAuthor] = useState({ userID: "", name: "You" });
+  const [syncBlock, setSyncBlock] = useState<EditorSyncBlock | null>(null);
+  const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID) && syncBlock === null;
+  const formattingControllerAvailable = editorTextCanEdit && blocks.some((block) => block.id === focusedTextBlockID);
   useEffect(() => {
     onFormattingControllerAvailabilityChange?.(formattingControllerAvailable);
   }, [formattingControllerAvailable, onFormattingControllerAvailabilityChange]);
   useEffect(() => () => {
     onFormattingControllerAvailabilityChange?.(false);
   }, [onFormattingControllerAvailabilityChange]);
-  const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
-  const [dropActive, setDropActive] = useState(false);
-  const [author, setAuthor] = useState({ userID: "", name: "You" });
+  useEffect(() => {
+    setSyncBlock(null);
+  }, [companyID, nodeID]);
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
   const textBlockProjectionSaveController = useMemo(
@@ -886,8 +904,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
 
   useEffect(() => {
+    const draftEntityScope = { userID: author.userID, companyID, entityKind: "node" as const, entityID: nodeID, tabID: editorProjectionDraftTabID };
+    const retainedDrafts = author.userID ? listEditorProjectionDrafts(window.localStorage, draftEntityScope) : [];
+    const draftByInformationID = new Map(retainedDrafts.map((entry) => [entry.informationID, entry.draft]));
+    const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
     const textBlocks = loadedTextBlockProjections.map((item) => {
-      const content = parseEditorTextBlockContent(item.information);
+      const retained = draftByInformationID.get(item.information_id);
+      const content = parseEditorTextBlockContent(retained?.text ?? item.information);
       return {
         id: item.information_id,
         title: content.title,
@@ -898,6 +921,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         pending: false,
       };
     });
+    for (const retained of retainedDrafts) {
+      if (serverRevisionByInformationID.has(retained.informationID)) continue;
+      const content = parseEditorTextBlockContent(retained.draft.text);
+      textBlocks.push({
+        id: retained.informationID,
+        title: content.title,
+        document: content.document,
+        attachments: content.attachments ?? [],
+        createdTimestamp: retained.draft.updatedAt,
+        updatedTimestamp: retained.draft.updatedAt,
+        pending: false,
+      });
+    }
     const parsedAttachedEmails = parseEditorAttachedEmails(projections);
     const parsedChatMessages = parseEditorTextBlockChats(projections);
     if (textBlockProjectionSaveController.hasAnyChangedOrSaveInProgress()) {
@@ -910,7 +946,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     textBlockProjectionSaveController.replaceBlocksAsHasNotChanged(textBlocks.map((block) => ({
       blockID: block.id,
       content: { title: block.title, document: block.document, attachments: block.attachments },
+      revision: draftByInformationID.get(block.id)?.baseRevision ?? serverRevisionByInformationID.get(block.id) ?? 0,
     })));
+    for (const retained of retainedDrafts) {
+      const block = textBlocks.find((candidate) => candidate.id === retained.informationID);
+      if (block) textBlockProjectionSaveController.markHasChanged(block.id, { title: block.title, document: block.document, attachments: block.attachments });
+    }
+    if (retainedDrafts.length > 0 && !syncBlock) {
+      const restored = retainedDrafts[retainedDrafts.length - 1];
+      setSyncBlock({
+        reason: "draft_restored",
+        target: { ...draftEntityScope, informationID: restored.informationID },
+        localText: restored.draft.text,
+        current: null,
+        message: "An unsynced draft was restored after refresh. Review it, then retry the save deliberately.",
+      });
+    }
     setChatMessages(parsedChatMessages);
     setAttachedEmails(parsedAttachedEmails);
     const nodeChanged = previousNodeIDRef.current !== nodeID;
@@ -956,7 +1007,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (nodeChanged || current === null) return textBlocks[0]?.id ?? "";
       return blockIDs.has(current) ? current : "";
     });
-  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
+  }, [author.userID, companyID, editorProjectionDraftTabID, loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1037,8 +1088,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (logicGateAssignFlashTimerRef.current !== null) window.clearTimeout(logicGateAssignFlashTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
-    void textBlockProjectionSaveController.flushChangedBlocks()
-      .finally(() => textBlockProjectionSaveController.clear());
+    void textBlockProjectionSaveController.flushChangedBlocks().catch(() => undefined);
   }, [textBlockProjectionSaveController]);
 
   useEffect(() => {
@@ -1056,24 +1106,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks.length, canEdit]);
 
-  const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent) => {
-    if (!canEdit || !nodeID || !companyID) throw new Error("failed_to_save_text_block");
+  const textBlockDraftScope = useCallback((blockID: string): EditorProjectionDraftScope => ({
+    userID: author.userID, companyID, entityKind: "node", entityID: nodeID, tabID: editorProjectionDraftTabID, informationID: blockID,
+  }), [author.userID, companyID, editorProjectionDraftTabID, nodeID]);
+
+  const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
+    if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block");
     const information = buildEditorTextBlockContentPayload(content);
-    if (information.trim()) {
-      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection`, {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          type: EDITOR_TEXT_BLOCK_TYPE,
-          information,
-          information_id: blockID,
-        }),
-      });
-    } else {
-      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${blockID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-    }
+    const response = await runEditorWriteWithBoundedRetry(() => requestJSON<{ revision?: number }>(`/v1/nodes/${nodeID}/projection`, {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        type: EDITOR_TEXT_BLOCK_TYPE,
+        information,
+        information_id: blockID,
+        expected_revision: baseRevision,
+      }),
+    }));
+    if (!Number.isInteger(response?.revision) || (response.revision ?? 0) <= baseRevision) throw new Error("invalid_projection_revision_ack");
     onProjectionMutation();
-  }, [canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+    return { revision: response.revision as number };
+  }, [author.userID, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
 
   const setTextBlockSaveInProgress = useCallback((blockID: string, saveInProgress: boolean) => {
     setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: saveInProgress } : block));
@@ -1081,13 +1134,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     textBlockProjectionSaveController.configure({
-      saveBlock: ({ blockID, content }) => saveTextBlockProjection(blockID, content),
+      saveBlock: ({ blockID, content, baseRevision }) => saveTextBlockProjection(blockID, content, baseRevision),
       onBlockSaveInProgressChange: setTextBlockSaveInProgress,
-      onSaveError: (_blockID, cause) => {
+      onSaveAcknowledged: (blockID, _content, revision, fullySaved) => {
+        const scope = textBlockDraftScope(blockID);
+        const latest = textBlockProjectionSaveController.getSnapshot(blockID);
+        if (fullySaved) clearEditorProjectionDraft(window.localStorage, scope);
+        else if (latest) retainEditorProjectionDraft(window.localStorage, scope, {
+          text: buildEditorTextBlockContentPayload(latest.latestContent), baseRevision: revision, updatedAt: new Date().toISOString(),
+        });
+        setSyncBlock((current) => current?.target.informationID === blockID ? null : current);
+      },
+      onSaveError: (blockID, cause) => {
+        const latest = textBlockProjectionSaveController.getSnapshot(blockID);
+        const conflict = parseEditorProjectionConflict(cause);
+        setSyncBlock({
+          reason: editorSyncBlockReason(cause),
+          target: textBlockDraftScope(blockID),
+          localText: latest ? buildEditorTextBlockContentPayload(latest.latestContent) : "",
+          current: conflict?.current ?? null,
+          message: conflict ? "Another tab saved a newer version of this text box. Choose which full document to keep." : "Mango could not confirm this text-box write. Editing is blocked until the retained draft is resolved.",
+        });
         onError(cause instanceof Error ? cause.message : "failed_to_save_text_block");
       },
     });
-  }, [onError, saveTextBlockProjection, setTextBlockSaveInProgress, textBlockProjectionSaveController]);
+  }, [onError, saveTextBlockProjection, setTextBlockSaveInProgress, textBlockDraftScope, textBlockProjectionSaveController]);
 
   const flushAllTextBlockProjectionSaves = useCallback(async () => {
     if (!canEdit) return;
@@ -1113,9 +1184,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [canEdit, textBlockProjectionSaveController]);
 
   const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
-    if (!canEdit) return;
+    if (!editorTextCanEdit) return;
     contentByBlockRef.current.set(blockID, content);
     textBlockProjectionSaveController.markHasChanged(blockID, content);
+    const baseRevision = textBlockProjectionSaveController.getSnapshot(blockID)?.baseRevision ?? 0;
+    retainEditorProjectionDraft(window.localStorage, textBlockDraftScope(blockID), {
+      text: buildEditorTextBlockContentPayload(content), baseRevision, updatedAt: new Date().toISOString(),
+    });
     const existingTimer = saveTimersRef.current.get(blockID);
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
     const timer = window.setTimeout(() => {
@@ -1123,14 +1198,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       textBlockProjectionSaveController.startLatestContentSave(blockID);
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
-  }, [canEdit, textBlockProjectionSaveController]);
+  }, [editorTextCanEdit, textBlockDraftScope, textBlockProjectionSaveController]);
 
   const createTextBlock = useCallback(() => {
-    if (!canEdit) return;
+    if (!editorTextCanEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "", attachments: [] };
     focusBlockIDRef.current = blockID;
+    retainEditorProjectionDraft(window.localStorage, textBlockDraftScope(blockID), {
+      text: buildEditorTextBlockContentPayload(initialContent), baseRevision: 0, updatedAt: now,
+    });
     contentByBlockRef.current.set(blockID, initialContent);
     textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
     setBlocks((current) => [
@@ -1146,7 +1224,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ...current,
     ]);
     textBlockProjectionSaveController.startLatestContentSave(blockID);
-  }, [canEdit, textBlockProjectionSaveController]);
+  }, [editorTextCanEdit, textBlockDraftScope, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
@@ -1293,16 +1371,46 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [onError, uploadNodeAttachmentItem]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
-    if (!canEdit) return;
-    if (!nodeID || !companyID) return;
+    if (!canEdit || !nodeID || !companyID) return;
     const timer = saveTimersRef.current.get(blockID);
     if (timer !== undefined) {
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
-    await textBlockProjectionSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
+    let snapshot;
+    try {
+      snapshot = await textBlockProjectionSaveController.waitForInProgressSave(blockID);
+    } catch {
+      return;
+    }
+    if (!snapshot) return;
     // Attached-email projections and resource attachment links are node-owned and intentionally retained.
     const deletedInformationIDs = projectionIDsForTextBlockDeletion(blockID, chatMessages);
+    try {
+      for (const informationID of deletedInformationIDs) {
+        if (informationID === blockID && snapshot.baseRevision === 0) continue;
+        const expectedRevision = informationID === blockID ? `&expected_revision=${snapshot.baseRevision}` : "";
+        try {
+          await runEditorWriteWithBoundedRetry(() => requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}${expectedRevision}`, { method: "DELETE" }));
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : "";
+          if (!message.includes("node_projection_not_found")) throw cause;
+        }
+      }
+    } catch (cause) {
+      const conflict = parseEditorProjectionConflict(cause);
+      setSyncBlock({
+        reason: editorSyncBlockReason(cause),
+        target: textBlockDraftScope(blockID),
+        localText: buildEditorTextBlockContentPayload(snapshot.latestContent),
+        current: conflict?.current ?? null,
+        message: conflict ? "Another tab changed this text box before it could be deleted." : "Mango could not confirm this delete. The text box and its retained draft remain in place.",
+      });
+      onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
+      return;
+    }
+    clearEditorProjectionDraft(window.localStorage, textBlockDraftScope(blockID));
+    textBlockProjectionSaveController.removeBlock(blockID);
     contentByBlockRef.current.delete(blockID);
     setBlocks((current) => current.filter((block) => block.id !== blockID));
     setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
@@ -1362,22 +1470,53 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     setActiveChatBlockID((current) => current === blockID ? "" : current);
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
+    onProjectionMutation();
+  }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON, textBlockDraftScope, textBlockProjectionSaveController]);
 
-    try {
-      for (const informationID of deletedInformationIDs) {
-        try {
-          await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : "";
-          if (!message.includes("node_projection_not_found")) throw cause;
-        }
-      }
-      onProjectionMutation();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
-      onProjectionMutation();
+  const retryBlockedTextBlockSave = useCallback(() => {
+    const blockID = syncBlock?.target.informationID ?? "";
+    if (!blockID) return;
+    setSyncBlock(null);
+    textBlockProjectionSaveController.startLatestContentSave(blockID);
+  }, [syncBlock, textBlockProjectionSaveController]);
+
+  const useServerTextBlockVersion = useCallback(() => {
+    if (!syncBlock?.current) return;
+    const blockID = syncBlock.target.informationID;
+    if (syncBlock.current.is_deleted) {
+      contentByBlockRef.current.delete(blockID);
+      setBlocks((current) => current.filter((block) => block.id !== blockID));
+      textBlockProjectionSaveController.removeBlock(blockID);
+      clearEditorProjectionDraft(window.localStorage, syncBlock.target);
+      setSyncBlock(null);
+      return;
     }
-  }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
+    const content = parseEditorTextBlockContent(syncBlock.current.information);
+    const revision = syncBlock.current.revision ?? 1;
+    contentByBlockRef.current.set(blockID, content);
+    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, title: content.title, document: content.document, attachments: content.attachments ?? [], pending: false } : block));
+    textBlockProjectionSaveController.replaceBlockAsHasNotChanged({ blockID, content, revision });
+    clearEditorProjectionDraft(window.localStorage, syncBlock.target);
+    setSyncBlock(null);
+  }, [syncBlock, textBlockProjectionSaveController]);
+
+  const keepLocalTextBlockAgainstLatest = useCallback(async () => {
+    if (!syncBlock) return;
+    const blockID = syncBlock.target.informationID;
+    try {
+      const payload = await requestJSON<{ items?: Array<{ information_id: string; type: string; revision?: number }> }>(`/v1/nodes/${nodeID}/projection?company_id=${encodeURIComponent(companyID)}`);
+      const current = (payload.items ?? []).find((item) => item.information_id === blockID && item.type === EDITOR_TEXT_BLOCK_TYPE);
+      const latestRevision = current?.revision ?? 0;
+      const snapshot = textBlockProjectionSaveController.getSnapshot(blockID);
+      if (!snapshot) return;
+      textBlockProjectionSaveController.adoptLatestRevision(blockID, latestRevision);
+      retainEditorProjectionDraft(window.localStorage, syncBlock.target, { text: buildEditorTextBlockContentPayload(snapshot.latestContent), baseRevision: latestRevision, updatedAt: new Date().toISOString() });
+      setSyncBlock(null);
+      textBlockProjectionSaveController.startLatestContentSave(blockID);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_refresh_text_block_revision");
+    }
+  }, [companyID, nodeID, onError, requestJSON, syncBlock, textBlockProjectionSaveController]);
 
   const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
     if (!canEdit) return;
@@ -2902,7 +3041,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   </div>
                   <NodeTextBlockEditor
                     blockID={block.id}
-                    editable={canEdit}
+                    editable={editorTextCanEdit}
                     nodeID={nodeID}
                     apiBase={apiBase}
                     companyID={companyID}
@@ -3097,6 +3236,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           onCancel={() => setDeleteTextBlockConfirmation(null)}
         />
       )}
+      <EditorSyncBlockingModal
+        block={syncBlock}
+        accent={accent}
+        onRetry={retryBlockedTextBlockSave}
+        onUseServer={useServerTextBlockVersion}
+        onKeepLocalAgainstLatest={() => { void keepLocalTextBlockAgainstLatest(); }}
+      />
     </div>
   );
 };

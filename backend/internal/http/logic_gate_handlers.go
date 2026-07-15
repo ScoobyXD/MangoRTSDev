@@ -237,10 +237,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method == http.MethodPost {
 			var req struct {
-				CompanyID     string `json:"company_id"`
-				Type          string `json:"type"`
-				Information   string `json:"information"`
-				InformationID string `json:"information_id"`
+				CompanyID        string `json:"company_id"`
+				Type             string `json:"type"`
+				Information      string `json:"information"`
+				InformationID    string `json:"information_id"`
+				ExpectedRevision *int64 `json:"expected_revision"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
@@ -273,7 +274,17 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				InformationID:    req.InformationID,
 				ActorUserID:      actorUserID,
 				ActorDisplayName: actorLabel,
+				ExpectedRevision: req.ExpectedRevision,
 			})
+			var revisionConflict *store.ProjectionRevisionConflictError
+			if errors.As(err, &revisionConflict) {
+				writeProjectionRevisionConflict(w, revisionConflict)
+				return
+			}
+			if errors.Is(err, store.ErrProjectionRevisionRequired) {
+				writeError(w, http.StatusBadRequest, "expected_revision_required")
+				return
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")
 				return
@@ -487,13 +498,26 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "information_id_required")
 			return
 		}
+		expectedRevision, revisionErr := parseOptionalExpectedRevision(r)
+		if revisionErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_expected_revision")
+			return
+		}
 		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		// Same contract as nodes: clear the latest value without manufacturing
 		// blank history rows on high-volume UI or agent writes.
-		if err := s.repo.DeleteLogicGateProjection(companyID, logicGateID, informationID); errors.Is(err, store.ErrNotFound) {
+		if err := s.repo.DeleteLogicGateProjection(store.LogicGateProjectionDeleteInput{
+			CompanyID: companyID, LogicGateID: logicGateID, InformationID: informationID, ExpectedRevision: expectedRevision,
+		}); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		} else if revisionConflict := (*store.ProjectionRevisionConflictError)(nil); errors.As(err, &revisionConflict) {
+			writeProjectionRevisionConflict(w, revisionConflict)
+			return
+		} else if errors.Is(err, store.ErrProjectionRevisionRequired) {
+			writeError(w, http.StatusBadRequest, "expected_revision_required")
 			return
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate_projection")

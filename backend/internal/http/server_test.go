@@ -625,7 +625,7 @@ func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T)
 		t.Fatalf("POST node information status = %d, want %d body=%s", postRec.Code, http.StatusCreated, postRec.Body.String())
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+stableProjectionID+"?company_id="+companyID, nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+stableProjectionID+"?company_id="+companyID+"&expected_revision=1", nil)
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {

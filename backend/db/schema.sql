@@ -868,9 +868,12 @@ create table if not exists node_projection_table (
   information_id uuid not null,
   type information_type not null,
   information text not null,
+  is_deleted boolean not null default false,
+  revision bigint not null default 1,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint node_projection_table_nonblank_chk check (btrim(information) <> ''),
+  constraint node_projection_table_revision_chk check (revision > 0),
   primary key (company_id, node_id, information_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
@@ -1492,9 +1495,12 @@ create table if not exists logic_gate_projection_table (
   information_id uuid not null,
   type information_type not null,
   information text not null,
+  is_deleted boolean not null default false,
+  revision bigint not null default 1,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint logic_gate_projection_table_nonblank_chk check (btrim(information) <> ''),
+  constraint logic_gate_projection_table_revision_chk check (revision > 0),
   primary key (company_id, logic_gate_id, information_id),
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );

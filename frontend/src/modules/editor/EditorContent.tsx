@@ -34,6 +34,7 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
+  buildNewEditorTextBlockProjectionPayload,
   buildEditorTextBlockContentPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
@@ -94,6 +95,16 @@ import {
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { EditorSyncBlockingModal } from "./EditorSyncBlockingModal";
+import {
+  clearEditorProjectionDraft,
+  getEditorProjectionDraftTabID,
+  listEditorProjectionDrafts,
+  readEditorProjectionDraft,
+  retainEditorProjectionDraft,
+  type EditorSyncBlock,
+} from "./editorProjectionSync";
+import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
@@ -583,7 +594,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
-  const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(true);
+  const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(false);
   const [linkedEntityCanAdmin, setLinkedEntityCanAdmin] = useState(true);
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
@@ -614,6 +625,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const [saveVersions, setSaveVersions] = useState<EditorSaveVersion[]>([]);
   const [saveVersionsLoading, setSaveVersionsLoading] = useState(false);
+  const [currentUserID, setCurrentUserID] = useState("");
+  const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
+  const [syncBlock, setSyncBlock] = useState<EditorSyncBlock | null>(null);
+  const editorProjectionDraftTabID = useMemo(() => getEditorProjectionDraftTabID(typeof window === "undefined" ? null : window.sessionStorage), []);
   const [selectedSaveVersionID, setSelectedSaveVersionID] = useState("");
   const [saveVersionIntervalMinutes, setSaveVersionIntervalMinutes] = useState(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
   const [saveVersionsSortAscending, setSaveVersionsSortAscending] = useState(false);
@@ -647,6 +662,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const documentInformationIDRef = useRef("");
+  const documentRevisionRef = useRef(0);
   const currentDocumentTargetKeyRef = useRef("");
   const persistedDocumentTargetKeyRef = useRef("");
   const saveTimerRef = useRef<number | null>(null);
@@ -682,12 +698,28 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
   const linkedEntityAccessDenied = linkedEntityAccessDeniedMessage.trim().length > 0;
   const hasLinkedDocument = linkedNodeID.trim().length > 0 && !linkedEntityAccessDenied;
+  const linkedEditorLoaded = linkedEntityKind === "node"
+    ? nodeWorkspaceLoadedNodeID === linkedNodeID : editorSnapshotLoadedScope === editorSnapshotScope("logic_gate", linkedNodeID);
+  const editorWriteEnabled = linkedEntityCanEdit && linkedEditorLoaded && currentUserLoaded && Boolean(currentUserID) && syncBlock === null;
   const { accounts: companyAccounts } = useCompanyAccounts(companyID, linkedEntityKind === "node" && hasLinkedDocument);
   const nodeAccountOptions = useMemo(() => mergeAccountLists(companyAccounts, nodeAccounts), [companyAccounts, nodeAccounts]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((payload) => { if (!cancelled) setCurrentUserID(payload.user.user_id); })
+      .catch(() => { if (!cancelled) setCurrentUserID(""); })
+      .finally(() => { if (!cancelled) setCurrentUserLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    setSyncBlock(null);
+  }, [companyID, linkedEntityKind, linkedNodeID]);
+
 
   useEffect(() => {
     nodeWorkspaceProjectionsRef.current = nodeWorkspaceProjections;
@@ -814,12 +846,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
   }, [apiBase, companyID]);
 
-  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow } = useEditorDocumentPersistence({
+  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow, discardFailedSave } = useEditorDocumentPersistence({
+    currentUserID,
     companyID,
+    draftTabID: editorProjectionDraftTabID,
     linkedEntityKind,
     linkedEntityID: linkedNodeID,
     documentDraftRef,
     persistedDocumentRef,
+    documentRevisionRef,
     documentInformationIDRef,
     currentDocumentTargetKeyRef,
     persistedDocumentTargetKeyRef,
@@ -829,6 +864,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     saveInFlightRef,
     setDocumentInformationID,
     setError,
+    onSyncBlocked: setSyncBlock,
     requestJSON,
     invalidateDocumentTargetCaches,
   });
@@ -965,19 +1001,33 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
-  const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string) => {
-    const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
+  const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string, revision: number) => {
+    const retainedDrafts = currentUserID ? listEditorProjectionDrafts(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID }) : [];
+    const restoredEntry = informationID ? retainedDrafts.find((entry) => entry.informationID === informationID) : retainedDrafts[retainedDrafts.length - 1];
+    const resolvedInformationID = informationID || restoredEntry?.informationID || "";
+    const targetKey = resolvedInformationID ? documentTargetKey({ entityKind, entityID, informationID: resolvedInformationID }) : `${entityKind}:${entityID}:`;
+    const retained = restoredEntry?.draft ?? (resolvedInformationID ? readEditorProjectionDraft(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID }) : null);
+    const loadedText = retained?.text ?? text;
+    const baseRevision = retained?.baseRevision ?? (Number.isInteger(revision) && revision >= 0 ? revision : 0);
     const element = editorDocumentRef.current;
     const preserveSelection = currentDocumentTargetKeyRef.current === targetKey;
     if (element && preserveSelection) restoreDocumentSelectionForHydrationRef.current?.(element);
     const selectionOffsets = element && preserveSelection ? getEditorSelectionOffsets(element) : null;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
-    documentDraftRef.current = text;
+    documentDraftRef.current = loadedText;
     persistedDocumentRef.current = text;
-    documentInformationIDRef.current = informationID;
-    setDocumentInformationID(informationID);
+    documentInformationIDRef.current = resolvedInformationID;
+    documentRevisionRef.current = baseRevision;
+    setDocumentInformationID(resolvedInformationID);
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
+    if (retained && resolvedInformationID) setSyncBlock({
+      reason: "draft_restored",
+      target: { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID },
+      localText: loadedText,
+      current: informationID ? { information_id: informationID, type: EDITOR_TEXT_BLOCK_TYPE, information: text, revision } : null,
+      message: "An unsynced draft was restored after refresh. Review it, then retry the save deliberately.",
+    });
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
     setSelectionHighlightColor(null);
@@ -989,7 +1039,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     restoringScrollRef.current = true;
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
     if (element) {
-      const nextHTML = deserializeEditorDocumentHTML(text);
+      const nextHTML = deserializeEditorDocumentHTML(loadedText);
       attachmentHydrationCleanupRef.current?.();
       attachmentHydrationCleanupRef.current = null;
       if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
@@ -1000,13 +1050,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       element.scrollTop = restoredScrollTop;
     }
     setDocumentScrollTop(restoredScrollTop);
-    scheduleIndentGuideUpdate(element ? readEditorDocumentText(element) : text);
+    scheduleIndentGuideUpdate(element ? readEditorDocumentText(element) : loadedText);
     restoreEditorDocumentScroll(targetKey);
-    window.requestAnimationFrame(() => {
-      restoringScrollRef.current = false;
-    });
+    window.requestAnimationFrame(() => { restoringScrollRef.current = false; });
     if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [apiBase, companyID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
+  }, [apiBase, companyID, currentUserID, editorProjectionDraftTabID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -1106,7 +1154,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const clearVisibleDocumentForSelection = useCallback(() => {
     setLinkedEntityAccessDeniedMessage("");
-    setLinkedEntityCanEdit(true);
+    setLinkedEntityCanEdit(false);
     setLinkedEntityCanAdmin(true);
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
@@ -1121,6 +1169,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     applyLogicGateGVICAssignments([], "");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
+    documentRevisionRef.current = 0;
     documentInformationIDRef.current = "";
     currentDocumentTargetKeyRef.current = "";
     persistedDocumentTargetKeyRef.current = "";
@@ -1382,12 +1431,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const informationID = generateStableInformationID();
     await requestJSON<unknown>(`/v1/nodes/${node.node_id}/projection`, {
       method: "POST",
-      body: JSON.stringify({
-        company_id: companyID,
-        type: EDITOR_TEXT_BLOCK_TYPE,
+      body: JSON.stringify(buildNewEditorTextBlockProjectionPayload({
+        companyID,
+        informationID,
         information: buildEditorTextBlockContentPayload({ title: blockTitle, document }),
-        information_id: informationID,
-      }),
+      })),
     });
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
@@ -1914,7 +1962,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         : undefined;
       const currentTextBox = activeTextBox ?? focusedTextBox ?? selectCurrentEditorTextProjection(projections);
       const localDocumentSaveActive = pendingSaveRef.current !== null || queuedSaveRef.current !== null || saveInFlightRef.current;
-      if (!localDocumentSaveActive) applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "");
+      if (!localDocumentSaveActive) applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
     } catch (cause) {
       if (!isCurrentTarget()) return;
       if (isTerminalResourceNotFoundError(cause)) {
@@ -2262,12 +2310,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => {
     let cancelled = false;
     editorSnapshotRefreshTokenRef.current += 1;
+    if (!currentUserLoaded) {
+      setLinkedEntityCanEdit(false);
+      return;
+    }
     const loadRefreshToken = editorSnapshotRefreshTokenRef.current;
     nodeContentChangesRefreshTokenRef.current += 1;
     const isCurrentLinkedLoad = () => !cancelled && editorSnapshotRefreshTokenRef.current === loadRefreshToken;
     if (!linkedNodeID) {
       setLinkedEntityAccessDeniedMessage("");
-      setLinkedEntityCanEdit(true);
+      setLinkedEntityCanEdit(false);
       setLinkedEntityCanAdmin(true);
       setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
@@ -2287,6 +2339,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeGVICAssignments([]);
       applyLogicGateGVICAssignments([], "");
       documentDraftRef.current = "";
+      documentRevisionRef.current = 0;
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
       currentDocumentTargetKeyRef.current = "";
@@ -2315,6 +2368,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeWorkspaceLoadedNodeID("");
     setLogicGateWorkspaceProjections([]);
     setEditorSnapshotLoadedScope("");
+    setLinkedEntityCanEdit(false);
+    setLinkedEntityCanAdmin(false);
     setNodeContentChanges([]);
     setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
@@ -2374,7 +2429,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             : undefined;
           const currentTextBox = focusedTextBox ?? selectCurrentEditorTextProjection(projections);
           const initialDocument = currentTextBox?.information ?? "";
-          applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
+          applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument, currentTextBox?.revision ?? 0);
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
@@ -2452,7 +2507,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2467,6 +2522,43 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
+  const retryBlockedDocumentSave = useCallback(() => {
+    if (!syncBlock) return;
+    const localText = syncBlock.localText;
+    discardFailedSave();
+    setSyncBlock(null);
+    void saveDocumentNow(localText).catch(() => undefined);
+  }, [discardFailedSave, saveDocumentNow, syncBlock]);
+
+  const useServerDocumentVersion = useCallback(() => {
+    if (!syncBlock?.current) return;
+    const current = syncBlock.current;
+    discardFailedSave();
+    clearEditorProjectionDraft(window.localStorage, syncBlock.target);
+    setSyncBlock(null);
+    applyLoadedDocument(syncBlock.target.entityKind, syncBlock.target.entityID, current.information_id, current.is_deleted ? "" : current.information, current.revision ?? 1);
+  }, [applyLoadedDocument, discardFailedSave, syncBlock]);
+
+  const keepLocalDocumentAgainstLatest = useCallback(async () => {
+    if (!syncBlock) return;
+    const target = syncBlock.target;
+    const path = target.entityKind === "logic_gate"
+      ? `/v1/logic-gates/${target.entityID}/projection?company_id=${encodeURIComponent(companyID)}`
+      : `/v1/nodes/${target.entityID}/projection?company_id=${encodeURIComponent(companyID)}`;
+    try {
+      const payload = await requestJSON<{ items?: Array<{ information_id: string; type: string; revision?: number }> }>(path);
+      const current = (payload.items ?? []).find((item) => item.information_id === target.informationID && item.type === EDITOR_TEXT_BLOCK_TYPE);
+      const latestRevision = current?.revision ?? 0;
+      documentRevisionRef.current = latestRevision;
+      retainEditorProjectionDraft(window.localStorage, target, { text: syncBlock.localText, baseRevision: latestRevision, updatedAt: new Date().toISOString() });
+      discardFailedSave();
+      setSyncBlock(null);
+      void saveDocumentNow(syncBlock.localText).catch(() => undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed_to_refresh_document_revision");
+    }
+  }, [companyID, discardFailedSave, requestJSON, saveDocumentNow, syncBlock]);
+
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions" || activeTab === "save-settings";
@@ -2523,7 +2615,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   restoreDocumentSelectionForHydrationRef.current = restoreDocumentSelection;
   const logicFormattingController = useEditorDocumentFormattingController({
     editorRef: editorDocumentRef,
-    editable: linkedEntityCanEdit && linkedEntityKind !== "node",
+    editable: editorWriteEnabled && linkedEntityKind !== "node",
     outlineStyle,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef,
@@ -2791,7 +2883,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             restoring={saveVersionRestoring}
             sortAscending={saveVersionsSortAscending}
             status={saveVersionStatus}
-            canEdit={linkedEntityCanEdit}
+            canEdit={editorWriteEnabled}
             accent={accent}
             surfaceText={surfaceText}
             panelBackground={panelBackground}
@@ -2857,7 +2949,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             documentRef={editorDocumentRef}
             surfaceID="logic-gate-editor"
             documentIsolation={documentIsolation}
-            editable={linkedEntityCanEdit}
+            editable={editorWriteEnabled}
             documentTopPx={documentTopPx}
             documentFontSize={documentFontSize}
             documentLineHeightPx={documentLineHeightPx}
@@ -2886,6 +2978,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           </div>
         )}
         {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
+        <EditorSyncBlockingModal
+          block={syncBlock}
+          accent={accent}
+          onRetry={retryBlockedDocumentSave}
+          onUseServer={useServerDocumentVersion}
+          onKeepLocalAgainstLatest={() => { void keepLocalDocumentAgainstLatest(); }}
+        />
       </div>
     </div>
   );

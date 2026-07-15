@@ -64,6 +64,7 @@ RW52 - Publication-time entity existence and audience resolution are deadline-bo
 RW53 - Backend folder, message-page, and message-detail singleflight keeps one shared provider leader per exact generation while every joined waiter observes its own context. Canceling a joined waiter returns promptly without canceling or duplicating the leader; the waiter releases its generation admission, the leader retains its own admission until completion, and only the still-current generation may cache the result.
 RW54 - Mailbox work uses separate ownership domains. Message-list/detail work may include mailbox tab, search, unread-only state, and selection generation; folder metadata uses only company plus exact mailbox scope; a queued provider mark-read is captured mutation intent rather than disposable list-refresh work. Navigation may detach stale UI results but cannot silently drop the mark-read command or let a prior scope overwrite the destination.
 RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
+RW56 - The first release that enforces Node and Logic Gate projection revisions is a coordinated migration and client rollout. The revision schema migration is applied before the matching backend/frontend release, users are given an explicit maintenance/reload boundary for pre-revision tabs, and revisionless full-document writes remain rejected rather than silently restoring last-write-wins compatibility.
 
 ## Scenarios
 
@@ -75,6 +76,7 @@ Business logic covered:
 - RW3
 - RW4
 - RW10
+- RW56
 
 Given:
 - A user edits a node or logic gate editor document.
@@ -85,6 +87,7 @@ Expected:
 - The backend commits the editor projection before the live save is treated as confirmed.
 - No editor/document or collaboration WebSocket message is sent.
 - Another user sees the durable value after reopening or revalidating the editor.
+- For the first revision-enforcing rollout, the schema is migrated before the coordinated app release and pre-revision browser tabs are required to reload; the backend does not accept revisionless full-document writes.
 
 ### Scenario RW-S1B: Editor Saved Versions Use Explicit HTTP Version Routes
 

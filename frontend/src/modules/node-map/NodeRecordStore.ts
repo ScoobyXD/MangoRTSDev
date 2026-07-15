@@ -17,6 +17,7 @@ export type NodeProjectionItem = {
   information_id: string;
   type: string;
   information: string;
+  revision?: number;
   created_timestamp: string;
   updated_timestamp: string;
 };

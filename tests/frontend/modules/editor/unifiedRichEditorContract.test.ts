@@ -393,7 +393,7 @@ test("the active node or project text block keeps its formatting controller curr
   const workspaceAvailability = sourceSliceBetween(
     nodeWorkspaceSurface,
     "const [focusedTextBlockID",
-    "const [projectAssignerDropdownLeft",
+    "const projectionIdentity",
     "node formatting-controller availability",
   );
   const workspaceTextBlock = jsxOpeningTagContaining(
@@ -411,7 +411,7 @@ test("the active node or project text block keeps its formatting controller curr
   assert.match(handoff, /const previousController = publishedFormattingControllerRef\.current/);
   assert.match(handoff, /formattingControllerWasActivatedRef\.current && formattingControllerRef\?\.current === previousController/);
   assert.match(activeEditorSurface, /onFocus=\{\(\) => \{\s*activateFormattingController\(\)/);
-  assert.match(workspaceAvailability, /const formattingControllerAvailable = canEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
+  assert.match(workspaceAvailability, /const formattingControllerAvailable = editorTextCanEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
   assert.match(workspaceAvailability, /onFormattingControllerAvailabilityChange\?\.\(formattingControllerAvailable\)/);
   assert.match(nodeWorkspaceSurface, /const \[focusedTextBlockID, setFocusedTextBlockID\] = useState<string \| null>\(null\)/);
   assert.match(nodeWorkspaceSurface, /setFocusedTextBlockID\(\(current\) => \{\s*if \(nodeChanged \|\| current === null\) return textBlocks\[0\]\?\.id \?\? "";\s*return blockIDs\.has\(current\) \? current : "";\s*\}\)/);
@@ -426,7 +426,7 @@ test("the active node or project text block keeps its formatting controller curr
   assert.doesNotMatch(workspaceTextBlock, /onBlur=[\s\S]*setFocusedTextBlockID\(""\)/);
 });
 
-test("external hydration preserves logical selection and node teardown drains local edits", () => {
+test("external hydration preserves logical selection and node teardown retains failed local edits", () => {
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
@@ -442,7 +442,8 @@ test("external hydration preserves logical selection and node teardown drains lo
   assert.match(editorContent, /setEditorSelectionByOffsets\(element, selectionOffsets\.start, selectionOffsets\.end\)/);
 
   assert.match(nodeWorkspace, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\),\s*\[companyID, nodeID\]/);
-  assert.match(nodeWorkspace, /textBlockProjectionSaveController\.flushChangedBlocks\(\)\s*\.finally\(\(\) => textBlockProjectionSaveController\.clear\(\)\)/);
+  assert.match(nodeWorkspace, /textBlockProjectionSaveController\.flushChangedBlocks\(\)\.catch\(\(\) => undefined\)/);
+  assert.doesNotMatch(nodeWorkspace, /flushChangedBlocks\(\)[\s\S]{0,120}textBlockProjectionSaveController\.clear\(\)/);
   assert.match(nodeWorkspaceParts, /nextHeight < TEXT_BLOCK_MIN_HEIGHT/);
 });
 
