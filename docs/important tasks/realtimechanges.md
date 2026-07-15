@@ -31,6 +31,37 @@ Before implementation is considered complete, reconcile this charter with the cu
 
 Current rules such as RW10, ED44, N107-N111, LG46-LG49, and the editor coverage note that cross-user document freshness is navigation/reopen-only describe the pre-collaboration system. They must be deliberately replaced or narrowed during implementation rather than left contradicting the new behavior.
 
+### Mandatory deletion of the legacy editor save/sync patch
+
+The unified realtime collaboration model is a complete replacement for Mango's current full-document draft/checkpoint and end-user conflict workflow. It must not be layered on top of that workflow, preserve it as a fallback, or leave it available on migrated editor surfaces.
+
+Implementation must explicitly find and delete all of the following legacy behavior:
+
+- full-document browser checkpoints and retained full-body draft records;
+- the `draft_restored` blocking state and every rule that treats checkpoint existence by itself as proof of unsaved work;
+- per-tab full-body draft isolation, including the current `mango-editor-projection-draft-v2` local-storage records and `mango-editor-projection-tab-v1` session identity used only by that system;
+- the current whole-document optimistic-revision conflict path presented to end users;
+- `EditorSyncBlockingModal` and equivalent whole-document conflict or restored-draft blocking UI;
+- the `Use server version`, `Use server deletion`, `Keep local draft and recheck`, `Retry save`, and `Retry after signing in` workflows when they operate on the old full-body draft model;
+- full-body retain/read/list/clear helpers and save-queue integration that exist only to support the legacy checkpoint workflow;
+- frontend and backend compatibility branches that allow a migrated editor to fall back to the old whole-document save/conflict behavior;
+- automated tests whose expected result is the legacy checkpoint, `draft_restored`, per-tab full-body isolation, or end-user version-choice workflow; and
+- source-of-truth rules, historical requirements presented as current behavior, and user-facing copy that instruct users or agents to preserve those legacy mechanics.
+
+The current implementation areas that must be audited during removal include `frontend/src/modules/editor/editorProjectionSync.ts`, `useEditorDocumentPersistence.ts`, `EditorSyncBlockingModal.tsx`, `EditorContent.tsx`, `NodeWorkspaceSurface.tsx`, the existing editor projection save controllers, the current whole-document revision-conflict HTTP/storage path, and their tests and owner documents. This is an inventory to delete or replace, not an instruction to retain their architecture.
+
+Legacy browser-storage records must receive an explicit one-time cleanup at cutover. The new editor must never hydrate them, turn them into a warning, or interpret their existence as pending work. The legacy keys and their tab-session key must be removed so an old checkpoint cannot resurrect the obsolete modal after deployment.
+
+Any valid product responsibility formerly attempted by this patch must be reimplemented solely through the new model:
+
+- unacknowledged work is represented by durable structured pending operations with stable operation IDs, not retained full-document bodies;
+- concurrent work is integrated by the collaboration engine and committed in server order, not rejected into a user-facing whole-document choice;
+- reconnect recovery loads a canonical full snapshot and automatically reapplies pending operations;
+- saved state comes only from backend commit acknowledgement; and
+- application-wide mutation blocking comes only from the central connection-health state machine and global modal layer.
+
+Cutover must be atomic per editor surface. A migrated Node, Logic Gate, Project, or text-box editor has exactly one mutation, acknowledgement, realtime delivery, pending-work, snapshot recovery, and connection-gating path: the new unified model. Do not dual-write, dual-read, shadow-save, retain a hidden compatibility fallback, or keep the legacy modal "just in case." The migration is incomplete while any migrated editor can execute the old behavior.
+
 ## Executive Decision
 
 Mango will have one cohesive realtime architecture spine:
@@ -717,6 +748,7 @@ This is one architecture program that may be implemented in ordered phases. Phas
 
 - Update the relevant `docs/tests/*.md` rules and scenarios alongside the first implementation work.
 - Explicitly replace the old no-coediting and user-merge-conflict expectations.
+- Inventory every legacy checkpoint, `draft_restored`, per-tab full-body draft, conflict-modal, compatibility, test, and documentation path listed in the mandatory-deletion section; assign each one to deletion during the owning surface's cutover.
 - Preserve the narrow retained-scope philosophy.
 
 ### Phase 1: Shared committed-event backbone
@@ -750,7 +782,8 @@ This is one architecture program that may be implemented in ordered phases. Phas
 - Migrate the Logic Gate root/editor document and any independent text boxes.
 - Migrate Project text boxes and embedded Node identity behavior.
 - Preserve full shared rich-text behavior and attachment-backed images.
-- Remove the old whole-document revision-conflict end-user modal path once the collaboration path safely replaces it.
+- For each migrated surface, delete the entire legacy full-document checkpoint, per-tab draft, `draft_restored`, revision-conflict modal/action, compatibility, test, and documentation path in the same cutover. Do not leave the old system dormant beside the new one.
+- Add and execute the one-time legacy browser-storage cleanup so old checkpoint keys cannot reactivate obsolete behavior after deployment.
 
 ### Phase 5: Recovery, compaction, and hardening
 
@@ -902,6 +935,7 @@ These choices must satisfy this charter and be documented with evidence when sel
 - Do not ask users to resolve developer-style merge conflicts during normal collaboration.
 - Do not treat saved-version history as a substitute for preventing data loss.
 - Do not create a fifth or sixth connection manager, publisher, broker, or heartbeat path for the editor.
+- Do not preserve the legacy full-document checkpoint, per-tab draft, `draft_restored`, or end-user conflict system as a fallback beneath the unified editor model.
 
 ## Definition Of Done
 
@@ -915,10 +949,11 @@ This charter is implemented only when all of the following are true:
 6. The green/orange/blinking-red/solid-red connection indicator and mutation gate work from actual server-connected health.
 7. Rich text, lists, formatting, mentions, tables where supported, and inline attachment-backed images retain behavior under collaboration.
 8. Multi-browser, multi-user, cross-instance, crash, duplicate, gap, and stalled-client scenarios pass automated tests.
-9. Old whole-document end-user conflict resolution is removed from the normal collaborative path.
-10. Source-of-truth docs/tests are updated without contradictory old rules.
-11. Focused verification and `node scripts/run_all_tests.mjs` pass.
-12. Any database migration and rollout requirements are reported explicitly, and production changes remain human-controlled under the repository security contract.
+9. Every legacy full-document checkpoint, per-tab full-body draft, `draft_restored` block, end-user whole-document conflict modal/action, and compatibility path is deleted from migrated editor surfaces rather than retained as a fallback.
+10. The legacy browser-storage and tab-session keys are removed at cutover and cannot resurrect an obsolete warning or modal.
+11. Legacy tests and source-of-truth rules are deleted or replaced with unified-model expectations, with no contradictory old behavior remaining.
+12. Focused verification and `node scripts/run_all_tests.mjs` pass.
+13. Any database migration and rollout requirements are reported explicitly, and production changes remain human-controlled under the repository security contract.
 
 ## Final Invariant
 
