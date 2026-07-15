@@ -5,7 +5,7 @@ Last updated: 2026-07-14
 Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the declared surface inventory, the one rich `contentEditable` host, the shared behavior and formatting-controller sources, the shared toolbar inventory, mailbox-scoped signature mounting, highlight-control/sanitizer wiring, font-selection restoration, and the EmailPickerModal attach-only source guard; `tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx` mounts the node text-block editor under React StrictMode and covers hydration-owner replay, unchanged rerenders, document replacement, request deduplication, observer teardown, abort, and Blob URL cleanup; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the declared surface inventory, the one rich `contentEditable` host, the shared behavior and formatting-controller sources, first-load node formatting-target wiring, the shared toolbar inventory, mailbox-scoped signature mounting, highlight-control/sanitizer wiring, font-selection restoration, and the EmailPickerModal attach-only source guard; `tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx` mounts the node text-block editor under React StrictMode and covers focus-free initial controller publication, hydration-owner replay, unchanged rerenders, document replacement, request deduplication, observer teardown, abort, and Blob URL cleanup; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
 
 ## Business Logic
 
@@ -89,6 +89,7 @@ ED64 - Turning selected text into chat keeps the source quote visibly annotated 
 ED65 - Unified-editor attachment hydration owns setup and cleanup in the same layout lifecycle. Cleanup replay cannot leave a durable `mango-attachment:` source stranded behind an already-applied-value guard: the authenticated hydration restarts whenever no active owner remains. Durable frames expose loading/ready/error state, hide native broken-image glyphs, use contain sizing, preserve the stored reference on failure, and retain double-click original-image viewing through its separately authorized loader.
 ED66 - In every unified rich editor surface from ED2, Tab is an editor indentation command and never browser focus navigation. Plain text and table-cell text receive one editor indent; structural list items nest through the shared list command. Shift+Tab performs the corresponding shared outdent or a prevented no-op when no outdent is possible. Tab must not accept a mention-menu item, move between table cells, leave the editor, or focus another app control.
 ED67 - Selecting an inline image, opening its chat action, or focusing and blurring an otherwise unchanged node/project text block is not a document edit and must not flush a projection save. A real document mutation still flushes through the existing debounce/blur/teardown guarantees.
+ED68 - An editable Node with at least one loaded text box must select and publish a deterministic text-block formatting target during initial hydration without moving browser focus. The outer toolbar is therefore enabled, clickable, and hover-responsive immediately; clicking a different text box retargets it normally. Read-only/permission-disabled nodes, hidden document modes, nodes with no text box, and the attached-email reply focus boundary in ED41 remain disabled.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -140,6 +141,7 @@ Business logic covered:
 - ED62
 - ED63
 - ED64
+- ED68
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, an attached-email reply body, and a personal/shared mailbox signature.
@@ -170,6 +172,7 @@ Expected:
 - A one-row list paste inserts at the exact caret without creating a second row; Enter preserves nested child hierarchy; Tab/Shift+Tab keep focus and the caret in the affected list item without consuming the following row.
 - Image-to-chat works for both inline data images and hydrated Mango attachment images, and selected text remains highlighted while the chat draft is open and after it is saved, including in nested lists.
 - The node + action scrolls and focuses the newly created text box.
+- An editable Node with a loaded text box publishes the first text box as its formatting target before any editor click, so the shared toolbar is immediately enabled and hover-responsive without stealing focus; later text-box focus retargets it.
 - Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate

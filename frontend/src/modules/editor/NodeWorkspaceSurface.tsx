@@ -403,7 +403,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
-  const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
+  const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
@@ -952,7 +952,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
       setClosedChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
     }
-    setFocusedTextBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
+    setFocusedTextBlockID((current) => {
+      if (nodeChanged || current === null) return textBlocks[0]?.id ?? "";
+      return blockIDs.has(current) ? current : "";
+    });
   }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
@@ -2940,6 +2943,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onImageChatRequest={addImageChatComment}
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
                     formattingControllerRef={formattingControllerRef}
+                    formattingControllerActive={textBlockIsFocused}
                     onSelectionFontSizeChange={onSelectionFontSizeChange}
                     onSelectionInlineFormatChange={onSelectionInlineFormatChange}
                     onSelectionHighlightColorChange={onSelectionHighlightColorChange}
