@@ -1039,6 +1039,101 @@ func TestNylasRESTClientMultipartProviderEarlyFailureClosesActiveSource(t *testi
 	}
 }
 
+func TestNylasRESTClientMultipartCleanupCloseErrorDoesNotOverrideAcceptedMessage(t *testing.T) {
+	source := &nylasCloseErrorReadCloser{
+		Reader:   strings.NewReader("image"),
+		closeErr: context.Canceled,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Fatalf("read multipart body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"data\":{\"id\":\"sent-with-image\"}}"))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	message, err := client.SendMessage(context.Background(), "grant-1", NylasSendMessageRequest{
+		To:          []NylasEmailAddress{{Email: "friend@example.com"}},
+		Subject:     "Signature image",
+		Body:        "<p>Hello<img src=\"cid:signature-image\"></p>",
+		Attachments: []NylasAttachment{{Filename: "image.png", ContentType: "image/png", ContentID: "signature-image", IsInline: true, Size: 5}},
+		OutboundAttachments: []NylasOutboundAttachment{{
+			Filename: "image.png", ContentType: "image/png", ContentID: "signature-image", Size: 5,
+			Open: func(context.Context) (NylasOutboundAttachmentContent, error) {
+				return NylasOutboundAttachmentContent{ContentLength: 5, Body: source}, nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("send returned cleanup error after exact bytes: %v", err)
+	}
+	if message.ID != "sent-with-image" {
+		t.Fatalf("message id = %q, want sent-with-image", message.ID)
+	}
+	if source.closeCalls != 1 {
+		t.Fatalf("source close calls = %d, want 1", source.closeCalls)
+	}
+}
+
+func TestNylasRESTClientMultipartProviderEarlySuccessIsAuthoritative(t *testing.T) {
+	source := newNylasBlockingReadCloser()
+	serverResult := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reader, err := r.MultipartReader()
+		if err == nil {
+			var messagePart *multipart.Part
+			messagePart, err = reader.NextPart()
+			if err == nil {
+				_, err = io.ReadAll(messagePart)
+			}
+		}
+		if err == nil {
+			_, err = reader.NextPart()
+		}
+		if err == nil {
+			select {
+			case <-source.started:
+			case <-time.After(5 * time.Second):
+				err = errors.New("attachment read did not start")
+			}
+		}
+		serverResult <- err
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Connection", "close")
+		_, _ = w.Write([]byte("{\"data\":{\"id\":\"sent-early\"}}"))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	message, err := client.SendMessage(context.Background(), "grant-1", NylasSendMessageRequest{
+		To:          []NylasEmailAddress{{Email: "friend@example.com"}},
+		Subject:     "Provider accepted",
+		Body:        "<p>Provider accepted</p>",
+		Attachments: []NylasAttachment{{Filename: "blocked.bin", Size: 1}},
+		OutboundAttachments: []NylasOutboundAttachment{{
+			Filename: "blocked.bin", Size: 1,
+			Open: func(context.Context) (NylasOutboundAttachmentContent, error) {
+				return NylasOutboundAttachmentContent{ContentLength: 1, Body: source}, nil
+			},
+		}},
+	})
+	if handlerErr := waitNylasTestResult(t, serverResult); handlerErr != nil {
+		t.Fatal(handlerErr)
+	}
+	if err != nil || message.ID != "sent-early" {
+		t.Fatalf("message=%+v error=%v, want accepted provider result", message, err)
+	}
+	if closes := source.closes(); closes != 1 {
+		t.Fatalf("source closes = %d, want 1", closes)
+	}
+}
+
 func TestNylasRESTClientRequiresMatchingOutboundAttachmentStreams(t *testing.T) {
 	client := NewNylasRESTClient("http://127.0.0.1:1", "api-key", "client-id")
 	_, err := client.SendMessage(context.Background(), "grant-1", NylasSendMessageRequest{
@@ -1064,6 +1159,17 @@ func TestNylasRESTClientRequiresMatchingOutboundAttachmentStreams(t *testing.T) 
 type nylasCountingReadCloser struct {
 	io.ReadCloser
 	bytesRead int64
+}
+
+type nylasCloseErrorReadCloser struct {
+	io.Reader
+	closeErr   error
+	closeCalls int
+}
+
+func (r *nylasCloseErrorReadCloser) Close() error {
+	r.closeCalls++
+	return r.closeErr
 }
 
 func (r *nylasCountingReadCloser) Read(p []byte) (int, error) {

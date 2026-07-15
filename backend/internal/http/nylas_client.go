@@ -776,6 +776,15 @@ func (s *nylasMultipartStream) Err() error {
 	return s.encodeErr
 }
 
+func (s *nylasMultipartStream) completed() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *nylasMultipartStream) shutdown(cause error) {
 	if cause == nil {
 		cause = context.Canceled
@@ -859,12 +868,9 @@ func (s *nylasMultipartStream) write(ctx context.Context, pipeWriter *io.PipeWri
 		if partErr == nil {
 			partErr = copyNylasOutboundAttachmentExact(ctx, part, content.Body, attachment.Size, buffer)
 		}
-		closeErr := s.closeActive(content.Body)
+		_ = s.closeActive(content.Body)
 		if partErr != nil {
 			return partErr
-		}
-		if closeErr != nil {
-			return fmt.Errorf("%w: attachment %d close: %w", errNylasOutboundAttachmentRead, index+1, closeErr)
 		}
 	}
 	return writer.Close()
@@ -986,6 +992,7 @@ func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nyl
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	resp, requestErr := c.client.Do(req)
+	completedBeforeClose := body.completed()
 	_ = body.Close()
 	streamErr := body.Err()
 	if requestErr != nil {
@@ -1006,7 +1013,7 @@ func (c *NylasRESTClient) doMultipart(ctx context.Context, path string, plan nyl
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return parseNylasAPIError(resp.StatusCode, resp.Header, raw)
 	}
-	if streamErr != nil {
+	if completedBeforeClose && streamErr != nil {
 		return streamErr
 	}
 	if out == nil || len(strings.TrimSpace(string(raw))) == 0 {

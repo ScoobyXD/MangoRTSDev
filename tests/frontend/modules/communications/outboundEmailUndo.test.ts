@@ -6,6 +6,7 @@ import {
   getPendingOutboundEmailSends,
   isOutboundEmailUndoneError,
   scheduleOutboundEmailDispatch,
+  sendOutboundEmailNow,
   undoAllOutboundEmailSends,
   undoOutboundEmailSend,
 } from "../../../../frontend/src/modules/communications/outboundEmailUndo.js";
@@ -46,6 +47,36 @@ test("expiry dispatches exactly once after the full ten-second window", async (t
   assert.deepEqual(getPendingOutboundEmailSends(), []);
 });
 
+test("send now dispatches only the selected attempt immediately and cancels its timer", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  undoAllOutboundEmailSends();
+  let dispatchCount = 0;
+  const pending = scheduleOutboundEmailDispatch(async () => {
+    dispatchCount += 1;
+    return "sent-now";
+  }, { label: "Immediate update" });
+  const untouched = scheduleOutboundEmailDispatch(async () => {
+    dispatchCount += 1;
+    return "unexpected";
+  }, { label: "Still undoable" });
+
+  const [queued, untouchedQueued] = getPendingOutboundEmailSends();
+  assert.ok(queued);
+  assert.ok(untouchedQueued);
+  assert.equal(dispatchCount, 0);
+  assert.equal(sendOutboundEmailNow(queued.id), true);
+  assert.equal(sendOutboundEmailNow(queued.id), false);
+  assert.equal(await pending, "sent-now");
+  assert.equal(dispatchCount, 1);
+  assert.deepEqual(getPendingOutboundEmailSends().map((item) => item.id), [untouchedQueued.id]);
+  assert.equal(undoOutboundEmailSend(untouchedQueued.id), true);
+  await assert.rejects(untouched, isOutboundEmailUndoneError);
+  assert.deepEqual(getPendingOutboundEmailSends(), []);
+
+  t.mock.timers.tick(10_000);
+  assert.equal(dispatchCount, 1);
+});
+
 test("multiple sends remain independently undoable", async () => {
   undoAllOutboundEmailSends();
   let dispatchCount = 0;
@@ -77,8 +108,12 @@ test("all send APIs enforce the shared window and every send surface exposes the
   assert.doesNotMatch(api, /undoWindowMs/);
   const scheduler = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/outboundEmailUndo.ts"), "utf8");
   assert.doesNotMatch(scheduler, /undoWindowMs\?:/);
+  assert.match(scheduler, /export function sendOutboundEmailNow\(sendID: string\)/);
+  assert.match(scheduler, /clearTimeout\(pending\.timer\)/);
   assert.match(banner, /window\.setInterval/);
   assert.match(banner, /width: `\$\{progress \* 100\}%`/);
+  assert.match(banner, /onClick=\{\(\) => sendOutboundEmailNow\(pending\.id\)\}/);
+  assert.match(banner, />\s*Send now\s*<\/button>/);
   assert.match(banner, />\s*Undo\s*<\/button>/);
   assert.doesNotMatch(banner, /#22c55e|#16a34a|#15803d/);
   assert.match(home, /<OutboundEmailUndoBanner \/>/);

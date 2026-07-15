@@ -87,6 +87,7 @@ ATT52 - Draft attachment mutation ownership spans durable preparation plus the c
 ATT53 - Signature editor, signature Preview, and composed-message insertion rehydrate each durable image after editor lifecycle replay through the exact `email_signature` authorization scope. Loading and terminal failure are explicit private preview states rather than attempts to navigate the browser to `mango-attachment:`; successful display uses a revocable object URL with contain sizing, cleanup revokes it and restores the durable reference, and the existing authenticated original/lightbox behavior remains independent.
 ATT54 - Reusing an attachment-backed node/project inline image as a chat attachment creates only the authorized `chat_attachment` resource link for the existing attachment ID; it must not GET the original content or create an upload intent. The composer stages the selected thumbnail immediately as transient processing UI, blocks send until the link reconciles, replaces success with the durable reference, and keeps a failed item visible and removable without persisting transient state or image bytes. Only a legacy image with no attachment ID may use the upload fallback.
 ATT55 - A successful ordinary personal/shared mailbox send promotes each Mango outgoing attachment from its draft-only ownership to an exact `email_message` resource link before local Sent state is returned. The link is idempotent, preserves inline versus ordinary relationship kind, uses personal user/message or shared-inbox/message authorization, and remains readable after the draft is deleted; the Sent viewer treats a durable `attachment_id` as a resolvable source even when provider response metadata omits filename or provider ID.
+ATT56 - Outbound provider multipart streaming validates each source's declared length and preserves genuine open/read/short/long attachment failures before provider acceptance. After exact bytes are validated, source close is cleanup-only; a cleanup-induced cancellation cannot override a successful provider response with `attachment_storage_failed`. When a browser abandons an authenticated provider attachment preview, matching request-context cancellation exits silently without a misleading proxy-error response or log.
 
 ## Scenarios
 
@@ -459,3 +460,17 @@ Given:
 Expected:
 - Mango backfills safe attachment metadata, creates one idempotent exact sent-message link with the inline relationship, and returns no raw attachment bytes.
 - The source draft link becomes unreadable as before, while the independent sent-message link authorizes display hydration and original viewing without a public or stale object URL.
+
+### Scenario ATT-S17: Accepted Signature Image And Canceled Preview
+
+Business logic covered:
+- ATT49
+- ATT56
+
+Given:
+- An outbound signature image streams its exact declared bytes, its source reports cancellation only during cleanup, and the provider accepts the message.
+- A separate provider-backed image preview is canceled by the browser during hydration cleanup.
+
+Expected:
+- The accepted send succeeds and is never rewritten as `attachment_storage_failed` by source cleanup; genuine content-read and length-validation failures remain attachment failures.
+- The abandoned preview releases work without writing a proxy error response or logging the expected request cancellation as a provider failure.
