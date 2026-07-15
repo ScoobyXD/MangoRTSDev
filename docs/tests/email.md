@@ -124,6 +124,9 @@ EMAIL95 - After a provider accepts an ordinary personal/shared mailbox send, eve
 EMAIL96 - Controlled rich-editor value updates caused by typing do not dispose and recreate an unchanged attachment hydration owner. Object URLs, decoded image nodes, loading state, selection, and double-click behavior remain stable across ordinary keystrokes; cleanup still aborts pending work and revokes URLs on actual value/context replacement, lifecycle replay, or unmount.
 EMAIL97 - New-message compose stretches its body editor through the remaining detail-panel height with a practical minimum and internal scrolling. In My Triage and Shared Triage, entering Sent preserves the normal three-action header geometry; Compose and Sent retain their positions while Archive page/go-next remains present but disabled and non-actionable.
 EMAIL98 - Outbound attachment streaming distinguishes validated content failures from cleanup cancellation. Open, read, short-body, and long-body failures before provider acceptance still return `attachment_storage_failed`; once the exact declared bytes have been read, source close is best-effort, and a successful provider response cannot be replaced by a cleanup-induced cancellation. A browser-canceled provider attachment preview also ends silently when its request context is canceled, without logging or writing a misleading Nylas proxy error.
+EMAIL99 - Sending a saved personal/shared signature resolves the authorized original attachment, rewrites every deduplicated Mango image reference to one alphanumeric CID, and streams the original bytes with declared-length and stored-SHA validation. Display is preview-only and cannot mask an unhealthy original. Provider success returns CID HTML plus durable attachment metadata and promotes the attachment to the exact sent email_message link before Sent rendering.
+EMAIL100 - Outbound attachment diagnostics classify object-not-found, storage unavailable/timeout, content-length mismatch, short stream, long stream, read failure, checksum mismatch, invalid stream, and opaque open failure. The server logs only request correlation and safe scope/attachment identifiers plus class/public code; no provider/storage error text, secrets, URLs, filenames, bodies, or bytes. Browser/request cancellation remains silent and is distinguishable from the messages/send POST.
+EMAIL101 - Timer expiry and Send now atomically invoke the same captured backend send closure once and propagate the identical backend success or failure. A failed dispatch never reports sent, never deletes the durable draft, and leaves the still-current compose/reply content recoverably open; only a resolved successful send may close the matching compose and retire its draft.
 
 ## Scenarios
 
@@ -650,3 +653,20 @@ Expected:
 - Only the selected attempt leaves the pending list and enters the existing backend send path immediately; its timer cannot dispatch it again, the other attempt remains undoable, and repeated Send now or Undo actions are harmless no-ops.
 - Provider acceptance remains authoritative after exact-byte validation, so cleanup cancellation does not surface as `attachment_storage_failed`; genuine open/read/short/long failures before acceptance still do.
 - The canceled preview request writes no proxy error response and produces no misleading Nylas proxy-error log.
+
+### Scenario EMAIL-S24: Saved Signature Original, Sent Rendering, And Diagnosable Failure
+
+Business logic covered:
+- EMAIL90
+- EMAIL95
+- EMAIL99
+- EMAIL100
+- EMAIL101
+
+Given:
+- Personal and shared saved signatures contain Mango images with distinct original/display objects and are submitted once by timer expiry and once with Send now.
+- The original stream succeeds, then exercises known open/length/read/checksum failures and request cancellation.
+
+Expected:
+- Both dispatch choices use one identical send path and send the checksum-validated original as a CID attachment; recipient/Sent rendering uses CID metadata plus the promoted durable link, never a compose object URL.
+- Each non-canceled failure returns the classified public boundary, safely correlates the messages/send POST and attachment index, retains the draft/compose, and leaks no raw error/body/secret data; cancellation is silent.

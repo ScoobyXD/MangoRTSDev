@@ -184,6 +184,10 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != http.StatusConflict {
 			releaseClaim()
 		}
+		if isNylasOutboundAttachmentFailure(err) {
+			writeCommunicationsSendAttachmentError(w, r, connection, companyID, sendReq.Attachments, err)
+			return
+		}
 		s.writeNylasError(w, r, connection, err)
 		return
 	}

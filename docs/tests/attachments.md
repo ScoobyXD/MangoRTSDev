@@ -88,6 +88,8 @@ ATT53 - Signature editor, signature Preview, and composed-message insertion rehy
 ATT54 - Reusing an attachment-backed node/project inline image as a chat attachment creates only the authorized `chat_attachment` resource link for the existing attachment ID; it must not GET the original content or create an upload intent. The composer stages the selected thumbnail immediately as transient processing UI, blocks send until the link reconciles, replaces success with the durable reference, and keeps a failed item visible and removable without persisting transient state or image bytes. Only a legacy image with no attachment ID may use the upload fallback.
 ATT55 - A successful ordinary personal/shared mailbox send promotes each Mango outgoing attachment from its draft-only ownership to an exact `email_message` resource link before local Sent state is returned. The link is idempotent, preserves inline versus ordinary relationship kind, uses personal user/message or shared-inbox/message authorization, and remains readable after the draft is deleted; the Sent viewer treats a durable `attachment_id` as a resolvable source even when provider response metadata omits filename or provider ID.
 ATT56 - Outbound provider multipart streaming validates each source's declared length and preserves genuine open/read/short/long attachment failures before provider acceptance. After exact bytes are validated, source close is cleanup-only; a cleanup-induced cancellation cannot override a successful provider response with `attachment_storage_failed`. When a browser abandons an authenticated provider attachment preview, matching request-context cancellation exits silently without a misleading proxy-error response or log.
+ATT57 - A saved personal/shared signature image is sendable only from a coherent original record: requested and served variants are original, byte sizes match, original/current bucket and key agree with configured storage, and the stored SHA-256 is valid and equal. A healthy display derivative proves only preview health; outbound CID construction never substitutes display bytes for a missing, stale, or corrupt original. Provider multipart validates the original object's reported length, exact stream length, and SHA-256 before success.
+ATT58 - Every non-canceled outbound attachment failure emits one sanitized communications-send log containing request correlation, POST route, company/user/scope, safe attachment ID/index/count, failure class, and public code. Object-not-found returns attachment_content_not_found, configured storage unavailability or timeout returns attachment_storage_unavailable, and reported/short/long size failures return attachment_content_length_mismatch; opaque open/read/checksum failures retain attachment_storage_failed. Logs never contain filenames, storage keys/buckets, signed URLs, credentials, raw bodies, or bytes, and a canceled request exits silently.
 
 ## Scenarios
 
@@ -474,3 +476,19 @@ Given:
 Expected:
 - The accepted send succeeds and is never rewritten as `attachment_storage_failed` by source cleanup; genuine content-read and length-validation failures remain attachment failures.
 - The abandoned preview releases work without writing a proxy error response or logging the expected request cancellation as a provider failure.
+
+### Scenario ATT-S18: Signature Original Integrity And Safe Failure Evidence
+
+Business logic covered:
+- ATT49
+- ATT55
+- ATT57
+- ATT58
+
+Given:
+- Personal and shared signatures each persist a Mango image with distinct healthy original and display objects.
+- A send is repeated with object-not-found, unavailable, reported-length, short, long, read, checksum, and canceled-request failures.
+
+Expected:
+- Compose preview may use display, but CID multipart contains the authorized original bytes and SHA-256; the accepted response retains CID metadata and gains the exact sent-message inline link.
+- Known public codes remain specific, every non-canceled failure log identifies its safe attachment index/class and send request, no secret/body/filename data appears, and request cancellation produces no failure log.

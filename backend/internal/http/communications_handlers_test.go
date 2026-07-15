@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -421,7 +423,7 @@ func (f *fakeNylasClient) SendMessage(ctx context.Context, grantID string, reque
 		for index, attachment := range request.OutboundAttachments {
 			content, err := attachment.Open(ctx)
 			if err != nil {
-				return NylasMessage{}, fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err)
+				return NylasMessage{}, wrapNylasOutboundAttachmentFailure(index+1, "open_failed", fmt.Errorf("%w: attachment %d: %w", errNylasOutboundAttachmentOpen, index+1, err))
 			}
 			raw, readErr := io.ReadAll(content.Body)
 			closeErr := content.Body.Close()
@@ -469,6 +471,41 @@ func seedEmailAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRe
 	return attachmentID
 }
 
+func seedEmailSignatureAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID string, original, display []byte) string {
+	t.Helper()
+	attachmentID := store.NewUUIDv7String()
+	originalKey := attachmentOriginalObjectKey(companyID, attachmentID)
+	storage.objects[originalKey] = fakeAttachmentObject{contentType: "image/png", body: append([]byte(nil), original...)}
+	originalSum := sha256.Sum256(original)
+	if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: companyID, AttachmentID: attachmentID, UploadedByUserID: actorUserID,
+		OriginalFilename: "signature.png", MimeType: "image/png", ByteSize: int64(len(original)),
+		SHA256: fmt.Sprintf("%x", originalSum[:]), SHA256VerificationMethod: "s3_full",
+		StorageBucket: storage.bucket, StorageKey: originalKey, SourceKind: store.AttachmentSourceEditorPaste,
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: "email_signature", ResourceID: resourceID,
+			RelationshipKind: store.AttachmentRelationshipInlineImage, CreatedByUserID: actorUserID,
+		},
+	}); err != nil {
+		t.Fatalf("seed email signature attachment: %v", err)
+	}
+
+	displayKey := "companies/" + companyID + "/attachments/" + attachmentID + "/display/v1"
+	storage.objects[displayKey] = fakeAttachmentObject{contentType: "image/png", body: append([]byte(nil), display...)}
+	displaySum := sha256.Sum256(display)
+	displaySHA := fmt.Sprintf("%x", displaySum[:])
+	generation := 1
+	width, height := 320, 80
+	if _, err := repo.UpsertAttachmentVariants(context.Background(), companyID, []store.AttachmentVariantInput{{
+		AttachmentID: attachmentID, VariantType: store.AttachmentVariantDisplay, MimeType: "image/png",
+		ByteSize: int64(len(display)), SHA256: &displaySHA, GenerationVersion: &generation, Width: &width, Height: &height,
+		StorageBucket: storage.bucket, StorageKey: displayKey,
+	}}); err != nil {
+		t.Fatalf("seed email signature display variant: %v", err)
+	}
+	return attachmentID
+}
+
 func seedLiveEmailDraftAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID, filename, contentType string, content []byte) string {
 	t.Helper()
 	parsed, ok := parseEmailScopedAttachmentResourceID("email_draft", resourceID)
@@ -500,6 +537,14 @@ func personalEmailDraftResourceID(userID, accountEmail, draftID string) string {
 
 func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
 	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+}
+
+func personalEmailSignatureResourceID(userID, accountEmail string) string {
+	return "personal:" + url.QueryEscape(strings.TrimSpace(userID)) + ":" + url.QueryEscape(normalizeEmailForCompare(accountEmail))
+}
+
+func sharedEmailSignatureResourceID(sharedInboxID string) string {
+	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID))
 }
 
 type countingCommunicationsAttachmentRepo struct {
@@ -732,6 +777,103 @@ func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
 	}
 }
 
+func TestValidCommunicationsSendAttachmentContentRequiresCoherentOriginal(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-original-contract"), "original.bin", []byte("original"))
+	content, err := fixture.repo.ReadAttachmentContent(context.Background(), fixture.companyID, attachmentID, store.AttachmentVariantOriginal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validCommunicationsSendAttachmentContent(content, fixture.companyID, attachmentID, fixture.storage.bucket) {
+		t.Fatalf("healthy original content rejected: %+v", content)
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*store.AttachmentContentRead)
+	}{
+		{name: "served display", mutate: func(item *store.AttachmentContentRead) { item.ServedVariant = store.AttachmentVariantDisplay }},
+		{name: "size disagreement", mutate: func(item *store.AttachmentContentRead) { item.ByteSize++ }},
+		{name: "key disagreement", mutate: func(item *store.AttachmentContentRead) { item.StorageKey += "-stale" }},
+		{name: "bucket disagreement", mutate: func(item *store.AttachmentContentRead) { item.StorageBucket = "other-bucket" }},
+		{name: "checksum disagreement", mutate: func(item *store.AttachmentContentRead) { item.SHA256 = strings.Repeat("0", sha256.Size*2) }},
+		{name: "invalid checksum", mutate: func(item *store.AttachmentContentRead) { item.SHA256 = "not-a-checksum" }},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			candidate := content
+			mutation.mutate(&candidate)
+			if validCommunicationsSendAttachmentContent(candidate, fixture.companyID, attachmentID, fixture.storage.bucket) {
+				t.Fatalf("incoherent original content accepted: %+v", candidate)
+			}
+		})
+	}
+}
+
+func TestCommunicationsSendPersonalSignatureImageUsesHealthyOriginalAndPromotesSentLink(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	resourceID := personalEmailSignatureResourceID(fixture.userID, fixture.accountEmail)
+	original := []byte("personal-signature-original")
+	display := []byte("personal-signature-display")
+	attachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, fixture.userID, fixture.companyID, resourceID, original, display)
+	signatureBody := "<p>Regards</p><img src=\"mango-attachment:" + url.PathEscape(attachmentID) + "\">"
+	if _, err := fixture.repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
+		CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+		Name: "Default", BodyEditorHTML: signatureBody, IsDefault: true,
+		CreatedByUserID: fixture.userID, UpdatedByUserID: fixture.userID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := fixture.send(t, map[string]any{
+		"to":      []map[string]string{{"email": "friend@example.com"}},
+		"subject": "Personal signature",
+		"body":    "<p>Hello</p>" + signatureBody,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s, want created", rec.Code, rec.Body.String())
+	}
+
+	contentID := communicationsInlineImageContentID(attachmentID)
+	if !strings.Contains(fixture.nylas.sent.Body, "src=\"cid:"+contentID+"\"") {
+		t.Fatalf("provider body=%q, want durable signature image rewritten to CID", fixture.nylas.sent.Body)
+	}
+	if len(fixture.nylas.sent.Attachments) != 1 || fixture.nylas.sent.Attachments[0].AttachmentID != attachmentID ||
+		fixture.nylas.sent.Attachments[0].ContentID != contentID || !fixture.nylas.sent.Attachments[0].IsInline ||
+		len(fixture.nylas.sent.OutboundAttachments) != 1 || !validAttachmentSHA256Hex(fixture.nylas.sent.OutboundAttachments[0].SHA256) ||
+		len(fixture.nylas.sentAttachmentBodies) != 1 || !bytes.Equal(fixture.nylas.sentAttachmentBodies[0], original) {
+		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want one checksum-validated original CID attachment", fixture.nylas.sent.Attachments, fixture.nylas.sent.OutboundAttachments, fixture.nylas.sentAttachmentBodies)
+	}
+	if len(fixture.storage.getKeys) != 1 || fixture.storage.getKeys[0] != attachmentOriginalObjectKey(fixture.companyID, attachmentID) {
+		t.Fatalf("storage reads=%v, want only the original object (not display)", fixture.storage.getKeys)
+	}
+
+	var response struct {
+		Message NylasMessage
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(response.Message.Body, "cid:"+contentID) || len(response.Message.Attachments) != 1 ||
+		response.Message.Attachments[0].AttachmentID != attachmentID || response.Message.Attachments[0].ContentID != contentID {
+		t.Fatalf("sent response=%+v, want local CID body and durable attachment metadata", response.Message)
+	}
+	links, err := fixture.repo.ListAttachmentResourceLinks(fixture.companyID, attachmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSentResource := communicationsSentMessageResourceID(fixture.userID, "", "sent-message")
+	foundSentLink := false
+	for _, link := range links {
+		if link.ResourceType == "email_message" && link.ResourceID == wantSentResource && link.RelationshipKind == store.AttachmentRelationshipEmailInline {
+			foundSentLink = true
+		}
+	}
+	if !foundSentLink {
+		t.Fatalf("resource links=%+v, want promoted sent-message inline image link %q", links, wantSentResource)
+	}
+}
+
 func TestCommunicationsSendUnauthorizedAttachmentDoesNotOpenStorage(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
 	attachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, fixture.userID, fixture.companyID, personalEmailDraftResourceID("another-user", fixture.accountEmail, "draft-private"), "private.txt", "application/octet-stream", []byte("private"))
@@ -771,6 +913,126 @@ func TestCommunicationsSendPreservesLazyStorageErrorResponse(t *testing.T) {
 	assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 1)
 	if len(fixture.storage.getKeys) != 1 || fixture.nylas.sendCalls != 1 {
 		t.Fatalf("lazy storage reads=%v send calls=%d, want one of each", fixture.storage.getKeys, fixture.nylas.sendCalls)
+	}
+}
+
+func TestCommunicationsSendAttachmentFailureClassificationIsActionableAndSanitized(t *testing.T) {
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	const attachmentID = "11111111-1111-1111-1111-111111111111"
+	const secretMarker = "SECRET_STORAGE_DETAIL"
+	attachments := []NylasAttachment{{AttachmentID: attachmentID, Filename: "SECRET_FILENAME.png"}}
+	connection := domain.UserEmailConnection{UserID: "safe-user-id"}
+	testCases := []struct {
+		name       string
+		err        error
+		statusCode int
+		publicCode string
+		class      string
+	}{
+		{
+			name: "object not found",
+			err: wrapNylasOutboundAttachmentFailure(1, "open_failed",
+				fmt.Errorf("%w: %w", errNylasOutboundAttachmentOpen, ErrAttachmentObjectNotFound)),
+			statusCode: http.StatusNotFound, publicCode: "attachment_content_not_found", class: "object_not_found",
+		},
+		{
+			name: "storage unavailable",
+			err: wrapNylasOutboundAttachmentFailure(1, "open_failed",
+				fmt.Errorf("%w: %w", errNylasOutboundAttachmentOpen, ErrAttachmentStorageUnavailable)),
+			statusCode: http.StatusServiceUnavailable, publicCode: "attachment_storage_unavailable", class: "storage_unavailable",
+		},
+		{
+			name: "reported length mismatch",
+			err: wrapNylasOutboundAttachmentFailure(1, "content_length_mismatch",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentContentLengthMismatch, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_content_length_mismatch", class: "content_length_mismatch",
+		},
+		{
+			name: "short stream",
+			err: wrapNylasOutboundAttachmentFailure(1, "short_stream",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentShort, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_content_length_mismatch", class: "short_stream",
+		},
+		{
+			name: "long stream",
+			err: wrapNylasOutboundAttachmentFailure(1, "long_stream",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentLong, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_content_length_mismatch", class: "long_stream",
+		},
+		{
+			name: "read failure",
+			err: wrapNylasOutboundAttachmentFailure(1, "read_failed",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentRead, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_storage_failed", class: "read_failed",
+		},
+		{
+			name: "checksum mismatch",
+			err: wrapNylasOutboundAttachmentFailure(1, "checksum_mismatch",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentChecksumMismatch, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_storage_failed", class: "checksum_mismatch",
+		},
+		{
+			name: "opaque open failure",
+			err: wrapNylasOutboundAttachmentFailure(1, "open_failed",
+				fmt.Errorf("%w: %s", errNylasOutboundAttachmentOpen, secretMarker)),
+			statusCode: http.StatusBadGateway, publicCode: "attachment_storage_failed", class: "open_failed",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			logs.Reset()
+			req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/send?shared_inbox_id=safe-shared-id", strings.NewReader("{\"body\":\"SECRET_RAW_BODY\"}"))
+			req.Header.Set("X-Request-ID", "safe-request-id")
+			rec := httptest.NewRecorder()
+			writeCommunicationsSendAttachmentError(rec, req, connection, "safe-company-id", attachments, testCase.err)
+			if rec.Code != testCase.statusCode || !strings.Contains(rec.Body.String(), testCase.publicCode) {
+				t.Fatalf("status=%d body=%s, want %d %s", rec.Code, rec.Body.String(), testCase.statusCode, testCase.publicCode)
+			}
+			logged := logs.String()
+			for _, want := range []string{
+				"request_id=\"safe-request-id\"",
+				"method=\"POST\"",
+				"path=\"/v1/communications/messages/send\"",
+				"scope=\"shared\"",
+				"attachment_id=\"" + attachmentID + "\"",
+				"attachment_index=1",
+				"failure_class=\"" + testCase.class + "\"",
+				"public_code=\"" + testCase.publicCode + "\"",
+			} {
+				if !strings.Contains(logged, want) {
+					t.Fatalf("log=%q, want %q", logged, want)
+				}
+			}
+			for _, forbidden := range []string{secretMarker, "SECRET_FILENAME", "SECRET_RAW_BODY"} {
+				if strings.Contains(logged, forbidden) {
+					t.Fatalf("log=%q leaked %q", logged, forbidden)
+				}
+			}
+		})
+	}
+
+	logs.Reset()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/send", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	writeCommunicationsSendAttachmentError(rec, req, connection, "safe-company-id", attachments,
+		wrapNylasOutboundAttachmentFailure(1, "read_failed", errNylasOutboundAttachmentRead))
+	if rec.Body.Len() != 0 || logs.Len() != 0 {
+		t.Fatalf("canceled request response=%q log=%q, want silent exit", rec.Body.String(), logs.String())
 	}
 }
 
@@ -3078,11 +3340,19 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != string(sharedContent) {
 		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want streamed shared inbox attachment", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
-	inlineAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-inline"), "shared-screenshot.png", "image/png", []byte("shared-png"))
+	inlineOriginal := []byte("shared-signature-original")
+	inlineAttachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailSignatureResourceID(folder.FolderID), inlineOriginal, []byte("shared-signature-display"))
+	signatureBody := "<p>Shared regards</p><img src=\"mango-attachment:" + url.PathEscape(inlineAttachmentID) + "\">"
+	if _, err := repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
+		CompanyID: companyID, SharedInboxID: folder.FolderID, Name: "Shared default",
+		BodyEditorHTML: signatureBody, IsDefault: true, CreatedByUserID: actor.UserID, UpdatedByUserID: actor.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	inlinePayload, err := json.Marshal(map[string]any{
 		"to":      []map[string]string{{"email": "customer@example.com"}},
-		"subject": "Shared inline screenshot",
-		"body":    `<img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `">`,
+		"subject": "Shared signature image",
+		"body":    "<p>Hello</p>" + signatureBody,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3093,8 +3363,9 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		t.Fatalf("shared inline send grant=%q body=%q", nylas.lastSendGrantID, nylas.sent.Body)
 	}
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != inlineAttachmentID || nylas.sent.Attachments[0].ContentID != inlineContentID || !nylas.sent.Attachments[0].IsInline || nylas.sent.Attachments[0].Content != "" ||
-		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "shared-png" {
-		t.Fatalf("shared inline metadata=%+v outbound=%+v bodies=%q, want one CID-linked streamed screenshot", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
+		len(nylas.sent.OutboundAttachments) != 1 || !validAttachmentSHA256Hex(nylas.sent.OutboundAttachments[0].SHA256) ||
+		len(nylas.sentAttachmentBodies) != 1 || !bytes.Equal(nylas.sentAttachmentBodies[0], inlineOriginal) {
+		t.Fatalf("shared inline metadata=%+v outbound=%+v bodies=%q, want one checksum-validated original CID signature image", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
 }
 
