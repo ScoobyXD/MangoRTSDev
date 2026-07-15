@@ -73,6 +73,20 @@ export type EditorTextBlockContent = {
   attachments?: EditorChatAttachment[];
 };
 
+export function buildNewEditorTextBlockProjectionPayload(input: {
+  companyID: string;
+  informationID: string;
+  information: string;
+}) {
+  return {
+    company_id: input.companyID,
+    type: EDITOR_TEXT_BLOCK_TYPE,
+    information: input.information,
+    information_id: input.informationID,
+    expected_revision: 0,
+  };
+}
+
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
   const updated = (a.updated_timestamp ?? "").localeCompare(b.updated_timestamp ?? "");
   if (updated !== 0) return updated;

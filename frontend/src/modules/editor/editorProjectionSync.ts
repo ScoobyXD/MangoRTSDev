@@ -2,13 +2,16 @@ import { APIHTTPError, isTerminalAuthFailureError } from "../api/requestJSON.js"
 import type { EditorProjectionItem } from "./editorProjection.js";
 import type { LinkedEntityKind } from "./editorTypes.js";
 
-const DRAFT_KEY_PREFIX = "mango-editor-projection-draft-v1";
+const DRAFT_KEY_PREFIX = "mango-editor-projection-draft-v2";
+const DRAFT_TAB_SESSION_KEY = "mango-editor-projection-tab-v1";
+let fallbackDraftTabID = "";
 
 export type EditorProjectionDraftScope = {
   userID: string;
   companyID: string;
   entityKind: LinkedEntityKind;
   entityID: string;
+  tabID: string;
   informationID: string;
 };
 
@@ -34,6 +37,27 @@ function cleanScopePart(value: string): string {
   return encodeURIComponent(value.trim());
 }
 
+function createEditorProjectionDraftTabID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function getEditorProjectionDraftTabID(storage: Storage | null): string {
+  if (storage) {
+    try {
+      const existing = storage.getItem(DRAFT_TAB_SESSION_KEY)?.trim();
+      if (existing) return existing;
+      const created = createEditorProjectionDraftTabID();
+      storage.setItem(DRAFT_TAB_SESSION_KEY, created);
+      return created;
+    } catch {
+      // Fall through to one page-lifetime ID when session storage is unavailable.
+    }
+  }
+  if (!fallbackDraftTabID) fallbackDraftTabID = createEditorProjectionDraftTabID();
+  return fallbackDraftTabID;
+}
+
 export function editorProjectionDraftKey(scope: EditorProjectionDraftScope): string {
   return [
     DRAFT_KEY_PREFIX,
@@ -41,6 +65,7 @@ export function editorProjectionDraftKey(scope: EditorProjectionDraftScope): str
     cleanScopePart(scope.companyID),
     scope.entityKind,
     cleanScopePart(scope.entityID),
+    cleanScopePart(scope.tabID),
     cleanScopePart(scope.informationID),
   ].join(":");
 }
@@ -52,12 +77,13 @@ function editorProjectionEntityDraftPrefix(scope: Omit<EditorProjectionDraftScop
     cleanScopePart(scope.companyID),
     scope.entityKind,
     cleanScopePart(scope.entityID),
+    cleanScopePart(scope.tabID),
     "",
   ].join(":");
 }
 
 export function retainEditorProjectionDraft(storage: Storage | null, scope: EditorProjectionDraftScope, draft: EditorProjectionDraft): void {
-  if (!storage || !scope.userID.trim() || !scope.companyID.trim() || !scope.entityID.trim() || !scope.informationID.trim()) return;
+  if (!storage || !scope.userID.trim() || !scope.companyID.trim() || !scope.entityID.trim() || !scope.tabID.trim() || !scope.informationID.trim()) return;
   try {
     storage.setItem(editorProjectionDraftKey(scope), JSON.stringify(draft));
   } catch {

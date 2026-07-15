@@ -26,6 +26,7 @@ type ProjectionWriteResponse = { revision?: number };
 type UseEditorDocumentPersistenceInput = {
   companyID: string;
   currentUserID: string;
+  draftTabID: string;
   linkedEntityKind: "" | LinkedEntityKind;
   linkedEntityID: string;
   documentDraftRef: React.MutableRefObject<string>;
@@ -52,6 +53,7 @@ function browserStorage(): Storage | null {
 export function useEditorDocumentPersistence({
   companyID,
   currentUserID,
+  draftTabID,
   linkedEntityKind,
   linkedEntityID,
   documentDraftRef,
@@ -86,8 +88,9 @@ export function useEditorDocumentPersistence({
     companyID,
     entityKind: request.target.entityKind,
     entityID: request.target.entityID,
+    tabID: draftTabID,
     informationID: request.target.informationID,
-  }), [companyID, currentUserID]);
+  }), [companyID, currentUserID, draftTabID]);
 
   const buildDocumentSaveRequest = useCallback((nextText: string): DocumentSaveRequest | null => {
     if (!currentUserID || !linkedEntityID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return null;

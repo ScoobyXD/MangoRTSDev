@@ -138,6 +138,16 @@ It performs:
 11. Invalidate CloudFront.
 12. Print the app, API, and Nylas callback URLs into the GitHub step summary.
 
+### Editor Projection Revision Rollout
+
+The release containing `20260714_editor_text_projection_revisions.sql` changes Node and Logic Gate full-document writes from last-write-wins to required optimistic revisions. For that first release only:
+
+1. Announce a maintenance/reload boundary so users save current editor work and close or reload old Mango tabs.
+2. Have Jonat apply the revision migration through the human-only database administration path before deploying the application. Agents and deploy automation must not use a writer credential.
+3. Deploy the matching backend and frontend together, then complete the normal CloudFront invalidation.
+4. Verify a fresh client loads positive revisions for existing text boxes and sends `expected_revision: 0` for a new text box. A pre-revision request with no expected revision must remain rejected; do not re-enable last-write-wins compatibility.
+5. Smoke-test one Node and one Logic Gate stale-tab conflict, plus image-to-Node creation, before ending the maintenance window.
+
 ## Current Dev Shortcuts
 
 - Dev deploys are manual-only for now: `Actions -> Deploy MangoRTS Dev -> Run workflow`.

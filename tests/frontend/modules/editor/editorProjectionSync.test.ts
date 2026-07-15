@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  clearEditorProjectionDraft,
   editorProjectionDraftKey,
+  getEditorProjectionDraftTabID,
   listEditorProjectionDrafts,
   parseEditorProjectionConflict,
   readEditorProjectionDraft,
@@ -22,7 +24,7 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string) { this.values.set(key, value); }
 }
 
-const baseScope = { userID: "user-a", companyID: "company-a", entityKind: "logic_gate" as const, entityID: "gate-a", informationID: "info-a" };
+const baseScope = { userID: "user-a", companyID: "company-a", entityKind: "logic_gate" as const, entityID: "gate-a", tabID: "tab-a", informationID: "info-a" };
 
 test("retained drafts restore after refresh and remain scoped by authenticated user and company", () => {
   const storage = new MemoryStorage();
@@ -30,8 +32,29 @@ test("retained drafts restore after refresh and remain scoped by authenticated u
   assert.deepEqual(readEditorProjectionDraft(storage, baseScope), { text: "local draft", baseRevision: 7, updatedAt: "2026-07-14T00:00:00Z" });
   assert.equal(readEditorProjectionDraft(storage, { ...baseScope, userID: "user-b" }), null);
   assert.equal(readEditorProjectionDraft(storage, { ...baseScope, companyID: "company-b" }), null);
-  assert.deepEqual(listEditorProjectionDrafts(storage, { userID: "user-a", companyID: "company-a", entityKind: "logic_gate", entityID: "gate-a" }).map((entry) => entry.informationID), ["info-a"]);
+  assert.deepEqual(listEditorProjectionDrafts(storage, { userID: "user-a", companyID: "company-a", entityKind: "logic_gate", entityID: "gate-a", tabID: "tab-a" }).map((entry) => entry.informationID), ["info-a"]);
   assert.notEqual(editorProjectionDraftKey(baseScope), editorProjectionDraftKey({ ...baseScope, companyID: "company-b" }));
+});
+
+test("same-document tabs retain and clear independent drafts in shared local storage", () => {
+  const sharedLocalStorage = new MemoryStorage();
+  const firstTabSessionStorage = new MemoryStorage();
+  const firstTabID = getEditorProjectionDraftTabID(firstTabSessionStorage);
+  const secondTabID = getEditorProjectionDraftTabID(new MemoryStorage());
+  const firstTabScope = { ...baseScope, tabID: firstTabID };
+  const secondTabScope = { ...baseScope, tabID: secondTabID };
+
+  assert.notEqual(firstTabID, secondTabID);
+  assert.equal(getEditorProjectionDraftTabID(firstTabSessionStorage), firstTabID);
+  retainEditorProjectionDraft(sharedLocalStorage, firstTabScope, { text: "first tab draft", baseRevision: 7, updatedAt: "2026-07-14T00:00:00Z" });
+  retainEditorProjectionDraft(sharedLocalStorage, secondTabScope, { text: "second tab draft", baseRevision: 7, updatedAt: "2026-07-14T00:00:01Z" });
+
+  assert.equal(readEditorProjectionDraft(sharedLocalStorage, firstTabScope)?.text, "first tab draft");
+  assert.equal(readEditorProjectionDraft(sharedLocalStorage, secondTabScope)?.text, "second tab draft");
+  assert.deepEqual(listEditorProjectionDrafts(sharedLocalStorage, { userID: "user-a", companyID: "company-a", entityKind: "logic_gate", entityID: "gate-a", tabID: firstTabID }).map((entry) => entry.draft.text), ["first tab draft"]);
+  clearEditorProjectionDraft(sharedLocalStorage, firstTabScope);
+  assert.equal(readEditorProjectionDraft(sharedLocalStorage, firstTabScope), null);
+  assert.equal(readEditorProjectionDraft(sharedLocalStorage, secondTabScope)?.text, "second tab draft");
 });
 
 test("bounded write retry retries delivery failures but never retries a confirmed revision conflict", async () => {

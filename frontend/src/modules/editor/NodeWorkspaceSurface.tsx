@@ -53,6 +53,7 @@ import { EditorSyncBlockingModal } from "./EditorSyncBlockingModal";
 import {
   clearEditorProjectionDraft,
   editorSyncBlockReason,
+  getEditorProjectionDraftTabID,
   listEditorProjectionDrafts,
   parseEditorProjectionConflict,
   retainEditorProjectionDraft,
@@ -376,6 +377,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRegisterSaveController,
   onError,
 }) => {
+  const editorProjectionDraftTabID = useMemo(() => getEditorProjectionDraftTabID(typeof window === "undefined" ? null : window.sessionStorage), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
@@ -902,7 +904,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
 
   useEffect(() => {
-    const draftEntityScope = { userID: author.userID, companyID, entityKind: "node" as const, entityID: nodeID };
+    const draftEntityScope = { userID: author.userID, companyID, entityKind: "node" as const, entityID: nodeID, tabID: editorProjectionDraftTabID };
     const retainedDrafts = author.userID ? listEditorProjectionDrafts(window.localStorage, draftEntityScope) : [];
     const draftByInformationID = new Map(retainedDrafts.map((entry) => [entry.informationID, entry.draft]));
     const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
@@ -1005,7 +1007,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (nodeChanged || current === null) return textBlocks[0]?.id ?? "";
       return blockIDs.has(current) ? current : "";
     });
-  }, [author.userID, companyID, loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
+  }, [author.userID, companyID, editorProjectionDraftTabID, loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1105,8 +1107,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [blocks.length, canEdit]);
 
   const textBlockDraftScope = useCallback((blockID: string): EditorProjectionDraftScope => ({
-    userID: author.userID, companyID, entityKind: "node", entityID: nodeID, informationID: blockID,
-  }), [author.userID, companyID, nodeID]);
+    userID: author.userID, companyID, entityKind: "node", entityID: nodeID, tabID: editorProjectionDraftTabID, informationID: blockID,
+  }), [author.userID, companyID, editorProjectionDraftTabID, nodeID]);
 
   const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
     if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block");

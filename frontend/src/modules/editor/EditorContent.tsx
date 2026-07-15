@@ -34,6 +34,7 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
+  buildNewEditorTextBlockProjectionPayload,
   buildEditorTextBlockContentPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
@@ -97,6 +98,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { EditorSyncBlockingModal } from "./EditorSyncBlockingModal";
 import {
   clearEditorProjectionDraft,
+  getEditorProjectionDraftTabID,
   listEditorProjectionDrafts,
   readEditorProjectionDraft,
   retainEditorProjectionDraft,
@@ -626,6 +628,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [currentUserID, setCurrentUserID] = useState("");
   const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
   const [syncBlock, setSyncBlock] = useState<EditorSyncBlock | null>(null);
+  const editorProjectionDraftTabID = useMemo(() => getEditorProjectionDraftTabID(typeof window === "undefined" ? null : window.sessionStorage), []);
   const [selectedSaveVersionID, setSelectedSaveVersionID] = useState("");
   const [saveVersionIntervalMinutes, setSaveVersionIntervalMinutes] = useState(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
   const [saveVersionsSortAscending, setSaveVersionsSortAscending] = useState(false);
@@ -846,6 +849,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow, discardFailedSave } = useEditorDocumentPersistence({
     currentUserID,
     companyID,
+    draftTabID: editorProjectionDraftTabID,
     linkedEntityKind,
     linkedEntityID: linkedNodeID,
     documentDraftRef,
@@ -998,11 +1002,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string, revision: number) => {
-    const retainedDrafts = currentUserID ? listEditorProjectionDrafts(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID }) : [];
+    const retainedDrafts = currentUserID ? listEditorProjectionDrafts(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID }) : [];
     const restoredEntry = informationID ? retainedDrafts.find((entry) => entry.informationID === informationID) : retainedDrafts[retainedDrafts.length - 1];
     const resolvedInformationID = informationID || restoredEntry?.informationID || "";
     const targetKey = resolvedInformationID ? documentTargetKey({ entityKind, entityID, informationID: resolvedInformationID }) : `${entityKind}:${entityID}:`;
-    const retained = restoredEntry?.draft ?? (resolvedInformationID ? readEditorProjectionDraft(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, informationID: resolvedInformationID }) : null);
+    const retained = restoredEntry?.draft ?? (resolvedInformationID ? readEditorProjectionDraft(window.localStorage, { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID }) : null);
     const loadedText = retained?.text ?? text;
     const baseRevision = retained?.baseRevision ?? (Number.isInteger(revision) && revision >= 0 ? revision : 0);
     const element = editorDocumentRef.current;
@@ -1019,7 +1023,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     persistedDocumentTargetKeyRef.current = targetKey;
     if (retained && resolvedInformationID) setSyncBlock({
       reason: "draft_restored",
-      target: { userID: currentUserID, companyID, entityKind, entityID, informationID: resolvedInformationID },
+      target: { userID: currentUserID, companyID, entityKind, entityID, tabID: editorProjectionDraftTabID, informationID: resolvedInformationID },
       localText: loadedText,
       current: informationID ? { information_id: informationID, type: EDITOR_TEXT_BLOCK_TYPE, information: text, revision } : null,
       message: "An unsynced draft was restored after refresh. Review it, then retry the save deliberately.",
@@ -1050,7 +1054,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     restoreEditorDocumentScroll(targetKey);
     window.requestAnimationFrame(() => { restoringScrollRef.current = false; });
     if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [apiBase, companyID, currentUserID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
+  }, [apiBase, companyID, currentUserID, editorProjectionDraftTabID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -1427,12 +1431,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const informationID = generateStableInformationID();
     await requestJSON<unknown>(`/v1/nodes/${node.node_id}/projection`, {
       method: "POST",
-      body: JSON.stringify({
-        company_id: companyID,
-        type: EDITOR_TEXT_BLOCK_TYPE,
+      body: JSON.stringify(buildNewEditorTextBlockProjectionPayload({
+        companyID,
+        informationID,
         information: buildEditorTextBlockContentPayload({ title: blockTitle, document }),
-        information_id: informationID,
-      }),
+      })),
     });
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);

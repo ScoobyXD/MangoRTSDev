@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildEditorAttachedEmailPayload,
+  buildNewEditorTextBlockProjectionPayload,
   buildEditorTextBlockContentPayload,
   buildEditorTextBlockChatPayload,
   canDeleteEditorTextBlockChatMessage,
@@ -11,6 +12,20 @@ import {
   parseEditorTextBlockChats,
   selectCurrentEditorTextProjection,
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
+
+test("new text-box projections explicitly use revision zero", () => {
+  assert.deepEqual(buildNewEditorTextBlockProjectionPayload({
+    companyID: "company-a",
+    informationID: "information-a",
+    information: "draft",
+  }), {
+    company_id: "company-a",
+    type: "Text box",
+    information: "draft",
+    information_id: "information-a",
+    expected_revision: 0,
+  });
+});
 
 test("selects the newest text-box projection for the single editor document", () => {
   const selected = selectCurrentEditorTextProjection([
