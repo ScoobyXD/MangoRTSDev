@@ -5,6 +5,7 @@ import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborati
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
 import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
+import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
@@ -4791,6 +4792,7 @@ function triggerEmailBodyImageDownload(image: EmailBodyImageSelection): void {
 
 const EmailBodyFrame: React.FC<{
   message: EmailMessage;
+  body: string;
   apiBase: string;
   companyID: string;
   sharedInboxID?: string;
@@ -4800,8 +4802,7 @@ const EmailBodyFrame: React.FC<{
   strokeColor: string;
   accent: string;
   onSelectionChange?: (selection: EmailFrameSelection | null) => void;
-}> = ({ message, apiBase, companyID, sharedInboxID, accountEmail, collaborationID, compact, strokeColor, accent, onSelectionChange }) => {
-  const body = message.body || message.snippet || "";
+}> = ({ message, body, apiBase, companyID, sharedInboxID, accountEmail, collaborationID, compact, strokeColor, accent, onSelectionChange }) => {
   const attachments = useMemo(() => message.attachments ?? [], [message.attachments]);
   const [srcDoc, setSrcDoc] = useState(() => messageDocument(body, compact));
   const [height, setHeight] = useState(compact ? 96 : 420);
@@ -5452,6 +5453,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
   const [expandedThreadMessageID, setExpandedThreadMessageID] = useState("");
+  const [quotedHistoryMessageIDs, setQuotedHistoryMessageIDs] = useState<Set<string>>(() => new Set());
   const [toDraft, setToDraft] = useState("");
   const [ccDraft, setCcDraft] = useState("");
   const [bccDraft, setBccDraft] = useState("");
@@ -5668,7 +5670,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
     : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
-  const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
   useEffect(() => {
     setExpandedThreadMessageID((current) => {
@@ -6106,9 +6107,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = false;
               const isExpanded = expandedThreadMessageID === threadMessageID;
-              const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
-              const collapsedSnippet = emailBodyText(threadMessage.snippet || threadMessage.body || "").replace(/\s+/g, " ").trim();
+              const fullThreadBody = threadMessage.body || threadMessage.snippet || "";
+              const quotedContent = splitEmailQuotedHistory(fullThreadBody);
+              const quotedHistoryVisible = quotedHistoryMessageIDs.has(threadMessageID);
+              const displayThreadBody = quotedHistoryVisible ? fullThreadBody : quotedContent.authoredBody;
+              const threadBody = emailBodyText(displayThreadBody);
+              const collapsedSnippet = emailBodyText(quotedContent.authoredBody || threadMessage.snippet || "").replace(/\s+/g, " ").trim();
               const useRichThreadBody = !canUseEmailSelection || /<(?:img|table|video|audio)\b|\bcid:/i.test(threadMessage.body ?? "") || (threadMessage.attachments ?? []).some((attachment) => attachment.is_inline || Boolean(attachment.content_id));
+              const threadMessageIsSent = sentReplies.some((reply) => reply.id === threadMessage.id)
+                || (threadMessage.from ?? []).some((address) => Boolean(accountEmail?.trim()) && address.email.trim().toLowerCase() === accountEmail?.trim().toLowerCase())
+                || (threadMessage.folders ?? []).some((folder) => folder.trim().toLowerCase() === "sent" || folder.trim().toLowerCase() === "\\sent");
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
               const isReplyTarget = replyTargetMessage?.id === threadMessage.id;
@@ -6116,17 +6124,21 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               return (
                 <div
                   key={threadMessage.id || `${index}`}
+                  data-email-timeline-item="true"
                   style={{
                     position: "relative",
                     display: "grid",
-                    gap: inlineExpansion ? 3 : 5,
-                    margin: "0 -8px",
-                    padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "8px 8px 9px" : "14px 8px 16px",
-                    borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
-                    borderRadius: 10,
-                    background: "transparent",
-                    boxShadow: isReplyTarget && !hideInlineMessageChrome ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)" : undefined,
-                    transition: "box-shadow 140ms ease",
+                    gap: inlineExpansion ? 5 : 7,
+                    margin: inlineExpansion ? "8px 0" : "12px 0",
+                    padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "9px 10px 10px" : "13px 12px 15px",
+                    border: `1px solid ${isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER}`,
+                    borderLeft: `3px solid ${threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)"}`,
+                    borderRadius: 12,
+                    background: isExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                    boxShadow: isReplyTarget && !hideInlineMessageChrome
+                      ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)"
+                      : isExpanded ? EDITOR_NEU_SHADOW : "4px 4px 11px rgba(174,174,192,0.2), -4px -4px 11px rgba(255,255,255,0.82)",
+                    transition: "background 140ms ease, box-shadow 160ms ease, border-color 140ms ease",
                   }}
                 >
                   {!hideInlineMessageChrome && (
@@ -6223,6 +6235,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   {isExpanded && (useRichThreadBody ? (
                     <EmailBodyFrame
                       message={threadMessage}
+                      body={displayThreadBody}
                       apiBase={apiBase}
                       companyID={companyID}
                       sharedInboxID={sharedInboxID}
@@ -6255,19 +6268,45 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       )}
                     </div>
                   ))}
+                  {isExpanded && quotedContent.hasQuotedHistory && (
+                    <div
+                      data-email-quoted-history-control="true"
+                      style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, flexWrap: "wrap", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "rgba(248,250,252,0.78)", padding: "6px 7px", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.12), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                    >
+                      <span style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
+                        {quotedHistoryVisible ? "Full provider body is visible." : "Earlier quoted messages are hidden from this reply."}
+                      </span>
+                      <button
+                        type="button"
+                        aria-expanded={quotedHistoryVisible}
+                        onClick={() => {
+                          setSelectionDraft(null);
+                          setQuotedHistoryMessageIDs((current) => {
+                            const next = new Set(current);
+                            if (next.has(threadMessageID)) next.delete(threadMessageID);
+                            else next.add(threadMessageID);
+                            return next;
+                          });
+                        }}
+                        style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "3px 8px", fontSize: 10.5, fontWeight: 850, boxShadow: EDITOR_NEU_SHADOW }}
+                      >
+                        {quotedHistoryVisible ? "Hide quoted history" : "Show quoted history"}
+                      </button>
+                    </div>
+                  )}
                   {isExpanded && (
                     <EmailMessageAttachments
-                    message={threadMessage}
-                    apiBase={apiBase}
-                    companyID={companyID}
-                    sharedInboxID={sharedInboxID}
-                    accountEmail={accountEmail}
-                    collaborationID={collaborationID}
-                    respondable={providerReplyAvailable}
-                    accent={accent}
-                    surfaceText={surfaceText}
-                    strokeColor={strokeColor}
-                    onError={onError}
+                      message={threadMessage}
+                      apiBase={apiBase}
+                      companyID={companyID}
+                      sharedInboxID={sharedInboxID}
+                      accountEmail={accountEmail}
+                      collaborationID={collaborationID}
+                      respondable={providerReplyAvailable}
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      strokeColor={strokeColor}
+                      onError={onError}
                     />
                   )}
                 </div>
