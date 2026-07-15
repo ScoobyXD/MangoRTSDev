@@ -2196,29 +2196,29 @@ export const toolbarStyle: React.CSSProperties = {
 };
 
 export function mailConversationCardStyle(expanded: boolean, sent: boolean, fill: boolean): React.CSSProperties {
+  const directionColor = sent ? "rgba(124, 58, 237, 0.5)" : "rgba(14, 165, 233, 0.5)";
   return {
     minWidth: 0,
     minHeight: fill ? "100%" : undefined,
     height: fill ? "100%" : undefined,
     display: "grid",
     gridTemplateRows: fill ? "auto minmax(0, 1fr)" : "auto",
-    gap: 10,
+    gap: expanded ? 8 : 6,
     alignContent: fill ? "stretch" : "start",
-    padding: expanded ? 12 : "10px 12px",
+    padding: expanded ? 10 : "9px 10px",
     border: expanded ? "1px solid transparent" : `1px solid ${HOME_KEY_SOFT_BORDER}`,
-    borderRadius: 14,
+    borderLeft: `3px solid ${directionColor}`,
+    borderRadius: 12,
     background: expanded
       ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
       : HOME_KEY_SURFACE,
     boxShadow: expanded
-      ? `${HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
-      : HOME_KEY_SHADOW,
-    borderLeftColor: expanded ? "transparent" : sent ? "rgba(124, 58, 237, 0.18)" : "rgba(14, 165, 233, 0.18)",
+      ? `6px 6px 16px rgba(148,163,184,0.22), -6px -6px 16px rgba(255,255,255,0.82), ${HOME_KEY_EDGE_FRAME_SHADOW}`
+      : "3px 3px 9px rgba(148,163,184,0.17), -3px -3px 9px rgba(255,255,255,0.76)",
     overflow: "hidden",
     transition: "background 140ms ease, box-shadow 160ms ease, border-color 140ms ease, transform 140ms ease",
   };
 }
-
 export function mailConversationTimelineDotStyle(expanded: boolean, sent: boolean): React.CSSProperties {
   const color = sent ? "#7c3aed" : "#0ea5e9";
   return {

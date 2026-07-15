@@ -41,6 +41,8 @@
     "../modules/communications/communicationsApi.test.ts",
     "../../../frontend/src/modules/communications/emailQuotedContent.ts",
     "../modules/communications/emailQuotedContent.test.ts",
+    "../../../frontend/src/modules/communications/emailThreadMessages.ts",
+    "../modules/communications/emailThreadMessages.test.ts",
     "../modules/communications/emailCollaborationContracts.test.ts",
     "../../../frontend/src/modules/notifications/notificationsApi.ts",
     "../modules/notifications/notificationsApi.test.ts",

@@ -6,6 +6,7 @@ import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBann
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
 import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
 import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
+import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
@@ -5355,10 +5356,6 @@ function emailBodyText(body: string): string {
     .trim();
 }
 
-function emailMessageTimestamp(message: EmailMessage): number {
-  return typeof message.date === "number" && Number.isFinite(message.date) ? message.date : 0;
-}
-
 function formatEmailRelativeTime(value: string | number | undefined): string {
   if (value === undefined || value === "") return "";
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
@@ -5382,25 +5379,37 @@ function formatEmailRelativeTime(value: string | number | undefined): string {
 }
 
 function mergeEmailThreadMessages(primary: EmailMessage | null, fetchedMessages: EmailMessage[], sentReplies: EmailMessage[]): EmailMessage[] {
-  const byID = new Map<string, EmailMessage>();
-  const append = (message: EmailMessage | null | undefined) => {
-    if (!message?.id) return;
-    const existing = byID.get(message.id);
-    byID.set(message.id, existing ? { ...existing, ...message } : message);
+  const fallbackScopeKey = primary?.client_source_scope_key?.trim() || "mailbox";
+  const candidates: EmailThreadMessageCandidate[] = [];
+  const appendAuthoritative = (message: EmailMessage | null | undefined) => {
+    if (!message?.id?.trim()) return;
+    const scopeKey = message.client_source_scope_key?.trim() || fallbackScopeKey;
+    candidates.push({
+      message,
+      source: message.collaboration_id?.trim() ? "collaboration" : "provider",
+      scopeKey,
+    });
+    for (const reply of message.local_replies ?? []) {
+      candidates.push({
+        message: { ...reply, local_replies: undefined },
+        source: "local",
+        scopeKey,
+        inheritedThreadID: message.thread_id,
+      });
+    }
   };
-  for (const threadMessage of fetchedMessages) append(threadMessage);
-  append(primary);
-  for (const threadMessage of fetchedMessages) {
-    for (const reply of threadMessage.local_replies ?? []) append(reply);
+  for (const threadMessage of fetchedMessages) appendAuthoritative(threadMessage);
+  appendAuthoritative(primary);
+  for (const reply of sentReplies) {
+    candidates.push({
+      message: { ...reply, local_replies: undefined },
+      source: "local",
+      scopeKey: reply.client_source_scope_key?.trim() || fallbackScopeKey,
+      inheritedThreadID: primary?.thread_id,
+    });
   }
-  for (const reply of primary?.local_replies ?? []) append(reply);
-  for (const reply of sentReplies) append(reply);
-  return Array.from(byID.values()).sort((a, b) => (
-    emailMessageTimestamp(a) - emailMessageTimestamp(b)
-    || a.id.localeCompare(b.id)
-  ));
+  return normalizeEmailThreadMessages(candidates, "oldest");
 }
-
 function estimateEditorBodyLineCount(value: string): number {
   if (!value.trim()) return 1;
   const raw = value.startsWith(EDITOR_RICH_TEXT_PREFIX) ? value.slice(EDITOR_RICH_TEXT_PREFIX.length) : value;
@@ -6123,8 +6132,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const relativeTime = formatEmailRelativeTime(threadMessage.date);
               return (
                 <div
-                  key={threadMessage.id || `${index}`}
+                  key={emailThreadMessageRenderKey(threadMessage) || `${index}`}
                   data-email-timeline-item="true"
+                  data-email-message-id={threadMessage.id}
+                  data-email-message-sources={emailThreadMessageSourceLabel(threadMessage)}
                   style={{
                     position: "relative",
                     display: "grid",
