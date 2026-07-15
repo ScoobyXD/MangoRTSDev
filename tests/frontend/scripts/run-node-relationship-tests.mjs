@@ -19,6 +19,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/outboundEmailUndo.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailQuotedContent.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailThreadMessages.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailCollaborationContracts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/grouping/universalStatusGrouping.test.js"),

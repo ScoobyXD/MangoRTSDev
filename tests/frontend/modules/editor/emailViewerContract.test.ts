@@ -31,6 +31,9 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /splitEmailQuotedHistory\(fullThreadBody\)/);
   assert.match(nodeParts, /body=\{displayThreadBody\}/);
   assert.match(nodeParts, /data-email-timeline-item="true"/);
+  assert.match(nodeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
+  assert.match(nodeParts, /data-email-message-id=\{threadMessage\.id\}/);
+  assert.match(nodeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(threadMessage\)\}/);
   assert.match(nodeParts, /Show quoted history/);
   assert.match(nodeParts, /Hide quoted history/);
   assert.match(nodeParts, /onSelectionChange=\{canUseEmailSelection/);

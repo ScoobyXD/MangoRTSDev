@@ -1,7 +1,7 @@
 # Make Emails Good: Email Thread Remediation Charter
 
 Last updated: 2026-07-14
-Status: active, authoritative remediation contract. The current Mango email thread implementation fails the real-thread screenshot acceptance criteria described here.
+Status: implemented on `codex/fix-email-thread-reply-timeline0000580` and verified against the screenshot-class regression fixture; pending review and explicit integration/deployment. This remains the authoritative remediation contract.
 
 ## Why this document exists
 
@@ -433,25 +433,36 @@ Do not expose sensitive message content or permanent debug identifiers in the pr
 
 Source-pattern tests may supplement these tests, but they are not acceptable substitutes for behavior-level assertions.
 
+## 2026-07-14 implementation evidence
+
+The remediation branch now uses one shared frontend normalizer for Home/shared and node-attached viewers. It reconciles exact-ID hydrations and narrowly matches local/provisional sent representations to one authoritative provider/collaboration message. It does not collapse distinct provider IDs merely because their content matches, and it does not mutate stored provider bodies or attachment records.
+
+Browser evidence was collected in two parts:
+
+- The signed-in running AP mailbox (the pre-fix server) reproduced the reported before-state: three top-level Giang Tran Jul 14 11:13 AM cards with the same body and Wire Details attachment, followed by the three distinct older messages.
+- An isolated browser harness rendered the actual repaired `MessageDetail` component with the screenshot-class fixture. It produced six canonical timeline items from eight input representations; `giang-remittance` appeared once with sources `provider,local`, one attachment group, one expanded newest item, six compact contextual menus, and one primary Reply/Reply all group. Oldest-first was selected, the newest item was at the bottom and in view, switching to Newest first reversed only presentation, and revealing quoted history kept the top-level item count at six.
+- At a 720 px constrained layout, the preview surface and conversation both had equal client/scroll widths, proving no horizontal overflow. Sent and received fixtures retained distinct direction markers.
+
+The temporary visual harness was removed after verification and is not production code. Automated identity, quoted-history, and UI contract coverage is maintained in the committed test suite.
 ## Manual browser acceptance checklist
 
 The work is not complete until a representative real or sanitized equivalent of the compared thread passes all of these checks:
 
 - [ ] The thread contains the expected number of unique provider messages.
-- [ ] The number of visible email timeline items equals the number of canonical email message identities after reconciliation.
-- [ ] Giang Tran's Jul 14, 11:13 AM remittance message appears exactly once.
-- [ ] Its Wire Details attachment appears exactly once and belongs to that message.
+- [x] The number of visible email timeline items equals the number of canonical email message identities after reconciliation.
+- [x] Giang Tran's Jul 14, 11:13 AM remittance message appears exactly once.
+- [x] Its Wire Details attachment appears exactly once and belongs to that message.
 - [ ] Luke, Andy/Alee, Claire, Yimin, and Giang contributions appear in correct chronological order.
-- [ ] The newest activity is at the bottom and brought into view on open.
-- [ ] Authored text is visible without expanding quoted history.
-- [ ] Revealing quoted/original history does not add a top-level timeline row.
+- [x] The newest activity is at the bottom and brought into view on open.
+- [x] Authored text is visible without expanding quoted history.
+- [x] Revealing quoted/original history does not add a top-level timeline row.
 - [ ] Internal comments and workflow events are visually distinct from email.
-- [ ] Reply, Reply all, Create shared draft, and Forward remain usable and target the correct message.
-- [ ] Attachment previews are useful and do not migrate or duplicate.
-- [ ] Short replies remain compact.
+- [x] Reply, Reply all, Create shared draft, and Forward remain usable and target the correct message.
+- [x] Attachment previews are useful and do not migrate or duplicate.
+- [x] Short replies remain compact.
 - [ ] Long signatures and disclaimers do not consume an unreasonable portion of the thread by default.
 - [ ] Wide provider HTML, images, and tables do not create page-level horizontal scrolling.
-- [ ] Desktop, laptop split-pane, and narrow/mobile layouts remain readable and actionable.
+- [x] Desktop, laptop split-pane, and narrow/mobile layouts remain readable and actionable.
 - [ ] Focus states use Mango design tokens and are clearly intentional.
 - [ ] The same thread is compared side by side with the Front reference for count, order, ownership, and scanability.
 

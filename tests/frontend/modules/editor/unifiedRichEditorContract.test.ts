@@ -559,9 +559,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
   const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
 
-  assert.match(homeParts, /sortEmailConversationMessagesNewestFirst/);
+  assert.match(homeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
   assert.match(homeParts, /aria-label="Email conversation order"/);
-  assert.match(homeParts, /setConversationOrder\("newest"\)[\s\S]*\[conversationIdentity\]/);
+  assert.match(homeParts, /setConversationOrder\("oldest"\)[\s\S]*\[conversationIdentity\]/);
   assert.match(homeParts, /onReply\(message\)/);
   assert.match(homeParts, /onReplyAll\(message\)/);
   assert.match(homeParts, /AutoHeightEmailBodyFrame/);
@@ -579,6 +579,12 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
   assert.match(homeParts, /splitEmailQuotedHistory\(body\)/);
   assert.match(homeParts, /data-email-timeline-item="true"/);
+  assert.match(homeParts, /data-email-message-id=\{message\.id\}/);
+  assert.match(homeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(message\)\}/);
+  assert.match(homeParts, /data-email-message-actions="true"/);
+  assert.match(homeParts, /data-email-primary-reply-actions="true"/);
+  assert.match(homeParts, /data-email-conversation-count=\{conversationMessages\.length\}/);
+  assert.match(homeParts, /conversationScrollRef\.current[\s\S]*scrollTop = scrollContainer\.scrollHeight/);
   assert.match(homeParts, /data-message-direction=\{sent \? "sent" : "received"\}/);
   assert.match(homeParts, /mailConversationCardStyle\(expanded, sent, fill\)/);
   assert.match(homeParts, /Show quoted history/);
