@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Verify the current agent session lacks direct DB-write-enabling AWS access.
+"""Verify that an AWS-integrated agent workflow lacks admin AWS access.
 
 This script intentionally does not retrieve secret values and does not connect to a
 database. It checks the current shell/session for obvious AWS access paths that
 would let an agent retrieve writer secrets or mutate prod/dev infrastructure.
+
+This check is not required for ordinary database reads and does not prove that a
+database credential is read-only. Database reads must use a separately designated,
+database-enforced read-only credential. Run this script only when a specific
+AWS/cloud-integrated workflow explicitly requires it.
 """
 
 from __future__ import annotations
