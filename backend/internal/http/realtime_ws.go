@@ -26,6 +26,7 @@ const (
 	maxRealtimeScopeBytes                      = 384
 	maxRealtimeSubscriptionsPerConnection      = 16
 	realtimeWebSocketWriteTimeout              = 2 * time.Second
+	realtimeWebSocketHeartbeatInterval         = 25 * time.Second
 	webSocketOpcodeText                   byte = 0x1
 	webSocketOpcodeClose                  byte = 0x8
 	webSocketOpcodePing                   byte = 0x9
@@ -168,7 +169,31 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 	}); err != nil {
 		return
 	}
+	heartbeatDone := make(chan struct{})
+	go runRealtimeWebSocketHeartbeat(realtimeConn, realtimeWebSocketHeartbeatInterval, heartbeatDone)
+	defer close(heartbeatDone)
 	s.readRealtimeMessages(realtimeConn)
+}
+
+func runRealtimeWebSocketHeartbeat(conn *realtimeConnection, interval time.Duration, done <-chan struct{}) {
+	if conn == nil || interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			// A protocol-level ping is handled by the browser networking stack, so
+			// background-tab timer throttling cannot turn an idle connection into
+			// an application reconnect and canonical-refetch cycle.
+			if err := conn.writeFrame(webSocketOpcodePing, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func isWebSocketUpgradeRequest(r *http.Request) bool {

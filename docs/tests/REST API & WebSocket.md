@@ -3,7 +3,7 @@ Last updated: 2026-07-14
 # REST API & WebSocket Tests
 
 Coverage Status:
-- RW51-RW54 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
+- RW51-RW56 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `backend/internal/http/realtime_websocket_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (focused backend tests exercise realtime transport, exact-scope authorization, resource existence/shape/limit admission, publication-time revocation, bounded concurrent stalled-client delivery, routing, and the Kanban lookup guard for RW23 and RW37-RW43. Frontend behavior tests exercise shared-socket acceptance/reconnect/late-handler semantics, mailbox first-acceptance/reconnect/event coalescing and navigation ownership, notification HTTP/socket ordering, coalescing, local-title and edit-buffer helpers, and RW15 publication-time cache convergence. A central source inventory rejects forbidden broad scopes while allowing the four approved surfaces, and one AppLayout guard proves installation of the committed-title cache reconciliation coordinator. These are not a full mounted React request-cardinality or dirty-`contentEditable`/caret integration suite. Calendar invitation/provider response tests cover RW25; broader REST rule IDs remain unmapped.)
 
@@ -64,6 +64,7 @@ RW52 - Publication-time entity existence and audience resolution are deadline-bo
 RW53 - Backend folder, message-page, and message-detail singleflight keeps one shared provider leader per exact generation while every joined waiter observes its own context. Canceling a joined waiter returns promptly without canceling or duplicating the leader; the waiter releases its generation admission, the leader retains its own admission until completion, and only the still-current generation may cache the result.
 RW54 - Mailbox work uses separate ownership domains. Message-list/detail work may include mailbox tab, search, unread-only state, and selection generation; folder metadata uses only company plus exact mailbox scope; a queued provider mark-read is captured mutation intent rather than disposable list-refresh work. Navigation may detach stale UI results but cannot silently drop the mark-read command or let a prior scope overwrite the destination.
 RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
+RW56 - An otherwise healthy realtime WebSocket remains connected while idle. The backend sends an empty protocol-level ping every 25 seconds, below the deployed load balancer's 60-second idle timeout; the browser networking stack answers without JavaScript timers, API fetches, auth refreshes, or new realtime tickets. Only a genuine transport failure invokes bounded reconnect and scoped canonical recovery.
 
 ## Scenarios
 
@@ -497,3 +498,20 @@ Expected:
 - The real notification hint coalesces one atomic feed reconciliation without first clearing visible rows, selection, or expansion.
 - Board reconciliation applies canonical card/title data without changing same-Node fullscreen.
 - No whole-app refresh, projection delta, or loss of necessary realtime correctness is introduced.
+
+### Scenario RW-S21: Quiet Realtime Connections Stay Open Without API Polling
+
+Business logic covered:
+- RW19
+- RW20
+- RW56
+
+Given:
+- A browser has active notification, mounted-board, and open-Node scopes.
+- The deployed load balancer closes connections that have no traffic for 60 seconds.
+- No product event occurs for several minutes, and the tab may be backgrounded with JavaScript timers throttled.
+
+Expected:
+- The backend sends a protocol-level ping every 25 seconds and the browser answers below JavaScript.
+- The quiet connection stays open without ticket, token, notification-summary, Logic Gate work, or Node-view HTTP requests.
+- A genuine transport failure still causes one bounded reconnect followed by the existing scoped canonical recovery.
