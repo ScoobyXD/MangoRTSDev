@@ -674,3 +674,116 @@ This section is the authoritative current status. The research and recommendatio
 
 - Manual thread split/merge, forwarding as an `.eml` attachment, proxying every remote image, calendar conflict detection and webhook reconciliation, separate-per-recipient multi-send tracking, and a full calendar workspace.
 - The next quality step is real-provider/browser acceptance against representative complex threads, forwarded marketing/Outlook HTML, and live Google/Microsoft invitations.
+## Mango Front email thread comparison number two
+
+### Scope and implementation boundary
+
+This comparison records the second Mango-versus-Front review of the exact same conversation:
+
+**Re: [EXTERNAL] Re: Payment - POs 2026-00-28449, 2026-00-28450, and 2026-00-28451**
+
+The evidence was reviewed in the user's exact screenshot order. Screenshots 1 through 16 are Mango; screenshots 17 through 24 are Front. The Front set is intentionally incomplete because the real Front conversation contains more messages than were captured.
+
+This section is documentation only for the item 5 thread-data problem. The item 5 data/reconciliation fix is deliberately deferred. The separate item 4 opening-state defect shown by screenshots 1 and 2 is addressed by the current triage-behavior work, but that does not prove or repair the missing/duplicate message history documented here.
+
+### What the screenshots show, in exact order
+
+| Screenshot | Product | Evidence |
+| --- | --- | --- |
+| 1 | Mango | The selected inbox card advertises a four-message conversation, but the detail pane initially shows only the latest Giang Tran message from July 15 at 1:19 PM. There is no visible timeline proving that this is a thread. |
+| 2 | Mango | The same selection later changes into a long timeline without a new deliberate thread-opening action. Several collapsed and expanded cards appear, proving that screenshot 1 was an incomplete transient presentation. |
+| 3 | Mango | The earliest clearly visible Mango card is Giang Tran on July 8 at 7:12 AM. Mango therefore presents this conversation as beginning roughly one week before the latest message. |
+| 4 | Mango | Expanding quoted content exposes a large nested prior reply from Luke Mendoza and Pilar Barrabes instead of keeping each real provider message as a clean independent timeline item. |
+| 5 | Mango | Another Giang reply includes Pilar's prior message and large inline order screenshots inside quoted history, making one card contain a substantial copy of earlier conversation state. |
+| 6 | Mango | The same quoted body continues across a very tall area with multiple order images, signatures, and disclaimers. This creates a false sense that one message is the whole thread. |
+| 7 | Mango | Another expanded body again includes prior sender headers, prior authored text, signatures, and disclaimers. Distinct authored content and copied history are difficult to distinguish. |
+| 8 | Mango | Two consecutive Giang Tran cards have the same July 13 11:37 AM timestamp, sender, recipients, and pricing-request body. A third copy begins below them. |
+| 9 | Mango | The duplicate July 13 11:37 AM Giang message is visible again before the next Pilar card. This is direct visible duplicate evidence, although the screenshots do not expose provider IDs. |
+| 10 | Mango | Pilar's July 14 card contains order imagery and then another embedded copy of the July 13 Giang message, multiplying content that should remain collapsed quoted history. |
+| 11 | Mango | Luke's reply contains another long embedded copy of Pilar's earlier message, signatures, and prior headers. |
+| 12 | Mango | The nested quoted chain continues into the July 8 messages, so the user must read repeated history inside cards while still lacking Front's older real messages. |
+| 13 | Mango | More inline order imagery and signatures continue inside the expanded quoted chain, consuming a large amount of vertical space. |
+| 14 | Mango | Near the newer end, several collapsed Giang July 15 1:19 PM cards appear consecutively with the same sender, time, and preview. |
+| 15 | Mango | At least three expanded copies of the same Giang July 15 1:19 PM remittance message are visible. Each copy repeats the same body and Wire Details PDF attachment. |
+| 16 | Mango | Additional copies of that same July 15 message and attachment continue. The attachment alternates between preview states but remains visibly repeated as if owned by multiple messages. |
+| 17 | Front | Front shows a message from approximately one month earlier, from Luke Mendoza, with 11 purchase-order attachments and a detailed production table. This alone proves Mango's July 8 start is not the true start of the conversation. |
+| 18 | Front | Separate Juan Flores and Stefanie Regalado messages appear as clean cards. Each card contains its own authored content and a small quote-toggle affordance instead of expanding copied history by default. |
+| 19 | Front | Separate Luke and Stefanie messages continue in chronological context with no visible duplicate cards. |
+| 20 | Front | Pilar's message owns its own 11 attachments and its own authored response. Attachment ownership is visually unambiguous. |
+| 21 | Front | Separate Giang and Pilar cards continue the older conversation. Their authored content is readable without automatically repeating the entire prior chain. |
+| 22 | Front | Luke's revised purchase-order attachment, another Luke reply, and Pilar's production-date response appear as distinct messages. Front also shows workflow context between messages without confusing those events with email bodies. |
+| 23 | Front | Pilar's production-date table remains part of that exact message body and is not duplicated into neighboring message cards. |
+| 24 | Front | The captured Front history reaches the recent July messages, including Luke, Giang, and the three purchase-order images. It cleanly connects the older month-long conversation to the period Mango displays. |
+
+### What Mango is doing wrong
+
+1. **Mango's visible history is incomplete.** Front proves that the conversation includes many real messages from approximately one month earlier. Mango begins around July 8, so older canonical members are missing from the selected thread.
+2. **Mango visibly duplicates messages.** The July 13 11:37 AM Giang request appears repeatedly, and the July 15 1:19 PM Giang remittance message appears at least three or four times. Sender, timestamp, recipients, body, and attachments match. The screenshots cannot prove whether the duplicate rows share one provider message ID, so the future implementation must capture identity provenance instead of deduplicating only by visible text.
+3. **Mango visibly duplicates attachment ownership.** The Wire Details PDF is repeated under each duplicate July 15 card. An attachment must belong to one canonical provider message and render once with that message.
+4. **Mango mixes real messages with copied quoted history.** Expanded cards contain prior headers, signatures, order images, disclaimers, and earlier replies. This makes repeated quote payloads look like additional thread chronology while real older messages are absent.
+5. **Mango has an unstable opening state.** Screenshot 1 paints one latest message even though the row reports four messages; screenshot 2 later replaces it with a timeline. That transition is jarring and makes the user doubt whether thread history exists.
+6. **Mango's timeline is too tall and noisy when quotes are expanded.** Repeated signatures, disclaimers, embedded images, and copied headers dominate the view. The user cannot quickly identify what each person newly wrote.
+7. **Mango has not yet proved source completeness.** A clean-looking timeline is not enough. The product must prove that every authoritative provider thread member was fetched, reconciled, and represented exactly once.
+
+### What Front is doing right
+
+1. **Front presents a much longer canonical history.** The same conversation reaches back approximately one month and includes messages that Mango never shows.
+2. **Front gives each real message one clear card.** Sender, recipients, age, authored body, attachments, and message actions are owned by that card.
+3. **Front keeps quoted history optional.** The small quote-toggle/ellipsis affordance allows the user to reveal the complete historical quote carried by a specific message without making that copied history the default timeline.
+4. **Front keeps attachments attached to their source message.** Eleven purchase orders belong to the relevant Luke or Pilar message; a revised purchase order belongs to the later Luke message; recent order images belong to the recent message. They do not repeat under duplicate cards.
+5. **Front separates conversation chronology from workflow context.** Assignment, waiting, snooze, topic, and status events appear between messages as contextual activity, not as fake email bodies.
+6. **Front remains readable even when the conversation is long.** Authored content is prominent, repeated quotes are collapsed, and signatures do not obscure the message-to-message sequence.
+
+### Important interpretation of Front's quote toggle
+
+The Front screenshots suggest that each message's ellipsis/quote control can reveal the full quoted chain carried inside that provider message. That quoted chain can be very long because it represents everything copied into that one message at send time. It is not evidence that those copied blocks are additional canonical messages.
+
+Mango must therefore preserve two separate truths:
+
+- **Canonical thread chronology:** one timeline item per real provider message identity.
+- **Per-message full body fidelity:** the unchanged body for that exact message, including quoted history, available only through an explicit Show quoted history action.
+
+Mango must never manufacture timeline items from quoted headers, and it must never use quoted content as a substitute for provider messages missing from canonical thread membership.
+
+### Likely failure boundaries that the future implementation must prove
+
+The screenshots identify symptoms, not the exact failing layer. A future implementation must collect evidence at every boundary:
+
+1. Record the provider thread ID and ordered authoritative provider message IDs for this exact mailbox.
+2. Record every thread-list page token and message ID returned by Nylas, including whether the oldest pages were exhausted.
+3. Record which authoritative IDs required exact Get Message hydration because they were absent from bounded preview pages.
+4. Record every collaboration snapshot, locally sent provisional reply, cached detail, and provider row offered to the frontend normalizer.
+5. For every visible timeline card, record the canonical scoped identity and source representations that produced it.
+6. For every attachment group, record the one canonical message identity that owns it.
+7. Compare the canonical provider message count with the mounted visible card count.
+
+No fix should be accepted if it merely hides visually identical cards. Distinct provider IDs with identical text can be legitimate messages; the correction must reconcile representations of the same identity while preserving genuinely distinct messages.
+
+### Required future correction
+
+1. Fetch authoritative thread membership first and continue until every message ID is either hydrated or reported as a specific recoverable failure.
+2. Reconcile provider, collaboration, cache, and local/provisional representations by exact mailbox-scoped message identity.
+3. Use conservative semantic matching only for one temporary local send that is becoming one provider message; never collapse two distinct provider IDs because their text looks the same.
+4. Render one chronological item and one attachment group per canonical provider message.
+5. Show only newly authored content by default. Keep the unchanged complete provider body behind Show quoted history on that exact message.
+6. Keep signatures and disclaimers faithful inside full-body view, but prevent them from becoming timeline structure.
+7. Hold a stable Loading conversation state until a known thread can mount as a thread; do not paint one message and later swap the whole layout.
+8. Validate this exact AP conversation in a real browser and compare it directly with Front.
+
+### Acceptance checklist for comparison number two
+
+- The canonical provider thread contains the same oldest-to-newest real messages that Front exposes for the captured period.
+- Mango does not begin at July 8 when older provider members exist.
+- The July 13 11:37 AM Giang pricing request appears exactly once per provider message ID.
+- The July 15 1:19 PM Giang remittance message appears exactly once per provider message ID.
+- The Wire Details PDF appears once under its owning canonical message.
+- Older month-level messages and their attachments appear without being reconstructed from quoted text.
+- Opening the row never shows a false single-message state before the thread.
+- Every card's Show quoted history reveals only that card's unchanged provider body.
+- The visible card count equals the canonical provider message count after reconciliation.
+- Tests cover missing preview members, repeated provider IDs across sources, legitimate identical-content messages with distinct IDs, local-to-provider send reconciliation, repeated attachments, and incomplete pagination.
+- Browser evidence records the provider ID count, visible card count, first visible message date, last visible message date, and screenshots at desktop and narrow widths.
+
+### Explicit non-completion statement
+
+This comparison documents item 5 in detail but does not implement the missing/duplicate thread-data correction. Item 5 remains open until the provider-to-render provenance trace and the acceptance checklist above pass on the representative AP thread.

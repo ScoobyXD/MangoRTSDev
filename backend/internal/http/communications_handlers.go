@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -299,7 +300,12 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		page, err := s.communicationsMessagePage(r.Context(), connection, query)
+		var page NylasMessagePage
+		if query.Order == "oldest" {
+			page, err = s.communicationsOldestMessageSnapshot(r.Context(), connection, query)
+		} else {
+			page, err = s.communicationsMessagePage(r.Context(), connection, query)
+		}
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
@@ -1557,6 +1563,7 @@ func (s *Server) markCommunicationsConnectionReauthRequired(connection domain.Us
 const (
 	communicationsNylasDefaultMessageLimit   = 12
 	communicationsNylasMaxMessageLimit       = 12
+	communicationsNylasOrderSnapshotLimit    = 200
 	communicationsNylasMinRequestInterval    = 200 * time.Millisecond
 	communicationsNylasMaxInFlightPerGrant   = 2
 	communicationsArchiveBatchConcurrency    = 4
@@ -1701,6 +1708,52 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 		return NylasMessagePage{}, err
 	}
 	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
+}
+
+func (s *Server) communicationsOldestMessageSnapshot(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
+	pageQuery := query
+	pageQuery.Order = ""
+	pageQuery.Limit = communicationsNylasOrderSnapshotLimit
+	pageQuery.PageToken = ""
+
+	messages := make([]NylasMessage, 0, communicationsNylasOrderSnapshotLimit)
+	seenMessageIDs := make(map[string]struct{})
+	seenPageTokens := make(map[string]struct{})
+	for {
+		page, err := s.communicationsMessagePage(ctx, connection, pageQuery)
+		if err != nil {
+			return NylasMessagePage{}, err
+		}
+		for _, message := range page.Messages {
+			messageID := strings.TrimSpace(message.ID)
+			if messageID == "" {
+				continue
+			}
+			if _, exists := seenMessageIDs[messageID]; exists {
+				continue
+			}
+			seenMessageIDs[messageID] = struct{}{}
+			messages = append(messages, message)
+		}
+
+		nextPageToken := strings.TrimSpace(page.NextPageToken)
+		if nextPageToken == "" {
+			break
+		}
+		if _, repeated := seenPageTokens[nextPageToken]; repeated {
+			return NylasMessagePage{}, errors.New("repeated communications message page token")
+		}
+		seenPageTokens[nextPageToken] = struct{}{}
+		pageQuery.PageToken = nextPageToken
+	}
+
+	sort.SliceStable(messages, func(i, j int) bool {
+		if messages[i].Date != messages[j].Date {
+			return messages[i].Date < messages[j].Date
+		}
+		return strings.TrimSpace(messages[i].ID) < strings.TrimSpace(messages[j].ID)
+	})
+	return NylasMessagePage{Messages: messages}, nil
 }
 
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
@@ -1902,7 +1955,7 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "thread_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "shared_inbox_id" && key != "account_email" && key != "refresh" {
+		if key != "limit" && key != "page_token" && key != "order" && key != "folder_id" && key != "thread_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "shared_inbox_id" && key != "account_email" && key != "refresh" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -1922,12 +1975,17 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 	query := NylasMessageQuery{
 		Limit:         limit,
 		PageToken:     strings.TrimSpace(r.URL.Query().Get("page_token")),
+		Order:         strings.TrimSpace(strings.ToLower(r.URL.Query().Get("order"))),
 		FolderID:      strings.TrimSpace(r.URL.Query().Get("folder_id")),
 		ThreadID:      strings.TrimSpace(r.URL.Query().Get("thread_id")),
 		Query:         strings.TrimSpace(r.URL.Query().Get("q")),
 		Mailbox:       normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
 		CompanyID:     strings.TrimSpace(r.URL.Query().Get("company_id")),
 		SharedInboxID: strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")),
+	}
+	if query.Order != "" && query.Order != "oldest" {
+		writeError(w, http.StatusBadRequest, "invalid_email_order")
+		return NylasMessageQuery{}, false
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("mailbox")); raw != "" && query.Mailbox == "" {
 		writeError(w, http.StatusBadRequest, "invalid_email_mailbox")

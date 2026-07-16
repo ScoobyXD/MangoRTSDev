@@ -104,7 +104,7 @@ import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, 
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
 import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, sharedInboxIDForHomeView } from "./emailCollaborationRows";
@@ -350,12 +350,12 @@ type PrefetchedMessagePage = {
   page: MessagePage;
 };
 
-function primaryTriageVisibleMessagesForList(messages: EmailMessage[]): EmailMessage[] {
-  return condenseEmailThreadMessages(messages).slice(0, MESSAGE_BATCH_SIZE);
+function primaryTriageVisibleMessagesForList(messages: EmailMessage[], order: EmailConversationOrder = "newest"): EmailMessage[] {
+  return emailMessagesForOrderedPage(condenseEmailThreadMessages(messages), order, MESSAGE_BATCH_SIZE);
 }
 
-function primaryTriageVisibleRawMessageIDs(messages: EmailMessage[]): string[] {
-  const visibleKeys = new Set(primaryTriageVisibleMessagesForList(messages).map(emailThreadKey));
+function primaryTriageVisibleRawMessageIDs(messages: EmailMessage[], order: EmailConversationOrder = "newest"): string[] {
+  const visibleKeys = new Set(primaryTriageVisibleMessagesForList(messages, order).map(emailThreadKey));
   const ids: string[] = [];
   const seenIDs = new Set<string>();
   for (const message of messages) {
@@ -579,6 +579,7 @@ export function HomePage({
   const selectedMessageRowKeyRef = useRef("");
   const selectedMessageRef = useRef<EmailMessage | null>(null);
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
+  const messageListOrderRef = useRef<EmailConversationOrder>("newest");
   const initialViewIDRef = useRef<HomeViewID>(initialViewID);
   const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
   const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
@@ -751,6 +752,7 @@ export function HomePage({
     searchQuery,
     unreadOnly,
     activeEmailMailboxScopeKey,
+    messageListOrder,
   );
   useLayoutEffect(() => {
     const mailboxScopeChanged = activeEmailMailboxScopeKeyRef.current !== activeEmailMailboxScopeKey;
@@ -1026,6 +1028,9 @@ export function HomePage({
   useLayoutEffect(() => {
     activeViewIDRef.current = activeViewID;
   }, [activeViewID]);
+  useLayoutEffect(() => {
+    messageListOrderRef.current = messageListOrder;
+  }, [messageListOrder]);
   useEffect(() => {
     if (!activeSharedInboxFolderID) return;
     if (sharedInboxes.some((folder) => folder.folder_id === activeSharedInboxFolderID)) return;
@@ -1279,6 +1284,7 @@ export function HomePage({
       searchQueryRef.current,
       unreadOnlyRef.current,
       activeEmailMailboxScopeKeyRef.current,
+      messageListOrderRef.current,
     )
   ), [companyID]);
   const currentMailboxRequestOwner = useCallback((): HomeMailboxRequestOwner => ({
@@ -1576,7 +1582,7 @@ export function HomePage({
 
     while (
       nextToken
-      && primaryTriageVisibleMessagesForList(pageMessages).length < MESSAGE_BATCH_SIZE
+      && primaryTriageVisibleMessagesForList(pageMessages, messageListOrderRef.current).length < MESSAGE_BATCH_SIZE
       && !seenPageTokens.has(nextToken)
       && additionalPageRequests < PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS
     ) {
@@ -1631,13 +1637,13 @@ export function HomePage({
     }
     const sharedInboxID = sharedInboxIDForHomeView(activeViewID);
     if (sharedInboxID && !activeSharedInbox) {
-      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey);
+      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
       clearMailListState();
       return;
     }
     if (!canLoadMailForView(activeViewID)) {
       if (activeViewID === "my-triage" && mailbox === "primary") {
-        const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+        const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, "", messageListOrder);
         messageListFilterKeyRef.current = requestKey;
         setLoadingMessages(true);
         setError("");
@@ -1676,7 +1682,7 @@ export function HomePage({
       }
       return;
     }
-    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey);
+    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
     messageListFilterKeyRef.current = requestKey;
     if (mailbox === "drafts") {
       const currentDraftMessages = draftMessagesRef.current;
@@ -1695,7 +1701,7 @@ export function HomePage({
       return;
     }
     if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail) {
-      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey);
+      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
       clearMailListState();
       return;
     }
@@ -1719,6 +1725,7 @@ export function HomePage({
       const [page, collaborations] = await Promise.all([
         listEmailMessages({
           limit: MESSAGE_BATCH_SIZE,
+          order: messageListOrder === "oldest" ? "oldest" : undefined,
           mailbox,
           companyID,
           sharedInboxID,
@@ -1750,7 +1757,7 @@ export function HomePage({
       setNextPageToken(visiblePage.next_page_token ?? "");
       setLoadedMessageListKey(requestKey);
       const selectableMessages = isPrimaryTriageMailbox(activeViewID, mailbox)
-        ? primaryTriageVisibleMessagesForList(pageMessages)
+        ? primaryTriageVisibleMessagesForList(pageMessages, messageListOrder)
         : pageMessages;
       const currentSelectedMessageRowKey = selectedMessageRowKeyRef.current;
       const currentSelectionStillVisible = !!currentSelectedMessageRowKey
@@ -1801,7 +1808,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeEmailMailboxScopeKey, activeMailAccountEmail, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, clearSelectedMessageState, companyID, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, scheduleMessageListRefresh, searchQuery, sharedInboxes, unreadOnly]);
+  }, [activeEmailMailboxScopeKey, activeMailAccountEmail, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, clearSelectedMessageState, companyID, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListOrder, scheduleMessageListRefresh, searchQuery, sharedInboxes, unreadOnly]);
   useEffect(() => {
     const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
     if (!sharedInboxID) return;
@@ -1988,7 +1995,7 @@ export function HomePage({
       owner.mailboxScopeKey,
       currentUserID,
     ), locallyReadMessageKeysRef.current, owner.mailboxScopeKey);
-    const firstMessage = primaryTriageVisibleMessagesForList(pageMessages)[0] ?? pageMessages[0] ?? null;
+    const firstMessage = primaryTriageVisibleMessagesForList(pageMessages, messageListOrderRef.current)[0] ?? pageMessages[0] ?? null;
     const firstMessageRowKey = firstMessage ? emailMessageRowKey(firstMessage) : "";
     messagesRef.current = pageMessages;
     nextPageTokenRef.current = page.next_page_token ?? "";
@@ -2230,7 +2237,7 @@ export function HomePage({
       currentUserID,
       activeMailAccountEmail,
     ));
-    const previousMessageIDs = primaryTriageVisibleRawMessageIDs(providerMessages);
+    const previousMessageIDs = primaryTriageVisibleRawMessageIDs(providerMessages, messageListOrderRef.current);
     if (previousMessageIDs.length === 0) return;
     const countKey = homeMailboxCountKey(owner.mailboxScopeKey);
     const primaryCountAtStart = mailboxCountsFromFolders(foldersRef.current).primary ?? 0;
@@ -2246,7 +2253,7 @@ export function HomePage({
     try {
       const archivedIDSet = new Set(previousMessageIDs);
       const remainingMessages = providerMessages.filter((message) => !archivedIDSet.has(message.id.trim()));
-      if (pageToken && primaryTriageVisibleMessagesForList(remainingMessages).length < MESSAGE_BATCH_SIZE) setLoadingMoreMessages(true);
+      if (pageToken && primaryTriageVisibleMessagesForList(remainingMessages, messageListOrderRef.current).length < MESSAGE_BATCH_SIZE) setLoadingMoreMessages(true);
       let prefetchedPage = consumePrefetchedMessagePage(filterKey, pageToken);
       const matchingPrefetch = !prefetchedPage
         && prefetchMessagePromiseRef.current
@@ -2308,7 +2315,7 @@ export function HomePage({
           currentUserID,
           activeMailAccountEmail,
         ));
-        if (nextPageTokenRef.current && primaryTriageVisibleMessagesForList(providerMessages).length < MESSAGE_BATCH_SIZE) {
+        if (nextPageTokenRef.current && primaryTriageVisibleMessagesForList(providerMessages, messageListOrderRef.current).length < MESSAGE_BATCH_SIZE) {
           void fillPrimaryTriageVisibleMessagePage({
             messages: providerMessages,
             next_page_token: nextPageTokenRef.current,
@@ -2346,7 +2353,7 @@ export function HomePage({
       if (messageListContentScrollHeight(list) <= list.clientHeight + 160) void loadMoreMessages();
     }, 0);
   }, [activeMailAccountEmail, canLoadMailForView, currentMailboxRequestOwner, currentMessageFilterKey, currentUserID, emailCollaborations, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, loadMoreMessages, localTriageConversionMailNetworkIsSuppressed, mailboxRequestOwnerIsCurrent, messageListWithinPrefetchDistance, prefetchNextMessagePage, scheduleOwnedMailRequest, sharedInboxes]);
-  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[], options?: { exactMessages?: EmailMessage[]; fillAfterRemoval?: boolean; preserveScrollAnchor?: boolean; suppressAutoNetwork?: boolean }) => {
+  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[], options?: { exactMessages?: EmailMessage[]; fillAfterRemoval?: boolean; preserveScrollAnchor?: boolean; suppressAutoNetwork?: boolean; selectAfterRemoval?: EmailMessage | null }) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     if (options?.suppressAutoNetwork) suppressLocalTriageConversionMailNetwork();
@@ -2360,23 +2367,33 @@ export function HomePage({
     const removedRowKeys = new Set(messagesRef.current
       .filter(shouldRemove)
       .map(emailMessageRowKey));
+    const nextSelection = options?.selectAfterRemoval && !shouldRemove(options.selectAfterRemoval)
+      ? options.selectAfterRemoval
+      : null;
+    const nextSelectionRowKey = nextSelection ? emailMessageRowKey(nextSelection) : "";
     const list = options?.preserveScrollAnchor ? messageListRef.current : null;
     const scrollAnchor = list ? captureMessageListScrollAnchor(list, removedRowKeys) : null;
     setMessages((previous) => previous.filter((message) => !shouldRemove(message)));
-    setSelectedMessageIDs((previous) => {
-      const next = new Set(previous);
-      for (const rowKey of removedRowKeys) next.delete(rowKey);
-      return next.size === previous.size ? previous : next;
-    });
-    setSelectionAnchorMessageID((current) => (removedRowKeys.has(current) ? "" : current));
+    if (nextSelection) {
+      setSelectedMessageIDs(new Set([nextSelectionRowKey]));
+      setSelectionAnchorMessageID(nextSelectionRowKey);
+    } else {
+      setSelectedMessageIDs((previous) => {
+        const next = new Set(previous);
+        for (const rowKey of removedRowKeys) next.delete(rowKey);
+        return next.size === previous.size ? previous : next;
+      });
+      setSelectionAnchorMessageID((current) => (removedRowKeys.has(current) ? "" : current));
+    }
     if (removedRowKeys.has(selectedMessageRowKeyRef.current)) {
-      selectedMessageIDRef.current = "";
-      selectedMessageRowKeyRef.current = "";
-      selectedMessageRef.current = null;
-      setSelectedMessageID("");
-      setSelectedMessageRowKey("");
-      setSelectedMessage(null);
-      setSelectedThreadMessages([]);
+      messageSelectionGenerationRef.current += 1;
+      selectedMessageIDRef.current = nextSelection?.id ?? "";
+      selectedMessageRowKeyRef.current = nextSelectionRowKey;
+      selectedMessageRef.current = nextSelection;
+      setSelectedMessageID(nextSelection?.id ?? "");
+      setSelectedMessageRowKey(nextSelectionRowKey);
+      setSelectedMessage(nextSelection);
+      setSelectedThreadMessages(nextSelection ? [nextSelection] : []);
     }
     setMessageContextMenu((current) => current && current.messageIDs.some((id) => ids.includes(id)) ? null : current);
     if (list && scrollAnchor) {
@@ -2507,7 +2524,7 @@ export function HomePage({
     setNodeEditorOverlay(null);
   }, [companyID]);
   useEffect(() => {
-    const loadedListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey);
+    const loadedListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
     if (loadedMessageListKey !== loadedListKey) return;
     if (!nextPageToken || loadingMessages || loadingMoreMessages) return;
     if (localTriageConversionMailNetworkIsSuppressed(loadedListKey)) return;
@@ -3037,7 +3054,7 @@ export function HomePage({
         removePendingStarredMessages([messageID], owner.mailboxScopeKey);
       });
   }, [addPendingStarredMessages, adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, cancelPendingStarredMessages, companyID, currentMessageFilterKey, forgetLocalMailboxMutationEchoes, handleEmailAccessExpired, loadFolders, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessages, rememberLocalMailboxMutationEchoes, removePendingStarredMessages, scheduleMessageListRefresh]);
-  const archiveMessages = useCallback(async (messageIDs: string[], exactMessages?: EmailMessage[]) => {
+  const archiveMessages = useCallback(async (messageIDs: string[], exactMessages?: EmailMessage[], selectAfterRemoval?: EmailMessage | null) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (!(exactMessages ? providerMutationAvailableForMessages(exactMessages) : providerMutationAvailableForMessageIDs(ids))) return;
@@ -3057,7 +3074,10 @@ export function HomePage({
     setBusy("archive");
     setError("");
     setNotice("");
-    removeMessagesFromVisibleMailList(ids, exactMessages ? { exactMessages } : undefined);
+    removeMessagesFromVisibleMailList(ids, {
+      ...(exactMessages ? { exactMessages } : {}),
+      selectAfterRemoval,
+    });
     try {
       rememberLocalMailboxMutationEchoes("message.updated", ids, realtimeScope);
       const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, accountEmail, messageIDs: ids });
@@ -3066,10 +3086,10 @@ export function HomePage({
       adjustPrimaryMailboxCount(countKey, -archivedInboxCount, primaryCountAtStart);
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
       const failed = result?.failed ?? [];
-      setSelectedMessageIDs(new Set());
+      if (!selectAfterRemoval) setSelectedMessageIDs(new Set());
       const failedIDs = failed.map((item) => item.message_id);
       if (failedIDs.length > 0) forgetLocalMailboxMutationEchoes("message.updated", failedIDs, realtimeScope);
-      setSelectionAnchorMessageID("");
+      if (!selectAfterRemoval) setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
       if (failed.length > 0) {
         setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
@@ -3128,7 +3148,10 @@ export function HomePage({
   const archiveSelected = async () => {
     if (!selectedMessage || !canMutateCurrentMailView) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id], [selectedMessage]);
-    else await archiveMessages([selectedMessage.id], [selectedMessage]);
+    else {
+      const nextMessage = nextEmailMessageAfterRemoval(visibleMessages, selectedMessageRowKey);
+      await archiveMessages([selectedMessage.id], [selectedMessage], nextMessage);
+    }
   };
   const composeDraftID = useCallback((value: ComposeState): string => {
     const currentDraftID = value.draftID.trim();
@@ -4146,6 +4169,7 @@ export function HomePage({
       searchQueryRef.current,
       unreadOnlyRef.current,
       requestEmailMailboxScopeKey,
+      messageListOrderRef.current,
     );
     const requestListParams = {
       limit: MESSAGE_BATCH_SIZE,
@@ -5597,18 +5621,42 @@ export function HomePage({
       .then(() => setNotice("Signature saved."))
       .catch(() => setNotice("Signature save failed. Mango will retry this mailbox-scoped edit; retry before leaving if it remains unsynced."));
   }, [companyID, compose.sharedInboxID, composeSignatureAccountEmail, composeSignatureScopeKey, currentUserID]);
-  const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey);
+  const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
   const activeMailViewCanLoadMessages = canLoadMailForView(activeViewID);
   const messageListIsCurrent = !activeMailViewCanLoadMessages || loadedMessageListKey === activeMessageListKey;
   const visibleMessages = useMemo(() => {
     if (!messageListIsCurrent) return [];
     const listMessages = isPrimaryTriageMailbox(activeViewID, mailbox)
-      ? primaryTriageVisibleMessagesForList(messages)
+      ? primaryTriageVisibleMessagesForList(messages, messageListOrder)
       : isArchivableListView && mailbox !== "drafts"
         ? condenseEmailThreadMessages(messages)
         : messages;
     return orderEmailConversationMessages(listMessages, messageListOrder);
   }, [activeViewID, isArchivableListView, mailbox, messageListIsCurrent, messageListOrder, messages]);
+  useEffect(() => {
+    if (!messageListIsCurrent || mailbox === "drafts" || isPrimaryTriageMailbox(activeViewID, mailbox)) return undefined;
+    if (!nextPageToken || loadingMessages || loadingMoreMessages) return undefined;
+    const owner = currentMailboxRequestOwner();
+    const frameID = window.requestAnimationFrame(() => {
+      if (!mailboxRequestOwnerIsCurrent(owner)) return;
+      const list = messageListRef.current;
+      if (!list) return;
+      if (messageListContentScrollHeight(list) <= list.clientHeight + 1) void loadMoreMessages();
+    });
+    return () => window.cancelAnimationFrame(frameID);
+  }, [
+    activeViewID,
+    currentMailboxRequestOwner,
+    loadMoreMessages,
+    loadingMessages,
+    loadingMoreMessages,
+    mailbox,
+    mailboxRequestOwnerIsCurrent,
+    messageListIsCurrent,
+    messages.length,
+    nextPageToken,
+    visibleMessages.length,
+  ]);
   const selectedProviderMutationAvailable = providerMutationAvailableForMessages(getSelectedMessagesForAction());
   const visibleUnreadMessageCount = visibleMessages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
   const visibleLoadingMessages = loadingMessages || (activeMailViewCanLoadMessages && !messageListIsCurrent);
@@ -5664,7 +5712,7 @@ export function HomePage({
       activeViewID,
       currentUserID,
       activeMailAccountEmail,
-    ))).length
+    )), messageListOrder).length
     : 0;
   const archiveQueueHasRoomForVisiblePage = queuedArchiveEmailCount + visibleArchiveCandidateCount <= ARCHIVE_QUEUE_MAX_EMAILS;
   const mailFilterStatus = selectedMessageIDs.size > 1

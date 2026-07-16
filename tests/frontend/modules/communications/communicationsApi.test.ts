@@ -69,6 +69,7 @@ test("communications message query omits empty values and encodes filters", () =
   assert.equal(createMessageQuery({ mailbox: "archive", limit: 10 }), "?limit=10&mailbox=archive");
   assert.equal(createMessageQuery({ mailbox: "starred", limit: 10 }), "?limit=10&mailbox=starred");
   assert.equal(createMessageQuery({ mailbox: "spam", limit: 10 }), "?limit=10&mailbox=spam");
+  assert.equal(createMessageQuery({ mailbox: "all", limit: 12, order: "oldest" }), "?limit=12&order=oldest&mailbox=all");
   assert.equal(createMessageQuery({ mailbox: "primary", refresh: true }), "?mailbox=primary&refresh=true");
   assert.equal(createMessageQuery({ mailbox: "primary", companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?mailbox=primary&company_id=company-1&shared_inbox_id=shared-1");
   assert.equal(createMessageQuery({ q: "   " }), "");
