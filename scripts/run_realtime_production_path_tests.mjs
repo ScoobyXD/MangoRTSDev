@@ -171,6 +171,8 @@ const DOC_NODE_OTHER = "aaaaaaaa-0000-4000-8000-000000000302";
 const DOC_GATE = "aaaaaaaa-0000-4000-8000-000000000303";
 const DOC_PROJECT = "aaaaaaaa-0000-4000-8000-000000000304";
 const DOC_COMPANY_B = "bbbbbbbb-0000-4000-8000-000000000301";
+const LEGACY_ESCAPED_EDITOR_MARKUP = '<strong><span style="font-size: 16px; font-size: 16px;">nice prompt </span></strong><span style="font-size: 14px; font-size: 14px;">review everything</span>';
+const LEGACY_ESCAPED_EDITOR_STATE = JSON.stringify({ ops: [{ insert: LEGACY_ESCAPED_EDITOR_MARKUP }] });
 
 function editorURL(frontendPort, apiPort, values) {
   const query = new URLSearchParams({
@@ -258,6 +260,14 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   const pageA = await openEditor(contextA, frontendPort, apiPorts[0], { ...common, subject: "browser-user-a" }, frames);
   const pageB = await openEditor(contextB, frontendPort, apiPorts[1], { ...common, subject: "browser-user-b" });
 
+  assert.equal(await pageA.locator("#editor").innerText(), "nice prompt review everything");
+  assert.equal(await pageA.locator("#editor strong").count(), 1);
+  assert.equal(await pageA.locator("#editor span").count(), 2);
+  assert.doesNotMatch(await pageA.locator("#editor").innerText(), /<\/?(?:strong|span)\b/);
+  assert.equal(await pageB.locator("#editor").innerText(), "nice prompt review everything");
+  assert.equal(psql(pgPort, "mangorts_realtime_test",
+    "select count(*) from editor_collaboration_operations where company_id='" + COMPANY_A + "'::uuid and resource_type='node' and resource_id='" + NODE_A + "'::uuid and document_id='" + DOC_A + "'::uuid and operation_id='legacy-escaped-rich-html-v1-0-0';"), "1");
+
   const rich = '<h2>Roadmap</h2><p><strong>Bold</strong> <em>italic</em> <mark data-mango-editor-highlight="#fde68a">highlight</mark> <span data-mention-user-id="' +
     USER_B + '">@Browser B</span></p><ul data-mango-editor-list="bullet"><li>First</li><li>Second</li></ul>' +
     '<table data-mango-editor-table="true" data-mango-editor-table-id="matrix"><tbody><tr><th>Owner</th><th>State</th></tr><tr><td>A</td><td>Ready</td></tr></tbody></table>' +
@@ -265,7 +275,7 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   await setHTML(pageA, rich);
   const normalizedRich = await waitConverged([pageA, pageB]);
   assert.match(normalizedRich, /<table/);
-  assert.match(normalizedRich, /data-mention-user-id/);
+  assert.match(normalizedRich, /data-mango-mention-user-id/);
   assert.match(normalizedRich, /mango-attachment:attachment-durable-001/);
   assert.doesNotMatch(normalizedRich.toLowerCase(), /base64|x-amz-credential|x-amz-signature/);
   assert.equal(await pageB.locator("#editor table").count(), 1);
@@ -497,6 +507,7 @@ async function main() {
     "insert into nodes(company_id,node_id,name,default_access,created_timestamp) values('" + COMPANY_A + "','" + NODE_A + "','Collaborative Node','edit',now()),('" + COMPANY_A + "','" + NODE_A_OTHER + "','Isolated Node','edit',now()),('" + COMPANY_B + "','" + NODE_B + "','Other Company Node','edit',now());",
     "insert into logic_gates(company_id,logic_gate_id,header,default_access,created_timestamp) values('" + COMPANY_A + "','" + GATE_A + "','Collaborative Logic Gate','edit',now());",
     "insert into projects(company_id,project_id,name,default_access) values('" + COMPANY_A + "','" + PROJECT_A + "','Collaborative Project','edit');",
+    "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,snapshot_revision,snapshot_state) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',0,0,'" + LEGACY_ESCAPED_EDITOR_STATE.replaceAll("'", "''") + "'::jsonb);",
   ].join("\n"));
 
   const apiProcessOptions = (port) => ({

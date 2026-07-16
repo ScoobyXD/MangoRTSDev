@@ -154,7 +154,7 @@ test("structured rich documents roundtrip with lists, formatting, tables, mentio
     const html = '<h2><strong>Bold</strong> <em>text</em></h2><ol><li>One</li></ol><p><span data-mention-user-id="u-1">@Ada</span></p><table data-mango-editor-table-id="t-1"><tbody><tr><td>A</td></tr></tbody></table><p><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img data-mango-attachment-id="attachment-1" alt="diagram"></span></p>';
     const state = newEditorCollaborationState(html);
     const canonical = materializeEditorCollaborationState(state);
-    for (const required of ["<h2>", "<strong>Bold</strong>", "<em>text</em>", "<ol", "data-mention-user-id", "<table", "data-mango-editor-attachment-id"]) {
+    for (const required of ["<h2>", "<strong>Bold</strong>", "<em>text</em>", "<ol", "data-mango-mention-user-id", "<table", "data-mango-editor-attachment-id"]) {
       assert.ok(canonical.includes(required), required);
     }
     assert.equal(materializeEditorCollaborationState(newEditorCollaborationState(canonical)), canonical);
@@ -200,6 +200,41 @@ test("collaboration materialization renders rich markup and durable attachment i
   }
 });
 
+test("recovery promotes already-corrupted Logic Gate markup and durably commits one stable repair", async () => {
+  const dom = installEditorDOM();
+  try {
+    const broken = EDITOR_RICH_TEXT_PREFIX
+      + "&lt;strong&gt;&lt;span style=\"font-size: 16px; font-size: 16px;\"&gt;nice prompt&lt;/span&gt;&lt;/strong&gt;"
+      + "&lt;span style=\"font-size: 14px; font-size: 14px;\"&gt;review everything&lt;/span&gt;";
+    const server = new StructuredTestServer();
+    server.state = newEditorCollaborationState(broken);
+    const renders: string[] = [];
+    const controller = new EditorCollaborationController(controllerOptions(server, "legacy-escaped-logic-gate", {
+      onHTML: (html) => renders.push(html),
+    }));
+    controller.start();
+    await controller.recover();
+    await controller.flush();
+
+    assert.equal(server.revision, 1);
+    assert.equal(server.operations[0]?.operationID, "legacy-escaped-rich-html-v1-0-0");
+    const canonical = materializeEditorCollaborationState(server.state);
+    assert.match(canonical, /<strong><span style="font-size: 16px;?">nice prompt<\/span><\/strong>/);
+    assert.doesNotMatch(canonical, /font-size: 16px[^"]*font-size/);
+    assert.doesNotMatch(canonical, /&lt;strong&gt;/);
+    assert.ok(renders.length > 0);
+    assert.ok(renders.every((html) => !html.includes("&lt;strong&gt;")));
+    const editor = dom.window.document.querySelector("#editor");
+    if (!editor) throw new Error("editor fixture was not mounted");
+    editor.innerHTML = deserializeEditorDocumentHTML(renders[renders.length - 1]);
+    assert.equal(editor.querySelectorAll("strong").length, 1);
+    assert.equal(editor.textContent, "nice promptreview everything");
+    controller.stop();
+  } finally {
+    dom.restore();
+
+  }
+});
 test("structured OT converges formatting versus formatting and block versus inline formatting", () => {
   const dom = installEditorDOM();
   try {

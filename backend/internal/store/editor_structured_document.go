@@ -432,8 +432,12 @@ func EditorCollaborationStateFromHTML(source string) (EditorCollaborationState, 
 		if node.Type != xhtml.ElementNode {
 			return
 		}
-		if id := editorAttribute(node, "data-mention-user-id"); id != "" {
-			appendEditorInsert(&state.Ops, map[string]any{"mention": map[string]any{"id": id, "label": editorTextContent(node), "kind": editorAttribute(node, "data-mango-mention-kind")}}, attributes)
+		mentionID := editorAttribute(node, "data-mention-user-id")
+		if mentionID == "" {
+			mentionID = editorAttribute(node, "data-mango-mention-user-id")
+		}
+		if mentionID != "" {
+			appendEditorInsert(&state.Ops, map[string]any{"mention": map[string]any{"id": mentionID, "label": editorTextContent(node), "kind": editorAttribute(node, "data-mango-mention-kind")}}, attributes)
 			return
 		}
 		attachmentID := editorAttribute(node, "data-mango-editor-attachment-id")
@@ -601,9 +605,14 @@ func editorEmbedHTML(insert map[string]any, attributes map[string]any) string {
 		return "<br>"
 	}
 	if mention, ok := insert["mention"].(map[string]any); ok {
-		id, _ := mention["id"].(string)
-		label, _ := mention["label"].(string)
-		return editorInlineHTML("<span data-mention-user-id=\""+editorHTMLAttribute(id)+"\">"+stdhtml.EscapeString(label)+"</span>", attributes)
+		id := safeEditorString(mention["id"], 160)
+		label := safeEditorString(mention["label"], 500)
+		kind := safeEditorString(mention["kind"], 80)
+		kindAttribute := ""
+		if kind != "" {
+			kindAttribute = " data-mango-mention-kind=\"" + editorHTMLAttribute(kind) + "\""
+		}
+		return editorInlineHTML("<span data-mango-mention=\"true\" data-mango-mention-user-id=\""+editorHTMLAttribute(id)+"\""+kindAttribute+">"+stdhtml.EscapeString(label)+"</span>", attributes)
 	}
 	if attachment, ok := insert["attachment"].(map[string]any); ok {
 		id := safeEditorString(attachment["attachment_id"], 160)

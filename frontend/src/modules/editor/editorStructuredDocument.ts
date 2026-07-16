@@ -26,6 +26,18 @@ function cleanStyle(value: string): string {
   return trimmed.slice(0, 1000);
 }
 
+function styleWithoutStructuredAttributes(value: string): string {
+  const represented = new Set([
+    "background", "background-color", "font-size", "font-style", "font-weight",
+    "text-decoration", "text-decoration-line",
+  ]);
+  return value.split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean)
+    .filter((declaration) => !represented.has(declaration.split(":", 1)[0].trim().toLowerCase()))
+    .join("; ");
+}
+
 function safeURL(value: string): string {
   const trimmed = value.trim();
   const lower = trimmed.toLowerCase();
@@ -65,7 +77,7 @@ function inlineAttributes(element: Element, inherited: AttributeMap): AttributeM
   }
   const className = element.getAttribute("class")?.trim() ?? "";
   if (className && className.split(/\s+/).every((item) => item.startsWith("mango-"))) next.class = className.slice(0, 500);
-  const spanStyle = tag === "span" ? style : "";
+  const spanStyle = tag === "span" ? styleWithoutStructuredAttributes(style) : "";
   if (spanStyle) next.span_style = spanStyle;
   return next;
 }
@@ -258,7 +270,7 @@ function embedHTML(insert: Record<string, unknown>, attributes?: AttributeMap): 
   if (mention) {
     const id = escapeHTML(String(mention.id ?? ""));
     const kind = mention.kind ? ' data-mango-mention-kind="' + escapeHTML(String(mention.kind)) + '"' : "";
-    return wrapInline('<span data-mention-user-id="' + id + '"' + kind + ">" + escapeHTML(String(mention.label ?? "")) + "</span>", attributes);
+    return wrapInline('<span data-mango-mention="true" data-mango-mention-user-id="' + id + '"' + kind + ">" + escapeHTML(String(mention.label ?? "")) + "</span>", attributes);
   }
   const attachment = insert.attachment && typeof insert.attachment === "object" ? insert.attachment as Record<string, unknown> : null;
   if (attachment) {

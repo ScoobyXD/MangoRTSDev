@@ -1,11 +1,11 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
 # Unified Editor Tests
 
 Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`editorCollaboration.test.ts`, `realtimeWebSocket.test.ts`, backend collaboration/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded structured operations, deterministic convergence, durable pending storage/legacy cleanup, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. Existing rich-editor DOM suites cover toolbar, hydration, formatting, attachments, and host behavior; simultaneous multi-browser DOM editing remains a browser-level coverage gap).
+- Business Logic Covered By Automated Tests: Partial overall. `editorCollaboration.test.ts`, `realtimeWebSocket.test.ts`, backend collaboration/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded structured operations, deterministic convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. `scripts/run_realtime_production_path_tests.mjs` covers simultaneous multi-user/tab editing, corrupted-state repair, exact scopes, lost acknowledgements, reconnect, migrations, PostgreSQL, WebSockets, and actual editor DOM.
 
 ## Business Logic
 
@@ -93,6 +93,8 @@ ED68 - An editable Node with at least one loaded text box must select and publis
 ED69 - Attachment hydration cleanup is tied to actual editor lifecycle/context/value replacement, not every controlled `value` rerender. A local input update that serializes the same live DOM keeps the active hydration owner, image element, decoded object URL, and selection intact; StrictMode replay and unmount still restart or dispose exactly once and revoke every owned URL.
 ED70 - Typing a dash followed by one space at the otherwise-empty current line start converts that line immediately into an empty structural bullet-list item in every unified editor surface, independent of the selected outline style. The physical Space key path must own this shortcut even when Chrome/React exposes text data without a native `inputType`; before-input remains the non-keyboard fallback. The shortcut consumes the dash and space, keeps focus and the caret in the new item, works inside a table cell, preserves unrelated inline images/rich DOM, and does not activate inside an existing structural list item or in the middle of ordinary text.
 ED71 - Personal/shared Forward reuses the same `ComposePanel` and `UnifiedRichEditorSurface` as ordinary compose/reply for the user's authored content, selection, formatting, inline-image, attachment, flush, and persistence behavior. The sanitized original-message block is locked preview/context outside the editable document and is combined with the authored HTML only by the shared forwarding renderer, so editing cannot corrupt the retained original.
+ED72 - A collaborative structured snapshot that contains the known escaped-rich-fragment rollout shape must recover automatically without rendering tags as text. Recovery requires multiple paired supported tags and a rich-content signal so ordinary prose/code examples remain literal, sanitizes promoted fragments, preserves surrounding valid rich structure, and commits the corrected canonical state through the durable collaboration queue with a deterministic revision-scoped operation ID. Multiple tabs deduplicate that repair, and Saved is reached only after backend commit/deduplication proof.
+ED73 - Structured inline style attributes must be canonical: CSS represented by bold/italic/underline/strike/highlight/font-size OT attributes is not retained a second time in `span_style`. Materialization must not duplicate a property across round trips, while unrelated safe span style survives.
 
 ### Required Unified Rich-Editor Surface Inventory
 
