@@ -61,6 +61,7 @@ type EditorAttachmentHydrationOwner = {
 
 export type EditorAttachmentHydrationOptions = Readonly<{
   eager?: boolean;
+  attemptTimeoutMs?: number;
   onError?: (attachmentID: string) => void;
 }>;
 
@@ -74,6 +75,8 @@ type EditorAttachmentHydrationTask = {
 const EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN = "800px 0px";
 const EDITOR_ATTACHMENT_HYDRATION_MAX_CONCURRENCY = 4;
 const EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS = [100, 500] as const;
+const EDITOR_ATTACHMENT_HYDRATION_ATTEMPT_TIMEOUT_MS = 15_000;
+const EDITOR_ATTACHMENT_HYDRATION_OBSERVER_WATCHDOG_MS = 5_000;
 const editorAttachmentHydrationQueue: EditorAttachmentHydrationTask[] = [];
 const editorAttachmentHydrationOwnerByRoot = new WeakMap<HTMLElement, EditorAttachmentHydrationOwner>();
 let editorAttachmentHydrationActive = 0;
@@ -450,6 +453,14 @@ export function setEditorImageFrameDisplaySource(
   return true;
 }
 
+function editorImageFrameIsNearHydrationRoot(root: HTMLElement, frame: HTMLSpanElement): boolean {
+  if (typeof root.getBoundingClientRect !== "function" || typeof frame.getBoundingClientRect !== "function") return false;
+  const rootRect = root.getBoundingClientRect();
+  const frameRect = frame.getBoundingClientRect();
+  if (rootRect.height <= 0 || frameRect.height <= 0 || frameRect.width <= 0) return false;
+  return frameRect.bottom >= rootRect.top - 800 && frameRect.top <= rootRect.bottom + 800;
+}
+
 function startEditorAttachmentImageHydrationGeneration(
   root: HTMLElement,
   loadObjectURL: EditorAttachmentImageObjectURLLoader,
@@ -477,6 +488,7 @@ function startEditorAttachmentImageHydrationGeneration(
   const retryCountByAttachmentID = new Map<string, number>();
   const retryTimers = new Set<ReturnType<typeof setTimeout>>();
   let observer: IntersectionObserver | null = null;
+  let observerWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
 
   const scheduleAttachment = (attachmentID: string, priority: number) => {
     if (disposed || scheduledAttachmentIDs.has(attachmentID)) return;
@@ -488,8 +500,21 @@ function startEditorAttachmentImageHydrationGeneration(
       const controller = new AbortController();
       activeControllers.add(controller);
       let objectURL = "";
+      let pendingLoad: Promise<string> | undefined;
+      let timedOut = false;
+      let attemptTimer: ReturnType<typeof setTimeout> | undefined;
+      const retryCount = retryCountByAttachmentID.get(attachmentID) ?? 0;
+      const variant = retryCount === 0 ? "display" : "original";
       try {
-        objectURL = await loadObjectURL(attachmentID, "display", { signal: controller.signal });
+        pendingLoad = loadObjectURL(attachmentID, variant, { signal: controller.signal });
+        const timeout = new Promise<never>((_resolve, reject) => {
+          attemptTimer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+            reject(new Error("editor_attachment_hydration_timeout"));
+          }, Math.max(1, options.attemptTimeoutMs ?? EDITOR_ATTACHMENT_HYDRATION_ATTEMPT_TIMEOUT_MS));
+        });
+        objectURL = await Promise.race([pendingLoad, timeout]);
         if (disposed) {
           URL.revokeObjectURL(objectURL);
           return;
@@ -507,9 +532,9 @@ function startEditorAttachmentImageHydrationGeneration(
         else URL.revokeObjectURL(objectURL);
       } catch {
         if (objectURL) URL.revokeObjectURL(objectURL);
-        if (disposed || controller.signal.aborted) return;
+        if (timedOut) void pendingLoad?.then((lateURL) => URL.revokeObjectURL(lateURL)).catch(() => undefined);
+        if (disposed || (controller.signal.aborted && !timedOut)) return;
         scheduledAttachmentIDs.delete(attachmentID);
-        const retryCount = retryCountByAttachmentID.get(attachmentID) ?? 0;
         const retryDelay = EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS[retryCount];
         if (retryDelay === undefined) {
           for (const frame of attachmentFrames) {
@@ -527,6 +552,7 @@ function startEditorAttachmentImageHydrationGeneration(
         }, retryDelay);
         retryTimers.add(retryTimer);
       } finally {
+        if (attemptTimer !== undefined) clearTimeout(attemptTimer);
         activeControllers.delete(controller);
       }
     });
@@ -542,9 +568,15 @@ function startEditorAttachmentImageHydrationGeneration(
         if (attachmentID) scheduleAttachment(attachmentID, -Math.max(0, entry.intersectionRatio));
       }
     }, { root, rootMargin: EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN });
-    for (const attachmentFrames of framesByAttachmentID.values()) {
+    for (const [attachmentID, attachmentFrames] of framesByAttachmentID) {
       attachmentFrames.forEach((frame) => observer?.observe(frame));
+      if (attachmentFrames.some((frame) => editorImageFrameIsNearHydrationRoot(root, frame))) {
+        scheduleAttachment(attachmentID, -1);
+      }
     }
+    observerWatchdogTimer = setTimeout(() => {
+      for (const attachmentID of framesByAttachmentID.keys()) scheduleAttachment(attachmentID, 1);
+    }, EDITOR_ATTACHMENT_HYDRATION_OBSERVER_WATCHDOG_MS);
   } else {
     for (const attachmentID of framesByAttachmentID.keys()) scheduleAttachment(attachmentID, 0);
   }
@@ -553,6 +585,7 @@ function startEditorAttachmentImageHydrationGeneration(
     if (disposed) return;
     disposed = true;
     observer?.disconnect();
+    if (observerWatchdogTimer !== undefined) clearTimeout(observerWatchdogTimer);
     activeControllers.forEach((controller) => controller.abort());
     activeControllers.clear();
     retryTimers.forEach((timer) => clearTimeout(timer));

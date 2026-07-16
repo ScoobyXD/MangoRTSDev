@@ -37,7 +37,7 @@ func TestStructuredEditorRoundTripPreservesSupportedRichContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{editorCollaborationRichTextPrefix, "<h2>", "<strong>Hello</strong>", "<em>world</em>", "<ul>", "data-mention-user-id=\"user-1\"", "<table", "data-mango-editor-attachment-id=\"attachment-1\"", `alt="diagram"`, `width="320"`, `height="180"`} {
+	for _, required := range []string{editorCollaborationRichTextPrefix, "<h2>", "<strong>Hello</strong>", "<em>world</em>", "<ul>", "data-mango-mention-user-id=\"user-1\"", "<table", "data-mango-editor-attachment-id=\"attachment-1\"", `alt="diagram"`, `width="320"`, `height="180"`} {
 		if !strings.Contains(materialized, required) {
 			t.Fatalf("materialized rich document is missing %q: %s", required, materialized)
 		}

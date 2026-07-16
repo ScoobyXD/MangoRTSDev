@@ -163,6 +163,41 @@ test("hydration waits for the near-viewport observer and uses the configured mar
   }
 });
 
+test("visible frames hydrate immediately even when the browser observer never reports them", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  class SilentIntersectionObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() { return []; }
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds = [];
+  }
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: SilentIntersectionObserver });
+  try {
+    const frame = new FakeSpan("attachment-visible");
+    const root = new FakeRoot([frame]);
+    Object.assign(frame, {
+      getBoundingClientRect: () => ({ top: 100, bottom: 260, left: 0, right: 220, width: 220, height: 160 }),
+    });
+    Object.assign(root, {
+      getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 500, width: 500, height: 500 }),
+    });
+    const calls: string[] = [];
+    const cleanup = hydrateEditorAttachmentImageFrames(root as unknown as HTMLElement, async (attachmentID, variant) => {
+      calls.push(`${attachmentID}:${variant}`);
+      return "blob:attachment-visible";
+    });
+    await flushPromises();
+    assert.deepEqual(calls, ["attachment-visible:display"]);
+    assert.equal(frame.image.src, "blob:attachment-visible");
+    cleanup();
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
 test("eager hydration loads compact signature previews without waiting for an observer callback", async () => {
   const originalSpan = globalThis.HTMLSpanElement;
   const originalObserver = globalThis.IntersectionObserver;
@@ -248,6 +283,31 @@ test("hydration retries a visible attachment after a bounded backoff", async () 
   }
 });
 
+test("a hung display request is aborted and retried through the original attachment", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: undefined });
+  try {
+    const frame = new FakeSpan("attachment-timeout");
+    const variants: string[] = [];
+    const cleanup = hydrateEditorAttachmentImageFrames(new FakeRoot([frame]) as unknown as HTMLElement, async (_attachmentID, variant, options) => {
+      variants.push(variant);
+      if (variant === "display") {
+        return await new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }
+      return "blob:attachment-timeout";
+    }, { attemptTimeoutMs: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    await flushPromises();
+    assert.deepEqual(variants, ["display", "original"]);
+    assert.equal(frame.image.src, "blob:attachment-timeout");
+    cleanup();
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
 test("the shared hydration queue bounds attachment loads to four", async () => {
   const originalSpan = globalThis.HTMLSpanElement;
   const originalObserver = globalThis.IntersectionObserver;
@@ -264,6 +324,7 @@ test("the shared hydration queue bounds attachment loads to four", async () => {
     await flushPromises();
     assert.equal(calls, 4);
     releases.shift()?.();
+    await flushPromises();
     await flushPromises();
     assert.equal(calls, 5);
     releases.forEach((release) => release());

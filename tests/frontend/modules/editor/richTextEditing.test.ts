@@ -2,12 +2,55 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { JSDOM } from "jsdom";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_ORDERED_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, mapEditorSelectedTextRunOffsets, normalizeEditorHighlightColor, normalizeEditorOrderedListAttributes, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { recoverLegacyEscapedEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource, resolveEditorImageFrameSource, shouldUseEditorImageFileTransferShortcut, writeImageClipboardData } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
+});
+
+test("legacy collaboration output promotes repeated escaped rich markup without interpreting ordinary tag prose", () => {
+  const previous = {
+    document: globalThis.document,
+    Node: globalThis.Node,
+    HTMLElement: globalThis.HTMLElement,
+    HTMLLIElement: globalThis.HTMLLIElement,
+    HTMLUListElement: globalThis.HTMLUListElement,
+    HTMLTableCellElement: globalThis.HTMLTableCellElement,
+    HTMLSpanElement: globalThis.HTMLSpanElement,
+  };
+  const dom = new JSDOM("<!doctype html>");
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  for (const key of ["Node", "HTMLElement", "HTMLLIElement", "HTMLUListElement", "HTMLTableCellElement", "HTMLSpanElement"] as const) {
+    Object.defineProperty(globalThis, key, { configurable: true, value: domGlobals[key] });
+  }
+  try {
+    const broken = EDITOR_RICH_TEXT_PREFIX
+      + "&lt;strong&gt;&lt;span style=\"font-size: 16px; font-size: 16px;\"&gt;nice prompt&lt;/span&gt;&lt;/strong&gt;"
+      + "&lt;span data-mention-user-id=\"user-1\"&gt;@Jonathan&lt;/span&gt; review";
+    const recovered = recoverLegacyEscapedEditorDocumentHTML(broken);
+
+    assert.equal(recovered.recovered, true);
+    assert.match(recovered.document, /<strong><span style="font-size: 16px;">nice prompt<\/span><\/strong>/);
+    assert.match(recovered.document, /data-mango-mention-user-id="user-1"/);
+    assert.doesNotMatch(deserializeEditorDocumentHTML(recovered.document), /&lt;strong&gt;/);
+
+    const literal = `${EDITOR_RICH_TEXT_PREFIX}Explain how to type &lt;strong&gt; in HTML.`;
+    assert.deepEqual(recoverLegacyEscapedEditorDocumentHTML(literal), {
+      document: literal,
+      recovered: false,
+    });
+  } finally {
+    dom.window.close();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
 });
 
 test("editor paste linkification turns plain URLs into safe visible links", () => {

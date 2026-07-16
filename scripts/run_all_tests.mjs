@@ -20,6 +20,6 @@ run("Frontend relationship semantics tests", "npm run test:node-relationships", 
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Backend Go tests", "go test ./...", resolve(repoRoot, "backend"));
 run("Realtime production-path PostgreSQL and browser tests", "node scripts/run_realtime_production_path_tests.mjs", repoRoot);
-run("Infrastructure attachment contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs", repoRoot);
+run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");

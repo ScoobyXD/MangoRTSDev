@@ -18,7 +18,10 @@ import {
   type StructuredEditorDocument,
   type StructuredEditorOperation,
 } from "./editorStructuredDocument.js";
-import { EDITOR_RICH_TEXT_PREFIX } from "./richTextEditing.js";
+import {
+  EDITOR_RICH_TEXT_PREFIX,
+  recoverLegacyEscapedEditorDocumentHTML,
+} from "./richTextEditing.js";
 
 export type EditorCollaborationResourceType = "node" | "logic_gate" | "project";
 export type EditorCollaborationState = StructuredEditorDocument;
@@ -275,9 +278,14 @@ export function applyEditorCollaborationDelta(
   return applyStructuredEditorOperation(state, asStructured(delta));
 }
 
-export function materializeEditorCollaborationState(state: EditorCollaborationState): string {
+function materializeRawEditorCollaborationState(state: EditorCollaborationState): string {
   const html = structuredEditorDocumentToHTML(state);
   return html ? EDITOR_RICH_TEXT_PREFIX + html : "";
+}
+
+export function materializeEditorCollaborationState(state: EditorCollaborationState): string {
+  const raw = materializeRawEditorCollaborationState(state);
+  return raw ? recoverLegacyEscapedEditorDocumentHTML(raw).document : "";
 }
 
 export function editorCollaborationDeltaForHTML(
@@ -443,6 +451,14 @@ export class EditorCollaborationController {
   }
 
   schedule(nextHTML: string, immediate = false): void {
+    this.queueDocumentChange(nextHTML, immediate);
+  }
+
+  private queueDocumentChange(
+    nextHTML: string,
+    immediate: boolean,
+    operationIDForPart: (index: number) => string = () => stableID(),
+  ): void {
     if (this.deleted || this.stopped) return;
     if (editorHTMLContainsForbiddenRealtimeContent(nextHTML)) {
       this.rollbackVisibleEdit("editor_collaboration_sensitive_content_rejected");
@@ -459,7 +475,7 @@ export class EditorCollaborationController {
       const parts = splitEditorCollaborationDelta(delta);
       const createdAt = Date.now();
       const records = parts.map((part, index): PendingEditorOperation => {
-        const operationID = stableID();
+        const operationID = operationIDForPart(index);
         return {
           storage_key: this.pendingPrefix + encodeURIComponent(operationID),
           user_id: this.options.currentUserID,
@@ -559,13 +575,28 @@ export class EditorCollaborationController {
       await this.applyCommitted(event);
     }
 
-    if (this.pending.length > 0) {
-      await this.drain();
-    } else {
-      this.optimistic = structuredEditorDocumentFromHTML(snapshot.html);
-      this.renderOptimistic("recovery", true);
-      this.options.onPendingChange?.(0);
-    }
+    if (this.pending.length > 0) await this.drain();
+    this.rebuild();
+    if (await this.repairLegacyEscapedDocumentIfNeeded()) return;
+    this.renderOptimistic("recovery", true);
+    this.options.onPendingChange?.(0);
+  }
+
+  private async repairLegacyEscapedDocumentIfNeeded(): Promise<boolean> {
+    const raw = materializeRawEditorCollaborationState(this.optimistic);
+    const recovered = recoverLegacyEscapedEditorDocumentHTML(raw);
+    if (!recovered.recovered) return false;
+    this.renderedHTML = recovered.document;
+    this.options.onHTML(recovered.document, "recovery");
+    const repairRevision = this.revision;
+    this.queueDocumentChange(
+      recovered.document,
+      true,
+      (index) => `legacy-escaped-rich-html-v1-${repairRevision}-${index}`,
+    );
+    await this.persistenceChain;
+    await this.drain();
+    return true;
   }
 
   private async drain(): Promise<void> {
