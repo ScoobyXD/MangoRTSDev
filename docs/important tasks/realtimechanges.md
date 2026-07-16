@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-15
 
-Status: the architectural foundation is merged and the complete repository gate passes, but the system is not production-ready. Post-merge review confirmed visible-convergence, lost-acknowledgement recovery, large-paste, permission-contract cleanup, and browser-evidence work recorded below. Definition of Done remains open.
+Status: the architectural foundation is merged and the complete repository gate passes, but the system is not production-ready. Owner decisions require the complete Phase 1 atomic transaction pass, visible-convergence and lost-acknowledgement fixes, realistic large-paste support, edit-or-no-access cleanup, and browser-level evidence recorded below. Definition of Done remains open.
 
 ## Implementation Record
 
@@ -15,7 +15,7 @@ This section is the live project-management record. It is updated as implementat
 - [x] Inventory current retained realtime lanes, editor hosts, legacy full-document persistence, schema, and verification surfaces.
 - [x] Resolve the initial backplane, collaboration model, batching, heartbeat, and bounded reconstruction choices from repository evidence.
 - [x] Phase 0: reconciled owner contracts and deleted contradictory legacy expectations for the migrated surfaces.
-- [ ] Phase 1: durable outbox, shared cross-instance consumption, common envelope, exact local publication, and retained-family routing are implemented; retained-family canonical mutation plus outbox insertion is not yet one database transaction at every producer.
+- [ ] Phase 1: durable outbox, shared cross-instance consumption, common envelope, exact local publication, and retained-family routing are implemented, but Phase 1 is required and not deferred. It remains open until every persisted realtime-event producer is inventoried and every canonical mutation plus its durable outbox event has one atomic database commit.
 - [x] Phase 2: implemented confirmed application heartbeat, the central health state machine, Key Views indicator, and global mutation gate.
 - [ ] Phase 3: exact editor-document identities, structured operations, revisions, server idempotency, snapshots/ETags, and durable pending storage are implemented, but acknowledgement/broadcast ordering can leave the visible DOM stale and lost-acknowledgement recovery can fail while reconciling already-committed pending operations.
 - [x] Phase 4: Logic Gate, Node, individual Node text boxes, and Project text boxes were cut over and the old save/conflict system was deleted atomically. This check records the mechanical cutover and deletion only; it does not claim the migrated collaboration behavior is production-ready while Phase 3 and Phase 5 remain open.
@@ -26,7 +26,7 @@ This section is the live project-management record. It is updated as implementat
 
 - Shared frontend transport: `frontend/src/modules/realtime/realtimeWebSocket.ts`. It already refcounts exact scopes locally and owns ticket acquisition/reconnect, but it currently has no application-visible confirmed heartbeat or editor event family.
 - Backend transport/registry/publication: `backend/internal/http/realtime_ticket.go`, `realtime_ws.go`, `realtime_registry.go`, and `realtime_publish.go`. The registry is exact by company/scope/connection, but current publication is process-local and synchronous socket writes can still let one stalled connection delay fan-out in this checkout.
-- Retained live producers: notification handlers, Node chat projection create/delete, mounted Kanban domain-event hints, and exact mailbox stream/webhook hints. All currently call the local publisher directly after their feature mutation.
+- Baseline retained producers before the unified-spine implementation: notification handlers, Node chat projection create/delete, mounted Kanban domain-event hints, and exact mailbox stream/webhook hints called the local publisher directly after their feature mutation. The Phase 1 ledger below records the post-merge transaction classification and requires a fresh exhaustive audit.
 - Existing durable event foundation: `domain_events`, `postgres_domain_events.go`, and memory equivalents already provide transaction-local domain-event append and per-stream ordering, but they do not provide claim/retry/publication state or per-instance consumption. They remain business-domain history rather than being overloaded as the realtime outbox.
 - Legacy editor root path: `EditorContent.tsx` plus `useEditorDocumentPersistence.ts`, `editorDocumentSaveQueue.ts`, `editorProjectionSync.ts`, and `EditorSyncBlockingModal.tsx` retain full bodies, require expected revisions, restore `draft_restored`, and expose end-user version-choice/retry UI.
 - Legacy per-text-box paths: `NodeWorkspaceSurface.tsx`, `NodeWorkspaceSurfaceParts.tsx`, `nodeTextBlockProjectionSaves.ts`, and `ProjectSummaryContent.tsx` serialize a full text-box payload through per-block save controllers. Node/Logic Gate HTTP handlers and `postgres_editor_projection_revisions.go` implement one-winner whole-document revision conflicts; Project projection persistence has no equivalent collaboration revision.
@@ -97,9 +97,49 @@ This section is the live project-management record. It is updated as implementat
 - **Immediate release-blocking priority 3:** support realistically large rich-text copy/paste through safe ordered operations without exposing the 64 KiB per-request boundary, silently truncating content, losing formatting/Unicode/list/table/attachment-reference order, or falling back to whole-document saves.
 - **Immediate release-blocking priority 4:** add automated real-browser coverage for visible multi-user and multi-tab convergence, acknowledgement/broadcast reordering, commit with lost acknowledgement, reconnect plus pending reconciliation, large multi-batch paste, exact document isolation, rich text, and authorized inline attachment references.
 - **Accepted limitation for now:** do not expand the immediate pass into a cursor, selection, IME, or undo-system redesign. Remote DOM replacement risks in those areas are known and may be revisited separately.
-- **Owner-accepted Phase 1 deferral:** do not currently prioritize moving notifications, Node chat, Kanban, and active-mailbox canonical mutations into the same repository transaction as their outbox insert. The crash window remains real and Phase 1 remains formally open.
+- **Phase 1 decision reversal - required:** the earlier deferral is revoked. Every persisted product mutation that requires a realtime event must commit the canonical change and durable outbox row in one database transaction. Phase 1 is an active requirement and must be completed in the next implementation pass.
 - **Owner-accepted retention deferral:** do not currently prioritize time/size retention or deletion for published realtime outbox rows and collaboration-operation history. Physical snapshot compaction bounds reconstruction but does not by itself bound stored history; this remains recorded operational debt.
 - Fixes must preserve the complete deletion of the old full-document checkpoint/conflict system. Recovery remains automatic through operations, stable IDs, snapshots, acknowledgements, and reconciliation; no end-user merge screen or legacy fallback may return.
+
+### 2026-07-15 Phase 1 decision reversal and atomic transaction standard
+
+"One commit" in this Phase 1 decision means one atomic database transaction, not one Git commit.
+
+The required transaction sequence for every persisted application mutation that produces a realtime event is:
+
+1. Save the canonical product change.
+2. Insert the corresponding durable realtime-outbox event.
+3. Commit the single transaction.
+
+The only acceptable outcomes are that both writes commit or neither write commits. A product change without its required outbox event and an outbox event without its product change are both forbidden. The backend reports success only after the joint transaction commits.
+
+This protects more than a narrow process-crash window. Restarts, deployments, request cancellation, database errors, outbox validation or serialization failures, exceptions, early returns, and temporary infrastructure failures must not split the mutation from its durable publication obligation.
+
+The requirement applies to persisted business mutations. Heartbeat, liveness, subscription-control, and other connection-control frames do not create fake database writes or outbox rows. Actual WebSocket publication must happen after commit through the existing dispatcher and shared backplane; no socket or broker I/O may hold the database transaction open.
+
+#### Phase 1 producer inventory ledger
+
+| Producer family | Initial post-merge classification to reverify | Required final boundary |
+| --- | --- | --- |
+| Editor collaboration mutations | Canonical operation, document revision, and outbox event were implemented in one repository transaction. | Preserve and prove the joint transaction, stable event ID, exact editor scope, rollback, retry, and deduplication behavior. |
+| Notifications and Updates | Shared durable outbox delivery exists, but prior review found the feature mutation and enqueue helper separately committed. | One repository-owned canonical mutation plus outbox transaction. |
+| Node chat create/delete | Shared durable outbox delivery exists, but prior review found save/delete and enqueue separately committed. | One repository-owned canonical mutation plus outbox transaction. |
+| Mounted Kanban changes | Shared durable outbox delivery exists, but prior review found board-visible mutation and enqueue separately committed. | One repository-owned canonical mutation plus outbox transaction. |
+| Active mailbox and email-related durable changes or hints | Shared exact mailbox delivery exists, but prior review found persisted mutation and enqueue separately committed where Mango owns both. | One repository-owned canonical mutation plus outbox transaction for every persisted Mango-owned event producer. |
+| Any other persisted realtime producer | Not yet exhaustively classified. The known list is a minimum, not the audit boundary. | Inventory every producer; eliminate separate commits and direct-broadcast bypasses. |
+
+The implementation worker must replace the initial classifications above with exact source methods, repository transaction owners, prior and final boundaries, event IDs/revisions, company/resource/subscription scopes, direct-broadcast findings, retry behavior, and focused test evidence. Do not infer completion from a family name or from eventual delivery through the shared backplane.
+
+Phase 1 is complete only when:
+
+- every applicable persisted realtime producer has been inventoried;
+- every canonical mutation and outbox insertion share one database transaction;
+- no applicable producer retains a save-first/enqueue-afterward sequence;
+- no applicable producer bypasses the shared spine;
+- tests prove outbox failure rolls back the mutation, mutation failure writes no event, post-commit failure retains a dispatchable event, and duplicate retry/delivery is safe; and
+- this ledger contains evidence for every producer classification.
+
+This decision reverses only the earlier Phase 1 deferral. Cursor/selection/IME/undo redesign and historical realtime-table retention remain owner-accepted deferrals.
 
 ### Genuine remaining acceptance gaps
 
@@ -108,7 +148,7 @@ This section is the live project-management record. It is updated as implementat
 3. **Realistically large paste:** the atom-per-character representation can exceed the internal 64 KiB mutation ceiling after only a few hundred inserted characters. Large changes need lossless ordered batching or an equally safe compact representation. This is a release blocker.
 4. **Complete rich-editor browser matrix:** pure collaboration-state, HTTP, cross-instance, exact fan-out/revocation, heartbeat, individual DOM-editor, rich-text, attachment, and shell evidence exists, but the exhaustive simultaneous multi-browser interaction and recovery matrix is not automated. This is required evidence for the three release-blocking fixes above.
 5. **Edit-or-no-access cleanup:** the repository must be audited and every view-only permission branch, contract, test, schema/default, and documentation statement must be deleted or replaced. No read-only editor subscription model is permitted.
-6. **Retained-family transaction boundary (owner-deferred):** notifications, Node chat, Kanban, and active-mailbox hints enqueue durably and reach every backend instance through the shared outbox, but their existing feature mutations complete before the HTTP publication helper inserts the outbox row. The editor path is atomic; the four retained producer families still need repository-level transaction ownership or an equivalent database-enforced bridge when this deferred remainder is resumed.
+6. **Every persisted realtime-producer transaction boundary (required):** notifications/Updates, Node chat, Kanban, active-mailbox/email hints, editor collaboration, and every other persisted producer must be exhaustively inventoried. Any save-first/enqueue-afterward path must be replaced so canonical mutation and outbox insertion commit or roll back together. No persisted feature may bypass the shared spine.
 7. **Historical-row retention (owner-deferred):** published outbox rows and collaboration operations do not yet have a time/size cleanup policy. Snapshot compaction bounds browser reconstruction, not database growth.
 
 These gaps are why Phase 1, Phase 3, Phase 5, and the Definition of Done remain open despite the passing repository gate. Phase 4 remains checked only for the completed cutover and legacy-system deletion. The system must not be described as production-ready until the release-blocking items and their browser evidence are complete.
@@ -238,7 +278,7 @@ Mango already has the right reusable local transport shape:
 - per-scope publication ordering, bounded concurrent fan-out, write deadlines, failed-connection removal, and delivery/no-subscriber metrics; and
 - one frontend `subscribeRealtimeScope(...)` entry point used by the retained live surfaces.
 
-The current four retained product lanes are:
+The four originally identified retained product lanes are listed below; they are a delivery-scope baseline, not the exhaustive Phase 1 persisted-producer inventory:
 
 - `notifications:user:{user_id}` for notifications and the Updates experience;
 - `chat:node:{node_id}` for mounted durable Node chat;
@@ -259,7 +299,13 @@ For editor collaboration, the command carries a structured editor operation or m
 
 ### 2. Transactional outbox
 
-The canonical mutation and its realtime outbox record are committed atomically in the same database transaction whenever Mango owns both writes.
+Every persisted product mutation that requires a realtime event must commit the canonical application change and its durable realtime-outbox record atomically in the same database transaction. They may remain separate SQL statements, but they have one database commit: both succeed or neither succeeds. The backend must not report the mutation as committed until that transaction commits.
+
+An outbox insertion, validation, or serialization failure rolls back the canonical mutation. A canonical mutation failure writes no outbox event. Request cancellation, exceptions, early returns, connection errors, restarts, and deployments must not split these outcomes.
+
+The transaction contains database work only: canonical mutation, durable outbox insert, and commit. Actual WebSocket or broker publication happens asynchronously after commit through the dispatcher and shared backplane and must never hold the transaction open.
+
+Heartbeat, liveness, subscription-control, and other non-persisted connection signals use the shared transport where appropriate but do not create fake outbox rows.
 
 The outbox record must contain enough information to publish the committed event without reconstructing untrusted client input after commit. At minimum it needs:
 
@@ -880,7 +926,10 @@ This is one architecture program that may be implemented in ordered phases. Phas
 - Add transactional outbox persistence/claim/retry behavior.
 - Add a deterministic local/test backplane adapter.
 - Add the selected cross-instance production backplane adapter.
-- Route the four retained existing families through it.
+- Inventory every persisted realtime-event producer, including but not limited to notifications/Updates, Node chat, Kanban, mailbox/email changes or hints, and editor collaboration; route each through repository-owned mutation-plus-outbox transactions and the shared spine.
+- Prove outbox insertion failure rolls back the canonical mutation and canonical mutation failure leaves no event.
+- Prove a committed row survives failure before broadcast, dispatch retries safely, and stable event IDs/revisions suppress duplicate effects.
+- Record exact prior/final transaction ownership, scopes, retry behavior, bypass audit, and test evidence for every producer in the Phase 1 inventory ledger.
 - Prove a mutation handled by backend A reaches a WebSocket connected to backend B.
 
 ### Phase 2: Central connection health and mutation gate
@@ -1064,7 +1113,7 @@ Given a platform with tens of thousands of companies and large employee director
 
 This charter is implemented only when all of the following are true:
 
-1. The transactional outbox and shared cross-instance realtime backplane are production-capable and used by every approved live family.
+1. Every persisted realtime-event producer is inventoried; its canonical mutation and durable outbox insertion share one atomic database transaction; no save-first/enqueue-afterward or direct-broadcast bypass remains; and the shared cross-instance realtime backplane is production-capable.
 2. Existing frontend/backend realtime paths converge on the shared interfaces without parallel delivery systems.
 3. Node, Logic Gate, and Project shared editor documents use structured micro-batched delta collaboration.
 4. Full snapshot/ETag open, refresh, reconnect, and revision-gap recovery are implemented.
@@ -1082,7 +1131,7 @@ This charter is implemented only when all of the following are true:
 ### Completion audit
 
 - Complete with passing evidence: items 2, 6, and 9-13. Item 12 records that the existing gate passes, not that its coverage is sufficient for open behaviors.
-- Incomplete: item 1 for the four retained producer transaction boundaries; this remainder is owner-deferred.
+- Incomplete and required: item 1 until the exhaustive producer inventory, atomic success/rollback guarantees, idempotent retry behavior, exact scopes, and no-bypass evidence are complete.
 - Incomplete: items 3 and 7 at the realistically large rich-text paste boundary.
 - Incomplete: items 4 and 5 for acknowledgement/broadcast visible convergence and commit-before-lost-acknowledgement pending-operation reconciliation.
 - Incomplete: item 8 for the automated real-browser multi-user/multi-tab interaction, reordering, recovery, and large-paste matrix.
