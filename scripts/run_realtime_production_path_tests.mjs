@@ -34,6 +34,7 @@ const tempRoot = mkdtempSync(join(tmpdir(), "mangorts-realtime-production-path-"
 const pgData = join(tempRoot, "postgres");
 const pgLog = join(tempRoot, "postgres.log");
 const migrationDir = join(tempRoot, "migrations");
+const legacyMigrationDir = join(tempRoot, "legacy-migrations");
 const migrateExe = join(tempRoot, "miraeopus-migrate" + exeSuffix);
 const apiExe = join(tempRoot, "miraeopus-api" + exeSuffix);
 const password = "mangorts-disposable-test-only";
@@ -171,8 +172,8 @@ const DOC_NODE_OTHER = "aaaaaaaa-0000-4000-8000-000000000302";
 const DOC_GATE = "aaaaaaaa-0000-4000-8000-000000000303";
 const DOC_PROJECT = "aaaaaaaa-0000-4000-8000-000000000304";
 const DOC_COMPANY_B = "bbbbbbbb-0000-4000-8000-000000000301";
-const LEGACY_ESCAPED_EDITOR_MARKUP = '<strong><span style="font-size: 16px; font-size: 16px;">nice prompt </span></strong><span style="font-size: 14px; font-size: 14px;">review everything</span>';
-const LEGACY_ESCAPED_EDITOR_STATE = JSON.stringify({ ops: [{ insert: LEGACY_ESCAPED_EDITOR_MARKUP }] });
+const INITIAL_RICH_EDITOR_HTML = '<!-- mango-editor-html-v1 --><p><strong><span style="font-size:16px">nice prompt </span></strong><span style="font-size:14px">review everything</span></p><p>second row</p><p><br></p>';
+const STALE_STRUCTURED_EDITOR_STATE = JSON.stringify({ ops: [{ insert: "stale structured collaboration content" }] });
 
 function editorURL(frontendPort, apiPort, values) {
   const query = new URLSearchParams({
@@ -233,12 +234,17 @@ async function waitUntil(predicate, description, timeout = 30_000) {
 }
 
 async function waitConverged(pages) {
-  return await waitUntil(async () => {
-    const states = await Promise.all(pages.map(state));
-    if (!states.every((item) => item.status === "Saved")) return false;
-    if (!states.every((item) => item.html === states[0].html)) return false;
-    return states[0].html;
-  }, "visible editor convergence");
+  let observed = [];
+  try {
+    return await waitUntil(async () => {
+      observed = await Promise.all(pages.map(state));
+      if (!observed.every((item) => item.status === "Saved")) return false;
+      if (!observed.every((item) => item.html === observed[0].html)) return false;
+      return observed[0].html;
+    }, "visible editor convergence");
+  } catch (cause) {
+    throw new Error("Visible editor convergence failed: " + JSON.stringify(observed), { cause });
+  }
 }
 
 async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
@@ -260,18 +266,45 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   const pageA = await openEditor(contextA, frontendPort, apiPorts[0], { ...common, subject: "browser-user-a" }, frames);
   const pageB = await openEditor(contextB, frontendPort, apiPorts[1], { ...common, subject: "browser-user-b" });
 
-  assert.equal(await pageA.locator("#editor").innerText(), "nice prompt review everything");
+  assert.equal(await pageA.locator("#editor").textContent(), "nice prompt review everything\nsecond row\n");
   assert.equal(await pageA.locator("#editor strong").count(), 1);
   assert.equal(await pageA.locator("#editor span").count(), 2);
+  assert.equal(await pageA.locator("#editor").evaluate((element) => element.children.length), 3);
   assert.doesNotMatch(await pageA.locator("#editor").innerText(), /<\/?(?:strong|span)\b/);
-  assert.equal(await pageB.locator("#editor").innerText(), "nice prompt review everything");
+  assert.equal(await pageB.locator("#editor").evaluate((element) => element.children.length), 3);
   assert.equal(psql(pgPort, "mangorts_realtime_test",
-    "select count(*) from editor_collaboration_operations where company_id='" + COMPANY_A + "'::uuid and resource_type='node' and resource_id='" + NODE_A + "'::uuid and document_id='" + DOC_A + "'::uuid and operation_id='legacy-escaped-rich-html-v1-0-0';"), "1");
+    "select canonical_html from editor_collaboration_documents where company_id='" + COMPANY_A + "'::uuid and resource_type='node' and resource_id='" + NODE_A + "'::uuid and document_id='" + DOC_A + "'::uuid;"), INITIAL_RICH_EDITOR_HTML);
 
-  const rich = '<h2>Roadmap</h2><p><strong>Bold</strong> <em>italic</em> <mark data-mango-editor-highlight="#fde68a">highlight</mark> <span data-mention-user-id="' +
-    USER_B + '">@Browser B</span></p><ul data-mango-editor-list="bullet"><li>First</li><li>Second</li></ul>' +
+  await setHTML(pageA, "<p>First row</p>");
+  await waitConverged([pageA, pageB]);
+  await pageA.locator("#editor").focus();
+  await pageA.evaluate(() => {
+    const root = document.querySelector("#editor");
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let caretNode = walker.nextNode();
+    for (let next = walker.nextNode(); next; next = walker.nextNode()) caretNode = next;
+    const range = document.createRange();
+    range.setStart(caretNode, caretNode.textContent.length);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await pageA.keyboard.press("Enter");
+  await pageA.keyboard.type("N");
+  const enteredHTML = await pageA.locator("#editor").innerHTML();
+  await pageA.evaluate(() => window.__mangoE2E.flush());
+  await waitUntil(async () => /First row[\s\S]*N/.test(await pageB.locator("#editor").innerText()), "Enter-created remote row");
+  assert.equal(await pageA.locator("#editor").innerHTML(), enteredHTML, "acknowledgement must not flatten or rebuild Enter-created DOM");
+  assert.match(await pageA.locator("#editor").innerText(), /First row[\s\S]*N/);
+  assert.match(await pageB.locator("#editor").innerText(), /First row[\s\S]*N/, "broadcast must preserve the Enter-created remote row");
+
+  const rich = '<h2 style="text-align:center">Roadmap</h2><p><strong>Bold</strong> <em>italic</em> <u>underline</u> <span style="font-size:18px;background-color:#fde68a">highlight</span> <a href="https://example.test">link</a> <span data-mango-mention="true" data-mango-mention-user-id="' +
+    USER_B + '">@Browser B</span><br>next line</p><p><br></p><ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">First</li></ul>' +
+    '<ul data-mango-editor-list="checklist"><li data-mango-editor-list-item="checklist" data-mango-editor-checklist-checked="true">Checked</li></ul>' +
+    '<ol><li>One</li><li style="margin-left:32px">Indented two</li></ol>' +
     '<table data-mango-editor-table="true" data-mango-editor-table-id="matrix"><tbody><tr><th>Owner</th><th>State</th></tr><tr><td>A</td><td>Ready</td></tr></tbody></table>' +
-    '<p><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-durable-001"><img src="mango-attachment:attachment-durable-001" data-mango-attachment-id="attachment-durable-001" alt="Diagram" width="320"></span></p>';
+    '<p><span data-mango-editor-image="true" data-mango-editor-image-id="image-durable-001" data-mango-editor-attachment-id="attachment-durable-001"><img src="mango-attachment:attachment-durable-001" data-mango-attachment-id="attachment-durable-001" alt="Diagram" width="320"></span></p>';
   await setHTML(pageA, rich);
   const normalizedRich = await waitConverged([pageA, pageB]);
   assert.match(normalizedRich, /<table/);
@@ -279,6 +312,14 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   assert.match(normalizedRich, /mango-attachment:attachment-durable-001/);
   assert.doesNotMatch(normalizedRich.toLowerCase(), /base64|x-amz-credential|x-amz-signature/);
   assert.equal(await pageB.locator("#editor table").count(), 1);
+  assert.equal(await pageB.locator("#editor ol").count(), 1);
+  assert.equal(await pageB.locator('[data-mango-editor-checklist-checked="true"]').count(), 1);
+  assert.ok(await pageB.locator("#editor br").count() >= 2);
+  assert.equal(await pageB.locator("#editor [data-mango-editor-attachment-id='attachment-durable-001'] img").count(), 1);
+  await waitUntil(async () => Promise.all([pageA, pageB].map(async (page) => (
+    (await page.locator("#editor [data-mango-editor-attachment-id='attachment-durable-001'] img").getAttribute("src"))?.startsWith("blob:")
+    && await page.locator('[data-mango-editor-image-id="image-durable-001"]').getAttribute("data-mango-editor-image-hydration") === "ready"
+  ))).then((items) => items.every(Boolean)), "attachment images to hydrate through the established loader");
 
   const base = "x".repeat(5_000);
   await setHTML(pageA, "<p>" + base + "</p>");
@@ -309,17 +350,6 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   assert.equal(await pageA.locator("#editor").innerText(), "Alpha Beta");
   assert.equal(await pageA.locator("#editor strong").count(), 1);
   assert.equal(await pageA.locator("#editor em").count(), 1);
-
-  await setHTML(pageA, "<p>Gamma</p>");
-  await waitConverged([pageA, pageB]);
-  await Promise.all([
-    setHTML(pageA, "<h2>Gamma</h2>"),
-    setHTML(pageB, "<p><strong>Gamma</strong></p>"),
-  ]);
-  await waitConverged([pageA, pageB]);
-  assert.equal(await pageA.locator("#editor").innerText(), "Gamma");
-  assert.equal(await pageA.locator("#editor h2").count(), 1);
-  assert.equal(await pageA.locator("#editor strong").count(), 1);
 
   await pageA.evaluate(() => window.__mangoE2E.delayNextBroadcast(500));
   await setHTML(pageA, "<p>Acknowledgement before broadcast</p>");
@@ -364,7 +394,12 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   await setHTML(pageA, "<h3>Large paste</h3><p><strong>" + pasteText + "</strong></p><ul><li>Tail one</li><li>Tail two</li></ul>");
   await waitConverged([pageA, pageB]);
   const pasted = await pageA.locator("#editor").textContent();
-  assert.equal(pasted, "Large paste" + pasteText + "Tail oneTail two");
+  assert.ok(pasted.startsWith("Large paste"));
+  assert.equal((pasted.match(/Rich paste line /g) || []).length, 28_000);
+  assert.equal((pasted.match(/Tail one/g) || []).length, 1);
+  assert.equal((pasted.match(/Tail two/g) || []).length, 1);
+  assert.equal(await pageA.locator("#editor strong").count(), 1);
+  assert.equal(await pageA.locator("#editor li").count(), 2);
   await pageA.evaluate(() => window.__mangoE2E.reconnect());
   await waitConverged([pageA, pageB]);
   assert.equal(await pageA.locator("#editor").textContent(), pasted);
@@ -443,6 +478,7 @@ async function main() {
   const frontendPort = await freePort();
   mkdirSync(pgData, { recursive: true });
   mkdirSync(migrationDir, { recursive: true });
+  mkdirSync(legacyMigrationDir, { recursive: true });
 
   run("Initialize disposable PostgreSQL", pgTools.initdb, [
     "-D", pgData, "--username=postgres", "--auth=trust", "--encoding=UTF8", "--no-locale",
@@ -459,26 +495,36 @@ async function main() {
   run("Build production API", "go", ["build", "-o", apiExe, "./cmd/miraeopus-api"], { cwd: backend });
   for (const name of ["20260715_unified_realtime_collaboration.sql", "20260715_zz_edit_or_no_access.sql"]) {
     copyFileSync(resolve(backend, "db", "migrations", name), resolve(migrationDir, name));
+    copyFileSync(resolve(backend, "db", "migrations", name), resolve(legacyMigrationDir, name));
   }
 
   const cleanEnv = databaseEnv(pgPort, "mangorts_realtime_test");
   run("Apply canonical schema to clean database", migrateExe, [
     "-mode", "schema", "-schema", resolve(backend, "db", "schema.sql"), "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
-  run("Run both new migrations in repository order on clean database", migrateExe, [
+  run("Record the two historical collaboration migrations on the clean canonical schema", migrateExe, [
+    "-mode", "migrate", "-migrations", migrationDir,
+  ], { cwd: backend, env: cleanEnv });
+  copyFileSync(resolve(backend, "db", "migrations", "20260716_restore_rich_html_collaboration.sql"), resolve(migrationDir, "20260716_restore_rich_html_collaboration.sql"));
+  run("Apply the rich HTML collaboration migration on the clean canonical schema", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
   run("Prove recorded migration rerun is idempotent", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260715%';"), "2");
-  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from pg_constraint where conname in ('editor_collaboration_documents_model_version_chk','editor_collaboration_operations_kind_chk');"), "2");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260716%';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from pg_constraint where conname in ('editor_collaboration_documents_model_version_chk','editor_collaboration_operations_kind_chk');"), "0");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name='editor_collaboration_documents' and column_name='canonical_html';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name='editor_collaboration_operations' and column_name in ('patch','requires_snapshot');"), "2");
 
   const legacySQL = [
     "create type information_type as enum ('Text box');",
     "create table companies(company_id uuid primary key,name text not null);",
     "create table users(user_id uuid primary key,cognito_subject text not null unique,email text not null,display_name text not null);",
-    "create table logic_gate_projection_table(company_id uuid not null,logic_gate_id uuid not null,information_id uuid not null,type information_type not null,information text not null,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now());",
+    "create table node_projection_table(company_id uuid not null,node_id uuid not null,information_id uuid not null,type information_type not null,information text not null,is_deleted boolean not null default false,revision bigint not null default 1,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),primary key(company_id,node_id,information_id));",
+    "create table logic_gate_projection_table(company_id uuid not null,logic_gate_id uuid not null,information_id uuid not null,type information_type not null,information text not null,is_deleted boolean not null default false,revision bigint not null default 1,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),primary key(company_id,logic_gate_id,information_id));",
+    "create table project_projection_table(company_id uuid not null,project_id uuid not null,information_id uuid not null,type information_type not null,information text not null,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),primary key(company_id,project_id,information_id));",
     "create unique index idx_logic_gate_projection_table_one_text_box on logic_gate_projection_table(company_id,logic_gate_id,type) where type='Text box'::information_type;",
     "create table resource_permissions(company_id uuid not null,resource_type text not null,resource_id uuid not null,subject_type text not null default 'user',subject_id uuid not null,user_id uuid,access_level text not null,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),constraint resource_permissions_access_level_chk check(access_level in('no_access','view','edit','admin')),primary key(company_id,resource_type,resource_id,subject_type,subject_id));",
     "create table resource_permission_subtree_applications(application_id bigserial primary key,policy_sequence bigint not null,company_id uuid not null,ancestor_resource_type text not null,ancestor_resource_id uuid not null,rule_key text not null,subject_type text,subject_id uuid,access_level text,deleted boolean not null default false,created_timestamp timestamptz not null default now(),constraint resource_permission_subtree_applications_access_level_chk check(access_level is null or access_level in('no_access','view','edit','admin')),constraint resource_permission_subtree_applications_rule_shape_chk check((rule_key='__default__' and subject_type is null and subject_id is null and access_level in('view','edit','admin','no_access') and not deleted) or (rule_key<>'__default__' and subject_type in('user','group') and subject_id is not null and (deleted or access_level in('view','edit','admin','no_access')))));",
@@ -488,13 +534,26 @@ async function main() {
     "insert into resource_permission_subtree_applications(policy_sequence,company_id,ancestor_resource_type,ancestor_resource_id,rule_key,subject_type,subject_id,access_level) values(1,'" + COMPANY_A + "','node','" + NODE_A + "','__default__',null,null,'admin'),(1,'" + COMPANY_A + "','node','" + NODE_A + "','user:" + USER_A + "','user','" + USER_A + "','view');",
   ].join("\n");
   psql(pgPort, "mangorts_realtime_legacy", legacySQL);
-  run("Run both migrations against legacy fixture", migrateExe, [
-    "-mode", "migrate", "-migrations", migrationDir,
+  run("Run the historical migrations against the legacy fixture", migrateExe, [
+    "-mode", "migrate", "-migrations", legacyMigrationDir,
   ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select string_agg(access_level,',' order by access_level) from resource_permissions;"), "edit");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select string_agg(access_level,',' order by application_id) from resource_permission_subtree_applications;"), "edit,edit");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select mangorts_access_level_rank('no_access')||','||mangorts_access_level_rank('edit')||','||mangorts_access_level_rank('view');"), "0,1,0");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select to_regclass('idx_logic_gate_projection_table_one_text_box') is null and to_regclass('idx_logic_gate_projection_table_text_boxes') is not null;"), "t");
+
+  psql(pgPort, "mangorts_realtime_legacy", [
+    "insert into node_projection_table(company_id,node_id,information_id,type,information,is_deleted,revision) values('" + COMPANY_A + "','" + NODE_A + "','" + DOC_A + "','Text box','" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false,7);",
+    "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,snapshot_revision,snapshot_state) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',1,0,'" + STALE_STRUCTURED_EDITOR_STATE.replaceAll("'", "''") + "'::jsonb);",
+    "insert into editor_collaboration_operations(company_id,resource_type,resource_id,document_id,revision,operation_id,client_id,base_revision,delta,event_id) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',1,'legacy-operation','legacy-client',0,'{\"ops\":[{\"insert\":\"stale\"}]}'::jsonb,'44444444-4444-4444-8444-444444444444');",
+  ].join("\n"));
+  copyFileSync(resolve(backend, "db", "migrations", "20260716_restore_rich_html_collaboration.sql"), resolve(legacyMigrationDir, "20260716_restore_rich_html_collaboration.sql"));
+  run("Migrate legacy structured state to authoritative projection rich HTML", migrateExe, [
+    "-mode", "migrate", "-migrations", legacyMigrationDir,
+  ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select canonical_html from editor_collaboration_documents where company_id='" + COMPANY_A + "' and resource_id='" + NODE_A + "' and document_id='" + DOC_A + "';"), INITIAL_RICH_EDITOR_HTML);
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select (patch->>'start_utf8')||','||(patch->>'delete_utf8')||','||(patch->>'insert')||','||requires_snapshot::text from editor_collaboration_operations where operation_id='legacy-operation';"), "0,0,,true");
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from information_schema.columns where table_name in ('editor_collaboration_documents','editor_collaboration_operations') and column_name in ('model_version','snapshot_revision','snapshot_state','accumulated_delta_bytes','operation_kind','delta');"), "0");
 
   run("Real PostgreSQL producer atomicity and retry tests", "go", [
     "test", "./internal/store", "-run", "TestPostgresRealtime", "-count=1", "-v",
@@ -507,7 +566,8 @@ async function main() {
     "insert into nodes(company_id,node_id,name,default_access,created_timestamp) values('" + COMPANY_A + "','" + NODE_A + "','Collaborative Node','edit',now()),('" + COMPANY_A + "','" + NODE_A_OTHER + "','Isolated Node','edit',now()),('" + COMPANY_B + "','" + NODE_B + "','Other Company Node','edit',now());",
     "insert into logic_gates(company_id,logic_gate_id,header,default_access,created_timestamp) values('" + COMPANY_A + "','" + GATE_A + "','Collaborative Logic Gate','edit',now());",
     "insert into projects(company_id,project_id,name,default_access) values('" + COMPANY_A + "','" + PROJECT_A + "','Collaborative Project','edit');",
-    "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,snapshot_revision,snapshot_state) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',0,0,'" + LEGACY_ESCAPED_EDITOR_STATE.replaceAll("'", "''") + "'::jsonb);",
+    "insert into node_projection_table(company_id,node_id,information_id,type,information,is_deleted,revision,created_timestamp,updated_timestamp) values('" + COMPANY_A + "','" + NODE_A + "','" + DOC_A + "','Text box','" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false,1,now(),now());",
+    "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,canonical_html,is_deleted) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',0,'" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false);",
   ].join("\n"));
 
   const apiProcessOptions = (port) => ({

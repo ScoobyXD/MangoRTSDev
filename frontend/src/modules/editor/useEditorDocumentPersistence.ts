@@ -1,6 +1,8 @@
 import type React from "react";
 import { useCallback, useEffect } from "react";
 import { deserializeEditorDocumentHTML } from "./richTextEditing.js";
+import { hydrateEditorAttachmentImageFrames } from "./editorImages.js";
+import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi.js";
 import {
   documentTargetKey,
   generateStableInformationID,
@@ -18,6 +20,7 @@ type UseEditorDocumentPersistenceInput = {
   linkedEntityID: string;
   documentInformationID: string;
   editorDocumentRef: React.MutableRefObject<HTMLDivElement | null>;
+  attachmentHydrationCleanupRef: React.MutableRefObject<(() => void) | null>;
   documentDraftRef: React.MutableRefObject<string>;
   persistedDocumentRef: React.MutableRefObject<string>;
   documentInformationIDRef: React.MutableRefObject<string>;
@@ -55,7 +58,7 @@ export function editorCollaborationUserMessage(cause: unknown): string {
 export function useEditorDocumentPersistence(input: UseEditorDocumentPersistenceInput) {
   const {
     apiBase, companyID, currentUserID, linkedEntityKind, linkedEntityID, documentInformationID,
-    editorDocumentRef, documentDraftRef, persistedDocumentRef, documentInformationIDRef,
+    editorDocumentRef, attachmentHydrationCleanupRef, documentDraftRef, persistedDocumentRef, documentInformationIDRef,
     documentRevisionRef, currentDocumentTargetKeyRef, persistedDocumentTargetKeyRef,
     pendingSaveRef, queuedSaveRef, saveInFlightRef, setDocumentInformationID, setError,
     requestJSON, invalidateDocumentTargetCaches,
@@ -85,9 +88,16 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     const element = editorDocumentRef.current;
     if (element) {
       const nextHTML = deserializeEditorDocumentHTML(html);
+      attachmentHydrationCleanupRef.current?.();
+      attachmentHydrationCleanupRef.current = null;
       if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
+      if (apiBase.trim() && companyID.trim()) {
+        attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
+          loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
+        ));
+      }
     }
-  }, [currentDocumentTargetKeyRef, documentDraftRef, documentInformationIDRef, editorDocumentRef, invalidateDocumentTargetCaches, linkedEntityID, linkedEntityKind, persistedDocumentRef, persistedDocumentTargetKeyRef]);
+  }, [apiBase, attachmentHydrationCleanupRef, companyID, currentDocumentTargetKeyRef, documentDraftRef, documentInformationIDRef, editorDocumentRef, invalidateDocumentTargetCaches, linkedEntityID, linkedEntityKind, persistedDocumentRef, persistedDocumentTargetKeyRef]);
 
   const { scheduleDocumentSave: scheduleCollaborativeSave, flushPendingDocumentSave: flushCollaborativeSave, recoverDocument } = useCollaborativeEditorDocument({
     enabled: Boolean(currentUserID && companyID && linkedEntityID && documentInformationID && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate")),

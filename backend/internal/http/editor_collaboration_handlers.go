@@ -79,18 +79,15 @@ func (s *Server) handleEditorCollaborationSnapshot(w http.ResponseWriter, r *htt
 		return
 	}
 	s.recordOperationalMetric("realtime.editor_snapshot_count", "editor", 1, 0)
-	if snapshot.ReplayCount > 0 {
-		s.recordOperationalMetric("realtime.editor_snapshot_replay_operations", "editor", int64(snapshot.ReplayCount), 0)
-	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, snapshot, snapshot.ETag)
 }
 
 func (s *Server) handleEditorCollaborationOperation(w http.ResponseWriter, r *http.Request, actor ActorContext, ref store.EditorDocumentRef) {
 	var request struct {
-		OperationID  string                         `json:"operation_id"`
-		ClientID     string                         `json:"client_id"`
-		BaseRevision int64                          `json:"base_revision"`
-		Delta        store.EditorCollaborationDelta `json:"delta"`
+		OperationID  string                `json:"operation_id"`
+		ClientID     string                `json:"client_id"`
+		BaseRevision int64                 `json:"base_revision"`
+		Patch        store.EditorHTMLPatch `json:"patch"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -100,7 +97,7 @@ func (s *Server) handleEditorCollaborationOperation(w http.ResponseWriter, r *ht
 	}
 	commit, err := s.repo.CommitEditorCollaborationOperation(store.EditorCollaborationOperationInput{
 		Document: ref, OperationID: request.OperationID, ClientID: request.ClientID,
-		ActorUserID: strings.TrimSpace(actor.User.UserID), BaseRevision: request.BaseRevision, Delta: request.Delta,
+		ActorUserID: strings.TrimSpace(actor.User.UserID), BaseRevision: request.BaseRevision, Patch: request.Patch,
 	})
 	if err != nil {
 		writeEditorCollaborationStoreError(w, err)
@@ -111,7 +108,6 @@ func (s *Server) handleEditorCollaborationOperation(w http.ResponseWriter, r *ht
 	if commit.Deduplicated {
 		s.recordOperationalMetric("realtime.editor_operation_deduplicated_count", "editor", 1, 0)
 	}
-	w.Header().Set("ETag", commit.Snapshot.ETag)
 	writeJSON(w, http.StatusOK, commit)
 }
 
@@ -155,7 +151,6 @@ func (s *Server) handleEditorCollaborationDelete(w http.ResponseWriter, r *http.
 		return
 	}
 	s.wakeRealtimeSpine()
-	w.Header().Set("ETag", commit.Snapshot.ETag)
 	writeJSON(w, http.StatusOK, commit)
 }
 

@@ -1,4 +1,4 @@
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 # MangoRTS Current Data And Realtime Architecture
 
@@ -8,7 +8,7 @@ Status: current architecture contract. This document supersedes the former proce
 
 Authenticated HTTP commands are the only product write path. A successful collaborative editor command means the backend has authorized the exact company/resource/document and atomically committed the accepted operation, next document revision, canonical collaboration state, and transactional realtime outbox event. WebSocket frames are never an uncommitted write path or durable source of truth.
 
-Canonical HTTP reads remain recovery truth. Ordinary feature wake-ups reconcile their existing canonical reads. Collaborative editors use exact full snapshots and ETags for open, refresh, reconnect, revision gaps, divergence, and explicit canonical replacement; normal typing uses structured operations rather than full-body writes or fan-out.
+Canonical HTTP reads remain recovery truth. Ordinary feature wake-ups reconcile their existing canonical reads. Collaborative editors use exact full-HTML snapshots and ETags for open, refresh, reconnect, revision gaps, divergence, and explicit canonical replacement; normal typing uses bounded edits to the serialized rich HTML rather than full-body writes or fan-out.
 
 ## One Shared Realtime Spine
 
@@ -36,7 +36,7 @@ The frontend reuses one physical WebSocket per API/company boundary and refcount
 | `board:{board_id}` | Mounted Logic Gate Kanban | Compact `kanban.changed` hint | Coalesced exact board/work read |
 | `mailbox:personal:account:{user_id}:{account}` | Exact selected personal mailbox | Compact provider message/folder hint | Exact mailbox folder/list/detail reads |
 | `mailbox:shared:{shared_inbox_id}` | Exact selected mail-bearing shared inbox | Compact provider message/folder hint | Exact shared-mailbox reads |
-| `editor:{node|logic_gate|project}:{resource_id}:{document_id}` | Exact mounted collaborative body | Committed structured Quill Delta operation, deletion, or compact snapshot-required signal | Exact collaboration snapshot/ETag plus durable pending-operation recovery |
+| `editor:{node|logic_gate|project}:{resource_id}:{document_id}` | Exact mounted collaborative body | Committed bounded HTML-text patch, deletion, or compact snapshot-required signal | Exact full-HTML snapshot/ETag plus durable pending-operation recovery |
 
 Broad company/workspace/user-directory/editor wildcard streams remain forbidden. Company Explorer, graphs/maps, GVIC/My Work, Project Management, permissions, generic projections, broad communications, and title caches do not receive generalized backend replication. Same-browser committed-title convergence remains the targeted local command-result/cache mechanism documented in the owner contracts.
 
@@ -44,17 +44,17 @@ Broad company/workspace/user-directory/editor wildcard streams remain forbidden.
 
 Every independently editable Node, Logic Gate, or Project rich-text body is a separate document. Its identity includes company, resource type, resource ID, and document ID. Node text boxes, Logic Gate root/body and independent text boxes, and Project text boxes never share revision streams or pending queues merely because they appear in one surface.
 
-The collaboration engine uses Quill Delta as its structured rich-document model and the mature `quill-delta`/`go-quilljs-delta` operational-transform algorithms on the browser and server. Operations retain, insert, delete, and apply attributes to document units rather than patching serialized HTML. The server transforms stale-base operations over every committed intervening operation and returns those concurrent operations in the acknowledgement so the origin can rebase unacknowledged local work. Stable operation IDs provide retry/deduplication after a lost acknowledgement. Users never choose between complete local and server documents.
+Mango has one editor document representation: sanitized rich HTML. The database stores that HTML, APIs and snapshots carry it, and editor DOMs deserialize and serialize it directly. Normal collaboration operations are small UTF-8-indexed HTML text patches (`start_utf8`, `delete_utf8`, `insert`), never a second rich-text document language. The server orders accepted patches by document revision, transforms stale disjoint ranges over intervening patches, and returns those concurrent patches in the acknowledgement so the origin can rebase unacknowledged local work. Stable operation IDs provide retry/deduplication after a lost acknowledgement. The product explicitly accepts the rare collision risk when collaborators edit the same exact HTML location inside the delivery window; a full-HTML recovery resolves detected gaps without a user merge screen.
 
-Local DOM rendering is immediate. Compatible rapid changes micro-batch for 160 ms. Large text inserts are split below a 24 KiB target and every request remains beneath the backend 64 KiB encoded-operation guard. The backend commits one transaction per accepted micro-batch, not per keystroke. Remote committed operations apply once and are marked as remote so they cannot echo into another save. `Saved` means backend acknowledgement, never local rendering or socket delivery.
+Local DOM rendering is immediate. Compatible rapid changes micro-batch for 160 ms. Large inserts split into ordered bounded HTML patches below the request guard. The backend commits one transaction per accepted micro-batch, not per keystroke. Own acknowledgements never replace the live DOM, and remote committed patches apply once and are marked as remote so they cannot echo into another save. `Saved` means backend acknowledgement, never local rendering or socket delivery.
 
-A physical snapshot is compacted after 128 operations since the prior snapshot or 512 KiB of accumulated deltas. Snapshot reconstruction is therefore bounded. Explicit saved-version restore is a canonical structured snapshot replacement; its outbox event contains no body/delta and tells subscribers to fetch the full snapshot. A client whose operation predates that replacement is required to recover the canonical snapshot and reconcile its still-durable operation instead of anchoring it to obsolete serialized markup.
+The collaboration document row stores current canonical HTML, revision, and ETag atomically with each operation and outbox event. Explicit saved-version restore is a canonical full-HTML replacement; its outbox event contains no body and tells subscribers to fetch the full snapshot. A client whose operation predates that replacement recovers current HTML and reconciles its still-durable operation instead of anchoring it to obsolete markup.
 
-Projection tables remain derived compatibility/read models. They may be materialized on initial commit, bounded compaction, metadata change, explicit save-version creation/restore, or another explicit snapshot boundary. They are not the normal typing authority. Title and attachment metadata use a body-free metadata command that reconstructs the canonical collaboration body server-side and cannot overwrite it.
+Projection tables remain compatible read models and are materialized atomically from the same canonical HTML. They are not a separate editor format. Title and attachment metadata use a body-free metadata command that reads the canonical collaboration body server-side and cannot overwrite it.
 
 ## Durable Pending Operations And Recovery
 
-Before an unacknowledged mutation can be lost, the browser stores its structured operation under authenticated user, company, exact resource/document, per-tab browser client, and stable operation ID. IndexedDB is the authoritative queue; quota and storage failures are surfaced and block the unsafe send rather than falling back to capacity-limited `localStorage`. A stable per-tab identity lives in `window.name`, surviving refresh/reconnect without causing separate tabs to share a queue. Legacy full-body keys are deleted once and never read.
+Before an unacknowledged mutation can be lost, the browser stores its HTML patch under authenticated user, company, exact resource/document, per-tab browser client, and stable operation ID. IndexedDB is the authoritative queue; quota and storage failures are surfaced and block the unsafe send rather than falling back to capacity-limited `localStorage`. A stable per-tab identity lives in `window.name`, surviving refresh/reconnect without causing separate tabs to share a queue. Legacy full-body and structured-document keys/databases are deleted once and never read.
 
 Open/reconnect recovery establishes or restores the exact subscription, buffers committed events, fetches/validates the full snapshot, accepts revision R, discards duplicates at or below R, orders events above R, transforms and reapplies/resubmits durable pending operations with their original IDs, waits for acknowledgement/deduplication, and only then reports the document healthy. Events or deletions arriving during an active recovery request another canonical recovery pass so the load-to-subscribe race cannot be lost.
 

@@ -54,7 +54,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 
 	requestBody := map[string]any{
 		"operation_id": "http-operation-1", "client_id": "http-client", "base_revision": 0,
-		"delta": map[string]any{"ops": []map[string]any{{"insert": "A"}}},
+		"patch": map[string]any{"start_utf8": 0, "delete_utf8": 0, "insert": "A"},
 	}
 	created := doJSON(http.MethodPost, allowedToken, requestBody, "")
 	if created.Code != http.StatusOK {
@@ -64,7 +64,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	if err := json.Unmarshal(created.Body.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	if first.Revision != 1 || first.Deduplicated || first.Snapshot.HTML != "<!-- mango-editor-html-v1 -->A" || created.Header().Get("ETag") == "" {
+	if first.Revision != 1 || first.Deduplicated || first.Patch.Insert != "A" || created.Header().Get("ETag") != "" {
 		t.Fatalf("unexpected committed acknowledgement: %+v etag=%q", first, created.Header().Get("ETag"))
 	}
 
@@ -83,7 +83,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	// An older valid base is integrated instead of becoming an end-user whole-document conflict.
 	concurrent := doJSON(http.MethodPost, allowedToken, map[string]any{
 		"operation_id": "http-operation-2", "client_id": "other-client", "base_revision": 0,
-		"delta": map[string]any{"ops": []map[string]any{{"insert": "B"}}},
+		"patch": map[string]any{"start_utf8": 0, "delete_utf8": 0, "insert": "B"},
 	}, "")
 	if concurrent.Code != http.StatusOK {
 		t.Fatalf("concurrent old-base status=%d body=%s", concurrent.Code, concurrent.Body.String())
@@ -99,6 +99,10 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	snapshot := doJSON(http.MethodGet, allowedToken, nil, "")
 	if snapshot.Code != http.StatusOK || snapshot.Header().Get("ETag") == "" {
 		t.Fatalf("snapshot status=%d etag=%q body=%s", snapshot.Code, snapshot.Header().Get("ETag"), snapshot.Body.String())
+	}
+	var beforeMetadataSnapshot store.EditorCollaborationSnapshot
+	if err := json.Unmarshal(snapshot.Body.Bytes(), &beforeMetadataSnapshot); err != nil {
+		t.Fatal(err)
 	}
 	validated := doJSON(http.MethodGet, allowedToken, nil, snapshot.Header().Get("ETag"))
 	if validated.Code != http.StatusNotModified {
@@ -124,14 +128,14 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	if err := json.Unmarshal(afterMetadata.Body.Bytes(), &afterMetadataSnapshot); err != nil {
 		t.Fatal(err)
 	}
-	if afterMetadataSnapshot.HTML != second.Snapshot.HTML || afterMetadataSnapshot.Revision != second.Revision {
-		t.Fatalf("metadata changed canonical document: before=%+v after=%+v", second.Snapshot, afterMetadataSnapshot)
+	if afterMetadataSnapshot.HTML != beforeMetadataSnapshot.HTML || afterMetadataSnapshot.Revision != second.Revision {
+		t.Fatalf("metadata changed canonical document: before=%+v after=%+v", beforeMetadataSnapshot, afterMetadataSnapshot)
 	}
 
 	// Causal gaps are machine recovery signals, not user merge workflows.
 	gap := doJSON(http.MethodPost, allowedToken, map[string]any{
 		"operation_id": "http-operation-gap", "client_id": "http-client", "base_revision": 2,
-		"delta": map[string]any{"ops": []map[string]any{{"retain": 999}, {"insert": "!"}}},
+		"patch": map[string]any{"start_utf8": 999, "delete_utf8": 0, "insert": "!"},
 	}, "")
 	if gap.Code != http.StatusConflict || !bytes.Contains(gap.Body.Bytes(), []byte("collaboration_snapshot_required")) {
 		t.Fatalf("gap status=%d body=%s", gap.Code, gap.Body.String())

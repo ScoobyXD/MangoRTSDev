@@ -139,20 +139,13 @@ export type RealtimeErrorMessage = RealtimeBaseMessage & {
   message?: string;
 };
 
-export type RealtimeEditorEmbed = Record<string, unknown>;
-
-export type RealtimeEditorOp = {
-  insert?: string | RealtimeEditorEmbed;
-  retain?: number;
-  delete?: number;
-  attributes?: Record<string, unknown>;
+export type RealtimeEditorHTMLPatch = {
+  start_utf8: number;
+  delete_utf8: number;
+  insert: string;
 };
 
-export type RealtimeEditorDelta = {
-  ops: RealtimeEditorOp[];
-};
-
-export type RealtimeEditorDeltaCommittedMessage = RealtimeBaseMessage & {
+export type RealtimeEditorPatchCommittedMessage = RealtimeBaseMessage & {
   type: "editor.delta.committed";
   company_id: string;
   scope: string;
@@ -164,7 +157,7 @@ export type RealtimeEditorDeltaCommittedMessage = RealtimeBaseMessage & {
   operation_id: string;
   client_id: string;
   committed_at?: string;
-  delta: RealtimeEditorDelta;
+  patch: RealtimeEditorHTMLPatch;
 };
 
 export type RealtimeEditorSnapshotRequiredMessage = RealtimeBaseMessage & {
@@ -215,7 +208,7 @@ type RealtimeInboundMessage =
   | RealtimeKanbanChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
-  | RealtimeEditorDeltaCommittedMessage
+  | RealtimeEditorPatchCommittedMessage
   | RealtimeEditorSnapshotRequiredMessage
   | RealtimeEditorDocumentDeletedMessage
   | RealtimeHeartbeatMessage
@@ -233,7 +226,7 @@ export type RealtimeSubscriptionHandlers = {
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
-  onEditorDeltaCommitted?: (message: RealtimeEditorDeltaCommittedMessage) => void;
+  onEditorPatchCommitted?: (message: RealtimeEditorPatchCommittedMessage) => void;
   onEditorSnapshotRequired?: (message: RealtimeEditorSnapshotRequiredMessage) => void;
   onEditorDocumentDeleted?: (message: RealtimeEditorDocumentDeletedMessage) => void;
   onRecover?: () => void | Promise<void>;
@@ -406,9 +399,9 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       };
       if (type === "editor.document.deleted") return common as RealtimeEditorDocumentDeletedMessage;
       if (type === "editor.snapshot.required") return { ...common, reason: stringValue(payload.reason) || undefined } as RealtimeEditorSnapshotRequiredMessage;
-      const delta = recordValue(payload.delta);
-      if (!delta) throw new Error("realtime_editor_delta_required");
-      return { ...common, delta: delta as RealtimeEditorDelta } as RealtimeEditorDeltaCommittedMessage;
+      const patch = recordValue(payload.patch);
+      if (!patch) throw new Error("realtime_editor_patch_required");
+      return { ...common, patch: patch as RealtimeEditorHTMLPatch } as RealtimeEditorPatchCommittedMessage;
     }
     case "heartbeat.challenge":
     case "heartbeat.confirmed": {
@@ -755,7 +748,7 @@ export class MangoRealtimeClient {
           sub.onMailboxFolderChanged?.(message);
           break;
         case "editor.delta.committed":
-          sub.onEditorDeltaCommitted?.(message);
+          sub.onEditorPatchCommitted?.(message);
           break;
         case "editor.snapshot.required":
           sub.onEditorSnapshotRequired?.(message);

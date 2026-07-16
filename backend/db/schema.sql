@@ -3935,25 +3935,16 @@ create table if not exists editor_collaboration_documents (
   resource_type text not null,
   resource_id uuid not null,
   document_id uuid not null,
-  model_version smallint not null default 2,
   revision bigint not null default 0,
-  snapshot_revision bigint not null default 0,
-  snapshot_state jsonb not null,
-  accumulated_delta_bytes integer not null default 0,
+  canonical_html text not null,
   is_deleted boolean not null default false,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   primary key (company_id, resource_type, resource_id, document_id),
   constraint editor_collaboration_documents_company_fkey foreign key (company_id) references companies(company_id) on delete cascade,
   constraint editor_collaboration_documents_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project')),
-  constraint editor_collaboration_documents_model_version_chk check (model_version = 2),
-  constraint editor_collaboration_documents_revision_chk check (revision >= 0 and snapshot_revision >= 0 and snapshot_revision <= revision),
-  constraint editor_collaboration_documents_snapshot_state_chk check (
-    jsonb_typeof(snapshot_state) = 'object'
-    and snapshot_state ? 'ops'
-    and jsonb_typeof(snapshot_state->'ops') = 'array'
-  ),
-  constraint editor_collaboration_documents_delta_bytes_chk check (accumulated_delta_bytes >= 0)
+  constraint editor_collaboration_documents_revision_chk check (revision >= 0),
+  constraint editor_collaboration_documents_html_size_chk check (octet_length(canonical_html) <= 2097152)
 );
 
 create index if not exists idx_editor_collaboration_documents_resource
@@ -3969,8 +3960,8 @@ create table if not exists editor_collaboration_operations (
   client_id text not null,
   actor_user_id uuid,
   base_revision bigint not null,
-  operation_kind text not null default 'quill_delta_v2',
-  delta jsonb not null,
+  patch jsonb not null,
+  requires_snapshot boolean not null default false,
   event_id uuid not null unique,
   is_tombstone boolean not null default false,
   committed_timestamp timestamptz not null default now(),
@@ -3982,19 +3973,25 @@ create table if not exists editor_collaboration_operations (
     on delete cascade,
   constraint editor_collaboration_operations_actor_fkey foreign key (actor_user_id) references users(user_id) on delete set null,
   constraint editor_collaboration_operations_revision_chk check (revision > 0 and base_revision >= 0),
-  constraint editor_collaboration_operations_kind_chk check (operation_kind = 'quill_delta_v2'),
   constraint editor_collaboration_operations_operation_id_chk check (btrim(operation_id) <> '' and octet_length(operation_id) <= 160),
   constraint editor_collaboration_operations_client_id_chk check (btrim(client_id) <> '' and octet_length(client_id) <= 160),
-  constraint editor_collaboration_operations_delta_chk check (
-    jsonb_typeof(delta) = 'object'
-    and pg_column_size(delta) <= 65536
-    and (is_tombstone or (delta ? 'ops' and jsonb_typeof(delta->'ops') = 'array'))
+  constraint editor_collaboration_operations_patch_chk check (
+    jsonb_typeof(patch) = 'object'
+    and patch ? 'start_utf8'
+    and patch ? 'delete_utf8'
+    and patch ? 'insert'
+    and pg_column_size(patch) <= 65536
+    and jsonb_typeof(patch->'start_utf8') = 'number'
+    and jsonb_typeof(patch->'delete_utf8') = 'number'
+    and jsonb_typeof(patch->'insert') = 'string'
+    and (patch->>'start_utf8')::integer >= 0
+    and (patch->>'delete_utf8')::integer >= 0
   )
 );
 
-create index if not exists idx_editor_collaboration_operations_replay
+create index if not exists idx_editor_collaboration_operations_rebase
   on editor_collaboration_operations(company_id, resource_type, resource_id, document_id, revision)
-  where not is_tombstone;
+  where not requires_snapshot and not is_tombstone;
 
 -- Logic Gate collaboration treats every independently editable text body as an
 -- exact document. Remove the historical one-text-box-per-gate uniqueness rule.

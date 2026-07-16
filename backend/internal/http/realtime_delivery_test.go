@@ -515,7 +515,7 @@ func TestRealtimeEditorOutboxCrossesBackendInstancesWithExactBoundedAudienceAndR
 	commit, err := repo.CommitEditorCollaborationOperation(store.EditorCollaborationOperationInput{
 		Document: ref, OperationID: "cross-instance-op-1", ClientID: "cross-instance-client",
 		ActorUserID: firstUser.UserID, BaseRevision: 0,
-		Delta: store.EditorCollaborationDelta{Ops: []store.EditorCollaborationOp{{Insert: "A"}}},
+		Patch: store.EditorHTMLPatch{Insert: "A"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +566,7 @@ func TestRealtimeEditorOutboxCrossesBackendInstancesWithExactBoundedAudienceAndR
 	_, err = repo.CommitEditorCollaborationOperation(store.EditorCollaborationOperationInput{
 		Document: ref, OperationID: "cross-instance-op-2", ClientID: "cross-instance-client",
 		ActorUserID: firstUser.UserID, BaseRevision: 1,
-		Delta: store.EditorCollaborationDelta{Ops: []store.EditorCollaborationOp{{Retain: 1}, {Insert: "B"}}},
+		Patch: store.EditorHTMLPatch{StartUTF8: 1, Insert: "B"},
 	})
 	if err != nil {
 		t.Fatal(err)

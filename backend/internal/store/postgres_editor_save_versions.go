@@ -234,15 +234,7 @@ func materializePostgresEditorCollaborationDocumentsForSaveTx(ctx context.Contex
 		if !found || document.Deleted {
 			continue
 		}
-		state, _, err := reconstructPostgresEditorStateTx(ctx, tx, document)
-		if err != nil {
-			return err
-		}
-		html, err := MaterializeEditorCollaborationState(state)
-		if err != nil {
-			return err
-		}
-		if err := materializePostgresEditorProjectionTx(ctx, tx, ref, html, document.Revision, now); err != nil {
+		if err := materializePostgresEditorProjectionTx(ctx, tx, ref, document.CanonicalHTML, document.Revision, now); err != nil {
 			return err
 		}
 	}
