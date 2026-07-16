@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -16,6 +17,80 @@ var (
 	errCalendarEventNotFound  = errors.New("calendar event not found")
 	errCalendarEventAmbiguous = errors.New("calendar event ambiguous")
 )
+
+type calendarInviteEventPayload struct {
+	ID            string                  `json:"id"`
+	CalendarID    string                  `json:"calendar_id,omitempty"`
+	ICalUID       string                  `json:"ical_uid,omitempty"`
+	Title         string                  `json:"title,omitempty"`
+	Status        string                  `json:"status,omitempty"`
+	Description   string                  `json:"description,omitempty"`
+	Location      string                  `json:"location,omitempty"`
+	HTMLLink      string                  `json:"html_link,omitempty"`
+	ConferenceURL string                  `json:"conference_url,omitempty"`
+	Busy          bool                    `json:"busy,omitempty"`
+	ReadOnly      bool                    `json:"read_only,omitempty"`
+	Organizer     NylasEmailAddress       `json:"organizer,omitempty"`
+	Participants  []NylasEventParticipant `json:"participants,omitempty"`
+	When          NylasEventWhen          `json:"when,omitempty"`
+	RSVPStatus    string                  `json:"rsvp_status,omitempty"`
+}
+
+func (s *Server) handleCommunicationsCalendarInviteEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
+	if messageID == "" {
+		writeError(w, http.StatusBadRequest, "email_message_id_required")
+		return
+	}
+	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
+	if !ok {
+		return
+	}
+	calendarClient, ok := s.nylasClient.(NylasCalendarClient)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "calendar_provider_unavailable")
+		return
+	}
+	event, err := s.resolveCalendarInviteEvent(r.Context(), connection, calendarClient, messageID)
+	if err != nil {
+		s.writeCalendarInviteResolutionError(w, r, connection, err)
+		return
+	}
+	payload := calendarInviteEventPayload{
+		ID:           event.ID,
+		CalendarID:   event.CalendarID,
+		ICalUID:      event.ICalUID,
+		Title:        event.Title,
+		Status:       event.Status,
+		Description:  event.Description,
+		Location:     event.Location,
+		HTMLLink:     event.HTMLLink,
+		Busy:         event.Busy,
+		ReadOnly:     event.ReadOnly,
+		Organizer:    event.Organizer,
+		Participants: event.Participants,
+		When:         event.When,
+		RSVPStatus:   calendarInviteParticipantStatus(event.Participants, connection.AccountEmail),
+	}
+	if event.Conferencing != nil {
+		payload.ConferenceURL = strings.TrimSpace(event.Conferencing.Details.URL)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"event": payload})
+}
 
 func (s *Server) handleCommunicationsCalendarInviteResponse(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -60,66 +135,14 @@ func (s *Server) handleCommunicationsCalendarInviteResponse(w http.ResponseWrite
 		return
 	}
 
-	var rawMIME string
-	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-		var err error
-		rawMIME, err = s.nylasClient.GetMessageRawMIME(ctx, connection.GrantID, messageID)
-		return err
-	})
-	iCalUID := ""
-	if err == nil {
-		iCalUID = calendarInviteUIDFromRawMIME(rawMIME)
-		if iCalUID == "" {
-			err = errCalendarInviteNotFound
-		}
-	}
-	var events []NylasEvent
-	if err == nil {
-		err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-			var listErr error
-			events, listErr = calendarClient.ListEventsByICalUID(ctx, connection.GrantID, iCalUID)
-			return listErr
-		})
-	}
-	var event NylasEvent
-	if err == nil {
-		matchingEvents := make([]NylasEvent, 0, len(events))
-		for _, candidate := range events {
-			if strings.EqualFold(strings.TrimSpace(candidate.Status), "cancelled") {
-				continue
-			}
-			if candidate.ICalUID != "" && strings.TrimSpace(candidate.ICalUID) != iCalUID {
-				continue
-			}
-			matchingEvents = append(matchingEvents, candidate)
-		}
-		if len(matchingEvents) == 0 || strings.TrimSpace(matchingEvents[0].ID) == "" {
-			err = errCalendarEventNotFound
-		} else if len(matchingEvents) > 1 {
-			err = errCalendarEventAmbiguous
-		} else {
-			event = matchingEvents[0]
-		}
-	}
+	event, err := s.resolveCalendarInviteEvent(r.Context(), connection, calendarClient, messageID)
 	if err == nil {
 		err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
 			return calendarClient.SendEventRSVP(ctx, connection.GrantID, event.ID, event.CalendarID, status)
 		})
 	}
-	if errors.Is(err, errCalendarInviteNotFound) {
-		writeError(w, http.StatusUnprocessableEntity, "calendar_invite_not_found")
-		return
-	}
-	if errors.Is(err, errCalendarEventNotFound) {
-		writeError(w, http.StatusNotFound, "calendar_event_not_found")
-		return
-	}
-	if errors.Is(err, errCalendarEventAmbiguous) {
-		writeError(w, http.StatusConflict, "calendar_event_ambiguous")
-		return
-	}
 	if err != nil {
-		s.writeNylasError(w, r, connection, err)
+		s.writeCalendarInviteResolutionError(w, r, connection, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -128,6 +151,70 @@ func (s *Server) handleCommunicationsCalendarInviteResponse(w http.ResponseWrite
 		"event_id":    event.ID,
 		"calendar_id": event.CalendarID,
 	})
+}
+
+func (s *Server) resolveCalendarInviteEvent(ctx context.Context, connection domain.UserEmailConnection, calendarClient NylasCalendarClient, messageID string) (NylasEvent, error) {
+	var rawMIME string
+	err := s.withCommunicationsNylasGate(ctx, connection, func(providerContext context.Context) error {
+		var rawErr error
+		rawMIME, rawErr = s.nylasClient.GetMessageRawMIME(providerContext, connection.GrantID, messageID)
+		return rawErr
+	})
+	if err != nil {
+		return NylasEvent{}, err
+	}
+	iCalUID := calendarInviteUIDFromRawMIME(rawMIME)
+	if iCalUID == "" {
+		return NylasEvent{}, errCalendarInviteNotFound
+	}
+	var events []NylasEvent
+	err = s.withCommunicationsNylasGate(ctx, connection, func(providerContext context.Context) error {
+		var listErr error
+		events, listErr = calendarClient.ListEventsByICalUID(providerContext, connection.GrantID, iCalUID)
+		return listErr
+	})
+	if err != nil {
+		return NylasEvent{}, err
+	}
+	matchingEvents := make([]NylasEvent, 0, len(events))
+	for _, candidate := range events {
+		if strings.EqualFold(strings.TrimSpace(candidate.Status), "cancelled") {
+			continue
+		}
+		if candidate.ICalUID != "" && !strings.EqualFold(strings.TrimSpace(candidate.ICalUID), iCalUID) {
+			continue
+		}
+		matchingEvents = append(matchingEvents, candidate)
+	}
+	if len(matchingEvents) == 0 || strings.TrimSpace(matchingEvents[0].ID) == "" {
+		return NylasEvent{}, errCalendarEventNotFound
+	}
+	if len(matchingEvents) > 1 {
+		return NylasEvent{}, errCalendarEventAmbiguous
+	}
+	return matchingEvents[0], nil
+}
+
+func (s *Server) writeCalendarInviteResolutionError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, err error) {
+	switch {
+	case errors.Is(err, errCalendarInviteNotFound):
+		writeError(w, http.StatusUnprocessableEntity, "calendar_invite_not_found")
+	case errors.Is(err, errCalendarEventNotFound):
+		writeError(w, http.StatusNotFound, "calendar_event_not_found")
+	case errors.Is(err, errCalendarEventAmbiguous):
+		writeError(w, http.StatusConflict, "calendar_event_ambiguous")
+	default:
+		s.writeNylasError(w, r, connection, err)
+	}
+}
+
+func calendarInviteParticipantStatus(participants []NylasEventParticipant, accountEmail string) string {
+	for _, participant := range participants {
+		if strings.EqualFold(strings.TrimSpace(participant.Email), strings.TrimSpace(accountEmail)) {
+			return normalizeCalendarRSVPStatus(participant.Status)
+		}
+	}
+	return ""
 }
 
 func normalizeCalendarRSVPStatus(value string) string {

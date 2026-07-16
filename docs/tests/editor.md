@@ -92,6 +92,7 @@ ED67 - Selecting an inline image, opening its chat action, or focusing/blurring 
 ED68 - An editable Node with at least one loaded text box must select and publish a deterministic text-block formatting target during initial hydration without moving browser focus. The outer toolbar is therefore enabled, clickable, and hover-responsive immediately; clicking a different text box retargets it normally. Permission-denied nodes, hidden document modes, nodes with no text box, and the attached-email reply focus boundary in ED41 remain disabled.
 ED69 - Attachment hydration cleanup is tied to actual editor lifecycle/context/value replacement, not every controlled `value` rerender. A local input update that serializes the same live DOM keeps the active hydration owner, image element, decoded object URL, and selection intact; StrictMode replay and unmount still restart or dispose exactly once and revoke every owned URL.
 ED70 - Typing a dash followed by one space at the otherwise-empty current line start converts that line immediately into an empty structural bullet-list item in every unified editor surface, independent of the selected outline style. The physical Space key path must own this shortcut even when Chrome/React exposes text data without a native `inputType`; before-input remains the non-keyboard fallback. The shortcut consumes the dash and space, keeps focus and the caret in the new item, works inside a table cell, preserves unrelated inline images/rich DOM, and does not activate inside an existing structural list item or in the middle of ordinary text.
+ED71 - Personal/shared Forward reuses the same `ComposePanel` and `UnifiedRichEditorSurface` as ordinary compose/reply for the user's authored content, selection, formatting, inline-image, attachment, flush, and persistence behavior. The sanitized original-message block is locked preview/context outside the editable document and is combined with the authored HTML only by the shared forwarding renderer, so editing cannot corrupt the retained original.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -197,7 +198,7 @@ Expected:
 - Personal and shared signatures save through their current mailbox-scoped signature record.
 - The shared editor behavior does not force unrelated domains into one backend persistence path.
 
-### Scenario ED-S3: Email Compose, Reply, And Signature Use Unified Rich Editing
+### Scenario ED-S3: Email Compose, Reply, Forward, And Signature Use Unified Rich Editing
 
 Business logic covered:
 - ED2
@@ -211,9 +212,10 @@ Business logic covered:
 - ED33
 - ED37
 - ED40
+- ED71
 
 Given:
-- A user writes a personal compose, personal reply, shared compose, shared reply, attached-email reply body, or mailbox-scoped email signature.
+- A user writes a personal/shared compose, reply, or forward, an attached-email reply body, or a mailbox-scoped email signature.
 - The body contains links, pasted content, rich formatting, indented blocks, or legacy plain text loaded from a draft.
 
 Expected:
@@ -222,7 +224,7 @@ Expected:
 - Sent or saved rich content is sanitized.
 - Indented blocks remain indented in sent HTML instead of flattening.
 - Numbered-list toolbar actions create or toggle a shared automatic numbered/alphanumerical list item rather than only changing an outline-style setting.
-- The visible compose/reply/signature toolbar includes the shared font-size, Bold, Underline, Italic, Strikethrough, highlight split control, and outline-style dropdown used by the main editor.
+- The visible compose/reply/forward/signature toolbar includes the shared font-size, Bold, Underline, Italic, Strikethrough, highlight split control, and outline-style dropdown used by the main editor; Forward keeps the sanitized original preview locked outside the editable document.
 - Font-size controls and both highlight split-button hitboxes restore the prior editor selection before acting. Repeated font-size plus/minus interactions preserve visible pending collapsed-caret size, Italic/Strikethrough remain pending for subsequent collapsed-caret typing, and all reversible inline toggles preserve their final state in serialized HTML.
 - Signature content round-trips as sanitized rich editor HTML and inserting it into a message preserves formatting and highlight color.
 - A body containing only a pasted attachment-backed image is sendable without adding placeholder text.
@@ -364,8 +366,8 @@ The declared unified surface IDs and persistence boundaries live in `frontend/sr
 | Node text box | `EditorContent` mounts `NodeWorkspaceSurface`, whose blocks use `NodeTextBlockEditor` and the shared handler | Mentions, inline images, shared-toolbar table insertion, text/image comment actions, content-change overlays, attached-email pane, and separate chat pane | Node information/projection, inside the `mango-node-text-block-v1` envelope |
 | Node editor opener variants | Home, sidebar, dock restore, Updates, Kanban/My Work, Company Explorer, and Project critical-path windows all mount the same node workspace | Opener chrome and state differ, but the text engine is the same | Node information/projection |
 | Project text box | Project Summary directly reuses `NodeTextBlockEditor` | Same rich behavior as a node block, plus project-specific saving; its chat and attached-email panes stay separate | Project information/projection, inside the same text-block envelope |
-| My Triage compose/reply | `ComposePanel` mounts `UnifiedRichEditorSurface` with `my-triage-compose` | Compact Format + Outline toolbar, no company mention users, email-draft attachment ownership | Personal mailbox draft/send |
-| Shared Triage compose/reply | The same `ComposePanel` selects `shared-triage-compose` when a shared inbox is active | Same editing behavior as My Triage; mailbox and attachment ownership differ | Shared mailbox draft/send |
+| My Triage compose/reply/forward | `ComposePanel` mounts `UnifiedRichEditorSurface` with `my-triage-compose` | Compact Format + Outline toolbar, no company mention users, email-draft attachment ownership; Forward adds a locked sanitized original preview outside the editor | Personal mailbox draft/send |
+| Shared Triage compose/reply/forward | The same `ComposePanel` selects `shared-triage-compose` when a shared inbox is active | Same editing and locked-forward-preview behavior as My Triage; mailbox and attachment ownership differ | Shared mailbox draft/send |
 | Email collaboration shared draft | The same `ComposePanel` selects `email-collaboration-shared-draft` for a revisioned participant draft | Same editor, selection, toolbar, inline-image, and flush behavior; collaboration participation and revision replace mailbox ownership | Collaboration-scoped shared draft/send |
 | Attached-email reply | The attached-email pane mounts `UnifiedRichEditorSurface` with `attached-email-reply` | Compact Format + Outline toolbar, no company mentions; inline and file attachments use the attached-email resource | Component-local reply body until direct send |
 

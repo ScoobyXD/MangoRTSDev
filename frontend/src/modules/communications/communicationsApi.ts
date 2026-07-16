@@ -325,6 +325,45 @@ export type CalendarInviteRSVPResponse = {
   event_id: string;
   calendar_id?: string;
 };
+export type CalendarInviteEventParticipant = {
+  name?: string;
+  email?: string;
+  status?: string;
+};
+
+export type CalendarInviteEventWhen = {
+  object?: string;
+  time?: number;
+  start_time?: number;
+  end_time?: number;
+  date?: string;
+  start_date?: string;
+  end_date?: string;
+  start_timezone?: string;
+  end_timezone?: string;
+};
+
+export type CalendarInviteEvent = {
+  id: string;
+  calendar_id?: string;
+  ical_uid?: string;
+  title?: string;
+  status?: string;
+  description?: string;
+  location?: string;
+  html_link?: string;
+  conference_url?: string;
+  busy?: boolean;
+  read_only?: boolean;
+  organizer?: EmailAddress;
+  participants?: CalendarInviteEventParticipant[];
+  when?: CalendarInviteEventWhen;
+  rsvp_status?: CalendarInviteRSVPStatus;
+};
+
+export type CalendarInviteEventResponse = {
+  event: CalendarInviteEvent;
+};
 
 export type CommunicationsEmailDraftAttachment = {
   resource_attachment_id: string;
@@ -868,6 +907,21 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
     return message;
   }, { label: messageInput.subject?.trim() || "Email" });
 }
+
+export async function getCalendarInviteEvent(input: {
+  messageID: string;
+  companyID?: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
+}): Promise<CalendarInviteEvent> {
+  const mailboxQuery = createMailboxMessageMutationQuery(input.sharedInboxID, input.companyID, input.accountEmail);
+  const separator = mailboxQuery ? "&" : "?";
+  const response = await apiFetchJSON<CalendarInviteEventResponse>(
+    `/v1/communications/calendar-invites/event${mailboxQuery}${separator}message_id=${encodeURIComponent(input.messageID.trim())}`,
+  );
+  return response.event;
+}
+
 
 export async function respondToCalendarInvite(input: {
   messageID: string;

@@ -90,6 +90,7 @@ ATT55 - A successful ordinary personal/shared mailbox send promotes each Mango o
 ATT56 - Outbound provider multipart streaming validates each source's declared length and preserves genuine open/read/short/long attachment failures before provider acceptance. After exact bytes are validated, source close is cleanup-only; a cleanup-induced cancellation cannot override a successful provider response with `attachment_storage_failed`. When a browser abandons an authenticated provider attachment preview, matching request-context cancellation exits silently without a misleading proxy-error response or log.
 ATT57 - A saved personal/shared signature image is sendable only from a coherent original record: requested and served variants are original, byte sizes match, original/current bucket and key agree with configured storage, and the stored SHA-256 is valid and equal. A healthy display derivative proves only preview health; outbound CID construction never substitutes display bytes for a missing, stale, or corrupt original. Provider multipart validates the original object's reported length, exact stream length, and SHA-256 before success.
 ATT58 - Every non-canceled outbound attachment failure emits one sanitized communications-send log containing request correlation, POST route, company/user/scope, safe attachment ID/index/count, failure class, and public code. Object-not-found returns attachment_content_not_found, configured storage unavailability or timeout returns attachment_storage_unavailable, and reported/short/long size failures return attachment_content_length_mismatch; opaque open/read/checksum failures retain attachment_storage_failed. Logs never contain filenames, storage keys/buckets, signed URLs, credentials, raw bodies, or bytes, and a canceled request exits silently.
+ATT59 - Starting a personal/shared Forward copies every ordinary source attachment and each inline asset actually referenced by the retained body into the exact live Mango forward-draft resource before send. The copied reference keeps the provider attachment ID only as source provenance and uses its new Mango attachment ID for authorization; retained `cid:` URLs are rewritten to those copied durable IDs. Unreferenced inline-only assets are not promoted, aggregate size is checked against ATT42 before copying, and partial download/upload failure stays visible and retryable without falsely claiming the complete forward is ready.
 
 ## Scenarios
 
@@ -197,6 +198,7 @@ Business logic covered:
 - ATT43
 - ATT50
 - ATT51
+- ATT59
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
@@ -210,6 +212,7 @@ Expected:
 - The backend reads S3 bytes at send time and passes normal files to the provider as ordinary attachments.
 - Each pasted image reference is deduplicated, permission-checked, converted to one inline attachment with a matching alphanumeric CID, and rewritten from the private Mango source to `cid:` in outbound HTML.
 - Personal and Shared Triage use the same conversion while preserving their personal/shared permission and grant scopes.
+- Starting Forward copies eligible source ordinary/CID-referenced attachments into the exact draft, rewrites the locked original to copied Mango references, and visibly reports partial copy failures before send; it never embeds provider bytes or authorizes the forward through the source attachment ID alone.
 - Personal draft metadata and bytes remain owner-only. New links use the exact owner account; legacy three-part owner/draft links remain readable only by that owner and only while the draft is live, and are rejected for new links/uploads/mutations. Provider reauthentication does not erase the known association. Wrong-account identifiers and company administrator/manager roles cannot authorize another user's direct resource operations. Shared reads and mutations require current Edit access to the exact live inbox/draft.
 - After draft deletion, every draft-scoped list/content/send/link/unlink attempt returns not found for owners and administrative bypass attempts. A legitimately independent sent-message attachment link continues to authorize the same bytes without reviving the deleted draft.
 - Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.

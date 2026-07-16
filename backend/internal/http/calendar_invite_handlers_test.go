@@ -123,7 +123,7 @@ func TestCalendarInviteResponseUsesAuthenticatedPersonalGrant(t *testing.T) {
 	}
 	client := &fakeCalendarNylasClient{
 		fakeNylasClient: &fakeNylasClient{rawMIME: rawCalendarMessage("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:invite-1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")},
-		events:          []NylasEvent{{ID: "event-1", CalendarID: "primary", ICalUID: "invite-1"}},
+		events:          []NylasEvent{{ID: "event-1", CalendarID: "primary", ICalUID: "invite-1", Title: "Planning review", Location: "Room 12", HTMLLink: "https://calendar.google.com/event-1", Organizer: NylasEmailAddress{Name: "Planner", Email: "planner@example.com"}, Participants: []NylasEventParticipant{{Email: "person@example.com", Status: "yes"}}, When: NylasEventWhen{Object: "timespan", StartTime: 1784080800, EndTime: 1784084400, StartTimezone: "America/Los_Angeles"}, Conferencing: &NylasEventConferencing{Provider: "Google Meet", Details: NylasEventConferencingDetails{URL: "https://meet.google.com/abc-defg-hij"}}}},
 	}
 	handler := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: client}).Routes()
 	req := httptest.NewRequest(http.MethodPost, "/v1/communications/calendar-invites/respond?company_id="+companyID, strings.NewReader(`{"message_id":"message-1","status":"maybe"}`))
@@ -135,6 +135,18 @@ func TestCalendarInviteResponseUsesAuthenticatedPersonalGrant(t *testing.T) {
 	}
 	if client.listGrantID != "personal-calendar-grant" || client.listICalUID != "invite-1" || client.rsvpGrantID != "personal-calendar-grant" || client.rsvpEventID != "event-1" || client.rsvpStatus != "maybe" {
 		t.Fatalf("calendar calls = %+v", client)
+	}
+	eventReq := httptest.NewRequest(http.MethodGet, "/v1/communications/calendar-invites/event?company_id="+companyID+"&message_id=message-1", nil)
+	eventReq = requestWithActorForTest(eventReq, user, companyID)
+	eventRec := httptest.NewRecorder()
+	handler.ServeHTTP(eventRec, eventReq)
+	if eventRec.Code != http.StatusOK {
+		t.Fatalf("calendar event status = %d body=%s", eventRec.Code, eventRec.Body.String())
+	}
+	for _, expected := range []string{"Planning review", "https://meet.google.com/abc-defg-hij", "Room 12", `"rsvp_status":"yes"`} {
+		if !strings.Contains(eventRec.Body.String(), expected) {
+			t.Fatalf("calendar event body missing %q: %s", expected, eventRec.Body.String())
+		}
 	}
 }
 

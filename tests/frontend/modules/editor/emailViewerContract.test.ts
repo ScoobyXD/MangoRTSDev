@@ -16,6 +16,7 @@ test("node email mailbox scopes normalize personal accounts and suppress them fo
 
 test("node-attached email viewer discloses per-message recipients while retaining thread, attachment, and image behavior", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
 
   assert.match(nodeParts, /Expand all threads/);
   assert.match(nodeParts, /replyAllAddressDrafts/);
@@ -44,10 +45,10 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /visibleEmailAttachmentsForBody\(message\.body \|\| message\.snippet \|\| "", allAttachments\)/);
   assert.doesNotMatch(nodeParts, /filter\(\(attachment\) => !attachment\.is_inline && !attachment\.content_id\?\.trim\(\)\)/);
   assert.match(nodeParts, /\{contentType\} · \{sizeLabel\}/);
-  assert.match(nodeParts, /respondToCalendarInvite/);
+  assert.match(nodeParts, /<CalendarInviteCard/);
   assert.match(nodeParts, /sharedInboxID=\{email\.sharedInboxID\}/);
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
-  assert.match(nodeParts, /respondToCalendarInvite\(\{ messageID: message\.id, status, companyID, sharedInboxID, accountEmail \}\)/);
+  assert.match(calendarInviteCard, /respondToCalendarInvite\(\{ messageID, status, companyID, sharedInboxID, accountEmail \}\)/);
   assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail, collaborationID \}\)/);
   assert.match(nodeParts, /getEmailMessage\(email\.messageID, companyID, mailboxScope\.sharedInboxID, \{ accountEmail: mailboxScope\.accountEmail \}\)/);
   assert.match(nodeParts, /getEmailThread\(threadID, companyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/);
@@ -56,7 +57,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /status\.connected && status\.status === "connected"/);
   assert.match(nodeParts, /if \(!accountScopeResolved \|\| !accountEmail\) return/);
   assert.ok((nodeParts.match(/listEmailMessages\(\{\s*accountEmail,/g) ?? []).length >= 3);
-  assert.match(nodeParts, /Calendar invitation/);
+  assert.match(calendarInviteCard, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
 
@@ -76,6 +77,7 @@ test("both node email attachment entry paths retain exact provider mailbox ident
 });
 
 test("triage thread controls and reply resize pointer lifecycle are explicit", () => {
+  const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
 
@@ -85,11 +87,12 @@ test("triage thread controls and reply resize pointer lifecycle are explicit", (
   assert.match(homeParts, /window\.addEventListener\("blur", finishResize/);
   assert.match(homeParts, /image\.addEventListener\("dblclick", previewSelectedImage\)/);
   assert.match(homeParts, /Download image/);
-  assert.match(homeParts, /function CalendarInviteActions/);
+  assert.match(homeParts, /<CalendarInviteCard/);
+  assert.match(calendarInviteCard, /getCalendarInviteEvent/);
   assert.match(homeParts, /compose\.focusRequestID/);
-  assert.match(homeParts, /Accept/);
-  assert.match(homeParts, /Tentative/);
-  assert.match(homeParts, /Decline/);
+  assert.match(calendarInviteCard, /Accept/);
+  assert.match(calendarInviteCard, /Tentative/);
+  assert.match(calendarInviteCard, /Decline/);
   assert.match(homePage, /requiredReplyAllRecipients/);
   assert.match(homePage, /mergeEmailAddressDrafts\(\[existingDraft\.cc, requiredReplyAllRecipients\.cc\], \[to\]\)/);
 });
@@ -214,7 +217,7 @@ test("permissions, node chat links, drafts, and shared image selection use expli
   assert.match(nodeParts, /rel="noopener noreferrer"/);
   assert.match(nodeParts, /textDecoration: "underline"/);
   assert.match(editorImages, /range\.setStartBefore\(frame\)/);
-  assert.match(drafts, /return replyMessageID \? `reply:/);
+  assert.match(drafts, /return replyMessageID \? `\$\{draft\.kind\}:/);
   assert.match(drafts, /supersededHomeMailDraftIDs/);
 });
 

@@ -539,7 +539,7 @@ What remains is product hardening:
 
 - Prove the real provider-backed AP thread has exactly one visible item per provider message.
 - Finish the unchecked visual cases: long signatures, wide marketing HTML, focus styling, comments/events, and side-by-side Front comparison.
-- Later add manual “Split conversation” and “Merge conversations” tools for the inevitable provider-threading mistakes—Front provides these because no automatic threading system is perfect.
+- Manual “Split conversation” and “Merge conversations” controls are intentionally deferred; they are not part of the current thread work.
 - Never group messages merely because their subjects or bodies look alike.
 
 ## 2. Forwarding
@@ -558,7 +558,7 @@ The correct Mango implementation should:
 - Preserve visible remote banners/images through a safe image proxy or forwarded inline copy.
 - Show a real send preview using the same rendering path the recipient will receive.
 - Offer “Forward as attachment (.eml)” when exact original fidelity matters.
-- Keep “Forward in conversation” and “Forward as new conversation” as distinct product choices.
+- For now, Forward is a new outbound message with preserved original context; conversation split/merge and alternate in-conversation forwarding controls are intentionally out of scope.
 
 That work should be the immediate priority because today’s behavior can send visibly corrupted mail to customers.
 
@@ -623,3 +623,54 @@ MEMORY.md:1038-1046|note=[Nylas provider boundary and email architecture context
 019f43ef-b078-7ea2-9f35-f5be5133c50a
 </rollout_ids>
 </oai-mem-citation>
+
+## Implementation status — worker branch
+
+This worker keeps the existing canonical oldest-to-newest thread timeline and deliberately does **not** add Split conversation or Merge conversations controls.
+
+The email experience in this branch now reflects the product decisions above:
+
+- Forward is an explicit draft/send mode, separate from Reply. It does not send a reply reference or accidentally continue the source thread.
+- The full original message is kept as a locked, sanitized HTML block instead of being flattened into plain text. Visible email styling is retained while scripts, forms, unsafe URLs, and obvious tracking pixels are removed.
+- Ordinary original attachments and referenced inline images are copied into Mango's forward draft. Copied inline images are rewritten to durable Mango attachment references before send.
+- The compose screen shows a locked forwarded-message preview produced by the same forwarding renderer used for the outbound body.
+- Calendar invitations render through one shared event card in both Home email and node-attached email. It shows the authoritative provider event title, time/timezone, organizer, guests, location, saved RSVP state, meeting link, and calendar link when Nylas supplies them.
+- External open tracking is labeled **Likely opened**. Exact provider identity is used only when actually reported; a single recipient may be labeled as inferred; multi-recipient unknown activity remains anonymous. Repeated signals are grouped under one person/unknown label with every available timestamp.
+
+Still intentionally outside this change: manual thread splitting/merging, forwarding as an `.eml` attachment, safe proxying of every remote image, calendar conflict detection/webhook reconciliation, separate-per-recipient multi-send tracking, and a full calendar workspace.
+
+## Current implementation progress (July 2026)
+
+This section is the authoritative current status. The research and recommendations above remain as the original project context.
+
+### Email threads - implemented
+
+- Mango keeps canonical provider/header thread identity, exact mailbox scoping, one visible item per canonical message, and deterministic conversation rendering.
+- Manual **Split conversation** and **Merge conversations** controls remain deliberately deferred.
+
+### Forwarding - implemented
+
+- Forward is an explicit draft/send mode, separate from Reply, and never sends a reply reference that would accidentally continue the source thread.
+- The complete original message is retained as a locked, sanitized HTML block. Safe visible HTML/CSS survives while scripts, forms, unsafe URLs, event handlers, and obvious tracking pixels are removed.
+- Ordinary source attachments and referenced inline images are copied into the exact Mango forward-draft scope. Inline CIDs are rewritten to copied durable attachment references and the existing 24,000,000-byte outbound limit is enforced before copying.
+- Compose displays a locked preview produced by the same forwarding renderer used to construct the outbound body; partial attachment-copy failure remains visible and recoverable.
+
+### Calendar invitation email experience - implemented
+
+- Home email and node/project-attached email use one shared event card backed by authenticated invitation UID resolution plus the authoritative Nylas event.
+- The card displays available title, time/timezone, organizer, guests, location, current RSVP, meeting join/copy controls, and provider calendar link. Accept, Tentative, and Decline show saved state only after provider success.
+
+### Read receipts - implemented
+
+- External open tracking is labeled **Likely opened**, never definitive Read/Seen. Provider-reported identity is used only when present; a sole recipient may be labeled **inferred**; unknown multi-recipient activity remains anonymous.
+- Repeated signals are grouped under one identity/unknown label and every distinct provider timestamp is available on hover or keyboard focus with a tracking-pixel reliability warning.
+
+### Verification
+
+- Forwarding, draft semantics, calendar event lookup/card usage, communications API requests, thread-viewer contracts, and receipt presentation have automated coverage.
+- The complete repository gate passes: frontend relationship/feature tests, production build, backend Go tests, and infrastructure attachment contracts.
+
+### Still deliberately deferred
+
+- Manual thread split/merge, forwarding as an `.eml` attachment, proxying every remote image, calendar conflict detection and webhook reconciliation, separate-per-recipient multi-send tracking, and a full calendar workspace.
+- The next quality step is real-provider/browser acceptance against representative complex threads, forwarded marketing/Outlook HTML, and live Google/Microsoft invitations.

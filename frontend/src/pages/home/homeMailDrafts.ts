@@ -2,7 +2,7 @@ import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/commu
 import { deleteEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
 import { applyEmailSignature, emailBodyHasSignature, emailBodyWithoutSignature } from "../../modules/editor/emailSignatureBody.js";
 import { EDITOR_RICH_TEXT_PREFIX, editorBodyHasEmailContent, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
-import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeTypes.js";
+import { emptyCompose, type ComposeAttachment, type ComposeKind, type ComposeState } from "./homeTypes.js";
 
 const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
 const HOME_MAIL_SIGNATURE_STORAGE_PREFIX = "mangorts.home.mailSignature.v1";
@@ -22,6 +22,7 @@ const HOME_MAIL_DRAFT_SCOPE_PURGE_ERROR_CODES = new Set([
 
 export type HomeMailDraft = {
   id: string;
+  kind: ComposeKind;
   userID: string;
   companyID: string;
   sharedInboxID: string;
@@ -337,6 +338,7 @@ function normalizeDraft(raw: unknown, companyID: string, userID: string): HomeMa
   const updatedAt = item.updatedAt?.trim() || createdAt;
   return {
     id,
+    kind: normalizeHomeMailDraftKind(item.kind, id),
     userID: userID.trim(),
     companyID: companyID.trim(),
     sharedInboxID: item.sharedInboxID?.trim() ?? "",
@@ -660,9 +662,9 @@ async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMa
     draftID: draft.id,
     sharedInboxID: draft.sharedInboxID || undefined,
     accountEmail: draft.accountEmail || undefined,
-    kind: homeMailDraftKind(draft),
+    kind: draft.kind,
     sourceMessageID: draft.replyToMessageID || undefined,
-    replyToMessageID: draft.replyToMessageID || undefined,
+    replyToMessageID: draft.kind === "reply" ? draft.replyToMessageID || undefined : undefined,
     to: draft.to,
     cc: draft.cc,
     bcc: draft.bcc,
@@ -682,6 +684,7 @@ function homeMailDraftFromRemote(draft: CommunicationsEmailDraft, companyID: str
   if (!id) return null;
   return normalizeDraft({
     id,
+    kind: draft.kind,
     userID,
     companyID,
     sharedInboxID: draft.shared_inbox_id ?? "",
@@ -754,12 +757,13 @@ function homeMailDraftSemanticKey(draft: HomeMailDraft): string {
   const scope = draft.sharedInboxID.trim()
     ? `shared:${draft.sharedInboxID.trim()}`
     : `personal:${draft.userID.trim()}:${draft.accountEmail.trim().toLowerCase()}`;
-  return replyMessageID ? `reply:${scope}:${replyMessageID}` : `draft:${draft.id}`;
+  return replyMessageID ? `${draft.kind}:${scope}:${replyMessageID}` : `draft:${draft.id}`;
 }
 
-function homeMailDraftKind(draft: HomeMailDraft): "compose" | "reply" | "forward" {
-  if (draft.id.startsWith("draft:reply:") || draft.id.startsWith("draft:shared-reply:")) return "reply";
-  if (draft.id.startsWith("draft:forward:")) return "forward";
+function normalizeHomeMailDraftKind(value: unknown, draftID: string): ComposeKind {
+  if (value === "reply" || value === "forward" || value === "compose") return value;
+  if (draftID.startsWith("draft:reply:") || draftID.startsWith("draft:shared-reply:")) return "reply";
+  if (draftID.startsWith("draft:forward:")) return "forward";
   return "compose";
 }
 
@@ -832,6 +836,7 @@ export function saveHomeMailDraftFromCompose(
   const existing = compose.draftID ? drafts.find((draft) => draft.id === compose.draftID) : null;
   const draft: HomeMailDraft = {
     id: existing?.id ?? (compose.draftID.trim() || createHomeMailDraftID()),
+    kind: compose.kind,
     userID: userID.trim(),
     companyID: companyID.trim(),
     sharedInboxID: compose.sharedInboxID.trim(),
@@ -859,6 +864,7 @@ export function homeMailDraftToCompose(draft: HomeMailDraft): ComposeState {
   return {
     ...emptyCompose,
     open: true,
+    kind: draft.kind,
     draftID: draft.id,
     sharedInboxID: draft.sharedInboxID,
     accountEmail: draft.accountEmail,

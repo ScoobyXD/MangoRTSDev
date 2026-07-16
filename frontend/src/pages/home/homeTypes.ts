@@ -14,7 +14,10 @@ export type HomePageProps = {
   onNodeOverlayClose?: () => void;
 };
 
+export type ComposeKind = "compose" | "reply" | "forward";
+
 export type ComposeState = {
+  kind: ComposeKind;
   open: boolean;
   draftID: string;
   sharedInboxID: string;
@@ -43,6 +46,7 @@ export type ComposeAttachment = {
 };
 
 export const emptyCompose: ComposeState = {
+  kind: "compose",
   open: false,
   draftID: "",
   sharedInboxID: "",

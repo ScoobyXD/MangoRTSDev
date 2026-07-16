@@ -1335,7 +1335,7 @@ func TestNylasRESTClientListsEventsByICalUID(t *testing.T) {
 			t.Fatalf("authorization = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"event-1","calendar_id":"primary","ical_uid":"invite+special@example.com"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"event-1","calendar_id":"primary","ical_uid":"invite+special@example.com","title":"Planning review","location":"Room 12","html_link":"https://calendar.google.com/event-1","organizer":{"name":"Planner","email":"planner@example.com"},"participants":[{"email":"person@example.com","status":"yes"}],"when":{"object":"timespan","start_time":1784080800,"end_time":1784084400,"start_timezone":"America/Los_Angeles"},"conferencing":{"provider":"Google Meet","details":{"url":"https://meet.google.com/abc-defg-hij"}}}]}`))
 	}))
 	defer server.Close()
 
@@ -1346,6 +1346,9 @@ func TestNylasRESTClientListsEventsByICalUID(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].ID != "event-1" {
 		t.Fatalf("events = %+v", events)
+	}
+	if events[0].Conferencing == nil || events[0].Conferencing.Details.URL != "https://meet.google.com/abc-defg-hij" || events[0].When.StartTime != 1784080800 || len(events[0].Participants) != 1 {
+		t.Fatalf("expanded event = %+v", events[0])
 	}
 }
 

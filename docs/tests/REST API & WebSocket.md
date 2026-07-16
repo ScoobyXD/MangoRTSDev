@@ -33,7 +33,7 @@ RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that re
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
 RW24 - Attachment upload control, metadata, linking, and content reads are HTTP operations. No attachment WebSocket message exists, and socket payloads never carry file bytes, base64 blobs, presigned URLs, or S3 object contents.
-RW25 - Calendar invitation responses use authenticated `POST /v1/communications/calendar-invites/respond` HTTP requests. The request supplies the company/mailbox scope plus `message_id` and `status` (`yes`, `maybe`, or `no`); the backend resolves the iCalendar UID and exactly one provider event under the authorized personal/shared mailbox scope instead of accepting client-supplied grant, calendar, or event identifiers. Shared inbox responses require edit access, WebSocket messages never send the RSVP, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
+RW25 - Calendar invitation display uses authenticated `GET /v1/communications/calendar-invites/event` and responses use authenticated `POST /v1/communications/calendar-invites/respond`. Both commands supply exact company/mailbox plus source `message_id` scope; the backend derives the authenticated raw-MIME iCalendar UID and resolves exactly one provider event rather than accepting client-supplied grant, calendar, event, meeting, or attendee data. The GET returns authoritative event details/current mailbox-participant RSVP; the POST accepts only normalized `status` (`yes`, `maybe`, or `no`). Shared inbox access requires edit permission, WebSocket never carries event detail or RSVP commands, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
 RW26 - Normal browser upload uses Mango HTTP JSON endpoints for policy, intent creation/state, multipart signing, completion, and abort, then raw HTTPS PUT directly to private S3 through the presigned URL. Mango API requests and WebSocket payloads never carry the browser file body. Intent creation carries active company context only in the membership-validated `X-Mango-Company-ID` Mango header, never in intent JSON or an S3 request; the S3 request also never carries Mango Authorization/cookies.
 RW27 - `GET /v2/logic-gates/{logic_gate_id}/work` is the primary Kanban-specific Arena read and returns only `logic_gate`, actor `permissions`, `board`, `columns`, and minimal `cards`. The legacy `GET /v1/logic-gate-arena` route may delegate to the same representation but is not the primary path.
 RW28 - The Logic Gate work response omits top-level repeated IDs, statuses, assignments, nodes, cards limits, and the full GVIC collection; contract tests must assert both required fields and absent redundant fields.
@@ -281,22 +281,23 @@ Expected:
 - S3 PUT requests include only exact signed headers and no Mango access token, cookies, company headers, or API-client interceptors.
 - Clients fetch attachment content through the attachment HTTP content route only when they need to render or download it.
 
-### Scenario RW-S11: Calendar Invitation RSVP Uses A Scoped HTTP Command
+### Scenario RW-S11: Calendar Invitation Event Details And RSVP Use Scoped HTTP Commands
 
 Business logic covered:
 - RW25
 
 Given:
 - A personal or shared mailbox message contains one valid `METHOD:REQUEST` iCalendar event.
-- The user chooses Accept, Tentative, or Decline in an email viewer.
+- The user opens the invitation card and may choose Accept, Tentative, or Decline in an email viewer.
 
 Expected:
-- The frontend posts the source `message_id`, normalized RSVP status, company scope, and shared inbox scope when applicable to `/v1/communications/calendar-invites/respond`.
-- The endpoint requires the authenticated communications connection and shared-inbox edit access when a shared scope is supplied.
-- The backend reads the source MIME, extracts the invitation UID, resolves exactly one non-cancelled event in the provider calendar, and sends the provider RSVP.
+- The frontend gets authoritative event details with exact company/mailbox and source `message_id` scope from `/v1/communications/calendar-invites/event`.
+- When the user responds, the frontend posts the source `message_id`, normalized RSVP status, company scope, and shared inbox scope when applicable to `/v1/communications/calendar-invites/respond`.
+- Both endpoints require the authenticated communications connection and shared-inbox edit access when a shared scope is supplied.
+- The backend reads the source MIME, extracts the invitation UID, and resolves exactly one non-cancelled provider event. GET returns available title, timing/timezone, organizer, participants/current mailbox RSVP, location, conference URL, and calendar link; POST sends the provider RSVP.
 - Missing invitations or events return a validation/not-found response, and ambiguous event matches return a conflict instead of choosing an arbitrary event.
-- The request does not accept or trust a client grant ID, provider event ID, calendar ID, provider token, or attachment bytes.
-- Each provider request is rate-gated and the action is not sent through WebSocket.
+- Neither request accepts or trusts a client grant ID, provider event ID, calendar ID, provider token, event details, or attachment bytes.
+- Each provider request is rate-gated and event details/RSVP are not sent through WebSocket.
 - Expired or revoked grants, insufficient calendar scope, and provider failures return a recoverable reconnect/provider response and never report a successful RSVP or force Mango logout.
 - Environment OAuth scopes must include Google/Microsoft calendar write access before integrated provider verification. Scope changes are not retroactive: existing grants must be reauthorized/reconsented after the configured scopes change. This route is invitation RSVP, not a full calendar workspace.
 

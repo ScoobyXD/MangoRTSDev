@@ -24,7 +24,8 @@ test("read receipt signal times are deduplicated, ordered, and locally renderabl
   ]);
   const title = messageReadStatusTitle(status);
   assert.match(title, /does not identify which recipient/i);
-  assert.match(title, /tracking pixel/i);
+  assert.match(title, /tracking-pixel/i);
+  assert.match(title, /Likely opened/i);
 });
 
 test("read receipt chip exposes identity limits and every observed timestamp", () => {
@@ -34,6 +35,9 @@ test("read receipt chip exposes identity limits and every observed timestamp", (
   assert.match(source, /role="tooltip"/);
   assert.match(source, /onPointerEnter/);
   assert.match(source, /onFocus/);
+  assert.match(source, /Likely opened/);
+  assert.match(source, /\(inferred\)/);
+  assert.match(source, /tracking-pixel loads, not verified human reads/i);
 });
 
 test("unread triage cards retain the dot without an unread outer frame", () => {

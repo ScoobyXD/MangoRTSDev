@@ -1,20 +1,69 @@
 import React from "react";
-import type { EmailMessage, EmailReadSignal } from "../../modules/communications/communicationsApi";
+import type { EmailAddress, EmailMessage, EmailReadSignal } from "../../modules/communications/communicationsApi";
 import { formatMessageReadSignalTimestamp, messageReadStatusSignalTimestamps, messageReadStatusTitle } from "./homeUtils";
 
-function signalPersonLabel(signal: EmailReadSignal | undefined): string {
-  if (signal?.identity_available) {
-    return signal.person_name?.trim() || signal.person_email?.trim() || "Identified recipient";
+type ReadSignalGroup = {
+  label: string;
+  inferred: boolean;
+  timestamps: string[];
+  count: number;
+};
+
+function uniqueRecipients(message: EmailMessage): EmailAddress[] {
+  const byEmail = new Map<string, EmailAddress>();
+  for (const recipient of [...(message.to ?? []), ...(message.cc ?? []), ...(message.bcc ?? [])]) {
+    const email = recipient.email?.trim().toLowerCase() ?? "";
+    if (email && !byEmail.has(email)) byEmail.set(email, recipient);
   }
-  return "Recipient identity unavailable";
+  return Array.from(byEmail.values());
+}
+
+function signalPerson(signal: EmailReadSignal | undefined, message: EmailMessage): { label: string; inferred: boolean } {
+  if (signal?.identity_available) {
+    return {
+      label: signal.person_name?.trim() || signal.person_email?.trim() || "Identified recipient",
+      inferred: false,
+    };
+  }
+  const recipients = uniqueRecipients(message);
+  if (recipients.length === 1) {
+    return {
+      label: recipients[0]?.name?.trim() || recipients[0]?.email?.trim() || "Only recipient",
+      inferred: true,
+    };
+  }
+  return { label: "Recipient identity unavailable", inferred: false };
+}
+
+function readSignalGroups(message: EmailMessage): ReadSignalGroup[] {
+  const status = message.read_status;
+  if (!status) return [];
+  const timestamps = messageReadStatusSignalTimestamps(status);
+  const signalsByTimestamp = new Map((status.signals ?? []).map((signal) => [signal.timestamp?.trim(), signal]));
+  const groups = new Map<string, ReadSignalGroup>();
+  for (const timestamp of timestamps) {
+    const person = signalPerson(signalsByTimestamp.get(timestamp), message);
+    const key = `${person.inferred ? "inferred" : "reported"}:${person.label.toLowerCase()}`;
+    const group = groups.get(key) ?? { ...person, timestamps: [], count: 0 };
+    group.timestamps.push(timestamp);
+    group.count += 1;
+    groups.set(key, group);
+  }
+  if (groups.size === 0) {
+    const person = signalPerson(undefined, message);
+    groups.set("fallback", { ...person, timestamps: [], count: Math.max(1, status.signal_count ?? 1) });
+  } else if (groups.size === 1) {
+    const onlyGroup = Array.from(groups.values())[0];
+    if (onlyGroup) onlyGroup.count = Math.max(onlyGroup.count, status.signal_count ?? 0);
+  }
+  return Array.from(groups.values());
 }
 
 export function MessageReadReceiptChip({ message }: { message: EmailMessage }) {
   const status = message.read_status;
   const [open, setOpen] = React.useState(false);
   if (!status) return null;
-  const timestamps = messageReadStatusSignalTimestamps(status);
-  const signalsByTimestamp = new Map((status.signals ?? []).map((signal) => [signal.timestamp?.trim(), signal]));
+  const groups = readSignalGroups(message);
   const title = messageReadStatusTitle(status);
   const tooltipID = `email-read-receipt-${message.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
@@ -46,7 +95,7 @@ export function MessageReadReceiptChip({ message }: { message: EmailMessage }) {
           whiteSpace: "nowrap",
         }}
       >
-        Seen
+        Likely opened
       </span>
       {open && (
         <span
@@ -57,12 +106,12 @@ export function MessageReadReceiptChip({ message }: { message: EmailMessage }) {
             zIndex: 40,
             right: 0,
             bottom: "calc(100% + 7px)",
-            width: 290,
-            maxHeight: 260,
+            width: 310,
+            maxHeight: 280,
             overflowY: "auto",
             display: "grid",
-            gap: 6,
-            padding: 9,
+            gap: 8,
+            padding: 10,
             border: "1px solid rgba(71,85,105,0.28)",
             borderRadius: 7,
             background: "rgba(255,255,255,0.99)",
@@ -74,14 +123,18 @@ export function MessageReadReceiptChip({ message }: { message: EmailMessage }) {
             textAlign: "left",
           }}
         >
-          <strong>Observed open signals</strong>
-          {timestamps.length > 0 ? timestamps.map((timestamp) => (
-            <span key={timestamp} style={{ display: "grid", gap: 1 }}>
-              <span style={{ fontWeight: 800 }}>{signalPersonLabel(signalsByTimestamp.get(timestamp))}</span>
-              <span>{formatMessageReadSignalTimestamp(timestamp)}</span>
+          <strong>Likely open activity</strong>
+          {groups.map((group) => (
+            <span key={`${group.label}:${group.inferred}`} style={{ display: "grid", gap: 3 }}>
+              <span style={{ fontWeight: 800 }}>
+                {group.label}{group.inferred ? " (inferred)" : ""} · {group.count} open signal{group.count === 1 ? "" : "s"}
+              </span>
+              {group.timestamps.length > 0 ? group.timestamps.map((timestamp) => (
+                <span key={timestamp}>{formatMessageReadSignalTimestamp(timestamp)}</span>
+              )) : <span>Open time unavailable</span>}
             </span>
-          )) : <span>Open time unavailable</span>}
-          <span style={{ color: "#64748b" }}>Nylas reports tracking-pixel loads, not a verified human read, and does not identify which recipient opened the message.</span>
+          ))}
+          <span style={{ color: "#64748b" }}>These are tracking-pixel loads, not verified human reads. Recipient identity is only shown when reported by the provider; with one recipient, Mango labels the likely recipient as inferred.</span>
         </span>
       )}
     </span>

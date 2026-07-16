@@ -46,6 +46,7 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
+import { buildForwardedComposeBody } from "./emailForwarding.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import {
   moveMyWorkNodeToCell as defaultMoveMyWorkNodeToCell,
@@ -296,7 +297,7 @@ export async function updateHomeMailMessageCommand(args: {
 }
 
 export async function sendHomeMailComposeCommand(args: {
-  compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "attachments" | "replyToMessageID">;
+  compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "attachments" | "replyToMessageID"> & Partial<Pick<ComposeState, "kind" | "replyToMessage">>;
   companyID?: string;
   sharedInboxID?: string;
   connectedAccountEmail?: string;
@@ -310,6 +311,10 @@ export async function sendHomeMailComposeCommand(args: {
   }
   const subject = args.compose.subject.trim();
   const bodyText = args.compose.body;
+  const kind = args.compose.kind ?? (args.compose.replyToMessageID ? "reply" : "compose");
+  const body = kind === "forward"
+    ? buildForwardedComposeBody(bodyText, args.compose.replyToMessage)
+    : editorBodyHasEmailContent(bodyText) ? serializeEditorBodyForEmailHTML(bodyText) : "";
   const attachments = (args.compose.attachments ?? [])
     .map((attachment) => ({
       id: attachment.attachmentID.trim(),
@@ -319,7 +324,7 @@ export async function sendHomeMailComposeCommand(args: {
       size: attachment.size,
     }))
     .filter((attachment) => attachment.attachment_id);
-  if (!subject && !editorBodyHasEmailContent(bodyText) && attachments.length === 0) {
+  if (!subject && !body && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
   const input: SendEmailInput = {
@@ -327,9 +332,9 @@ export async function sendHomeMailComposeCommand(args: {
     cc,
     bcc,
     subject,
-    body: editorBodyHasEmailContent(bodyText) ? serializeEditorBodyForEmailHTML(bodyText) : "",
+    body,
     attachments,
-    reply_to_message_id: args.compose.replyToMessageID || undefined,
+    reply_to_message_id: kind === "reply" ? args.compose.replyToMessageID || undefined : undefined,
   };
   const cleanCompanyID = args.companyID?.trim() ?? "";
   const cleanSharedInboxID = args.sharedInboxID?.trim() ?? "";

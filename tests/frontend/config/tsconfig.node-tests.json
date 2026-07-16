@@ -58,6 +58,7 @@
     "../../../frontend/src/pages/home/homeUtils.ts",
     "../pages/home/homeUtils.test.ts",
     "../pages/home/emailReadReceipts.test.ts",
+    "../pages/home/emailForwarding.test.ts",
     "../../../frontend/src/pages/home/emailCollaborationRows.ts",
     "../pages/home/emailCollaborationRows.test.ts",
     "../../../frontend/src/pages/home/emailCollaborationChat.ts",
