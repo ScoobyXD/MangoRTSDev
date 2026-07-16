@@ -460,6 +460,7 @@ async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string
     credentials: "include",
     json: { company_id: companyID },
     getAccessToken,
+    allowDuringRealtimeDegraded: true,
   });
 }
 

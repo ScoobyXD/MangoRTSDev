@@ -1,11 +1,11 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 # REST API & WebSocket Tests
 
 Coverage Status:
 - RW51-RW54 and RW57 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `backend/internal/http/realtime_websocket_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Backend realtime, collaboration HTTP/store, and cross-instance delivery tests cover exact admission/publication authorization, revocation, bounded stalled-client isolation, shared outbox recovery/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend realtime/editor tests cover one shared socket, exact refcount, application heartbeat recovery states, mutation gating, structured deltas, legacy cleanup, and source inventory. Existing retained-family and mailbox suites remain; real multi-browser rich DOM coverage remains partial.
+- Business Logic Covered By Automated Tests: Partial. Backend realtime, collaboration HTTP/store, and cross-instance delivery tests cover exact admission/publication authorization, revocation, bounded stalled-client isolation, shared outbox recovery/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend realtime/editor tests cover one shared socket, exact refcount, ticket bootstrap while health is degraded, application heartbeat recovery states, mutation gating, structured deltas, legacy cleanup, and source inventory. Existing retained-family and mailbox suites remain; real multi-browser rich DOM coverage remains partial.
 
 ## Business Logic
 
@@ -66,6 +66,7 @@ RW54 - Mailbox work uses separate ownership domains. Message-list/detail work ma
 RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
 RW56 - The unified collaboration rollout is coordinated: apply `20260715_unified_realtime_collaboration.sql` before the matching backend/frontend release, then require pre-cutover tabs to reload. Migrated `Text box` projection POST/DELETE compatibility writes remain rejected; no revisionless or whole-document fallback is restored.
 RW57 - An otherwise healthy realtime WebSocket remains connected while idle. The backend sends an empty protocol-level ping every 25 seconds, below the deployed load balancer's 60-second idle timeout; the browser networking stack answers without JavaScript timers, API fetches, auth refreshes, or new realtime tickets. Only a genuine transport failure invokes bounded reconnect and scoped canonical recovery.
+RW58 - Realtime ticket acquisition is a bootstrap exception to the degraded-realtime mutation gate. Activating the shared client may mark health Reconnecting before `POST /v1/realtime/ticket`; that exact authenticated request must still reach the backend and advance to WebSocket construction. The exception must not permit any ordinary business mutation while realtime remains degraded.
 
 ## Scenarios
 
@@ -540,3 +541,21 @@ Reference defaults:
 - [Cloudflare Agents keepalive interval](https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/)
 - [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
 - [RFC 6455 Ping and Pong](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2)
+
+### Scenario RW-S22: Realtime Bootstrap Cannot Block Its Own Ticket
+
+Business logic covered:
+- RW12
+- RW22
+- RW58
+
+Given:
+- The first shared realtime consumer activates the client.
+- Activation correctly changes health from inactive to Reconnecting before a socket exists.
+- The client uses its production ticket path rather than a test-only injected ticket function.
+
+Expected:
+- The authenticated `POST /v1/realtime/ticket` reaches the configured API exactly once even though the global mutation gate is active.
+- A successful ticket response advances immediately to construction of `/v1/realtime/ws?company_id=...`.
+- The client still stays non-green until server readiness, confirmed application heartbeat, accepted subscriptions, and mounted-document recovery complete.
+- Unrelated POST, PUT, PATCH, and DELETE business requests remain blocked while realtime is degraded.

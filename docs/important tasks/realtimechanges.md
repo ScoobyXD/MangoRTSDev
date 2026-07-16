@@ -33,6 +33,14 @@ This section is the live project-management record. It is updated as implementat
 - Focused store/HTTP, frontend collaboration, production build, real browser/DOM verification, and the complete repository gate pass.
 - No live database, cloud resource, provider setting, production infrastructure, merge, push, handoff, or pull request was used.
 
+### 2026-07-15 connection-status false-positive correction
+
+- Root cause: activating the shared client correctly set global realtime health to `reconnecting`, then the generic degraded-realtime mutation gate rejected the client's own authenticated `POST /v1/realtime/ticket` before `fetch`. No ticket or WebSocket reached the backend, so neither local nor deployed tabs could ever receive the heartbeat confirmation required to turn the indicator green even while unrelated GET requests and `/healthz` succeeded.
+- Correction: the exact ticket-bootstrap request now opts into the existing `allowDuringRealtimeDegraded` escape hatch. This breaks the circular dependency without weakening the gate for Node, Logic Gate, mailbox, editor, or other business mutations and without changing the 25-second heartbeat or any outage threshold.
+- Regression proof: `tests/frontend/modules/realtime/realtimeWebSocket.test.ts` activates a client in its real initial `reconnecting` state, uses the default production ticket path, asserts the authenticated POST reaches the API, and proves a successful response advances to WebSocket construction. Existing health-state coverage continues to require application heartbeat and recovery before Connected.
+- Operational scope: this is a frontend bootstrap correction only. It does not treat `/healthz` as realtime health, alter backend protocol/authentication, change CORS or proxy behavior, apply infrastructure, or modify a database/schema.
+- Verification: `npm.cmd run test:node-relationships`, `npm.cmd run build`, and `node scripts/run_all_tests.mjs` all passed; the complete gate ended with `All test suites passed.`
+
 ### Phase 1 persisted-realtime producer inventory
 
 The executable protocol has five persisted application families plus external mailbox hints: editor documents, notifications, Node chat, mounted Kanban hints, and mailbox hints. Updates has no independent socket scope or event type; it is a canonical `domain_events` read model. Heartbeats, subscription authorization, and liveness/control frames are non-persisted transport signals.
