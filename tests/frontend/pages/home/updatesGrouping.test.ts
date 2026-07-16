@@ -8,6 +8,10 @@ import {
   normalizeUpdateGroupingStack,
   withBuiltInUpdateGroupingSetting,
 } from "../../../../frontend/src/pages/home/updatesGrouping.js";
+import {
+  collectAllUpdateGroupIDs,
+  reconcileExpandedUpdateGroupIDs,
+} from "../../../../frontend/src/pages/home/updatesExpansion.js";
 import { logicGateGVICRolePresentation } from "../../../../frontend/src/modules/logic-gate-map/gvicPresentation.js";
 import { resolveUpdateGroupSemanticPresentation } from "../../../../frontend/src/pages/home/updatesGroupPresentation.js";
 
@@ -79,4 +83,53 @@ test("individual Updates rows omit Logic Gate presentation without removing Logi
   assert.match(source, /if \(field === "logic_gate"\)[\s\S]*resolveCurrentUpdateLogicGateGroupValue/);
   assert.match(source, /group\.resource_type === "project" \|\| group\.resource_type === "logic_gate" \|\| group\.resource_type === "node"/);
   assert.match(source, /onOpenLogicGate\(resourceID, resolveCurrentUpdateLogicGateLabel/);
+});
+
+test("Updates groups expand completely on first activation and keep explicit collapses during refresh", () => {
+  const groups = [{
+    id: "date:today",
+    groups: [{
+      id: "gvic:generated",
+      groups: [{ id: "priority:urgent", groups: [] }],
+    }],
+  }];
+
+  assert.deepEqual(collectAllUpdateGroupIDs(groups), new Set([
+    "date:today",
+    "gvic:generated",
+    "priority:urgent",
+  ]));
+  assert.deepEqual(reconcileExpandedUpdateGroupIDs({
+    groups,
+    manuallyCollapsedGroupIDs: new Set(["gvic:generated"]),
+    reset: true,
+  }), new Set([
+    "date:today",
+    "gvic:generated",
+    "priority:urgent",
+  ]));
+  assert.deepEqual(reconcileExpandedUpdateGroupIDs({
+    groups,
+    manuallyCollapsedGroupIDs: new Set(["gvic:generated"]),
+    reset: false,
+  }), new Set([
+    "date:today",
+    "priority:urgent",
+  ]));
+});
+
+test("Updates exposes all-group controls and a split three-cell live counter surface", () => {
+  const updatesView = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  const appSidebar = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
+
+  assert.match(updatesView, /aria-label="Collapse all Update groups"[\s\S]*onClick={collapseAllGroups}/);
+  assert.match(updatesView, /aria-label="Expand all Update groups"[\s\S]*onClick={expandAllGroups}/);
+  assert.match(appSidebar, /label="Updates"[\s\S]*splitTrailing[\s\S]*<SidebarNotificationBadges large/);
+  assert.match(appSidebar, /gridTemplateColumns: splitTrailing \? "repeat\(2, minmax\(0, 1fr\)\)"/);
+  assert.match(appSidebar, /gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
+  assert.match(appSidebar, /!large \|\| normalizeSidebarNotificationCount\(badge\.count\) > 0/);
+  assert.match(appSidebar, /if \(!highlighted\) return/);
+  assert.match(appSidebar, /rgba\(254, 226, 226, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
+  assert.match(appSidebar, /rgba\(204, 251, 241, 0\.98\)[\s\S]*rgba\(125, 211, 252, 0\.72\)/);
+  assert.match(appSidebar, /rgba\(254, 249, 195, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
 });
