@@ -409,6 +409,67 @@ test("application heartbeat stays non-green through subscription recovery and dr
   unsubscribeHealth();
   client.close();
 });
+
+test("realtime ticket bootstrap bypasses its own degraded mutation gate", async () => {
+  const originalFetch = globalThis.fetch;
+  const sockets: FakeTicketWebSocket[] = [];
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+
+  class FakeTicketWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeTicketWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(readonly url: string) {
+      sockets.push(this);
+    }
+
+    send(_message: string): void {}
+    close(): void {
+      if (this.readyState === FakeTicketWebSocket.CLOSED) return;
+      this.readyState = FakeTicketWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({ expires_at: "2026-07-15T12:00:00Z" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const client = new MangoRealtimeClient("https://ticket.example.test", "ticket-company", {
+    WebSocketCtor: FakeTicketWebSocket as unknown as typeof WebSocket,
+    getAccessToken: async () => "ticket-token",
+    reconnectDelayMs: 60_000,
+  });
+
+  try {
+    const unsubscribe = client.subscribeHealth(() => undefined);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+
+    assert.equal(requests.length, 1, "the initial reconnecting state must not block its own ticket request");
+    assert.equal(requests[0]?.input, "https://ticket.example.test/v1/realtime/ticket");
+    assert.equal(requests[0]?.init?.method, "POST");
+    assert.equal(requests[0]?.init?.credentials, "include");
+    assert.equal(new Headers(requests[0]?.init?.headers).get("Authorization"), "Bearer ticket-token");
+    assert.equal(sockets.length, 1, "a successful ticket request must advance to WebSocket construction");
+    assert.equal(sockets[0]?.url, "wss://ticket.example.test/v1/realtime/ws?company_id=ticket-company");
+
+    unsubscribe();
+  } finally {
+    client.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("terminal authentication failure does not reconnect", async () => {
   let ticketRequests = 0;
   const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
