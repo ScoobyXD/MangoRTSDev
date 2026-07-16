@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   applyHomeMailboxCountDelta,
+  consumeHomeMailboxLocalMutationEcho,
   cancelHomeMailboxListRequestTimers,
   createHomeMailboxFolderLoadCoordinator,
   createHomeMailboxRealtimeCoordinator,
+  forgetHomeMailboxLocalMutationEchoes,
   homeMailboxComposeSubmissionIsCurrent,
   homeMailboxCountKey,
   homeMailboxFolderOwnerIsCurrent,
@@ -13,6 +15,7 @@ import {
   homeMailboxPendingMessageKey,
   homeMailboxRealtimeTargetKey,
   homeMailboxRequestOwnerIsCurrent,
+  rememberHomeMailboxLocalMutationEchoes,
   homeMailboxRealtimeRefreshPlan,
   selectHomeMailboxRealtimeTarget,
   type HomeMailboxRealtimeRefreshPlan,
@@ -138,52 +141,80 @@ test("equivalent mailbox metadata replacements keep one subscription lifetime", 
   assert.equal(subscriptionCount, 2, "navigating to a different exact mailbox does resubscribe");
 });
 
-test("first acceptance discovers a message committed after the initial list and reconnect reconciles again", async () => {
+test("subscription acceptance invalidates caches without refetching or replacing the visible list", () => {
   const timers = fakeTimers();
-  let requestKey = "mailbox-A";
-  const canonicalMessages = ["initial-message"];
-  let visibleMessages = [...canonicalMessages]; // The ordinary HTTP list completed before subscription acceptance.
-  let canonicalLoads = 1;
-  const plans: HomeMailboxRealtimeRefreshPlan[] = [];
+  let invalidations = 0;
+  let providerReads = 0;
   const coordinator = createHomeMailboxRealtimeCoordinator({
     target: personalTarget(),
-    getRequestKey: () => requestKey,
+    getRequestKey: () => "mailbox-A",
     getSelection: () => ({}),
-    isRequestCurrent: (key) => key === requestKey,
-    invalidate: () => undefined,
-    reconcile: async (plan) => {
-      canonicalLoads += 1;
-      plans.push(plan);
-      visibleMessages = [...canonicalMessages];
-    },
+    isRequestCurrent: (key) => key === "mailbox-A",
+    invalidate: () => { invalidations += 1; },
+    reconcile: () => { providerReads += 1; },
     setTimer: timers.setTimer,
     clearTimer: timers.clearTimer,
   });
 
-  // This provider commit lands after the HTTP response but before subscription
-  // acceptance, so there is intentionally no socket event for this browser.
-  canonicalMessages.push("between-list-and-acceptance");
-  assert.deepEqual(visibleMessages, ["initial-message"]);
   coordinator.accepted();
-  assert.equal(canonicalLoads, 1);
-  assert.equal(timers.runNext(), true);
-  await Promise.resolve();
-  assert.equal(canonicalLoads, 2, "first acceptance performs the canonical catch-up read");
-  assert.deepEqual(
-    visibleMessages,
-    ["initial-message", "between-list-and-acceptance"],
-    "the acceptance read converges visible data to the canonical provider result",
-  );
-  assert.deepEqual(plans[0], { folders: true, messageList: true, selectedDetail: false });
-
-  canonicalMessages.push("committed-before-reconnect-acceptance");
+  assert.equal(invalidations, 1, "acceptance makes future explicit reads canonical");
+  assert.equal(timers.size, 0, "acceptance does not schedule a second list or folder GET");
+  assert.equal(providerReads, 0);
   coordinator.accepted();
-  timers.runNext();
-  await Promise.resolve();
-  assert.equal(canonicalLoads, 3, "reconnect acceptance performs one more canonical reconciliation");
-  assert.deepEqual(visibleMessages, canonicalMessages);
+  assert.equal(invalidations, 2, "reconnect also invalidates cached reads without touching presentation state");
+  assert.equal(timers.size, 0);
+  assert.equal(providerReads, 0);
   coordinator.dispose();
-  requestKey = "disposed";
+});
+
+test("local archive, send, update, and delete echoes cause zero invalidations or provider reads", () => {
+  const timers = fakeTimers();
+  const target = personalTarget();
+  const registry = new Map();
+  const archiveIDs = Array.from({ length: 12 }, (_, index) => `archive-${index + 1}`);
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.updated", archiveIDs, 1_000);
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.created", ["sent-1"], 1_000);
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.updated", ["star-1", "read-1"], 1_000);
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.deleted", ["deleted-1"], 1_000);
+  let invalidations = 0;
+  let providerReads = 0;
+  const coordinator = createHomeMailboxRealtimeCoordinator({
+    target,
+    getRequestKey: () => "mailbox-A",
+    getSelection: () => ({}),
+    isRequestCurrent: () => true,
+    isLocalMutationEcho: (signal) => consumeHomeMailboxLocalMutationEcho(registry, signal, 1_001),
+    invalidate: () => { invalidations += 1; },
+    reconcile: () => { providerReads += 1; },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  for (const messageID of archiveIDs) {
+    coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: messageID });
+  }
+  coordinator.changed({ scope: target.scope, trigger: "message.created", message_id: "sent-1" });
+  coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: "star-1" });
+  coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: "read-1" });
+  coordinator.changed({ scope: target.scope, trigger: "message.deleted", message_id: "deleted-1" });
+  assert.equal(invalidations, 0);
+  assert.equal(timers.size, 0);
+  assert.equal(providerReads, 0, "the complete local action confirmation burst performs no GET");
+
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.updated", ["failed-1"], 1_000);
+  forgetHomeMailboxLocalMutationEchoes(registry, target.scope, "message.updated", ["failed-1"]);
+  coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: "failed-1" });
+  assert.equal(invalidations, 1, "a failed local command does not hide a later external change");
+  assert.equal(timers.runNext(), true);
+  assert.equal(providerReads, 1);
+
+  rememberHomeMailboxLocalMutationEchoes(registry, target.scope, "message.updated", ["expired-1"], 1_000);
+  assert.equal(consumeHomeMailboxLocalMutationEcho(registry, {
+    scope: target.scope,
+    trigger: "message.updated",
+    message_id: "expired-1",
+  }, 1_000 + 5 * 60_000 + 1), false, "expired local mutations cannot suppress later external changes");
+  coordinator.dispose();
 });
 
 test("an account B hint cannot invalidate or read the active account A mailbox", async () => {
@@ -280,25 +311,23 @@ test("the exact active Shared Triage inbox reconciles while a different shared i
   });
 
   coordinator.accepted();
-  timers.runNext();
-  await Promise.resolve();
-  assert.equal(invalidations, 1, "acceptance invalidates only the active shared mailbox before its canonical read");
-  assert.equal(providerReads, 1, "first acceptance canonically reconciles the active shared inbox");
+  assert.equal(invalidations, 1, "acceptance invalidates only the active shared mailbox cache");
+  assert.equal(providerReads, 0, "acceptance never reloads the visible shared-inbox list");
 
   coordinator.changed({ scope: inactive.scope, trigger: "message.created", message_id: "off-view" });
   assert.equal(timers.size, 0);
   assert.equal(invalidations, 1);
-  assert.equal(providerReads, 1, "an off-view shared inbox never starts a provider read");
+  assert.equal(providerReads, 0, "an off-view shared inbox never starts a provider read");
 
   coordinator.changed({ scope: active.scope, trigger: "message.updated", message_id: "active-message" });
   timers.runNext();
   await Promise.resolve();
   assert.equal(invalidations, 2);
-  assert.equal(providerReads, 2, "an exact active shared-inbox hint canonically reconciles that inbox");
+  assert.equal(providerReads, 1, "an external active-inbox hint reconciles folder metadata only");
   coordinator.dispose();
 });
 
-test("bursts coalesce and one final refresh queues behind an in-flight reconciliation", async () => {
+test("external bursts coalesce folder metadata and selected-detail work without reloading the list", async () => {
   const timers = fakeTimers();
   const resolvers: Array<() => void> = [];
   const plans: HomeMailboxRealtimeRefreshPlan[] = [];
@@ -330,7 +359,7 @@ test("bursts coalesce and one final refresh queues behind an in-flight reconcili
   coordinator.changed({ scope: personalTarget().scope, trigger: "folder.updated" });
   assert.equal(timers.size, 1);
   timers.runNext();
-  assert.equal(plans.length, 1, "the acceptance/event burst starts one reconciliation");
+  assert.equal(plans.length, 1, "the external event burst starts one metadata reconciliation");
   assert.equal(maxInFlight, 1);
 
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.updated", message_id: "selected" });
@@ -364,7 +393,7 @@ test("presentation navigation drops stale list work but preserves exact-scope fo
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-1" });
   requestKey = "account-A:starred:q=urgent";
   assert.equal(timers.runNext(), true);
-  assert.deepEqual(plans, [{ folders: true, messageList: false, selectedDetail: false }]);
+  assert.deepEqual(plans, [{ folders: true, selectedDetail: false }]);
 
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-2" });
   coordinator.dispose();
@@ -462,7 +491,7 @@ test("a pending folder load is rejected after the exact mailbox scope changes", 
   coordinator.dispose();
 });
 
-test("first acceptance queues one canonical folder refresh behind the initial folder load", async () => {
+test("an external metadata refresh queues once behind the initial folder load", async () => {
   const owner: FolderOwner = {
     mailboxScopeKey: "company-1:user-1:account-a@example.com",
   };
@@ -486,9 +515,9 @@ test("first acceptance queues one canonical folder refresh behind the initial fo
   });
 
   const initial = coordinator.request(owner);
-  const accepted = coordinator.request(owner, true);
-  const duplicateAccepted = coordinator.request(owner, true);
-  assert.deepEqual(loads.map((load) => load.refresh), [false], "acceptance must not overlap the initial provider read");
+  const externalRefresh = coordinator.request(owner, true);
+  const duplicateExternalRefresh = coordinator.request(owner, true);
+  assert.deepEqual(loads.map((load) => load.refresh), [false], "an external metadata refresh must not overlap the initial provider read");
 
   loads[0].resolve(true);
   await initial;
@@ -497,9 +526,9 @@ test("first acceptance queues one canonical folder refresh behind the initial fo
   assert.equal(maxActiveLoads, 1);
 
   loads[1].resolve(true);
-  assert.equal(await accepted, true);
-  assert.equal(await duplicateAccepted, true);
-  assert.equal(loads.length, 2, "duplicate acceptance signals coalesce into the same final refresh");
+  assert.equal(await externalRefresh, true);
+  assert.equal(await duplicateExternalRefresh, true);
+  assert.equal(loads.length, 2, "duplicate external refresh signals coalesce into the same final refresh");
 
   currentOwner = { mailboxScopeKey: "other" };
   coordinator.dispose();
@@ -567,51 +596,51 @@ test("compose completion closes only the submitted draft in its exact mailbox", 
   assert.equal(homeMailboxComposeSubmissionIsCurrent({ ...unsaved }, unsaved), false, "a no-id completion cannot close a newer clone");
 });
 
-test("provider event mapping refreshes relevant lists/folders and only directly affected detail", () => {
+test("provider event mapping preserves the visible list while reconciling folders and directly affected detail", () => {
   const selected = { messageID: "selected", threadID: "thread-selected" };
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.created",
     message_id: "unrelated",
     thread_id: "unrelated-thread",
-  }, selected), { folders: true, messageList: true, selectedDetail: false });
+  }, selected), { folders: true, selectedDetail: false });
   for (const trigger of ["message.updated", "message.deleted"]) {
     assert.deepEqual(homeMailboxRealtimeRefreshPlan({
       scope: personalTarget().scope,
       trigger,
       message_id: "selected",
-    }, selected), { folders: true, messageList: true, selectedDetail: true });
+    }, selected), { folders: true, selectedDetail: true });
   }
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     // Nylas represents a folder move as a message.updated notification.
     scope: "mailbox:personal:account:user-1:me@example.test",
     trigger: "message.updated",
     message_id: "moved-message",
-  }, selected), { folders: true, messageList: true, selectedDetail: false });
+  }, selected), { folders: true, selectedDetail: false });
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.created",
     message_id: "new-thread-message",
     thread_id: "thread-selected",
-  }, selected), { folders: true, messageList: true, selectedDetail: true });
+  }, selected), { folders: true, selectedDetail: true });
   for (const trigger of ["folder.created", "folder.updated", "folder.deleted"]) {
     assert.deepEqual(homeMailboxRealtimeRefreshPlan({
       scope: personalTarget().scope,
       trigger,
-    }, selected), { folders: true, messageList: false, selectedDetail: false });
+    }, selected), { folders: true, selectedDetail: false });
   }
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.opened",
     message_id: "selected",
     thread_id: "thread-selected",
-  }, selected), { folders: false, messageList: false, selectedDetail: true });
+  }, selected), { folders: false, selectedDetail: true });
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.opened",
     message_id: "unrelated",
     thread_id: "unrelated-thread",
-  }, selected), { folders: false, messageList: false, selectedDetail: false });
+  }, selected), { folders: false, selectedDetail: false });
 });
 
 test("read-receipt hints refresh only a directly affected selected detail", () => {
@@ -637,7 +666,7 @@ test("read-receipt hints refresh only a directly affected selected detail", () =
   assert.equal(invalidations, 1);
   assert.equal(timers.size, 1);
   timers.runNext();
-  assert.deepEqual(plans, [{ folders: false, messageList: false, selectedDetail: true }]);
+  assert.deepEqual(plans, [{ folders: false, selectedDetail: true }]);
   coordinator.changed({
     scope: personalTarget().scope,
     trigger: "message.opened",
@@ -695,7 +724,10 @@ test("a queued detail hint cannot wake a different selection after an in-flight 
     clearTimer: timers.clearTimer,
   });
 
-  coordinator.accepted();
+  coordinator.changed({
+    scope: personalTarget().scope,
+    trigger: "folder.updated",
+  });
   assert.equal(timers.runNext(), true);
   assert.equal(plans.length, 1);
   coordinator.changed({
