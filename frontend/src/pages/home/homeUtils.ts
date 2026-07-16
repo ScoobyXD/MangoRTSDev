@@ -1137,7 +1137,7 @@ export function formatMessageDate(epochSeconds?: number): string {
 
 export function messageReadStatusLabel(status?: EmailReadStatus): string {
   if (!status) return "";
-  return "Seen";
+  return "Likely opened";
 }
 
 export function messageReadStatusSignalTimestamps(status?: EmailReadStatus): string[] {
@@ -1173,7 +1173,7 @@ export function messageReadStatusTitle(status?: EmailReadStatus): string {
   if (!label) return "";
   const timestamps = messageReadStatusSignalTimestamps(status).map(formatMessageReadSignalTimestamp);
   const observed = timestamps.length > 0 ? ` Observed: ${timestamps.join("; ")}.` : "";
-  const caveat = " Nylas does not identify which recipient loaded the tracking pixel; image proxies and privacy settings can create or suppress signals.";
+  const caveat = " Tracking-pixel loads are not verified human reads. Nylas usually does not identify which recipient loaded the pixel; image proxies and privacy settings can create or suppress signals.";
   return `${label}.${observed}${caveat}`;
 }
 

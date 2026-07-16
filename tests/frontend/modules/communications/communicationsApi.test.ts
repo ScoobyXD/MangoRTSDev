@@ -15,6 +15,7 @@ import {
   emailMessageMatchesListFilters,
   ensureEmailCollaboration,
   fetchCommunicationsStatus,
+  getCalendarInviteEvent,
   getEmailMessage,
   getEmailCollaborationThread,
   getEmailSignature,
@@ -200,6 +201,29 @@ test("calendar RSVP uses message identity and shared mailbox scope", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("calendar event details use the exact mailbox and message identity", async () => {
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    return jsonResponse({ event: { id: "event-1", title: "Planning review", conference_url: "https://meet.google.com/abc" } });
+  };
+  try {
+    const event = await getCalendarInviteEvent({
+      messageID: " message-1 ",
+      companyID: " company-1 ",
+      accountEmail: " OWNER@Example.Test ",
+    });
+    assert.equal(event.title, "Planning review");
+    assert.deepEqual(calls, [
+      "/v1/communications/calendar-invites/event?company_id=company-1&account_email=owner%40example.test&message_id=message-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 
 test("email signature helpers preserve exact personal and shared mailbox scope", async () => {
   const calls: Array<{ path: string; method: string; body: unknown }> = [];

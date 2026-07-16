@@ -19,6 +19,7 @@ import type { ComposeState } from "../../../../frontend/src/pages/home/homeTypes
 
 function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
   return {
+    kind: "compose",
     id: "draft-1",
     userID: "user-1",
     companyID: "company-1",
@@ -677,6 +678,7 @@ test("shared-draft save reconciliation lists by participant instead of requiring
       });
     };
     const compose: ComposeState = {
+      kind: "reply",
       open: true,
       draftID: remoteDraft.draft_id,
       sharedInboxID: remoteDraft.shared_inbox_id,

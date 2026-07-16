@@ -25,7 +25,8 @@ import {
   mangoEmailSignatureResourceID,
   uploadMangoAttachment,
 } from "../../modules/attachments/attachmentApi";
-import { downloadEmailAttachment, parseEmailAddressList, respondToCalendarInvite, type CalendarInviteRSVPStatus, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { CalendarInviteCard } from "../../modules/communications/CalendarInviteCard";
 import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
 import { splitEmailQuotedHistory } from "../../modules/communications/emailQuotedContent";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../../modules/communications/emailThreadMessages";
@@ -63,6 +64,7 @@ import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachme
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 import { mailConversationCardStyle, mailConversationTimelineDotStyle } from "./homeStyles";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
+import { buildForwardedEmailHTML } from "./emailForwarding";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
@@ -4185,38 +4187,6 @@ function emailAttachmentIsCalendarInvite(attachment: EmailAttachment): boolean {
     || emailAttachmentFileName(attachment).toLowerCase().endsWith(".ics");
 }
 
-function CalendarInviteActions({ messageID, companyID, sharedInboxID, accountEmail, busy }: {
-  messageID: string;
-  companyID: string;
-  sharedInboxID?: string;
-  accountEmail?: string;
-  busy: boolean;
-}) {
-  const [response, setResponse] = React.useState<CalendarInviteRSVPStatus | "">("");
-  const [responding, setResponding] = React.useState(false);
-  const [error, setError] = React.useState("");
-  const respond = (status: CalendarInviteRSVPStatus) => {
-    if (responding || busy) return;
-    setResponding(true);
-    setError("");
-    void respondToCalendarInvite({ messageID, status, companyID, sharedInboxID, accountEmail })
-      .then(() => setResponse(status))
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "Failed to respond to calendar invitation."))
-      .finally(() => setResponding(false));
-  };
-  return (
-    <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", border: "1px solid rgba(20,184,166,0.24)", borderRadius: 8, background: "rgba(240,253,250,0.72)", padding: "8px 9px" }}>
-      <strong style={{ color: "#0f172a", fontSize: 11 }}>Calendar invitation</strong>
-      {([{"status":"yes","label":"Accept"},{"status":"maybe","label":"Tentative"},{"status":"no","label":"Decline"}] as const).map((option) => (
-        <button key={option.status} type="button" style={{ ...mailPanelSmallButtonStyle, color: option.status === "no" ? "#b91c1c" : mailPanelSmallButtonStyle.color, boxShadow: response === option.status ? "0 0 0 2px rgba(14,165,233,0.24)" : mailPanelSmallButtonStyle.boxShadow }} disabled={busy || responding} onClick={() => respond(option.status)}>
-          {option.label}
-        </button>
-      ))}
-      {response && <span role="status" style={mutedSmallStyle}>Response saved: {response === "yes" ? "Accepted" : response === "maybe" ? "Tentative" : "Declined"}</span>}
-      {error && <span role="alert" style={{ ...mutedSmallStyle, color: "#b91c1c" }}>{error}</span>}
-    </div>
-  );
-}
 
 function emailAttachmentDataURL(attachment: EmailAttachment): string {
   const content = attachment.content?.trim() ?? "";
@@ -5364,7 +5334,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     signatureEditorControllerRef.current?.applyHighlightColor(color);
     syncSignatureToolbarFormatState();
   };
-  const isReplyMode = !!replyMessage;
+  const isReplyMode = compose.kind === "reply" && !!replyMessage;
+  const isForwardMode = compose.kind === "forward" && !!replyMessage;
   const setSignatureSelectionTextAlignment = (alignment: EditorTextAlignment) => {
     signatureEditorControllerRef.current?.applyTextAlignment(alignment);
     syncSignatureToolbarFormatState();
@@ -5494,7 +5465,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   return (
     <form style={composePanelStyle(isReplyMode)} onSubmit={handleSubmit}>
       <div style={isReplyMode ? composeReplyHeaderStyle : panelHeaderStyle}>
-        <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
+        <h2 style={panelTitleStyle}>{compose.kind === "forward" ? "Forward" : compose.kind === "reply" ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
         {isReplyMode && (
           <div style={composeReplyHeaderFieldsStyle}>
             {renderRecipientInput("to", "To")}
@@ -5510,7 +5481,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
         </div>
       </div>
-      {replyMessage && (
+      {isReplyMode && replyMessage && (
         <div style={composeReplyOriginalStyle}>
           <div style={mutedSmallStyle}>
             Original from {formatAddressList(replyMessage.from) || "Unknown sender"} to {formatAddressList(replyMessage.to) || "me"}
@@ -5595,6 +5566,23 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
         />
+        {isForwardMode && replyMessage && (
+          <section
+            aria-label="Forwarded message preview"
+            style={{ display: "grid", gap: 7, padding: 12, border: "1px solid rgba(148,163,184,0.34)", borderRadius: 10, background: "rgba(248,250,252,0.78)" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <strong style={{ color: "#334155", fontSize: 13 }}>Forwarded message preview</strong>
+              <span style={mutedSmallStyle}>Locked to preserve the original formatting</span>
+            </div>
+            <iframe
+              title="Forwarded email preview"
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
+              srcDoc={messageDocument(buildForwardedEmailHTML(replyMessage))}
+              style={{ ...mailComposeOriginalFrameStyle, minHeight: 280, height: 320, background: "#fff", borderRadius: 8 }}
+            />
+          </section>
+        )}
         <div style={mailComposeAttachmentRowStyle}>
           <input
             ref={fileInputRef}
@@ -6261,12 +6249,12 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
           </div>
         )}
         {expanded && hasCalendarInvite && (
-          <CalendarInviteActions
+          <CalendarInviteCard
             messageID={message.id}
             companyID={companyID}
             sharedInboxID={sharedInboxID}
             accountEmail={accountEmail}
-            busy={busy || !calendarResponseAvailable}
+            disabled={busy || !calendarResponseAvailable}
           />
         )}
         {expanded && latest && (

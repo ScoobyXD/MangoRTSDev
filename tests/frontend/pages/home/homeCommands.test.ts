@@ -50,6 +50,7 @@ test("image-only mail drafts are retained and draft snippets never expose editor
 
   const draft = {
     id: "draft-1",
+    kind: "compose" as const,
     userID: "user-1",
     companyID: "company-1",
     sharedInboxID: "",
@@ -1102,6 +1103,52 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
   assert.match(sentInputs[0]?.body ?? "", /href="https:\/\/example\.test\/?"/);
   assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
 });
+
+test("Home compose command sends forwards as new messages with preserved original HTML", async () => {
+  const sentInputs: SendEmailInput[] = [];
+  const sendEmail: HomeSendEmail = async (input) => {
+    sentInputs.push(input);
+    return emailMessage("sent-forward", { to: input.to, subject: input.subject, body: input.body });
+  };
+  const source: EmailMessage = {
+    id: "source-message",
+    subject: "Original",
+    unread: false,
+    starred: false,
+    from: [{ email: "source@example.test" }],
+    to: [{ email: "owner@example.test" }],
+    body: "<style>.original-card{color:#123456}</style><div class=\"original-card\"><strong>Original layout</strong></div>",
+  };
+
+  await sendHomeMailComposeCommand({
+    compose: {
+      kind: "forward",
+      to: "reader@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Fwd: Original",
+      body: `${EDITOR_RICH_TEXT_PREFIX}<div>FYI</div>`,
+      attachments: [{
+        id: "attachment-1",
+        attachmentID: "attachment-1",
+        filename: "brief.pdf",
+        contentType: "application/pdf",
+        size: 123,
+      }],
+      replyToMessageID: source.id,
+      replyToMessage: source,
+    },
+    sendEmail,
+  });
+
+  assert.equal(sentInputs[0]?.reply_to_message_id, undefined);
+  assert.match(sentInputs[0]?.body ?? "", /FYI/);
+  assert.match(sentInputs[0]?.body ?? "", /data-mango-forwarded-message="true"/);
+  assert.match(sentInputs[0]?.body ?? "", /\.original-card/);
+  assert.match(sentInputs[0]?.body ?? "", /Original layout/);
+  assert.equal(sentInputs[0]?.attachments?.[0]?.attachment_id, "attachment-1");
+});
+
 
 test("Home compose command sends an image-only rich body as a durable Mango reference", async () => {
   const sentInputs: SendEmailInput[] = [];

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
 import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
@@ -5039,17 +5040,6 @@ const EmailMessageAttachments: React.FC<{
   const [previewAttachment, setPreviewAttachment] = useState<EmailAttachment | null>(null);
   const [previewURL, setPreviewURL] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [calendarResponse, setCalendarResponse] = useState<CalendarInviteRSVPStatus | "">("");
-  const [calendarResponseBusy, setCalendarResponseBusy] = useState(false);
-
-  const respondToInvite = useCallback((status: CalendarInviteRSVPStatus) => {
-    if (calendarResponseBusy || !respondable) return;
-    setCalendarResponseBusy(true);
-    void respondToCalendarInvite({ messageID: message.id, status, companyID, sharedInboxID, accountEmail })
-      .then(() => setCalendarResponse(status))
-      .catch((cause) => onError(cause instanceof Error ? cause.message : "failed_to_respond_to_calendar_invite"))
-      .finally(() => setCalendarResponseBusy(false));
-  }, [accountEmail, calendarResponseBusy, companyID, message.id, onError, respondable, sharedInboxID]);
 
   const loadAttachmentURL = useCallback(async (attachment: EmailAttachment, variant: "display" | "original") => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -5121,15 +5111,16 @@ const EmailMessageAttachments: React.FC<{
           {attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}
         </div>
         {hasCalendarInvite && (
-          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "rgba(240,253,250,0.76)", padding: "7px 8px" }}>
-            <strong style={{ color: "#0f172a", fontSize: 10.8 }}>Calendar invitation</strong>
-            {([{"status":"yes","label":"Accept"},{"status":"maybe","label":"Tentative"},{"status":"no","label":"Decline"}] as const).map((option) => (
-              <button key={option.status} type="button" disabled={calendarResponseBusy || !respondable} onClick={() => respondToInvite(option.status)} style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: calendarResponse === option.status ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: option.status === "no" ? "#b91c1c" : accent, cursor: calendarResponseBusy ? "wait" : respondable ? "pointer" : "default", padding: "3px 8px", fontSize: 10.5, fontWeight: 850 }}>
-                {option.label}
-              </button>
-            ))}
-            {calendarResponse && <span role="status" style={{ color: "rgba(71,85,105,0.82)", fontSize: 10.5, fontWeight: 800 }}>Response saved: {calendarResponse === "yes" ? "Accepted" : calendarResponse === "maybe" ? "Tentative" : "Declined"}</span>}
-          </div>
+          <CalendarInviteCard
+            messageID={message.id}
+            companyID={companyID}
+            sharedInboxID={sharedInboxID}
+            accountEmail={accountEmail}
+            disabled={!respondable}
+            compact
+            accent={accent}
+            onError={onError}
+          />
         )}
         <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 7 }}>
           {attachments.map((attachment, index) => {

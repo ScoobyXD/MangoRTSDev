@@ -427,12 +427,51 @@ func nylasOutboundAttachmentFailureDetails(err error) (int, string) {
 	}
 }
 
+type NylasEventParticipant struct {
+	Name   string `json:"name,omitempty"`
+	Email  string `json:"email,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+type NylasEventWhen struct {
+	Object        string `json:"object,omitempty"`
+	Time          int64  `json:"time,omitempty"`
+	StartTime     int64  `json:"start_time,omitempty"`
+	EndTime       int64  `json:"end_time,omitempty"`
+	Date          string `json:"date,omitempty"`
+	StartDate     string `json:"start_date,omitempty"`
+	EndDate       string `json:"end_date,omitempty"`
+	StartTimezone string `json:"start_timezone,omitempty"`
+	EndTimezone   string `json:"end_timezone,omitempty"`
+}
+
+type NylasEventConferencingDetails struct {
+	URL         string   `json:"url,omitempty"`
+	MeetingCode string   `json:"meeting_code,omitempty"`
+	Password    string   `json:"password,omitempty"`
+	Phone       []string `json:"phone,omitempty"`
+}
+
+type NylasEventConferencing struct {
+	Provider string                        `json:"provider,omitempty"`
+	Details  NylasEventConferencingDetails `json:"details,omitempty"`
+}
+
 type NylasEvent struct {
-	ID         string `json:"id"`
-	CalendarID string `json:"calendar_id,omitempty"`
-	ICalUID    string `json:"ical_uid,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Status     string `json:"status,omitempty"`
+	ID           string                  `json:"id"`
+	CalendarID   string                  `json:"calendar_id,omitempty"`
+	ICalUID      string                  `json:"ical_uid,omitempty"`
+	Title        string                  `json:"title,omitempty"`
+	Status       string                  `json:"status,omitempty"`
+	Description  string                  `json:"description,omitempty"`
+	Location     string                  `json:"location,omitempty"`
+	HTMLLink     string                  `json:"html_link,omitempty"`
+	Busy         bool                    `json:"busy,omitempty"`
+	ReadOnly     bool                    `json:"read_only,omitempty"`
+	Organizer    NylasEmailAddress       `json:"organizer,omitempty"`
+	Participants []NylasEventParticipant `json:"participants,omitempty"`
+	When         NylasEventWhen          `json:"when,omitempty"`
+	Conferencing *NylasEventConferencing `json:"conferencing,omitempty"`
 }
 
 func (c *NylasRESTClient) ExchangeCode(ctx context.Context, code, redirectURI string) (NylasGrant, error) {

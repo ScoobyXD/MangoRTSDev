@@ -15,6 +15,7 @@ import {
   addLocalEmailReply,
   addLocalReplyToEmailMessage,
   disconnectCommunications,
+  downloadEmailAttachment,
   emailMessageWithLogicGatePlacement,
   emailMessageMatchesListFilters,
   ensureEmailCollaboration,
@@ -59,6 +60,7 @@ import {
   type EmailProvider,
   type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
+import { mangoEmailDraftResourceID, uploadMangoAttachment } from "../../modules/attachments/attachmentApi";
 import { isOutboundEmailUndoneError } from "../../modules/communications/outboundEmailUndo";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
@@ -99,14 +101,15 @@ import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
-import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, createHomeMailSharedReplyDraftID, deleteHomeMailDraft, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
+import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, createHomeMailSharedReplyDraftID, deleteHomeMailDraft, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, formatMessageDate, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
-import { emptyCompose, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
+import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
 import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, sharedInboxIDForHomeView } from "./emailCollaborationRows";
+import { forwardedAttachmentsForCopy, forwardedProviderAttachmentID, withForwardedAttachmentCopy } from "./emailForwarding";
 import { emailMessageRowKey } from "./homeUtils";
 
 function isPrimaryTriageMailbox(viewID: HomeViewID, mailbox: EmailMailbox): boolean {
@@ -257,18 +260,6 @@ function forwardSubject(subject: string): string {
   return cleanSubject.toLowerCase().startsWith("fwd:") ? cleanSubject : `Fwd: ${cleanSubject}`.trim();
 }
 
-function forwardBodyWithSignature(message: EmailMessage, signature: string): string {
-  const header = [
-    "---------- Forwarded message ---------",
-    `From: ${formatAddressList(message.from) || "Unknown sender"}`,
-    `Date: ${formatMessageDate(message.date) || ""}`,
-    `Subject: ${message.subject || "(no subject)"}`,
-    `To: ${formatAddressList(message.to) || ""}`,
-    formatAddressList(message.cc) ? `Cc: ${formatAddressList(message.cc)}` : "",
-  ].filter(Boolean).join("\n");
-  const quoted = (message.body || message.snippet || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  return appendHomeMailPlainText(composeBodyWithSignature(signature), `${header}${quoted ? `\n\n${quoted}` : ""}`);
-}
 
 function scheduledSendTimestamp(value: string): number {
   const cleanValue = value.trim();
@@ -467,6 +458,7 @@ export function HomePage({
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const notificationSummary = useNotificationSummary(companyID);
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
@@ -3310,6 +3302,7 @@ export function HomePage({
       : { draftID: existingDraftID, scopeKey: activeSignatureScopeKey };
     const nextCompose: ComposeState = {
       ...emptyCompose,
+      kind: "reply",
       open: true,
       draftID: existingDraftID,
       sharedInboxID,
@@ -3395,7 +3388,7 @@ export function HomePage({
     }
   };
   const openReplyAll = (sourceMessage: EmailMessage | null = selectedMessage) => openReply("reply-all", sourceMessage);
-  const openForward = (sourceMessage: EmailMessage | null = selectedMessage) => {
+  const openForward = async (sourceMessage: EmailMessage | null = selectedMessage) => {
     if (!sourceMessage) return;
     const composeError = currentMailComposeError();
     if (composeError) {
@@ -3411,19 +3404,114 @@ export function HomePage({
       ?? (legacyDraftID !== forwardDraftID ? activeMailDrafts.find((draft) => draft.id === legacyDraftID) : undefined);
     if (existingDraft) {
       pendingAutoSignatureRef.current = null;
-      setCompose(homeMailDraftToCompose(existingDraft));
+      const existingCompose = homeMailDraftToCompose(existingDraft);
+      composeRef.current = existingCompose;
+      setCompose(existingCompose);
       return;
     }
+
+    setBusy("forward");
+    setError("");
+    setNotice("Preparing the forwarded message…");
     pendingAutoSignatureRef.current = null;
-    setCompose({
+    const hydratedSource = emailBodyLooksHydrated(sourceMessage)
+      ? sourceMessage
+      : (await loadSelectedThreadMessageBody(sourceMessage.id) ?? sourceMessage);
+    let forwardedSource = hydratedSource;
+    const forwardedAttachments: ComposeAttachment[] = [];
+    let copyFailure = "";
+    const attachmentsToCopy = forwardedAttachmentsForCopy(hydratedSource);
+    const totalAttachmentBytes = attachmentsToCopy.reduce((sum, attachment) => sum + Math.max(0, attachment.size ?? 0), 0);
+    if (totalAttachmentBytes > 24_000_000) {
+      copyFailure = "The original attachments exceed the 24 MB forwarding limit. The message body is ready, but its files were not copied.";
+    } else if (attachmentsToCopy.length > 0) {
+      try {
+        const preparedCompose: ComposeState = {
+          ...emptyCompose,
+          kind: "forward",
+          open: true,
+          draftID: forwardDraftID,
+          sharedInboxID,
+          accountEmail,
+          replyToMessageID: hydratedSource.id,
+          replyToMessage: hydratedSource,
+          subject: forwardSubject(hydratedSource.subject || ""),
+          body: composeBodyWithSignature(activeScopeEmailSignature),
+        };
+        const drafts = await ensureHomeMailDraftAttachmentTarget(companyID, currentUserID, preparedCompose, activeScopeEmailSignature);
+        setMailDraftsForScopeIfActive(drafts, sharedInboxID, accountEmail);
+        const resourceID = mangoEmailDraftResourceID({
+          draftID: forwardDraftID,
+          userID: currentUserID,
+          accountEmail,
+          sharedInboxID,
+        });
+        if (!resourceID) throw new Error("Email attachment context is unavailable.");
+        const results = await Promise.allSettled(attachmentsToCopy.map(async (attachment) => {
+          const providerAttachmentID = forwardedProviderAttachmentID(attachment);
+          const blob = await downloadEmailAttachment(hydratedSource.id, providerAttachmentID, companyID, sharedInboxID || undefined, {
+            accountEmail: sharedInboxID ? undefined : accountEmail,
+            collaborationID: hydratedSource.collaboration_id,
+          });
+          const filename = attachment.filename?.trim() || "attachment";
+          const file = new File([blob], filename, { type: attachment.content_type?.trim() || blob.type || "application/octet-stream" });
+          const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
+            companyID,
+            resourceType: "email_draft",
+            resourceID,
+            file,
+            sourceKind: "email_outgoing",
+            relationshipKind: attachment.is_inline || attachment.content_id?.trim() ? "email_inline_attachment" : "email_attachment",
+            messageID: hydratedSource.id,
+            editorSurface: sharedInboxID ? "shared-triage-compose" : "my-triage-compose",
+            sourceProvider: "nylas",
+          });
+          const copied = uploaded.attachment;
+          return {
+            providerAttachmentID,
+            mangoAttachmentID: copied.attachment_id,
+            composeAttachment: {
+              id: copied.attachment_id,
+              attachmentID: copied.attachment_id,
+              filename: copied.original_filename || filename,
+              contentType: copied.mime_type || file.type || "application/octet-stream",
+              size: copied.byte_size || file.size,
+            },
+          };
+        }));
+        for (const result of results) {
+          if (result.status === "rejected") continue;
+          forwardedAttachments.push(result.value.composeAttachment);
+          forwardedSource = withForwardedAttachmentCopy(forwardedSource, result.value.providerAttachmentID, result.value.mangoAttachmentID);
+        }
+        const failureCount = results.filter((result) => result.status === "rejected").length;
+        if (failureCount > 0) copyFailure = `${failureCount} original attachment${failureCount === 1 ? "" : "s"} could not be copied. You can still review and send the forward.`;
+      } catch (cause) {
+        copyFailure = formatError(cause, "The original attachments could not be copied. You can still review and send the forward.");
+      }
+    }
+    const nextCompose: ComposeState = {
       ...emptyCompose,
+      kind: "forward",
       open: true,
       draftID: forwardDraftID,
       sharedInboxID,
       accountEmail,
-      subject: forwardSubject(sourceMessage.subject || ""),
-      body: forwardBodyWithSignature(sourceMessage, activeScopeEmailSignature),
-    });
+      replyToMessageID: forwardedSource.id,
+      replyToMessage: forwardedSource,
+      subject: forwardSubject(forwardedSource.subject || ""),
+      body: composeBodyWithSignature(activeScopeEmailSignature),
+      attachments: forwardedAttachments,
+    };
+    composeRef.current = nextCompose;
+    setCompose(nextCompose);
+    setMailDrafts(saveHomeMailDraftFromCompose(companyID, currentUserID, nextCompose, activeScopeEmailSignature));
+    void syncHomeMailDraftFromCompose(companyID, currentUserID, nextCompose, activeScopeEmailSignature)
+      .then((drafts) => applySyncedMailDrafts(drafts, nextCompose.draftID))
+      .catch((draftError) => setError(formatError(draftError, "Failed to save the forwarded draft")));
+    setNotice(copyFailure ? "" : attachmentsToCopy.length > 0 ? "Forward ready with the original attachments." : "Forward ready.");
+    if (copyFailure) setError(copyFailure);
+    setBusy("");
   };
   const submitCompose = async (event: React.FormEvent, composeAtSubmit: ComposeState) => {
     event.preventDefault();
