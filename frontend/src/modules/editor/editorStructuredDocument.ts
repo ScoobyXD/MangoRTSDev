@@ -90,11 +90,14 @@ function attachmentValue(element: Element): Record<string, unknown> | null {
         : "");
     if (attachmentID) {
       const image = element.tagName.toLowerCase() === "img" ? element : element.querySelector("img");
+      const ownerStyle = cleanStyle(owner.getAttribute("style") ?? "");
+      const styleWidth = /(?:^|;)\s*width\s*:\s*([^;]+)/i.exec(ownerStyle)?.[1]?.trim() ?? "";
+      const styleHeight = /(?:^|;)\s*height\s*:\s*([^;]+)/i.exec(ownerStyle)?.[1]?.trim() ?? "";
       return {
         attachment_id: attachmentID.slice(0, 160),
         alt: (image?.getAttribute("alt") ?? "").slice(0, 500),
-        width: (image?.getAttribute("width") ?? owner.getAttribute("data-mango-editor-image-width") ?? "").slice(0, 40),
-        height: (image?.getAttribute("height") ?? owner.getAttribute("data-mango-editor-image-height") ?? "").slice(0, 40),
+        width: (image?.getAttribute("width") ?? owner.getAttribute("data-mango-editor-image-width") ?? styleWidth).slice(0, 40),
+        height: (image?.getAttribute("height") ?? owner.getAttribute("data-mango-editor-image-height") ?? styleHeight).slice(0, 40),
         align: (owner.getAttribute("data-mango-editor-image-align") ?? "").slice(0, 40),
       };
     }

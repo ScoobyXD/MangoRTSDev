@@ -342,6 +342,18 @@ func editorElement(node *xhtml.Node, name string) bool {
 	return node != nil && node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, name)
 }
 
+func editorFirstDescendantElement(node *xhtml.Node, name string) *xhtml.Node {
+	if editorElement(node, name) {
+		return node
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if match := editorFirstDescendantElement(child, name); match != nil {
+			return match
+		}
+	}
+	return nil
+}
+
 func editorInlineAttributes(node *xhtml.Node, inherited map[string]any) map[string]any {
 	next := cloneEditorAttributes(inherited)
 	if next == nil {
@@ -429,7 +441,11 @@ func EditorCollaborationStateFromHTML(source string) (EditorCollaborationState, 
 			attachmentID = editorAttribute(node, "data-mango-attachment-id")
 		}
 		if attachmentID != "" && (strings.EqualFold(node.Data, "img") || editorAttribute(node, "data-mango-editor-image") != "") {
-			appendEditorInsert(&state.Ops, map[string]any{"attachment": map[string]any{"attachment_id": attachmentID, "alt": editorAttribute(node, "alt"), "width": editorAttribute(node, "width"), "height": editorAttribute(node, "height"), "align": editorAttribute(node, "data-mango-editor-image-align")}}, attributes)
+			image := editorFirstDescendantElement(node, "img")
+			if image == nil {
+				image = node
+			}
+			appendEditorInsert(&state.Ops, map[string]any{"attachment": map[string]any{"attachment_id": attachmentID, "alt": editorAttribute(image, "alt"), "width": editorAttribute(image, "width"), "height": editorAttribute(image, "height"), "align": editorAttribute(node, "data-mango-editor-image-align")}}, attributes)
 			return
 		}
 		if strings.EqualFold(node.Data, "br") {
@@ -590,9 +606,23 @@ func editorEmbedHTML(insert map[string]any, attributes map[string]any) string {
 		return editorInlineHTML("<span data-mention-user-id=\""+editorHTMLAttribute(id)+"\">"+stdhtml.EscapeString(label)+"</span>", attributes)
 	}
 	if attachment, ok := insert["attachment"].(map[string]any); ok {
-		id, _ := attachment["attachment_id"].(string)
-		alt, _ := attachment["alt"].(string)
-		return "<span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"" + editorHTMLAttribute(id) + "\"><img src=\"mango-attachment:" + editorHTMLAttribute(id) + "\" data-mango-attachment-id=\"" + editorHTMLAttribute(id) + "\" alt=\"" + editorHTMLAttribute(alt) + "\"></span>"
+		id := safeEditorString(attachment["attachment_id"], 160)
+		alt := safeEditorString(attachment["alt"], 500)
+		width := safeEditorString(attachment["width"], 40)
+		height := safeEditorString(attachment["height"], 40)
+		align := safeEditorString(attachment["align"], 40)
+		wrapperAttributes := ""
+		if align != "" {
+			wrapperAttributes = " data-mango-editor-image-align=\"" + editorHTMLAttribute(align) + "\""
+		}
+		imageAttributes := ""
+		if width != "" {
+			imageAttributes += " width=\"" + editorHTMLAttribute(width) + "\""
+		}
+		if height != "" {
+			imageAttributes += " height=\"" + editorHTMLAttribute(height) + "\""
+		}
+		return "<span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"" + editorHTMLAttribute(id) + "\"" + wrapperAttributes + "><img src=\"mango-attachment:" + editorHTMLAttribute(id) + "\" data-mango-attachment-id=\"" + editorHTMLAttribute(id) + "\" alt=\"" + editorHTMLAttribute(alt) + "\"" + imageAttributes + "></span>"
 	}
 	return ""
 }

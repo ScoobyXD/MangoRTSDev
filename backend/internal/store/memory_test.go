@@ -186,7 +186,7 @@ func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersion
 	collaborationSnapshot, err := repo.GetEditorCollaborationSnapshot(EditorDocumentRef{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: informationID,
 	})
-	if err != nil || collaborationSnapshot.HTML != "beta" || collaborationSnapshot.Revision != 1 {
+	if err != nil || collaborationSnapshot.HTML != editorCollaborationRichTextPrefix+"beta" || collaborationSnapshot.Revision != 1 {
 		t.Fatalf("restored collaboration snapshot=%+v err=%v, want beta at revision 1", collaborationSnapshot, err)
 	}
 	outbox, err := repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 10})
