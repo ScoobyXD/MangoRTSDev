@@ -1,8 +1,8 @@
 # Realtime Changes And Collaborative Editor Architecture Charter
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
-Status: implementation and verification are complete on the canonical worker branch. The authoritative `node scripts/run_all_tests.mjs` gate passes, including real disposable PostgreSQL and production-path Chrome DOM evidence. Production rollout remains blocked and human-controlled. The local commit SHA is intentionally recorded in the final worker report because a commit cannot contain its own identity; no live database, cloud resource, merge, push, handoff, or pull request has been used.
+Status: the post-integration rich-document rendering regression is repaired and verification is complete on the canonical worker branch. The authoritative `node scripts/run_all_tests.mjs` gate passes, including real disposable PostgreSQL and production-path Chrome DOM evidence. Production rollout remains blocked and human-controlled. No live database or cloud resource was changed, and no merge, push, handoff, or pull request occurred.
 
 ## Implementation Record
 
@@ -30,6 +30,7 @@ This is the live project-management record. The charter below remains the approv
 6. **Production-path evidence:** the deleted localStorage/BroadcastChannel/fake-WebSocket harness is replaced by `editor-collaboration-e2e.html`, the production controller/socket adapter, and `run_realtime_production_path_tests.mjs`. The runner launches two real API processes, Vite, installed Chrome, and a disposable PostgreSQL 18 cluster.
 7. **Migrations and permissions:** the unified migration and canonical schema now require model version 2, Quill Delta operations, structured snapshots, and bounded operation JSON. The edit/no-access migration relies on the migration runner's transaction and converts legacy `view`/`admin` resource values to `edit`; no executable collaboration view-only tier exists.
 8. **Evidence discipline:** behavior tests replace the obsolete raw-HTML and source-order claims. Source inventory remains supplemental only.
+9. **2026-07-16 rich-document envelope regression - repaired and verified:** structured collaboration materializers returned raw HTML even though every existing editor consumer uses the `<!-- mango-editor-html-v1 -->` storage envelope to distinguish trusted rich documents from legacy plain text. The deserializer therefore escaped tags into visible text and attachment images disappeared from the DOM. Backend and frontend materializers now restore the shared envelope without changing structured state or sending attachment bytes. Nested attachment image metadata, alt text, and bounded dimensions survive state/materialization/sanitization. Existing structured snapshots retain their attachment IDs and need no data migration; clients rematerialize them correctly after deployment, while derived projections are rewritten at the next normal materialization boundary. The production matrix also reproduced a causal-gap response on the last of 18 rich-paste batches; recovery now atomically regenerates the still-uncommitted IndexedDB queue from the fresh canonical snapshot to the exact visible target, retains stable operation identity, and performs one bounded retry.
 
 ### Persisted realtime producer inventory
 
@@ -64,6 +65,7 @@ The real automation uses the production `EditorCollaborationController`, `MangoR
 - A rich paste of 28,000 repeated segments commits in ordered bounded batches and matches exact DOM text. Explicit socket reconnect/full-snapshot recovery preserves it. Terminating and relaunching one API process on the same port restores affected tabs to healthy exact subscriptions and canonical state; a later edit entering through the other API converges across the restarted instance.
 - Two pages in one browser context prove independent tab identities; the same user in a second browser context also converges. Shared local consumers send one subscribe, no unsubscribe on the first unmount, and one unsubscribe on the last.
 - Node document, second Node/text box, Logic Gate, Project, and unrelated-company documents remain isolated. Permission revocation stops later delivery and rejects reload recovery.
+- The 2026-07-16 regression test feeds the observed `<br><span style="font-size: 14px...">` shape plus a durable attachment through structured state, the collaboration materializer, the production rich-document deserializer, and JSDOM. It asserts that markup is not visible as text and that the actual image frame retains its attachment ID, source, alt text, width, and height.
 
 ### Migration and human rollout record
 
@@ -82,6 +84,8 @@ No agent applied a migration to a live or production database.
 
 ### Current verification record
 
+- 2026-07-16 focused repair evidence: `npm run test:node-relationships`, `npm run build`, and `go test ./internal/store ./internal/http` passed. `node scripts/run_realtime_production_path_tests.mjs` passed on a fresh PostgreSQL 18 cluster with two API instances, Vite, WebSockets, and Chrome DOM assertions. `node scripts/run_all_tests.mjs` then passed with exit code 0.
+- Failed approach recorded: the first two production-path reruns reproduced `collaboration_snapshot_required` on the final large-paste batch. Updating only the pending base revision still failed because the queued delta shape was stale relative to the canonical snapshot. Atomically regenerating the uncommitted queue from canonical state to the exact visible target preserved all 28,000 segments and passed the real browser matrix.
 - `go test ./internal/store ./internal/http` - passed after the producer and auth-boundary changes.
 - `node scripts/run_realtime_production_path_tests.mjs` - passed on a fresh disposable PostgreSQL 18 cluster, including clean/legacy migrations, real PostgreSQL atomicity/retry, two backend instances, Vite, Chrome, and actual DOM assertions.
 - `node scripts/run_all_tests.mjs` - passed with exit code 0 after final owner-contract reconciliation. It ran frontend unit/contract suites, the production build, all Go packages, clean and legacy disposable migration paths, real PostgreSQL transaction/retry tests, two API instances, Vite, and real Chrome DOM automation.
@@ -1200,6 +1204,7 @@ This charter is implemented only when all of the following are true:
 - Acknowledgement/broadcast reordering and commit-before-lost-acknowledgement recovery are proven against actual visible editor DOM state, including duplicate delivery and stable-operation deduplication.
 - The real-browser matrix proves multi-user, multi-tab, exact document/company isolation, refcounted subscribe/unsubscribe, revocation, rich text, and durable inline attachment references.
 - The repository-wide permission cleanup and migration enforce only `edit` or `no_access`; user, manager, and administrator roles do not create a view-only resource outcome.
+- The 2026-07-16 post-integration repair proves literal rich markup is no longer rendered as text, durable attachment frames retain ID/source/alt/dimensions, and causal-gap recovery preserves the exact visible target through an atomic IndexedDB queue regeneration.
 - The final `node scripts/run_all_tests.mjs` gate passed with exit code 0 after owner-contract reconciliation. The implementation Definition of Done is complete; database migration, deployment, monitoring, and rollback control remain human-owned production rollout actions.
 
 ## Final Invariant

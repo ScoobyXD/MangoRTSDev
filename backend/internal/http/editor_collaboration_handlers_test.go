@@ -64,7 +64,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	if err := json.Unmarshal(created.Body.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	if first.Revision != 1 || first.Deduplicated || first.Snapshot.HTML != "A" || created.Header().Get("ETag") == "" {
+	if first.Revision != 1 || first.Deduplicated || first.Snapshot.HTML != "<!-- mango-editor-html-v1 -->A" || created.Header().Get("ETag") == "" {
 		t.Fatalf("unexpected committed acknowledgement: %+v etag=%q", first, created.Header().Get("ETag"))
 	}
 

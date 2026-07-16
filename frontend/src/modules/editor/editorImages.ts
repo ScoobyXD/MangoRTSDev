@@ -28,6 +28,7 @@ export type EditorImagePointerInteraction =
 
 export type EditorImageData = {
   src: string;
+  alt?: string;
   id?: string;
   attachmentID?: string;
   filename?: string;
@@ -160,7 +161,7 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   frame.style.cursor = "move";
 
   const image = ownerDocument.createElement("img");
-  image.alt = "";
+  image.alt = data.alt?.trim().slice(0, 500) ?? "";
   image.draggable = false;
   image.style.display = "block";
   image.style.width = "100%";
@@ -198,13 +199,14 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
   } else if (!isSafeEditorImageSource(src)) {
     return null;
   }
-  const width = readSafeStylePixels(source.style.width, 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
-  const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  const width = readSafeStylePixels(source.style.width.trim() || image?.getAttribute("width")?.trim() || "", 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(source.style.height.trim() || image?.getAttribute("height")?.trim() || "", 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
   const floatSide = readEditorImageFloatSide(source);
   const marginLeft = readEditorImageInlineOffset(source);
   const marginTop = readSafeStylePixels(source.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX, -5_000, 5_000);
   return {
     src: src || editorAttachmentImageSource(attachmentID),
+    alt: image?.getAttribute("alt")?.trim() || undefined,
     id: source.getAttribute(EDITOR_IMAGE_ID_ATTRIBUTE) ?? undefined,
     attachmentID: attachmentID || undefined,
     filename: source.getAttribute(EDITOR_IMAGE_FILENAME_ATTRIBUTE)?.trim() || undefined,

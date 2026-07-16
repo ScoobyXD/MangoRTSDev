@@ -19,6 +19,10 @@ import {
   transformStructuredEditorOperation,
   type StructuredEditorOperation,
 } from "../../../../frontend/src/modules/editor/editorStructuredDocument.js";
+import {
+  deserializeEditorDocumentHTML,
+  EDITOR_RICH_TEXT_PREFIX,
+} from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import type { RealtimeEditorDelta } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 class MemoryStorage implements Storage {
@@ -43,13 +47,26 @@ function installEditorDOM(initialHTML = "A"): InstalledDOM {
     document: globalThis.document,
     indexedDB: globalThis.indexedDB,
     IDBKeyRange: globalThis.IDBKeyRange,
+    Node: globalThis.Node,
+    HTMLElement: globalThis.HTMLElement,
+    HTMLLIElement: globalThis.HTMLLIElement,
+    HTMLUListElement: globalThis.HTMLUListElement,
+    HTMLTableCellElement: globalThis.HTMLTableCellElement,
+    HTMLSpanElement: globalThis.HTMLSpanElement,
   };
   const dom = new JSDOM("<!doctype html><div id=\"editor\"></div>", { url: "https://mango.test/" });
+  const domGlobals = dom.window as unknown as typeof globalThis;
   const renders: string[] = [];
   Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
   Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
   Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
   Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "Node", { configurable: true, value: domGlobals.Node });
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
+  Object.defineProperty(globalThis, "HTMLLIElement", { configurable: true, value: domGlobals.HTMLLIElement });
+  Object.defineProperty(globalThis, "HTMLUListElement", { configurable: true, value: domGlobals.HTMLUListElement });
+  Object.defineProperty(globalThis, "HTMLTableCellElement", { configurable: true, value: domGlobals.HTMLTableCellElement });
+  Object.defineProperty(globalThis, "HTMLSpanElement", { configurable: true, value: domGlobals.HTMLSpanElement });
   dom.window.document.querySelector("#editor")!.innerHTML = initialHTML;
   return {
     window: dom.window as unknown as Window,
@@ -146,6 +163,43 @@ test("structured rich documents roundtrip with lists, formatting, tables, mentio
   }
 });
 
+test("collaboration materialization renders rich markup and durable attachment images instead of literal HTML", () => {
+  const dom = installEditorDOM();
+  try {
+    const stored = EDITOR_RICH_TEXT_PREFIX
+      + '<br><span style="font-size: 14px; font-size: 14px;">Business Logic &quot;Email&quot;</span>'
+      + '<span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1">'
+      + '<img src="mango-attachment:attachment-1" data-mango-attachment-id="attachment-1" alt="Diagram" width="320" height="180"></span>';
+    const materialized = materializeEditorCollaborationState(newEditorCollaborationState(stored));
+
+    assert.ok(materialized.startsWith(EDITOR_RICH_TEXT_PREFIX));
+    const rendered = deserializeEditorDocumentHTML(materialized);
+    const editor = dom.window.document.querySelector("#editor");
+    if (!editor) {
+      throw new Error("editor fixture was not mounted");
+    }
+    editor.innerHTML = rendered;
+
+    assert.equal(editor.textContent?.includes("<br>"), false);
+    assert.match(editor.textContent ?? "", /Business Logic "Email"/);
+    const image = editor.querySelector("img");
+    if (!image) {
+      throw new Error("durable attachment image was not rendered");
+    }
+    const frame = image.parentElement;
+    if (!frame) {
+      throw new Error("durable attachment frame was not rendered");
+    }
+    assert.equal(image.getAttribute("src"), "mango-attachment:attachment-1");
+    assert.equal(frame.getAttribute("data-mango-editor-attachment-id"), "attachment-1");
+    assert.equal(image.getAttribute("alt"), "Diagram");
+    assert.equal(frame.style.width, "320px");
+    assert.equal(frame.style.height, "180px");
+  } finally {
+    dom.restore();
+  }
+});
+
 test("structured OT converges formatting versus formatting and block versus inline formatting", () => {
   const dom = installEditorDOM();
   try {
@@ -234,7 +288,7 @@ test("storage unavailability rolls back visible content and never reports a pend
     }));
     controller.schedule("AL", true);
     await controller.flush();
-    assert.deepEqual(renders, ["A"]);
+    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A"]);
     assert.deepEqual(errors, ["editor_collaboration_storage_unavailable"]);
     assert.equal(server.revision, 0);
   } finally {
@@ -274,7 +328,7 @@ test("IndexedDB quota failure rolls back visible content with a stable user-safe
     }));
     controller.schedule("AL", true);
     await controller.flush();
-    assert.deepEqual(renders, ["A"]);
+    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A"]);
     assert.deepEqual(errors, ["editor_collaboration_storage_quota_exceeded"]);
     assert.equal(server.revision, 0);
   } finally {
@@ -295,7 +349,7 @@ test("oversized and sensitive visible edits roll back deterministically", () => 
     controller.schedule('<img src="data:image/png;base64,AAAA">', true);
     controller.schedule("x".repeat(EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES + 1), true);
     assert.deepEqual(errors, ["editor_collaboration_sensitive_content_rejected", "editor_collaboration_document_too_large"]);
-    assert.deepEqual(renders, ["A", "A"]);
+    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A", EDITOR_RICH_TEXT_PREFIX + "A"]);
   } finally {
     dom.restore();
   }
@@ -342,9 +396,54 @@ test("lost acknowledgement survives refresh, retries the stable operation, and d
     await second.recover();
     assert.equal(retryID, retriedOperationID);
     assert.equal(server.revision, 1);
-    assert.equal(materializeEditorCollaborationState(server.state), "AL");
-    assert.ok(renders.every((html) => html === "AL"));
+    assert.equal(materializeEditorCollaborationState(server.state), EDITOR_RICH_TEXT_PREFIX + "AL");
+    assert.ok(renders.every((html) => html === EDITOR_RICH_TEXT_PREFIX + "AL"));
     second.stop();
+  } finally {
+    dom.restore();
+  }
+});
+
+test("snapshot-required during a durable batch refreshes canonical state and retries the same operation once", async () => {
+  const dom = installEditorDOM("A");
+  try {
+    const server = new StructuredTestServer();
+    const renders: string[] = [];
+    let reads = 0;
+    let posts = 0;
+    let firstOperationID = "";
+    let retriedOperationID = "";
+    const controller = new EditorCollaborationController(controllerOptions(server, "snapshot-interleaving", {
+      onHTML: (html) => renders.push(html),
+      requestJSON: async <T,>(_path: string, init?: RequestInit) => {
+        if (!init?.method) {
+          reads += 1;
+          return server.currentSnapshot() as T;
+        }
+        const body = JSON.parse(String(init.body));
+        posts += 1;
+        if (posts === 1) {
+          firstOperationID = body.operation_id;
+          throw new Error("collaboration_snapshot_required");
+        }
+        retriedOperationID = body.operation_id;
+        assert.equal(body.base_revision, server.revision);
+        return server.commit(body) as T;
+      },
+    }));
+    controller.start();
+    await controller.recover();
+    const readsBeforeRetry = reads;
+    controller.schedule("AL", true);
+    await controller.flush();
+
+    assert.equal(posts, 2);
+    assert.equal(reads, readsBeforeRetry + 1);
+    assert.equal(retriedOperationID, firstOperationID);
+    assert.equal(server.revision, 1);
+    assert.equal(materializeEditorCollaborationState(server.state), EDITOR_RICH_TEXT_PREFIX + "AL");
+    assert.equal(renders[renders.length - 1], EDITOR_RICH_TEXT_PREFIX + "AL");
+    controller.stop();
   } finally {
     dom.restore();
   }

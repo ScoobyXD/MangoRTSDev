@@ -19,6 +19,7 @@ const (
 	EditorCollaborationCompactOperationCount     = 128
 	EditorCollaborationCompactDeltaBytes         = 512 * 1024
 	editorCollaborationTextBlockPrefix           = "<!-- mango-node-text-block-v1 -->"
+	editorCollaborationRichTextPrefix            = "<!-- mango-editor-html-v1 -->"
 )
 
 type EditorDocumentRef struct {
@@ -244,7 +245,14 @@ func ApplyEditorCollaborationDelta(state EditorCollaborationState, delta EditorC
 }
 
 func MaterializeEditorCollaborationState(state EditorCollaborationState) (string, error) {
-	return MaterializeStructuredEditorState(state)
+	html, err := MaterializeStructuredEditorState(state)
+	if err != nil {
+		return "", err
+	}
+	if html == "" {
+		return "", nil
+	}
+	return editorCollaborationRichTextPrefix + html, nil
 }
 
 func EditorCollaborationSnapshotETag(revision int64, state EditorCollaborationState) string {

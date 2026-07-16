@@ -28,7 +28,7 @@ func editorTestTransform(t *testing.T, committed, concurrent EditorCollaboration
 }
 
 func TestStructuredEditorRoundTripPreservesSupportedRichContent(t *testing.T) {
-	source := `<h2><strong>Hello</strong> <em>world</em></h2><ul><li>One</li><li><span data-mention-user-id="user-1">@Ada</span></li></ul><table data-mango-editor-table-id="table-1"><tbody><tr><th>Key</th><td><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img data-mango-attachment-id="attachment-1" alt="diagram"></span></td></tr></tbody></table>`
+	source := editorCollaborationRichTextPrefix + `<h2><strong>Hello</strong> <em>world</em></h2><ul><li>One</li><li><span data-mention-user-id="user-1">@Ada</span></li></ul><table data-mango-editor-table-id="table-1"><tbody><tr><th>Key</th><td><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img src="mango-attachment:attachment-1" data-mango-attachment-id="attachment-1" alt="diagram" width="320" height="180"></span></td></tr></tbody></table>`
 	state, err := EditorCollaborationStateFromHTML(source)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestStructuredEditorRoundTripPreservesSupportedRichContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"<h2>", "<strong>Hello</strong>", "<em>world</em>", "<ul>", "data-mention-user-id=\"user-1\"", "<table", "data-mango-editor-attachment-id=\"attachment-1\""} {
+	for _, required := range []string{editorCollaborationRichTextPrefix, "<h2>", "<strong>Hello</strong>", "<em>world</em>", "<ul>", "data-mention-user-id=\"user-1\"", "<table", "data-mango-editor-attachment-id=\"attachment-1\"", `alt="diagram"`, `width="320"`, `height="180"`} {
 		if !strings.Contains(materialized, required) {
 			t.Fatalf("materialized rich document is missing %q: %s", required, materialized)
 		}
@@ -72,6 +72,46 @@ func TestStructuredEditorOTConvergesDisjointLargeAndUnicodeEdits(t *testing.T) {
 	second, _ := MaterializeEditorCollaborationState(rightThenLeft)
 	if first != second || strings.Count(first, "LEFT") != 1 || strings.Count(first, rightText) != 1 || strings.Count(first, emoji) != 1 {
 		t.Fatalf("large Unicode operations did not converge exactly once: equal=%v left=%d right=%d emoji=%d", first == second, strings.Count(first, "LEFT"), strings.Count(first, rightText), strings.Count(first, emoji))
+	}
+}
+
+func TestStructuredEditorAppliesRealisticLargeRichPasteBatches(t *testing.T) {
+	state := NewEditorCollaborationState("<p>Lost acknowledgement committed once</p>")
+	bold := map[string]any{"bold": true}
+	for index := 0; index < 17; index++ {
+		retain := 12 + index*24_576
+		ops := []EditorCollaborationOp{{Retain: retain}, {Insert: strings.Repeat("Rich paste line ", 1_536), Attributes: bold}}
+		if index == 0 {
+			ops = []EditorCollaborationOp{
+				{Retain: 1},
+				{Insert: "arge paste"},
+				{Insert: "\n", Attributes: map[string]any{"block": "h3"}},
+				{Insert: strings.Repeat("Rich paste line ", 1_536), Attributes: bold},
+			}
+		}
+		state = editorTestApply(t, state, EditorCollaborationDelta{Ops: ops})
+	}
+	final := EditorCollaborationDelta{Ops: []EditorCollaborationOp{
+		{Retain: 417_804},
+		{Insert: strings.Repeat("Rich paste line ", 1_888), Attributes: bold},
+		{Insert: "\n", Attributes: map[string]any{"block": "p"}},
+		{Insert: "Tail one"},
+		{Insert: "\n", Attributes: map[string]any{"block": "li", "list": "bullet", "indent": 0}},
+		{Insert: "Tail two"},
+		{Delete: 34},
+		{Retain: 1, Attributes: map[string]any{"block": "li", "list": "bullet", "indent": 0}},
+	}}
+	state = editorTestApply(t, state, final)
+	materialized, err := MaterializeEditorCollaborationState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(materialized, editorCollaborationRichTextPrefix+"<h3>Large paste</h3>") ||
+		strings.Count(materialized, "Rich paste line ") != 28_000 ||
+		!strings.Contains(materialized, "<ul>") ||
+		!strings.Contains(materialized, "<li>Tail one</li>") ||
+		!strings.Contains(materialized, "<li>Tail two</li>") {
+		t.Fatalf("large rich paste did not survive ordered batches: length=%d repeats=%d has_ul=%v has_one=%v has_two=%v prefix=%q suffix=%q", len(materialized), strings.Count(materialized, "Rich paste line "), strings.Contains(materialized, "<ul>"), strings.Contains(materialized, "<li>Tail one</li>"), strings.Contains(materialized, "<li>Tail two</li>"), materialized[:min(len(materialized), 120)], materialized[max(0, len(materialized)-200):])
 	}
 }
 
@@ -120,7 +160,7 @@ func TestStructuredEditorMultiOperationBatchAndDuplicateCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second.Deduplicated || second.Revision != first.Revision || second.EventID != first.EventID || second.Snapshot.HTML != "<p>A\U0001F642B</p>" {
+	if !second.Deduplicated || second.Revision != first.Revision || second.EventID != first.EventID || second.Snapshot.HTML != editorCollaborationRichTextPrefix+"<p>A\U0001F642B</p>" {
 		t.Fatalf("duplicate commit was not proven idempotent: first=%+v second=%+v", first, second)
 	}
 	claimed, err := repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 10, LeaseDuration: time.Second})
@@ -153,7 +193,7 @@ func TestStructuredEditorConcurrentServerCommitsTransformAgainstCanonicalOrder(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if commit.Snapshot.HTML != "aLbcRd" {
+	if commit.Snapshot.HTML != editorCollaborationRichTextPrefix+"aLbcRd" {
 		t.Fatalf("server did not transform stale operation against canonical order: %q", commit.Snapshot.HTML)
 	}
 }
@@ -184,7 +224,7 @@ func TestStructuredEditorDocumentLimitRejectsAtomically(t *testing.T) {
 		t.Fatalf("oversized document error=%v", err)
 	}
 	snapshot, snapshotErr := repo.GetEditorCollaborationSnapshot(ref)
-	if snapshotErr != nil || snapshot.Revision != 34 || len(snapshot.HTML) != 34*chunkSize {
+	if snapshotErr != nil || snapshot.Revision != 34 || len(snapshot.HTML) != len(editorCollaborationRichTextPrefix)+34*chunkSize {
 		t.Fatalf("oversized operation changed canonical state: snapshot=%+v err=%v", snapshot, snapshotErr)
 	}
 	claimed, claimErr := repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 100})
