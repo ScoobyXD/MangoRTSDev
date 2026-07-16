@@ -345,7 +345,7 @@ where projection.company_id=$1::uuid
   and projection.user_id=$2::uuid
   and mangorts_user_can_access_resource(projection.company_id, projection.resource_type, projection.resource_id, $3::uuid, $4::text)
 order by projection.start_date asc, projection.position asc, lower(projection.display_title) asc, projection.item_id asc
-limit $5`, query.CompanyID, query.UserID, query.ViewerUserID, EntityPermissionView, query.Limit)
+limit $5`, query.CompanyID, query.UserID, query.ViewerUserID, EntityPermissionEdit, query.Limit)
 	if err != nil {
 		return nil, err
 	}

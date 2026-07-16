@@ -196,12 +196,12 @@ func TestRealtimeWebSocketNotificationSubscriptionRequiresOwnUser(t *testing.T) 
 	}
 }
 
-func TestRealtimeWebSocketNodeChatSubscriptionRejectsViewOnlyAndIsNotStored(t *testing.T) {
+func TestRealtimeWebSocketNodeChatSubscriptionRejectsNoAccessAndIsNotStored(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "90909090-9090-4090-8090-909090909090"
-	token := "chat-view-only-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "chat-view-only-user", domain.RoleCompanyUser)
-	node, err := repo.CreateNode(companyID, "View-only chat node")
+	token := "chat-no-access-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "chat-no-access-user", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "No-access chat node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRealtimeWebSocketNodeChatSubscriptionRejectsViewOnlyAndIsNotStored(t *t
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionNoAccess,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -230,10 +230,10 @@ func TestRealtimeWebSocketNodeChatSubscriptionRejectsViewOnlyAndIsNotStored(t *t
 
 	rejected := client.readJSON(t)
 	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope || rejected["error"] != "access_denied" {
-		t.Fatalf("View-only Node chat subscription response = %+v, want Edit-access denial for %s", rejected, scope)
+		t.Fatalf("No-access Node chat subscription response = %+v, want access denial for %s", rejected, scope)
 	}
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 0 {
-		t.Fatal("View-only Node chat subscription was stored")
+		t.Fatal("No-access Node chat subscription was stored")
 	}
 }
 
@@ -253,7 +253,7 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -373,8 +373,8 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 	}
 	for _, input := range []store.EntityPermissionUpdateInput{
 		{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
-		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}},
-		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: sharedInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: sharedInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
 		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: hiddenInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true},
 	} {
 		if _, err := repo.SetEntityPermissions(input); err != nil {
@@ -654,7 +654,14 @@ func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server.publishNodeChatCreated(companyID, node.NodeID, "revoked-message", domain.NodeInformation{Type: "Text block chat", Information: `{"block_id":"revoked-block"}`})
+	revokedItem, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
+		CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
+		Information: `{"block_id":"revoked-block"}`, InformationID: "32323232-3232-4232-8232-000000000001",
+	})
+	if err != nil {
+		t.Fatalf("AddNodeInformationWithActor revoked: %v", err)
+	}
+	server.publishNodeChatCreated(companyID, node.NodeID, "32323232-3232-4232-8232-000000000001", revokedItem)
 	client.assertNoMessage(t)
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatal("revocation test lost its existing subscription")
@@ -662,8 +669,15 @@ func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) 
 	if _, err := repo.SetEntityPermissions(grant); err != nil {
 		t.Fatal(err)
 	}
-	server.publishNodeChatCreated(companyID, node.NodeID, "restored-message", domain.NodeInformation{Type: "Text block chat", Information: `{"block_id":"restored-block"}`})
-	if message := client.readJSON(t); message["type"] != realtimeMessageChatCreated || message["message_id"] != "restored-message" {
+	restoredItem, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
+		CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
+		Information: `{"block_id":"restored-block"}`, InformationID: "32323232-3232-4232-8232-000000000002",
+	})
+	if err != nil {
+		t.Fatalf("AddNodeInformationWithActor restored: %v", err)
+	}
+	server.publishNodeChatCreated(companyID, node.NodeID, "32323232-3232-4232-8232-000000000002", restoredItem)
+	if message := client.readJSON(t); message["type"] != realtimeMessageChatCreated || message["message_id"] != "32323232-3232-4232-8232-000000000002" {
 		t.Fatalf("restored chat publication = %+v", message)
 	}
 }
@@ -680,7 +694,7 @@ func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
 	grant := store.EntityPermissionUpdateInput{
 		CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID,
 		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}},
+		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}},
 	}
 	if _, err := repo.SetEntityPermissions(grant); err != nil {
 		t.Fatal(err)
@@ -776,7 +790,7 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}}); err != nil {
 		t.Fatal(err)
 	}
 	server := newRealtimeAuthServerForTest(repo, token, user)
@@ -836,7 +850,7 @@ func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationBoardsOnce(t *te
 			Permissions: []store.EntityPermissionInput{{
 				SubjectType: store.EntityPermissionSubjectUser,
 				SubjectID:   user.UserID,
-				AccessLevel: store.EntityPermissionView,
+				AccessLevel: store.EntityPermissionEdit,
 			}},
 		}); err != nil {
 			t.Fatal(err)
@@ -983,7 +997,17 @@ func TestRealtimeWebSocketNotificationDeletedRoutesOnlyToRecipientScope(t *testi
 	if err != nil {
 		t.Fatalf("CreateNotifications: %v", err)
 	}
-	server.publishNotificationDeletions(created)
+	server.publishNotifications(created)
+	if message := clientA.readJSON(t); message["type"] != realtimeMessageNotificationCreated {
+		t.Fatalf("notification creation before deletion = %+v", message)
+	}
+	deleted, err := repo.DeleteNotifications(store.NotificationDeleteInput{
+		UserID: userA.UserID, NotificationID: created[0].NotificationID, RealtimeMode: store.NotificationRealtimeDeleteEach,
+	})
+	if err != nil {
+		t.Fatalf("DeleteNotifications: %v", err)
+	}
+	server.publishNotificationDeletions(deleted)
 	message := clientA.readJSON(t)
 	if message["type"] != realtimeMessageNotificationDeleted || message["scope"] != scopeA || message["notification_id"] != created[0].NotificationID {
 		t.Fatalf("deleted notification websocket message = %+v, want deletion for %s", message, created[0].NotificationID)
@@ -1043,7 +1067,20 @@ func TestRealtimeWebSocketNotificationsClearedRoutesAggregateToRecipientScope(t 
 	if err != nil {
 		t.Fatalf("CreateNotifications: %v", err)
 	}
-	server.publishNotificationsCleared(created)
+	server.publishNotifications(created)
+	for index := 0; index < len(created); index++ {
+		createdMessage := clientA.readJSON(t)
+		if createdMessage["type"] != realtimeMessageNotificationCreated {
+			t.Fatalf("notification creation before clear[%d] = %+v", index, createdMessage)
+		}
+	}
+	deleted, err := repo.DeleteNotifications(store.NotificationDeleteInput{
+		UserID: userA.UserID, CompanyID: companyID, RealtimeMode: store.NotificationRealtimeClear,
+	})
+	if err != nil {
+		t.Fatalf("DeleteNotifications clear: %v", err)
+	}
+	server.publishNotificationsCleared(deleted)
 	message := clientA.readJSON(t)
 	if message["type"] != realtimeMessageNotificationsCleared || message["scope"] != scopeA || message["deleted_count"] != float64(2) {
 		t.Fatalf("cleared notification websocket message = %+v, want aggregate clear count for scope %s", message, scopeA)

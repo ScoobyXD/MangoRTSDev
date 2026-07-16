@@ -444,7 +444,7 @@ func (r *PostgresRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node
 		 where n.company_id=$1::uuid
 		   and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $2::uuid, $3::text)
 		 order by n.created_timestamp asc, n.node_id::text asc`,
-		companyID, userID, EntityPermissionView,
+		companyID, userID, EntityPermissionEdit,
 	)
 	if err != nil {
 		return nil, err
@@ -1092,6 +1092,15 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		}
 	}
 
+	if strings.EqualFold(infoType, "Text block chat") {
+		outboxInput, err := nodeChatCreatedOutboxInput(item, keyValue)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.NodeInformation{}, err
 	}
@@ -1282,9 +1291,18 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	if err != nil {
 		return err
 	}
-	if affected, err := deleted.RowsAffected(); err != nil {
+	affected, err := deleted.RowsAffected()
+	if err != nil {
 		return err
-	} else if affected > 0 {
+	}
+	if affected > 0 && previousFound && strings.EqualFold(strings.TrimSpace(previous.Type), "Text block chat") {
+		outboxInput, err := nodeChatDeletedOutboxInput(previous)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -6,7 +6,6 @@ import {
   NODE_H,
   NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX,
   NODE_W,
-  canAdminResourceAccess,
   canEditResourceAccess,
   persistedMapPositionsToNodePositions,
   resolveOpenNodeMapPosition,
@@ -586,7 +585,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(false);
-  const [linkedEntityCanAdmin, setLinkedEntityCanAdmin] = useState(true);
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
@@ -1132,7 +1130,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const clearVisibleDocumentForSelection = useCallback(() => {
     setLinkedEntityAccessDeniedMessage("");
     setLinkedEntityCanEdit(false);
-    setLinkedEntityCanAdmin(true);
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
@@ -1951,7 +1948,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       if (isTerminalResourceNotFoundError(cause)) {
         clearVisibleDocumentForSelection();
         setLinkedEntityCanEdit(false);
-        setLinkedEntityCanAdmin(false);
         setLinkedEntityAccessDeniedMessage(LINKED_ENTITY_NOT_FOUND_MESSAGE);
         setError("");
         return;
@@ -2251,7 +2247,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const node = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!node) return;
       setLinkedEntityCanEdit(canEditResourceAccess(node));
-      setLinkedEntityCanAdmin(canAdminResourceAccess(node));
       const rawNextTitle = getNodeTitle(node);
       setLinkedNodeTitle((current) => {
         if (editingTitleActiveRef.current) return current;
@@ -2277,7 +2272,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const logicGate = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!logicGate) return;
       setLinkedEntityCanEdit(canEditResourceAccess(logicGate));
-      setLinkedEntityCanAdmin(canAdminResourceAccess(logicGate));
       const nextTitle = getLogicGateTitle(logicGate);
       setLinkedNodeTitle((current) => {
         if (editingTitleActiveRef.current) return current;
@@ -2303,7 +2297,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!linkedNodeID) {
       setLinkedEntityAccessDeniedMessage("");
       setLinkedEntityCanEdit(false);
-      setLinkedEntityCanAdmin(true);
       setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
@@ -2352,7 +2345,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLogicGateWorkspaceProjections([]);
     setEditorSnapshotLoadedScope("");
     setLinkedEntityCanEdit(false);
-    setLinkedEntityCanAdmin(false);
     setNodeContentChanges([]);
     setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
@@ -2370,7 +2362,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           const snapshotScope = editorSnapshotScope("logic_gate", linkedNodeID);
           if (!isCurrentLinkedLoad()) return;
           setLinkedEntityCanEdit(canEditResourceAccess(details));
-          setLinkedEntityCanAdmin(canAdminResourceAccess(details));
           const loadedLogicGateTitle = foldCommittedEntityTitlesSince(
             getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }),
             companyID,
@@ -2425,7 +2416,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         if (!isCurrentLinkedLoad()) return;
         const snapshotScope = editorSnapshotScope("node", linkedNodeID);
         setLinkedEntityCanEdit(canEditResourceAccess(details));
-        setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         const loadedNodeTitle = foldCommittedEntityTitlesSince(
           getNodeTitle(details.node),
           companyID,
@@ -2480,7 +2470,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           if (message === LINKED_NODE_ACCESS_DENIED_MESSAGE || message === LINKED_ENTITY_NOT_FOUND_MESSAGE) {
             clearVisibleDocumentForSelection();
             setLinkedEntityCanEdit(false);
-            setLinkedEntityCanAdmin(false);
             setLinkedEntityAccessDeniedMessage(message);
             setError("");
             return;
@@ -2701,7 +2690,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             reserveHeaderOffset={!forcedEntityKind}
             singleLine
           />
-          
+
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
           <EditorLinkedDocumentPanels
             activeTab={activeTab}
@@ -2813,7 +2802,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               entityID={linkedNodeID}
               title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
               variant="embedded"
-              readOnly={!linkedEntityCanAdmin}
+              readOnly={!linkedEntityCanEdit}
             />
           </div>
         )}

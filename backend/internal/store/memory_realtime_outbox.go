@@ -17,6 +17,9 @@ func (r *MemoryRepo) EnqueueRealtimeOutbox(input RealtimeOutboxInput) (RealtimeO
 }
 
 func (r *MemoryRepo) enqueueRealtimeOutboxLocked(input RealtimeOutboxInput) (RealtimeOutboxEvent, error) {
+	if r.realtimeOutboxErr != nil {
+		return RealtimeOutboxEvent{}, r.realtimeOutboxErr
+	}
 	if input.EventID == "" {
 		input.EventID = newUUIDv7String()
 	}

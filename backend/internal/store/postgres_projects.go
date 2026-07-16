@@ -420,7 +420,7 @@ where project.company_id=$1::uuid`
 	args := []any{companyID}
 	if viewerUserID != "" {
 		query += ` and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $2::uuid, $3::text)`
-		args = append(args, viewerUserID, EntityPermissionView)
+		args = append(args, viewerUserID, EntityPermissionEdit)
 	}
 	query += ` order by lower(project.name) asc, project.project_id asc`
 	rows, err := r.db.QueryContext(context.Background(), query, args...)
@@ -536,7 +536,7 @@ join folder_scope folder
   on folder.folder_id=item.parent_folder_id
 where project.company_id=$1::uuid
   and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, $4::text)
-order by lower(project.name) asc, project.project_id asc`, companyID, folderID, userID, EntityPermissionView)
+order by lower(project.name) asc, project.project_id asc`, companyID, folderID, userID, EntityPermissionEdit)
 	if err != nil {
 		return nil, err
 	}
@@ -592,13 +592,11 @@ func (r *PostgresRepo) GetProjectView(companyID, projectID, viewerUserID string)
 		CriticalPathCount: len(criticalPath),
 	}
 	if strings.TrimSpace(viewerUserID) != "" {
-		view.CanView = true
 		view.CanEdit, _ = r.UserHasEffectiveAccess(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionEdit)
-		view.CanAdmin, _ = r.UserHasEffectiveAccess(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionAdmin)
 		if view.CanEdit {
 			view.Project.EffectiveAccess = EntityPermissionEdit
 		} else {
-			view.Project.EffectiveAccess = EntityPermissionView
+			view.Project.EffectiveAccess = EntityPermissionEdit
 		}
 	}
 	return view, nil
@@ -785,7 +783,7 @@ func (r *PostgresRepo) ListProjectCriticalPathSteps(companyID, projectID, viewer
 	if viewerUserID != "" {
 		query = strings.Replace(query, "/* viewer_access */", `
  and mangorts_user_can_access_resource(projection.company_id, projection.resource_type, projection.resource_id, $3::uuid, $4::text)`, 1)
-		args = append(args, viewerUserID, EntityPermissionView)
+		args = append(args, viewerUserID, EntityPermissionEdit)
 	} else {
 		query = strings.Replace(query, "/* viewer_access */", "", 1)
 	}
@@ -1081,7 +1079,7 @@ where projection.company_id=$1::uuid
 		query += `
   and mangorts_user_can_access_resource(projection.company_id, 'project', projection.project_id, $3::uuid, $4::text)
   and mangorts_user_can_access_resource(projection.company_id, projection.resource_type, projection.resource_id, $3::uuid, $4::text)`
-		args = append(args, viewerUserID, EntityPermissionView)
+		args = append(args, viewerUserID, EntityPermissionEdit)
 	}
 	query += `
 order by projection.position asc, lower(projection.display_title) asc, projection.relationship_id asc`
@@ -1108,7 +1106,7 @@ where projection.company_id=$1::uuid
 	args := []any{companyID, resourceType, resourceID}
 	if viewerUserID != "" {
 		query += ` and mangorts_user_can_access_resource(projection.company_id, 'project', projection.project_id, $4::uuid, $5::text)`
-		args = append(args, viewerUserID, EntityPermissionView)
+		args = append(args, viewerUserID, EntityPermissionEdit)
 	}
 	query += ` order by lower(projection.display_title) asc, projection.project_id asc`
 	rows, err := r.db.QueryContext(context.Background(), query, args...)

@@ -1278,7 +1278,7 @@ create table if not exists resource_permissions (
   updated_timestamp timestamptz not null default now(),
   constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox')),
   constraint resource_permissions_subject_type_chk check (subject_type in ('user', 'group')),
-  constraint resource_permissions_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
+  constraint resource_permissions_access_level_chk check (access_level in ('no_access', 'edit')),
   constraint resource_permissions_user_subject_chk check ((subject_type = 'user' and user_id = subject_id) or (subject_type = 'group' and user_id is null)),
   primary key (company_id, resource_type, resource_id, subject_type, subject_id),
   constraint resource_access_company_id_fkey foreign key (company_id) references companies (company_id) on delete cascade,
@@ -1301,9 +1301,7 @@ create or replace function mangorts_access_level_rank(p_access_level text)
 returns integer as $$
   select case lower(btrim(coalesce(p_access_level, '')))
     when 'no_access' then 0
-    when 'view' then 1
-    when 'edit' then 2
-    when 'admin' then 3
+    when 'edit' then 1
     else 0
   end;
 $$ language sql immutable;
@@ -1441,14 +1439,6 @@ returns boolean as $$
     else false
   end
   from requested, normalized_resource;
-$$ language sql stable;create or replace function mangorts_user_can_view_entity(
-  p_company_id uuid,
-  p_entity_type text,
-  p_entity_id uuid,
-  p_user_id uuid
-)
-returns boolean as $$
-  select mangorts_user_can_access_resource(p_company_id, p_entity_type, p_entity_id, p_user_id, 'view');
 $$ language sql stable;
 
 create table if not exists logic_gate_relationships (
@@ -2725,7 +2715,7 @@ create table if not exists resource_permission_subtree_applications (
   constraint resource_permission_subtree_applications_subject_type_chk
     check (subject_type is null or subject_type in ('user', 'group')),
   constraint resource_permission_subtree_applications_access_level_chk
-    check (access_level is null or access_level in ('no_access', 'view', 'edit', 'admin')),
+    check (access_level is null or access_level in ('no_access', 'edit')),
   constraint resource_permission_subtree_applications_rule_shape_chk check (
     (
       rule_key = '__default__'
@@ -2738,7 +2728,7 @@ create table if not exists resource_permission_subtree_applications (
       rule_key <> '__default__'
       and subject_type in ('user', 'group')
       and subject_id is not null
-      and (deleted or access_level in ('no_access', 'view', 'edit', 'admin'))
+      and (deleted or access_level in ('no_access', 'edit'))
     )
   ),
   foreign key (company_id) references companies (company_id) on delete cascade

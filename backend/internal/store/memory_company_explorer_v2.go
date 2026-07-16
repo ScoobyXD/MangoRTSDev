@@ -960,7 +960,7 @@ func (r *MemoryRepo) companyExplorerV2EntityVisibleLocked(query CompanyExplorerV
 	if entity.EntityType == CompanyExplorerV2EntityFolder {
 		resourceID = entity.EntityID
 	}
-	return r.userHasEffectiveAccessLocked(entity.CompanyID, query.PermissionUserID, resourceType, resourceID, EntityPermissionView)
+	return r.userHasEffectiveAccessLocked(entity.CompanyID, query.PermissionUserID, resourceType, resourceID, EntityPermissionEdit)
 }
 
 func (r *MemoryRepo) companyExplorerV2EntityCanEditLocked(companyID, userID string, entity memoryCompanyExplorerV2Entity) bool {
@@ -982,10 +982,10 @@ func (r *MemoryRepo) companyExplorerV2EffectiveAccessLocked(query CompanyExplore
 	resourceType := companyExplorerV2ResourcePermissionType(entity.EntityType)
 	if resourceType == "" {
 		if r.userHasRoleAdminAccessLocked(entity.CompanyID, query.PermissionUserID) {
-			return EntityPermissionAdmin
+			return EntityPermissionEdit
 		}
 		if r.userHasCompanyMembershipLocked(entity.CompanyID, query.PermissionUserID) {
-			return EntityPermissionView
+			return EntityPermissionEdit
 		}
 		return ""
 	}
@@ -993,7 +993,7 @@ func (r *MemoryRepo) companyExplorerV2EffectiveAccessLocked(query CompanyExplore
 	if entity.EntityType == CompanyExplorerV2EntityFolder {
 		resourceID = entity.EntityID
 	}
-	return r.effectiveAccessLevelLocked(entity.CompanyID, query.PermissionUserID, resourceType, resourceID, EntityPermissionView)
+	return r.effectiveAccessLevelLocked(entity.CompanyID, query.PermissionUserID, resourceType, resourceID, EntityPermissionEdit)
 }
 
 func (r *MemoryRepo) userHasCompanyMembershipLocked(companyID, userID string) bool {

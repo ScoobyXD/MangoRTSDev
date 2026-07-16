@@ -202,7 +202,7 @@ func (s *Server) authorizeUserPinResourceView(w http.ResponseWriter, actor Actor
 	if actorCanManageCompany(actor, companyID) {
 		return true
 	}
-	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, resourceID, store.EntityPermissionView)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, resourceID, store.EntityPermissionEdit)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 		return false

@@ -669,6 +669,29 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		}
 		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID)
 	})
+	t.Run("transactional outbox failure", func(t *testing.T) {
+		repo := NewMemoryRepo()
+		companyID := "11111111-1111-4111-8111-111111111110"
+		repo.EnsureCompany(companyID, "Email Conversion Outbox Company")
+		user, logicGate := setupEmailConversionUserAndGate(t, repo, companyID)
+		message := domain.EmailMessageSnapshot{ID: "message-outbox-fail", ThreadID: "thread-outbox-fail", Subject: "Rollback outbox"}
+		if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+		}
+		forced := errors.New("forced outbox failure")
+		repo.realtimeOutboxErr = forced
+		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+			UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID,
+			MessageIDs: []string{message.ID}, ActorUserID: user.UserID, IdempotencyKey: "outbox-failure",
+		})
+		if !errors.Is(err, forced) {
+			t.Fatalf("err = %v, want outbox failure", err)
+		}
+		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID)
+		if len(repo.domainEvents) != 0 || len(repo.realtimeOutbox) != 0 {
+			t.Fatalf("split conversion state domain_events=%d outbox=%d", len(repo.domainEvents), len(repo.realtimeOutbox))
+		}
+	})
 }
 
 func TestMemoryEmailConversionCommandValidatesInputs(t *testing.T) {

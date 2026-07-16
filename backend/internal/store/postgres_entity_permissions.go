@@ -653,10 +653,6 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 	return nil, ErrInvalid
 }
 
-func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
-	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
-}
-
 func (r *PostgresRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)

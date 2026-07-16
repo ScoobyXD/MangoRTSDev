@@ -11,7 +11,7 @@ Coverage Status:
 PIN1 - Pins are stored in the database, scoped by company and user, not browser cache.
 PIN2 - The canonical database table is pins; a pin row has a single primary key pin ID plus company ID, user ID, resource type, resource ID, name, position, and created timestamp.
 PIN3 - Supported pinned resource types are node, logic gate, and project.
-PIN4 - Creating a pin requires company access and current view access to the target resource.
+PIN4 - Creating a pin requires company access and current edit access to the target resource.
 PIN5 - The pin name is a snapshot resolved from the server resource name or title at pin time.
 PIN6 - A user can only have one pin for the same company, resource type, and resource ID.
 PIN7 - Listing pins reads the user's company pins directly from the pins table and does not join to live resource tables.
@@ -71,8 +71,8 @@ Business logic covered:
 - PIN9
 
 Given:
-- A user pins a resource while they have view access.
-- The user's view access is later removed.
+- A user pins a resource while they have edit access.
+- The user's edit access is later removed.
 
 Expected:
 - The pin remains visible in the sidebar pin section.

@@ -702,10 +702,6 @@ func (r *MemoryRepo) userCanMutateManagerResourceOverridesLocked(companyID, user
 	return ok && domain.NormalizeRole(membership.Role) == domain.RoleCompanyAdmin
 }
 
-func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
-	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
-}
-
 func (r *MemoryRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
@@ -863,18 +859,7 @@ func (r *MemoryRepo) userHasRoleAdminAccessLocked(companyID, userID string) bool
 }
 
 func entityPermissionRank(accessLevel string) int {
-	switch strings.TrimSpace(accessLevel) {
-	case EntityPermissionNoAccess:
-		return 0
-	case EntityPermissionView:
-		return 1
-	case EntityPermissionEdit:
-		return 2
-	case EntityPermissionAdmin:
-		return 3
-	default:
-		return 0
-	}
+	return EntityPermissionRank(accessLevel)
 }
 
 func (r *MemoryRepo) sharedTriageFolderAncestryLocked(companyID, folderID string) []string {

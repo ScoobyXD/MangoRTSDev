@@ -221,7 +221,7 @@ func (r *MemoryRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node, 
 		if node.CompanyID != companyID {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionEdit) {
 			continue
 		}
 		node = r.withNodeReadModelLocked(node)
@@ -535,14 +535,23 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.nodeInfo[k] = append(r.nodeInfo[k], item)
-	sort.Slice(r.nodeInfo[k], func(i, j int) bool {
-		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
-	})
 	keyValue := informationID
 	if keyValue == "" {
 		keyValue = item.InformationID
 	}
+	if strings.EqualFold(infoType, "Text block chat") {
+		outboxInput, err := nodeChatCreatedOutboxInput(item, keyValue)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	}
+	r.nodeInfo[k] = append(r.nodeInfo[k], item)
+	sort.Slice(r.nodeInfo[k], func(i, j int) bool {
+		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
+	})
 	if r.nodeText[k] == nil {
 		r.nodeText[k] = map[string]domain.NodeProjection{}
 	}
@@ -644,6 +653,15 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		if existing.IsDeleted || *input.ExpectedRevision != existing.Revision {
 			current := existing
 			return &ProjectionRevisionConflictError{NodeCurrent: &current}
+		}
+	}
+	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Text block chat") {
+		outboxInput, err := nodeChatDeletedOutboxInput(existing)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return err
 		}
 	}
 	if projectionExists && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {

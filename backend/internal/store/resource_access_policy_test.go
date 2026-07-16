@@ -65,10 +65,10 @@ func TestMemoryResourceAccessPolicyDefaultOverrideSemantics(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("deny override: %v", err)
 	}
-	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || allowedAccess {
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || allowedAccess {
 		t.Fatalf("default edit/override denied = %v err = %v, want false", allowedAccess, err)
 	}
-	if adminAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, admin.UserID, EntityPermissionAdmin); err != nil || !adminAccess {
+	if adminAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, admin.UserID, EntityPermissionEdit); err != nil || !adminAccess {
 		t.Fatalf("admin bypass = %v err = %v, want true", adminAccess, err)
 	}
 
@@ -500,13 +500,13 @@ func TestMemoryResourceAccessPolicyGroupPointerFollowsLaterMembershipAndUserOver
 		resourcePermissionSubjectKeyForTest(EntityPermissionSubjectGroup, parentGroup.GroupID): EntityPermissionNoAccess,
 	})
 
-	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || !allowedAccess {
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || !allowedAccess {
 		t.Fatalf("unassigned user access before group membership = %v err = %v, want true", allowedAccess, err)
 	}
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{other.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers child other: %v", err)
 	}
-	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || allowedAccess {
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || allowedAccess {
 		t.Fatalf("new child-group member access = %v err = %v, want false from parent group row", allowedAccess, err)
 	}
 
@@ -529,7 +529,7 @@ func TestMemoryResourceAccessPolicyGroupPointerFollowsLaterMembershipAndUserOver
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{other.UserID, allowed.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers child other+allowed: %v", err)
 	}
-	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, allowed.UserID, EntityPermissionView); err != nil || allowedAccess {
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, allowed.UserID, EntityPermissionEdit); err != nil || allowedAccess {
 		t.Fatalf("second child-group member access = %v err = %v, want false from group pointer", allowedAccess, err)
 	}
 	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessEdit, map[string]string{
@@ -652,7 +652,7 @@ func TestMemoryResourceAccessPolicyApplyToDescendantsUpdatesExplorerTree(t *test
 		t.Fatalf("SetEntityPermissions remove descendant group row: %v", err)
 	}
 	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessNoAccess, map[string]string{})
-	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || allowedAccess {
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || allowedAccess {
 		t.Fatalf("group member access after descendant row removal = %v err = %v, want false", allowedAccess, err)
 	}
 }

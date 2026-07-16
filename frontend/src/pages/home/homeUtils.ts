@@ -871,18 +871,14 @@ export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communi
   return [...folders].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name) || a.folder_id.localeCompare(b.folder_id));
 }
 
-type SharedInboxAccessLevel = "no_access" | "view" | "edit" | "admin";
+type SharedInboxAccessLevel = "no_access" | "edit";
 
 function sharedInboxAccessRank(accessLevel: string | undefined): number {
   switch (accessLevel) {
     case "no_access":
       return 0;
-    case "view":
-      return 1;
     case "edit":
-      return 2;
-    case "admin":
-      return 3;
+      return 1;
     default:
       return 0;
   }
@@ -924,21 +920,21 @@ export function userCanManageSharedInboxStructure(user: SharedInboxAccessUser | 
 function sharedInboxEffectiveAccess(folder: CommunicationsSharedInbox | undefined, userID: string): SharedInboxAccessLevel | "" {
   if (!folder) return "";
   const effective = folder.effective_access_level;
-  if (effective === "no_access" || effective === "view" || effective === "edit" || effective === "admin") return effective;
+  if (effective === "no_access" || effective === "edit") return effective;
   const cleanUserID = userID.trim();
   let best: SharedInboxAccessLevel | "" = "";
   if (!cleanUserID) return best;
   for (const grant of folder.access_grants ?? []) {
     if (grant.subject_type !== "user" || grant.subject_id?.trim() !== cleanUserID) continue;
     const accessLevel = grant.access_level ?? grant.permission;
-    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (accessLevel !== "no_access" && accessLevel !== "edit") continue;
     if (best === "" || sharedInboxAccessRank(accessLevel) > sharedInboxAccessRank(best)) best = accessLevel;
   }
   return best;
 }
 
 export function sharedInboxUserHasRole(folder: CommunicationsSharedInbox | undefined, userID: string): boolean {
-  return sharedInboxAccessRank(sharedInboxEffectiveAccess(folder, userID)) >= sharedInboxAccessRank("view");
+  return sharedInboxAccessRank(sharedInboxEffectiveAccess(folder, userID)) >= sharedInboxAccessRank("edit");
 }
 
 export function sharedInboxUserCanManageMail(folder: CommunicationsSharedInbox | undefined, userID: string, hasFullAccess = false): boolean {

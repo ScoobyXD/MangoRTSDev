@@ -12,7 +12,7 @@ E1 - Explorer V2 root and child reads require a company ID.
 E2 - Explorer V2 supports the all scope and rejects old Me/Team scope behavior.
 E3 - Root reads load the company root containers for the viewer.
 E4 - Child reads require a parent ID that is either the company root or a valid Explorer folder resource ID.
-E5 - Explorer reads return only resources where the viewer has effective view access or higher.
+E5 - Explorer reads return only resources where the viewer has effective edit access or higher.
 E6 - Explorer rows include effective access so the UI can decide available actions.
 E7 - Explorer rows include has-children information for folder rows so the UI can lazy-load folder branches.
 E8 - Explorer rows sort by position, then creation time, then name, then entity ID.
@@ -310,7 +310,7 @@ Given:
 Expected:
 - Every editable permission view visibly exposes **Save** and follows `docs/tests/permissions.md`.
 - Saving persists the current selection without closing the view and reports loading or failure state.
-- Read-only and denied views remain dismissible and do not issue a permission mutation.
+- Denied views remain dismissible and do not issue a permission mutation.
 - Node search rows remain open-only and do not expose Explorer permission or mutation controls.
 
 ### Scenario E-S10: Protected Unfiled Nodes Collaboration Placement

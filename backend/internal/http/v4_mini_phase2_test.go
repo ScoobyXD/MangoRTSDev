@@ -45,7 +45,7 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions visible node: %v", err)
@@ -203,7 +203,7 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 			Permissions: []store.EntityPermissionInput{{
 				SubjectType: store.EntityPermissionSubjectUser,
 				SubjectID:   viewer.UserID,
-				AccessLevel: store.EntityPermissionView,
+				AccessLevel: store.EntityPermissionEdit,
 			}},
 		}); err != nil {
 			t.Fatalf("SetEntityPermissions %s: %v", grant.entityType, err)

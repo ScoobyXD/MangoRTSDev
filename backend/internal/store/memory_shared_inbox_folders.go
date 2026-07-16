@@ -105,11 +105,11 @@ func (r *MemoryRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, user
 			continue
 		}
 		resourceType := CommunicationsSharedInboxResourceType(folder)
-		if !r.userHasEffectiveAccessLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionEdit) {
 			continue
 		}
 		item := r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(folder))
-		item.EffectiveAccess = r.effectiveAccessLevelLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionView)
+		item.EffectiveAccess = r.effectiveAccessLevelLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionEdit)
 		if item.EffectiveAccess == "" {
 			continue
 		}

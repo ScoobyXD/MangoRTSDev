@@ -163,7 +163,7 @@ export type CommunicationsSharedInboxGVICAssignment = {
   created_timestamp: string;
 };
 
-export type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
+export type ResourceAccessLevel = "no_access" | "edit";
 
 export type ResourceAccessGrant = {
   company_id: string;

@@ -26,7 +26,7 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 			items, err = s.repo.ListCommunicationsSharedInboxFolders(companyID)
 			if hasActor && actorCanManageCompany(actor, companyID) {
 				for index := range items {
-					items[index].EffectiveAccess = store.EntityPermissionAdmin
+					items[index].EffectiveAccess = store.EntityPermissionEdit
 				}
 			}
 		}
@@ -283,7 +283,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		if !ok {
 			return
 		}
-		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionView) {
+		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionEdit) {
 			return
 		}
 		folder, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
@@ -480,8 +480,8 @@ func (s *Server) requireCommunicationsSharedInboxAccess(w http.ResponseWriter, r
 	if allowed {
 		return true
 	}
-	if accessLevel != store.EntityPermissionView {
-		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionView)
+	if accessLevel != store.EntityPermissionEdit {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionEdit)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
 			return false

@@ -23,10 +23,10 @@ func TestMemoryVisibleQueriesUseEffectiveAccessDirectGrants(t *testing.T) {
 	editGate := mustCreateVisibleQueryGate(t, repo, companyID, "Edit gate")
 	hiddenGate := mustCreateVisibleQueryGate(t, repo, companyID, "Hidden gate")
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, editNode.NodeID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, editGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 
@@ -93,11 +93,11 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicChild.FolderID, "logic_gate", adminGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicChild.FolderID, "logic_gate", hiddenGate.LogicGateID)
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, editNode.NodeID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, adminGate.LogicGateID, viewer.UserID, EntityPermissionAdmin)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, adminGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 
 	nodes, err := repo.ListVisibleNodesInFolderSubtree(companyID, nodeParent.FolderID, viewer.UserID)
@@ -160,7 +160,7 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicFolder.FolderID, "logic_gate", visibleGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicFolder.FolderID, "logic_gate", hiddenGate.LogicGateID)
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
@@ -241,7 +241,7 @@ func TestMemorySharedTriageVisibilityUsesPermissionsNotGVIC(t *testing.T) {
 	}
 	assertVisibleQueryFoldersDoNotContain(t, folders, folder.FolderID)
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, viewer.UserID, EntityPermissionEdit)
 	folders, err = repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
 		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders permission view: %v", err)
@@ -287,10 +287,10 @@ func TestMemoryVisibleCompanyExplorerFoldersUseFolderPermissions(t *testing.T) {
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicParent.FolderID, "logic_gate", visibleGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, hiddenNestedLogicFolder.FolderID, "logic_gate", hiddenNestedGate.LogicGateID)
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionView)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenFolderNode.NodeID, viewer.UserID, EntityPermissionView)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionView)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenNestedGate.LogicGateID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenFolderNode.NodeID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenNestedGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeCompanyExplorerFolder, hiddenNodeFolder.FolderID, ResourceDefaultAccessNoAccess)
 	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeCompanyExplorerFolder, hiddenNestedLogicFolder.FolderID, ResourceDefaultAccessNoAccess)
 
@@ -407,7 +407,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(companyExplorerSource, "companyid, nil, userid, entitypermissionview") {
+	if strings.Contains(companyExplorerSource, "companyid, nil, userid, entitypermissionedit") {
 		t.Fatalf("Postgres visible company explorer root folder query must not pass an unused $2 parameter")
 	}
 
@@ -422,7 +422,6 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"item_access as",
 		"where item.company_id=$1::text",
 		"mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit')",
-		"mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')",
 		"'shared_inbox_folder'",
 		"'shared_inbox'",
 	} {

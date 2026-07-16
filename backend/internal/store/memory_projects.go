@@ -149,7 +149,7 @@ func (r *MemoryRepo) ListProjects(companyID, viewerUserID string) ([]domain.Proj
 		if project.CompanyID != companyID {
 			continue
 		}
-		if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, project.ProjectID, EntityPermissionView) {
+		if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, project.ProjectID, EntityPermissionEdit) {
 			continue
 		}
 		project = r.withProjectReadModelLocked(project)
@@ -232,7 +232,7 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 	if !ok {
 		return domain.ProjectView{}, ErrNotFound
 	}
-	if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionView) {
+	if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionEdit) {
 		return domain.ProjectView{}, ErrNotFound
 	}
 	projections := make([]domain.ProjectProjection, 0, len(r.projectText[key(companyID, projectID)]))
@@ -262,9 +262,7 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 		CriticalPathCount: len(criticalPath),
 	}
 	if viewerUserID != "" {
-		view.CanView = true
 		view.CanEdit = r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionEdit)
-		view.CanAdmin = r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionAdmin)
 		view.Project.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, viewerUserID, EntityTypeProject, projectID)
 	}
 	return view, nil
@@ -578,7 +576,7 @@ func (r *MemoryRepo) ListProjectRelationshipsForResource(companyID, resourceType
 		if projection.CompanyID != companyID || projection.ResourceType != resourceType || projection.ResourceID != resourceID {
 			continue
 		}
-		if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projection.ProjectID, EntityPermissionView) {
+		if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projection.ProjectID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, cloneProjectRelationshipProjection(projection))
@@ -683,10 +681,10 @@ func (r *MemoryRepo) projectRelationshipProjectionsForViewerLocked(companyID, pr
 	for _, projection := range r.projectRelationshipProjection {
 		if projection.CompanyID == companyID && projection.ProjectID == projectID {
 			if viewerUserID != "" {
-				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projection.ProjectID, EntityPermissionView) {
+				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projection.ProjectID, EntityPermissionEdit) {
 					continue
 				}
-				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionView) {
+				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionEdit) {
 					continue
 				}
 			}
@@ -723,7 +721,7 @@ func (r *MemoryRepo) withProjectCriticalPathReadModelLocked(step domain.ProjectC
 		if projection, ok := r.projectRelationshipProjection[projectRelationshipKey(step.CompanyID, *step.RelationshipID)]; ok {
 			canAttach := true
 			if viewerUserID != "" {
-				canAttach = r.userHasEffectiveAccessLocked(step.CompanyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionView)
+				canAttach = r.userHasEffectiveAccessLocked(step.CompanyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionEdit)
 			}
 			if canAttach {
 				step.ResourceType = projection.ResourceType

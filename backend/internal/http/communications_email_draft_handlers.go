@@ -116,7 +116,7 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 	scope := resolvedCommunicationsEmailScope{}
 	scopeAvailable := false
 	if strings.TrimSpace(sharedInboxID) != "" || normalizeEmailForCompare(accountEmail) != "" {
-		scope, scopeAvailable = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionView)
+		scope, scopeAvailable = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionEdit)
 		if !scopeAvailable {
 			return
 		}
@@ -168,7 +168,7 @@ func (s *Server) handleCommunicationsEmailDraftGet(w http.ResponseWriter, r *htt
 	scope := resolvedCommunicationsEmailScope{}
 	scopeAvailable := false
 	if strings.TrimSpace(sharedInboxID) != "" || normalizeEmailForCompare(accountEmail) != "" {
-		scope, scopeAvailable = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionView)
+		scope, scopeAvailable = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionEdit)
 		if !scopeAvailable {
 			return
 		}
@@ -379,7 +379,7 @@ func (s *Server) handleCommunicationsEmailSignatureGet(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionView)
+	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)
 	if !ok {
 		return
 	}

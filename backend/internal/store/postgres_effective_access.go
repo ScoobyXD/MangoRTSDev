@@ -280,9 +280,9 @@ with requested(resource_id) as (
 )
 select requested.resource_id::text,
        case
-         when (select allowed from admin_actor) then 'admin'
+         when (select allowed from admin_actor) then 'edit'
          when mangorts_user_can_access_resource($1::uuid, $3::text, requested.resource_id, $2::uuid, 'edit') then 'edit'
-         when mangorts_user_can_access_resource($1::uuid, $3::text, requested.resource_id, $2::uuid, 'view') then 'view'
+         when mangorts_user_can_access_resource($1::uuid, $3::text, requested.resource_id, $2::uuid, 'edit') then 'edit'
          else 'no_access'
        end
 from requested`,

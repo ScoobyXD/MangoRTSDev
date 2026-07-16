@@ -531,12 +531,12 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 
 func (r *MemoryRepo) userCanReadMyWorkProjectionContextLocked(companyID, viewerUserID string, row GVICMatrixProjectionRow) bool {
 	if row.LogicGateID != nil && strings.TrimSpace(*row.LogicGateID) != "" {
-		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeLogicGate, strings.TrimSpace(*row.LogicGateID), EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeLogicGate, strings.TrimSpace(*row.LogicGateID), EntityPermissionEdit) {
 			return false
 		}
 	}
 	if strings.TrimSpace(row.ProjectID) != "" {
-		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, strings.TrimSpace(row.ProjectID), EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, strings.TrimSpace(row.ProjectID), EntityPermissionEdit) {
 			return false
 		}
 	}

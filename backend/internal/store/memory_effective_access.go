@@ -278,7 +278,7 @@ func (r *MemoryRepo) userHasEffectiveAccessLocked(companyID, userID, resourceTyp
 
 func (r *MemoryRepo) effectiveAccessLevelForUserLocked(companyID, userID, resourceType, resourceID string) string {
 	if r.userHasRoleAdminAccessLocked(companyID, userID) {
-		return EntityPermissionAdmin
+		return EntityPermissionEdit
 	}
 	if r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, EntityPermissionEdit) {
 		return EntityPermissionEdit
@@ -296,9 +296,6 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 	}
 	switch resourceType {
 	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
-		if accessLevel == EntityPermissionAdmin {
-			return false
-		}
 		if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
 			return false
 		}

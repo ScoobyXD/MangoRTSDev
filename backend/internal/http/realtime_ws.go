@@ -407,7 +407,7 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		return false, "resource_not_found", nil
 	}
 	if sharedInboxID := realtimeSharedMailboxIDFromScope(scope); sharedInboxID != "" {
-		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionEdit)
 	}
 	if nodeID := realtimeChatNodeIDFromScope(scope); nodeID != "" {
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
@@ -417,7 +417,7 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		if logicGateID == "" {
 			return false, "unsupported_scope", nil
 		}
-		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 	}
 	if document, ok := realtimeEditorDocumentFromScope(companyID, scope); ok {
 		return s.authorizeRealtimeEntityScope(actor, companyID, document.ResourceType, document.ResourceID, store.EntityPermissionEdit)

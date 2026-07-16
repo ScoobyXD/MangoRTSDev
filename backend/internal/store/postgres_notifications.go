@@ -58,35 +58,35 @@ const notificationRecipientVisibilityWhereSQL = `
           'logic_gate',
           notifications.logic_gate_id::uuid,
           notifications.recipient_user_id,
-          'view'
+          'edit'
         )
         when btrim(node_id) <> '' then mangorts_user_can_access_resource(
           notifications.company_id,
           'node',
           notifications.node_id::uuid,
           notifications.recipient_user_id,
-          'view'
+          'edit'
         )
         when entity_type = 'logic_gate' then mangorts_user_can_access_resource(
           notifications.company_id,
           'logic_gate',
           notifications.entity_id::uuid,
           notifications.recipient_user_id,
-          'view'
+          'edit'
         )
         when entity_type = 'node' then mangorts_user_can_access_resource(
           notifications.company_id,
           'node',
           notifications.entity_id::uuid,
           notifications.recipient_user_id,
-          'view'
+          'edit'
         )
         when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder', 'shared_inbox') then mangorts_user_can_access_resource(
           notifications.company_id,
           case when entity_type='shared_inbox' then 'shared_inbox' else 'shared_inbox_folder' end,
           notifications.entity_id::uuid,
           notifications.recipient_user_id,
-          'view'
+          'edit'
         )
         else true
       end
@@ -147,6 +147,13 @@ returning `+notificationSelectColumns,
 			return nil, err
 		}
 		created = append(created, item)
+		outboxInput, err := notificationCreatedOutboxInput(item)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -371,10 +378,17 @@ func (r *PostgresRepo) DeleteNotifications(input NotificationDeleteInput) ([]dom
 	input.Role = strings.TrimSpace(input.Role)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
-	if input.UserID == "" {
+	input.RealtimeMode = strings.TrimSpace(input.RealtimeMode)
+	if input.UserID == "" || (input.RealtimeMode != "" && input.RealtimeMode != NotificationRealtimeDeleteEach && input.RealtimeMode != NotificationRealtimeClear) {
 		return nil, ErrInvalid
 	}
-	rows, err := r.db.Query(`
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
 delete from notifications
 where recipient_user_id=$1::uuid
   and ($2 = '' or company_id = nullif($2, '')::uuid)
@@ -413,6 +427,18 @@ returning `+notificationSelectColumns,
 	if input.NotificationID != "" && len(deleted) == 0 {
 		return nil, ErrNotFound
 	}
+	outboxInputs, err := notificationDeletionOutboxInputs(deleted, input.RealtimeMode)
+	if err != nil {
+		return nil, err
+	}
+	for _, outboxInput := range outboxInputs {
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return deleted, nil
 }
 
@@ -421,7 +447,13 @@ func (r *PostgresRepo) DeleteExpiredNotifications(olderThan time.Time, limit int
 		return nil, ErrInvalid
 	}
 	limit = NormalizeNotificationCleanupLimit(limit)
-	rows, err := r.db.Query(`
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
 with expired as (
   select notification_id
   from notifications
@@ -451,5 +483,20 @@ order by created_timestamp asc, notification_id asc`, olderThan.UTC(), limit)
 		}
 		deleted = append(deleted, item)
 	}
-	return deleted, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	outboxInputs, err := notificationDeletionOutboxInputs(deleted, NotificationRealtimeDeleteEach)
+	if err != nil {
+		return nil, err
+	}
+	for _, outboxInput := range outboxInputs {
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }

@@ -54,9 +54,7 @@ function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewRespo
     information_count: payload.information_count,
     relationships_count: payload.relationships_count,
     effective_access_level: payload.effective_access_level ?? payload.logic_gate?.effective_access_level,
-    can_view: payload.can_view,
     can_edit: payload.can_edit,
-    can_admin: payload.can_admin,
   };
   detailsCache.set(cacheKey, details);
   projectionCache.set(cacheKey, payload.projections ?? []);
@@ -163,9 +161,7 @@ export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: stri
       information_count: 0,
       relationships_count: entry.relationships?.length ?? 0,
       effective_access_level: entry.logicGate.effective_access_level,
-      can_view: entry.logicGate.can_view,
       can_edit: entry.logicGate.can_edit,
-      can_admin: entry.logicGate.can_admin,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
   }

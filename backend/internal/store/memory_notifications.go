@@ -77,7 +77,7 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if !r.entityExistsLocked(companyID, target.EntityType, target.EntityID) {
 		return false
 	}
-	if !r.userHasEffectiveAccessLocked(companyID, userID, target.EntityType, target.EntityID, EntityPermissionView) {
+	if !r.userHasEffectiveAccessLocked(companyID, userID, target.EntityType, target.EntityID, EntityPermissionEdit) {
 		return false
 	}
 	return true
@@ -108,6 +108,18 @@ func notificationRoleSummaryTargetKey(item domain.Notification) string {
 func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	notificationsBefore := cloneMemoryMap(r.notifications)
+	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
+	outboxSequenceBefore := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		r.notifications = notificationsBefore
+		r.realtimeOutbox = outboxBefore
+		r.realtimeOutboxSequence = outboxSequenceBefore
+	}()
 
 	created := make([]domain.Notification, 0, len(input.Notifications))
 	for _, candidate := range input.Notifications {
@@ -125,7 +137,7 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
 		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
 		candidate.InformationID = strings.TrimSpace(candidate.InformationID)
-		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
+		if candidate.CompanyID == "" || candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
 		duplicate := false
@@ -158,8 +170,16 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 			CreatedTimestamp: now,
 		}
 		r.notifications[item.NotificationID] = item
+		outboxInput, err := notificationCreatedOutboxInput(item)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return nil, err
+		}
 		created = append(created, cloneNotification(item))
 	}
+	committed = true
 	return created, nil
 }
 
@@ -426,12 +446,25 @@ func (r *MemoryRepo) DeleteNotifications(input NotificationDeleteInput) ([]domai
 	input.Role = strings.TrimSpace(input.Role)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
-	if input.UserID == "" {
+	input.RealtimeMode = strings.TrimSpace(input.RealtimeMode)
+	if input.UserID == "" || (input.RealtimeMode != "" && input.RealtimeMode != NotificationRealtimeDeleteEach && input.RealtimeMode != NotificationRealtimeClear) {
 		return nil, ErrInvalid
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	notificationsBefore := cloneMemoryMap(r.notifications)
+	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
+	outboxSequenceBefore := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		r.notifications = notificationsBefore
+		r.realtimeOutbox = outboxBefore
+		r.realtimeOutboxSequence = outboxSequenceBefore
+	}()
 
 	deleted := make([]domain.Notification, 0)
 	for id, item := range r.notifications {
@@ -474,9 +507,18 @@ func (r *MemoryRepo) DeleteNotifications(input NotificationDeleteInput) ([]domai
 		}
 		return strings.Compare(a.NotificationID, b.NotificationID)
 	})
+	outboxInputs, err := notificationDeletionOutboxInputs(deleted, input.RealtimeMode)
+	if err != nil {
+		return nil, err
+	}
+	for _, outboxInput := range outboxInputs {
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return nil, err
+		}
+	}
+	committed = true
 	return deleted, nil
 }
-
 func (r *MemoryRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) ([]domain.Notification, error) {
 	if olderThan.IsZero() {
 		return nil, ErrInvalid
@@ -485,6 +527,18 @@ func (r *MemoryRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) 
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	notificationsBefore := cloneMemoryMap(r.notifications)
+	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
+	outboxSequenceBefore := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		r.notifications = notificationsBefore
+		r.realtimeOutbox = outboxBefore
+		r.realtimeOutboxSequence = outboxSequenceBefore
+	}()
 
 	candidates := make([]domain.Notification, 0)
 	for _, item := range r.notifications {
@@ -509,5 +563,15 @@ func (r *MemoryRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) 
 		delete(r.notifications, item.NotificationID)
 		deleted = append(deleted, cloneNotification(item))
 	}
+	outboxInputs, err := notificationDeletionOutboxInputs(deleted, NotificationRealtimeDeleteEach)
+	if err != nil {
+		return nil, err
+	}
+	for _, outboxInput := range outboxInputs {
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return nil, err
+		}
+	}
+	committed = true
 	return deleted, nil
 }

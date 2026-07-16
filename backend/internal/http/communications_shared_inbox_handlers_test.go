@@ -327,7 +327,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPerm
 	if len(payload.AccessGrants) != 0 {
 		t.Fatalf("assignments-only access update created compatibility grants: %+v", payload.AccessGrants)
 	}
-	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionView)
+	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionEdit)
 	if err != nil {
 		t.Fatalf("UserHasEffectiveAccess: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestCommunicationsSharedInboxManagerCanManageAccess(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"permissions": []map[string]string{
-			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": targetUser.UserID, "access_level": store.EntityPermissionView},
+			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": targetUser.UserID, "access_level": store.EntityPermissionEdit},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))
@@ -393,7 +393,7 @@ func TestCommunicationsSharedInboxManagerCanManageAccess(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT shared inbox access as manager status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	allowed, err := repo.UserHasEffectiveAccess(companyID, targetUser.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionView)
+	allowed, err := repo.UserHasEffectiveAccess(companyID, targetUser.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionEdit)
 	if err != nil {
 		t.Fatalf("UserHasEffectiveAccess target: %v", err)
 	}

@@ -300,7 +300,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			stop = timings.observeAccounted("events.publish.enqueue")
-			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			s.publishCommittedWorkspaceEvents(result.Events)
 			s.publishCapturedKanbanDeletes(companyID, capturedBoardDeletes)
 			stop()
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})

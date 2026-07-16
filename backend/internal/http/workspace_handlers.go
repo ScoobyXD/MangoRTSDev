@@ -912,8 +912,11 @@ func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
 }
 
 func (s *Server) publishCommittedWorkspaceEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
+	if len(events) == 0 {
+		return
+	}
 	stop := timings.observeAccounted("events.publish")
-	s.publishKanbanChangesForEvents(events)
+	s.wakeRealtimeSpine()
 	stop()
 }
 

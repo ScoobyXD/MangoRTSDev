@@ -135,9 +135,7 @@ export type ProjectView = {
   information_count?: number;
   projection_count?: number;
   critical_path_count?: number;
-  can_view?: boolean;
   can_edit?: boolean;
-  can_admin?: boolean;
 };
 
 export type ProjectMutationResponse = {

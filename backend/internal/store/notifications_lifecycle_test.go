@@ -28,8 +28,8 @@ func TestDeleteExpiredNotificationsRemovesOnlyOldNotificationRows(t *testing.T) 
 		Permissions: []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: EntityPermissionView,
-			Permission:  EntityPermissionView,
+			AccessLevel: EntityPermissionEdit,
+			Permission:  EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -104,8 +104,8 @@ func TestNotificationReadStateDoesNotRemoveFeedRow(t *testing.T) {
 		Permissions: []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: EntityPermissionView,
-			Permission:  EntityPermissionView,
+			AccessLevel: EntityPermissionEdit,
+			Permission:  EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)

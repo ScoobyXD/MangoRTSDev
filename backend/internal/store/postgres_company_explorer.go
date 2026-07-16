@@ -316,9 +316,9 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		                  membership.role='dev_admin'
 		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
 		                )
-		            ) then 'admin'
+		            ) then 'edit'
 		            when mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $2::uuid, 'edit') then 'edit'
-		            else 'view'
+		            else 'edit'
 		          end as access_level
 		   from company_explorer_folders folder
 		   where folder.company_id=$1::uuid
@@ -335,9 +335,9 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		                  membership.role='dev_admin'
 		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
 		                )
-		            ) then 'admin'
+		            ) then 'edit'
 		            when mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $2::uuid, 'edit') then 'edit'
-		            else 'view'
+		            else 'edit'
 		          end as access_level
 		   from company_explorer_folders child
 		   join visible_workspace_folder parent
@@ -351,7 +351,7 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		 join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
 		 where folder.company_id=$1::uuid
 		 order by folder.position asc, folder.created_timestamp asc`,
-		companyID, userID, EntityPermissionView,
+		companyID, userID, EntityPermissionEdit,
 	)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
@@ -468,9 +468,9 @@ with recursive subtree as (
                  membership.role='dev_admin'
                  or (membership.company_id=$1::uuid and membership.role='company_admin')
                )
-           ) then 'admin'
+           ) then 'edit'
            when mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $3::uuid, 'edit') then 'edit'
-           else 'view'
+           else 'edit'
          end as access_level
   from subtree
   where mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $3::uuid, $4)
@@ -479,7 +479,7 @@ select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.
        visible_workspace_folder.access_level
 from subtree
 join visible_workspace_folder on visible_workspace_folder.resource_id=subtree.folder_id
-order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, userID, EntityPermissionView)
+order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, userID, EntityPermissionEdit)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryVisibleCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, userID, false)
@@ -903,6 +903,11 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
+	events, err := r.appendDomainEventsTx(ctx, tx, companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false))
+	if err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	result.Events = events
 
 	recycleCandidates := make([]companyExplorerRecycleRootScope, 0, len(recycleRoots))
 	for index := range recycleRoots {
@@ -1528,7 +1533,7 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		     $5
 		   )
 		 order by item.position asc, item.created_timestamp asc`,
-		companyID, folderParam, itemTypeParam, userID, EntityPermissionView,
+		companyID, folderParam, itemTypeParam, userID, EntityPermissionEdit,
 	)
 	if err != nil {
 		return nil, err
@@ -1654,7 +1659,7 @@ where item.company_id=$1::uuid
     $4::uuid,
     $5
   )
-order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam, userID, EntityPermissionView)
+order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam, userID, EntityPermissionEdit)
 	if err != nil {
 		return nil, err
 	}
@@ -1717,7 +1722,7 @@ from nodes n
 `+nodeStatusJoin+`
 where n.company_id=$1::uuid
   and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $2::uuid, $3)
-order by n.created_timestamp asc, n.node_id::text asc`, companyID, userID, EntityPermissionView)
+order by n.created_timestamp asc, n.node_id::text asc`, companyID, userID, EntityPermissionEdit)
 	if err != nil {
 		return nil, err
 	}
@@ -1791,7 +1796,7 @@ select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 from logic_gates gate
 where gate.company_id=$1::uuid
   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $2::uuid, $3)
-order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, userID, EntityPermissionView)
+order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, userID, EntityPermissionEdit)
 	if err != nil {
 		return nil, err
 	}
@@ -1877,7 +1882,7 @@ from logic_gates gate
 join folder_gates visible on visible.logic_gate_id=gate.logic_gate_id
 where gate.company_id=$1::uuid
   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $3::uuid, $4)
-order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, folderID, userID, EntityPermissionView)
+order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, folderID, userID, EntityPermissionEdit)
 	if err != nil {
 		return nil, err
 	}

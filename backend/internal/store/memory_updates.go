@@ -84,7 +84,7 @@ func (r *MemoryRepo) updatesBuildContextLocked(input UpdatesQuery, items []domai
 		if projection.CompanyID != input.CompanyID {
 			continue
 		}
-		if input.UserID != "" && !r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeProject, projection.ProjectID, EntityPermissionView) {
+		if input.UserID != "" && !r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeProject, projection.ProjectID, EntityPermissionEdit) {
 			continue
 		}
 		projectName := strings.TrimSpace(projection.ProjectName)

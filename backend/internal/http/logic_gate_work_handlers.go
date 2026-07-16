@@ -84,7 +84,7 @@ func (s *Server) logicGateWorkETag(_ *http.Request, companyID, logicGateID, acto
 	if err != nil {
 		return "", err
 	}
-	permissionKey := strconv.FormatBool(flags.CanView) + ":" + strconv.FormatBool(flags.CanEdit) + ":" + strconv.FormatBool(flags.CanAdmin)
+	permissionKey := strconv.FormatBool(flags.CanEdit)
 	return strongETagFromString(
 		"logic-gate-work:v3:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" + strconv.FormatInt(version, 10),
@@ -95,7 +95,7 @@ func (s *Server) requireLogicGateWorkReadAccess(w http.ResponseWriter, r *http.R
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		if s.authValidator == nil {
-			return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, "", true
+			return domain.EffectiveAccessFlags{CanEdit: true}, "", true
 		}
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return domain.EffectiveAccessFlags{}, "", false
@@ -106,7 +106,7 @@ func (s *Server) requireLogicGateWorkReadAccess(w http.ResponseWriter, r *http.R
 	}
 	actorUserID := strings.TrimSpace(actor.User.UserID)
 	if actorCanManageCompany(actor, companyID) {
-		return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, actorUserID, true
+		return domain.EffectiveAccessFlags{CanEdit: true}, actorUserID, true
 	}
 	flags, err := s.repo.LogicGateWorkAccessFlags(companyID, actorUserID, logicGateID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -118,7 +118,7 @@ func (s *Server) requireLogicGateWorkReadAccess(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_check_logic_gate_access")
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
-	if !flags.CanView {
+	if !flags.CanEdit {
 		writeAccessResourceNotFound(w)
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
@@ -488,18 +488,6 @@ func (s *Server) requireLogicGateWorkEffectiveAccess(w http.ResponseWriter, r *h
 	}
 	if hasAccess {
 		return true
-	}
-	if accessLevel == store.EntityPermissionEdit || accessLevel == store.EntityPermissionAdmin {
-		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
-		if err != nil {
-			log.Printf("failed to check v2 logic gate work view fallback company_id=%s logic_gate_id=%s user_id=%s: %v", companyID, logicGateID, actor.User.UserID, err)
-			writeError(w, http.StatusInternalServerError, "failed_to_check_logic_gate_access")
-			return false
-		}
-		if canView {
-			writeAccessActionDenied(w)
-			return false
-		}
 	}
 	writeAccessResourceNotFound(w)
 	return false

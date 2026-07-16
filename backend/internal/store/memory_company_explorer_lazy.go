@@ -92,7 +92,7 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateChildRows(query CompanyExplorer
 		if assignment.CompanyID != query.CompanyID || assignment.LogicGateID != query.ParentID || seen[assignment.NodeID] {
 			continue
 		}
-		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeNode, assignment.NodeID, EntityPermissionView) {
+		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeNode, assignment.NodeID, EntityPermissionEdit) {
 			continue
 		}
 		node, ok := r.nodes[key(query.CompanyID, assignment.NodeID)]
@@ -128,7 +128,7 @@ func (r *MemoryRepo) companyExplorerLazyAppendRootEntitiesLocked(query CompanyEx
 		if node.CompanyID != query.CompanyID || assignedNodes[node.NodeID] {
 			continue
 		}
-		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeNode, node.NodeID, EntityPermissionEdit) {
 			continue
 		}
 		if !r.companyExplorerLazyNodeMatchesScopeLocked(query, node) {
@@ -141,7 +141,7 @@ func (r *MemoryRepo) companyExplorerLazyAppendRootEntitiesLocked(query CompanyEx
 		if gate.CompanyID != query.CompanyID || assignedLogicGates[gate.LogicGateID] {
 			continue
 		}
-		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
 		if !r.companyExplorerLazyLogicGateMatchesScopeLocked(query, gate.LogicGateID) {
@@ -154,7 +154,7 @@ func (r *MemoryRepo) companyExplorerLazyAppendRootEntitiesLocked(query CompanyEx
 		if project.CompanyID != query.CompanyID || assignedProjects[project.ProjectID] {
 			continue
 		}
-		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeProject, project.ProjectID, EntityPermissionView) {
+		if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeProject, project.ProjectID, EntityPermissionEdit) {
 			continue
 		}
 		if !r.companyExplorerLazyProjectMatchesScopeLocked(query, project.ProjectID) {
@@ -195,7 +195,7 @@ func (r *MemoryRepo) companyExplorerLazyFolderIncludedLocked(query CompanyExplor
 	if !r.companyExplorerLazyFolderMatchesScopeLocked(query, folder) {
 		return false
 	}
-	if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
+	if query.PermissionUserID != "" && !r.userHasEffectiveAccessLocked(query.CompanyID, query.PermissionUserID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit) {
 		return false
 	}
 	return true
@@ -206,7 +206,7 @@ func (r *MemoryRepo) companyExplorerLazyFolderWithAccessLocked(query CompanyExpl
 		return folder
 	}
 	item := folder
-	item.EffectiveAccess = r.effectiveAccessLevelLocked(query.CompanyID, query.PermissionUserID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView)
+	item.EffectiveAccess = r.effectiveAccessLevelLocked(query.CompanyID, query.PermissionUserID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit)
 	return item
 }
 

@@ -24,7 +24,7 @@ KB6 - Generic Kanban board card APIs remain node-card APIs. Logic Gate work stat
 KB7 - Deleting a node from Kanban uses node soft-delete semantics: the actor must have edit access to the node, the node moves to that actor's Recycle Bin, and Kanban card placements plus Logic Gate Kanban projection rows are removed.
 KB8 - Deleting a Logic Gate removes the Logic Gate Kanban board/work placements owned by that Logic Gate.
 KB9 - Logic Gate Kanban board reads must be permission-filtered by the owning Logic Gate.
-KB10 - Users without current View access to the existing same-company owning Logic Gate must not receive card rows, `kanban.changed` hints, saved board state, or card metadata. Admission proves resource existence separately from any administrator override, and every publication re-resolves the exact current View audience so revocation after subscription suppresses later hints without reconnecting.
+KB10 - Users without current Edit access to the existing same-company owning Logic Gate must not receive card rows, `kanban.changed` hints, saved board state, or card metadata. Admission proves resource existence separately from any administrator override, and every publication re-resolves the exact current Edit audience so revocation after subscription suppresses later hints without reconnecting.
 
 ### Columns, Status, And Card State
 
@@ -160,7 +160,7 @@ KB122 - Logic Gate boards and columns remain synthesized contract data rather th
 KB123 - Ordinary `node_updated` processing performs no Kanban projection-row lookup when that company has no relevant local board subscriber. With a mounted board subscriber, it resolves affected boards and preserves exact board-scoped publication correctness.
 KB124 - Every successful Kanban Node rename, and a Kanban board title rename that commits the owning Logic Gate header, publishes the concrete committed-title event after commit. Kanban's matching card or board label converges locally, and other applicable same-window consumers converge under RW15. No broad server event is added; active title drafts/carets and passive dock/pin metadata remain intact.
 KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announces the exact source and destination board IDs only after commit. Mounted boards route both local command events and authorized `kanban.changed` hints through the same debounced single-flight canonical work loader, so the source card disappears immediately, destination/current projections converge, duplicate hints coalesce, and a failed command cannot leave false optimistic board state.
-KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked View access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
+KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked Edit access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
 KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
 KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
 
@@ -500,7 +500,7 @@ Business logic covered:
 Given:
 - Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching current-selection event.
 - The user quickly selects Logic Gate B and may then return to A.
-- The board subscription is first accepted, compact hints arrive while a canonical read is slow, the socket later reconnects, another local board handler may join the accepted scope, and one legitimately subscribed viewer then loses owning-Logic-Gate View access.
+- The board subscription is first accepted, compact hints arrive while a canonical read is slow, the socket later reconnects, another local board handler may join the accepted scope, and one legitimately subscribed viewer then loses owning-Logic-Gate Edit access.
 - The same Node is renamed successfully from Kanban while other title-bearing surfaces are mounted.
 - An ordinary `node_updated` is published once with no local board subscriber and once with a relevant mounted board subscriber.
 
@@ -509,7 +509,7 @@ Expected:
 - Forced-prop and current-selection paths do not create a second request or duplicate snapshot application.
 - Selecting B aborts A's obsolete request; an old A response cannot overwrite B or a newer A generation.
 - First/reconnect/late-handler acceptance and hints use one active guarded loader plus at most one queued final request; the canonical response refreshes rendered and cached minimal cards, including `created_from_email`.
-- Publication resolves the current exact owning-Logic-Gate View audience; the revoked subscriber receives no later hint while still-authorized mounted viewers do.
+- Publication resolves the current exact owning-Logic-Gate Edit audience; the revoked subscriber receives no later hint while still-authorized mounted viewers do.
 - The no-subscriber publish does not query Kanban projection rows; the mounted-board case preserves exact affected-board lookup and delivery.
 - Each successful Kanban Node/owning-Logic-Gate title rename publishes one committed-title event and non-edited mounted labels converge without changing dirty editor text or an active title draft/caret.
 - Duplicate acceptance/hint work does not create concurrent or abort/restarted `/work` requests.
@@ -541,7 +541,7 @@ Business logic covered:
 - KB126
 
 Given:
-- A Logic Gate board is mounted by one currently authorized local viewer and one local connection without View access.
+- A Logic Gate board is mounted by one currently authorized local viewer and one local connection without Edit access.
 - The delete command captures publication state, commits the Logic Gate deletion, and publishes afterward.
 
 Expected:

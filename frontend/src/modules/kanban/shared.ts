@@ -186,9 +186,7 @@ export type LogicGateArenaLogicGate = {
 };
 
 export type LogicGateArenaPermissions = {
-  can_view: boolean;
   can_edit: boolean;
-  can_admin: boolean;
 };
 
 export type LogicGateArenaCard = {

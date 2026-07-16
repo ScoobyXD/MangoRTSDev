@@ -319,7 +319,7 @@ func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain
 		 where gate.company_id=$1::uuid
 		   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $2::uuid, $3::text)
 		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
-		companyID, userID, EntityPermissionView,
+		companyID, userID, EntityPermissionEdit,
 	)
 	if err != nil {
 		return nil, err
@@ -427,7 +427,7 @@ func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID,
 		 where gate.company_id=$1::uuid
 		   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $3::uuid, $4::text)
 		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
-		companyID, folderID, userID, EntityPermissionView,
+		companyID, folderID, userID, EntityPermissionEdit,
 	)
 	if err != nil {
 		return nil, err
@@ -560,7 +560,7 @@ func (r *PostgresRepo) QueryVisibleLogicGates(companyID, userID string, query Lo
 		return nil, ErrInvalid
 	}
 
-	args := []any{companyID, userID, EntityPermissionView}
+	args := []any{companyID, userID, EntityPermissionEdit}
 	conditions := []string{"logic_gate.company_id = $1::uuid"}
 	search := strings.ToLower(strings.TrimSpace(query.Search))
 	if search != "" {

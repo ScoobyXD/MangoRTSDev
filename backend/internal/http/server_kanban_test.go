@@ -198,10 +198,10 @@ func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionNoAccess,
 		}},
 	}); err != nil {
-		t.Fatalf("SetEntityPermissions view: %v", err)
+		t.Fatalf("SetEntityPermissions no access: %v", err)
 	}
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
@@ -231,8 +231,8 @@ func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/cards/"+result.Card.CardID+"?company_id="+companyID+"&board_id="+boardID, nil)
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusForbidden {
-		t.Fatalf("DELETE with view permission plus GVIC status = %d body=%s, want 403", deleteRec.Code, deleteRec.Body.String())
+	if deleteRec.Code != http.StatusNotFound {
+		t.Fatalf("DELETE with no access plus GVIC status = %d body=%s, want hidden 404", deleteRec.Code, deleteRec.Body.String())
 	}
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{

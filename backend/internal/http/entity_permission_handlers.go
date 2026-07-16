@@ -73,8 +73,8 @@ func (s *Server) requireEntityAccess(w http.ResponseWriter, r *http.Request, com
 	if allowed {
 		return true
 	}
-	if accessLevel != store.EntityPermissionView {
-		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, entityType, entityID, store.EntityPermissionView)
+	if accessLevel != store.EntityPermissionEdit {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, entityType, entityID, store.EntityPermissionEdit)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 			return false
@@ -97,7 +97,7 @@ func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, compa
 	if userID == "" {
 		return true
 	}
-	allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, store.EntityPermissionView)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, store.EntityPermissionEdit)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 		return false
@@ -118,7 +118,7 @@ func (s *Server) requireEntityEdit(w http.ResponseWriter, r *http.Request, compa
 }
 
 func (s *Server) requireEntityAdmin(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, notFoundCode string) bool {
-	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionAdmin, notFoundCode)
+	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionEdit, notFoundCode)
 }
 
 func (s *Server) actorCanEditEntityPermissions(actor ActorContext, companyID, entityType, entityID string) (bool, error) {
@@ -153,7 +153,7 @@ func (s *Server) visibleEntityIDSet(r *http.Request, companyID, entityType strin
 		}
 		return out, nil
 	}
-	return s.repo.ListEffectiveResourceIDsForUser(companyID, userID, entityType, store.EntityPermissionView, cleanIDs)
+	return s.repo.ListEffectiveResourceIDsForUser(companyID, userID, entityType, store.EntityPermissionEdit, cleanIDs)
 }
 
 func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []domain.Node) ([]domain.Node, error) {
@@ -456,8 +456,8 @@ func (s *Server) requireKanbanLogicGateEffectiveAccess(w http.ResponseWriter, co
 	if allowed {
 		return true
 	}
-	if accessLevel != store.EntityPermissionView {
-		canView, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+	if accessLevel != store.EntityPermissionEdit {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 			return false
@@ -476,7 +476,7 @@ func (s *Server) requireKanbanLogicGateEffectiveAccess(w http.ResponseWriter, co
 }
 
 func (s *Server) requireKanbanBoardView(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID string) bool {
-	return s.requireKanbanBoardAccess(w, r, companyID, boardID, logicGateID, store.EntityPermissionView)
+	return s.requireKanbanBoardAccess(w, r, companyID, boardID, logicGateID, store.EntityPermissionEdit)
 }
 
 func (s *Server) requireKanbanBoardEdit(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID string) bool {
@@ -766,7 +766,7 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 				continue
 			}
 			if domain.CanBypassResourcePermissions(user.Role) {
-				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionAdmin})
+				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionEdit})
 				continue
 			}
 			allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, store.EntityPermissionEdit)
@@ -781,7 +781,7 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 		}
 		return out, nil
 	}
-	levels := []string{store.EntityPermissionAdmin, store.EntityPermissionEdit, store.EntityPermissionView}
+	levels := []string{store.EntityPermissionEdit}
 	out := make([]map[string]string, 0, len(users))
 	for _, user := range users {
 		userID := strings.TrimSpace(user.UserID)

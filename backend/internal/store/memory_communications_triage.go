@@ -562,6 +562,15 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeState := r.snapshotRecycleStateLocked()
+	beforeTriageItems := cloneMap(r.triageItems)
+	committed := false
+	defer func() {
+		if !committed {
+			r.restoreRecycleSnapshotLocked(beforeState)
+			r.triageItems = beforeTriageItems
+		}
+	}()
 
 	linkKey := emailNodeLinkKey(input.CompanyID, input.BoardID, input.CardID)
 	link, ok := r.emailNodeLinks[linkKey]
@@ -579,12 +588,20 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 	r.triageItems[triageItemKey(input.UserID, link.MessageID)] = triageItem
 
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, linkKey, link)
-
+	events, err := r.appendDomainEventsLocked([]DomainEventInput{
+		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": input.BoardID, "card_id": input.CardID}),
+		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
+	})
+	if err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
+	committed = true
 	return CommunicationsTriageRevertResult{
 		TriageItem:    triageItem,
 		DeletedNodeID: link.NodeID,
 		DeletedCardID: input.CardID,
 		BoardID:       input.BoardID,
+		Events:        events,
 	}, nil
 }
 
@@ -596,6 +613,13 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeState := r.snapshotRecycleStateLocked()
+	committed := false
+	defer func() {
+		if !committed {
+			r.restoreRecycleSnapshotLocked(beforeState)
+		}
+	}()
 
 	sourceKey := emailNodeLinkKey(input.CompanyID, input.SourceBoardID, input.SourceCardID)
 	sourceLink, ok := r.emailNodeLinks[sourceKey]
@@ -629,6 +653,15 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 	r.emailNodeLinks[attachmentKey] = attachmentLink
 	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.SharedInboxID, sourceLink.AccountEmail, sourceLink.Message, now, false)
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
+	events, err := r.appendDomainEventsLocked([]DomainEventInput{
+		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": sourceLink.BoardID, "card_id": sourceLink.CardID}),
+		nodeDeletedWorkspaceEventInput(input.CompanyID, sourceLink.NodeID),
+		workspaceDomainEventInput(input.CompanyID, "node_updated", map[string]any{"node_id": targetCard.NodeID}),
+	})
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	committed = true
 
 	return CommunicationsEmailNodeTransferResult{
 		EmailPlacement: domain.CommunicationsEmailPlacement{
@@ -648,6 +681,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 		TargetNodeID:  targetCard.NodeID,
 		TargetBoardID: targetCard.BoardID,
 		TargetCardID:  targetCard.CardID,
+		Events:        events,
 	}, nil
 }
 

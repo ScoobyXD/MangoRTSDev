@@ -633,9 +633,7 @@ type NodeDetails struct {
 }
 
 type EffectiveAccessFlags struct {
-	CanView  bool `json:"can_view"`
-	CanEdit  bool `json:"can_edit"`
-	CanAdmin bool `json:"can_admin"`
+	CanEdit bool `json:"can_edit"`
 }
 
 type NodeView struct {

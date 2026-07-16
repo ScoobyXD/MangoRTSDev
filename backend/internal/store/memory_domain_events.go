@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"strings"
@@ -45,9 +46,24 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 		return domain.DomainEvent{}, r.domainEventAppendErr
 	}
 
+	beforeDomainEvents := maps.Clone(r.domainEvents)
+	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
+	beforeOutbox := maps.Clone(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
+	restore := func() {
+		r.domainEvents = beforeDomainEvents
+		r.workspaceReadVersions = beforeWorkspaceReadVersions
+		r.realtimeOutbox = beforeOutbox
+		r.realtimeOutboxSequence = beforeOutboxSequence
+	}
+
 	if input.IdempotencyKey != "" {
 		for _, existing := range r.domainEvents {
 			if existing.CompanyID == input.CompanyID && existing.IdempotencyKey == input.IdempotencyKey {
+				if err := r.enqueueKanbanRealtimeForDomainEventLocked(existing); err != nil {
+					restore()
+					return domain.DomainEvent{}, err
+				}
 				return cloneDomainEvent(existing), nil
 			}
 		}
@@ -76,17 +92,41 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	r.domainEvents[domainEventMemoryKey(item.CompanyID, item.EventID)] = item
 	r.updateWorkspaceReadVersionsLocked(item)
 	r.updateLogicGateWorkReadVersionsLocked(item)
+	if err := r.enqueueKanbanRealtimeForDomainEventLocked(item); err != nil {
+		restore()
+		return domain.DomainEvent{}, err
+	}
 	return cloneDomainEvent(item), nil
 }
 
 func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	beforeDomainEvents := maps.Clone(r.domainEvents)
+	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
+	beforeOutbox := maps.Clone(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
+	restore := func() {
+		r.domainEvents = beforeDomainEvents
+		r.workspaceReadVersions = beforeWorkspaceReadVersions
+		r.realtimeOutbox = beforeOutbox
+		r.realtimeOutboxSequence = beforeOutboxSequence
+	}
 	events := make([]domain.DomainEvent, 0, len(inputs))
 	for _, input := range inputs {
 		event, err := r.appendDomainEventLocked(input)
 		if err != nil {
+			restore()
 			return nil, err
 		}
 		events = append(events, event)
+	}
+	// Individual appends must be atomic when called alone, but a multi-event
+	// product mutation is one delivery unit. Replace its provisional rows with
+	// one coalesced event per exact board scope before the logical commit.
+	r.realtimeOutbox = maps.Clone(beforeOutbox)
+	r.realtimeOutboxSequence = beforeOutboxSequence
+	if err := r.enqueueKanbanRealtimeForDomainEventsLocked(events); err != nil {
+		restore()
+		return nil, err
 	}
 	return events, nil
 }

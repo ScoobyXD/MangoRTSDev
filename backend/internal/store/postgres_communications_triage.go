@@ -998,6 +998,14 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
+	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
+		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": link.BoardID, "card_id": link.CardID}),
+		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
+		workspaceDomainEventInput(input.CompanyID, "node_updated", map[string]any{"node_id": targetCard.NodeID}),
+	})
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
@@ -1009,6 +1017,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		TargetNodeID:   targetCard.NodeID,
 		TargetBoardID:  targetCard.BoardID,
 		TargetCardID:   targetCard.CardID,
+		Events:         events,
 	}, nil
 }
 
@@ -1074,6 +1083,13 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
+	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
+		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": input.BoardID, "card_id": input.CardID}),
+		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
+	})
+	if err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageRevertResult{}, err
@@ -1083,6 +1099,7 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 		DeletedNodeID: link.NodeID,
 		DeletedCardID: input.CardID,
 		BoardID:       input.BoardID,
+		Events:        events,
 	}, nil
 }
 

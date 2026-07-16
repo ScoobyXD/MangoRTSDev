@@ -80,9 +80,8 @@ func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScop
 
 	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
 	fixture.expectStatus(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
-		"company_id": fixture.companyID, "shared_inbox_id": fixture.sharedA.FolderID, "subject": "viewer takeover",
-	}, fixture.viewer, domain.RoleCompanyUser, http.StatusForbidden)
-	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.viewer, domain.RoleCompanyUser, http.StatusForbidden)
+		"company_id": fixture.companyID, "shared_inbox_id": fixture.sharedA.FolderID, "subject": "member updated",
+	}, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
 
 	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedB.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
 	fixture.expectStatus(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
@@ -91,7 +90,7 @@ func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScop
 	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedB.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
 
 	unchanged := fixture.request(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.owner, domain.RoleCompanyUser)
-	if unchanged.Code != http.StatusOK || decodeHTTPDraft(t, unchanged).Subject != "shared A" {
+	if unchanged.Code != http.StatusOK || decodeHTTPDraft(t, unchanged).Subject != "member updated" {
 		t.Fatalf("shared A after IDOR attempts status=%d body=%s", unchanged.Code, unchanged.Body.String())
 	}
 	updated := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
@@ -174,7 +173,7 @@ func newCommunicationsEmailDraftScopeHTTPFixture(t *testing.T) communicationsEma
 	}
 	setPermissions(sharedA, []store.EntityPermissionInput{
 		{SubjectType: store.EntityPermissionSubjectUser, SubjectID: owner.UserID, AccessLevel: store.EntityPermissionEdit},
-		{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+		{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 		{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
 	})
 	setPermissions(sharedB, []store.EntityPermissionInput{

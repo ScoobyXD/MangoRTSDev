@@ -135,7 +135,7 @@ func (s *Server) filterKanbanCardsVisibleToActor(w http.ResponseWriter, r *http.
 	if len(nodeIDs) == 0 {
 		return cards, true
 	}
-	allowed, err := s.repo.ListEffectiveResourceIDsForUser(companyID, userID, store.EntityTypeNode, store.EntityPermissionView, nodeIDs)
+	allowed, err := s.repo.ListEffectiveResourceIDsForUser(companyID, userID, store.EntityTypeNode, store.EntityPermissionEdit, nodeIDs)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
 		return nil, false
@@ -251,7 +251,7 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"boards": logicGateProjectionBoards(gates, query)})
 		return
 	}
-	work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, query.LogicGateID, store.EntityPermissionView)
+	work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, query.LogicGateID, store.EntityPermissionEdit)
 	if !ok {
 		return
 	}

@@ -246,7 +246,7 @@ function boardContents(
   const boardID = logicGateKanbanBoardID(logicGateID);
   return {
     logicGate: { logic_gate_id: logicGateID, header: "Old gate", default_access: "edit" },
-    permissions: { can_view: true, can_edit: true, can_admin: false },
+    permissions: { can_edit: true },
     board: {
       company_id: companyID,
       board_id: boardID,

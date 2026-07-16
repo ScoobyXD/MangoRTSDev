@@ -84,8 +84,7 @@ select proname
 from pg_proc
 where proname in (
   'sync_node_logic_gate_assignment_from_kanban_card',
-  'mangorts_user_can_access_resource',
-  'mangorts_user_can_view_entity'
+  'mangorts_user_can_access_resource'
 )
 order by proname;
 

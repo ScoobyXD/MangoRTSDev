@@ -475,9 +475,7 @@ function materializeProjectionNode(row: GVICMatrixProjectionRow, previous: NodeR
     logic_gate_ids: logicGateID ? [logicGateID] : [],
     created_timestamp: row.created_timestamp || previous?.created_timestamp || "",
     effective_access_level: previous?.effective_access_level ?? "edit",
-    can_view: previous?.can_view ?? true,
     can_edit: previous?.can_edit ?? true,
-    can_admin: previous?.can_admin ?? false,
   };
 }
 
@@ -501,9 +499,7 @@ function materializeProjectionLogicGate(
     created_timestamp: projected?.created_timestamp || previous?.created_timestamp || "",
     gvic_assignments: projected?.gvic_assignments ?? previous?.gvic_assignments ?? [],
     effective_access_level: projected?.effective_access_level ?? previous?.effective_access_level ?? "edit",
-    can_view: projected?.can_view ?? previous?.can_view ?? true,
     can_edit: projected?.can_edit ?? previous?.can_edit ?? true,
-    can_admin: projected?.can_admin ?? previous?.can_admin ?? false,
   };
 }
 

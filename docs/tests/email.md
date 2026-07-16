@@ -23,14 +23,14 @@ Coverage Status:
 
 Required regression scenario:
 - Attach an email from a node text box, delete that box, reopen the node with no live text boxes, and open the email from the node-header counter/list.
-- Confirm the count and projection remain, the standalone attached-email organizer renders its list/folders and retained thread, no replacement text box is created, and a view-only user can open it without receiving edit controls.
+- Confirm the count and projection remain, the standalone attached-email organizer renders its list/folders and retained thread, no replacement text box is created, and an edit-authorized user can open it while a no-access user receives no projection.
 
 EMAIL1 - Mango email drafts are Mango application records, not Nylas provider drafts and not browser-only state. Personal and shared Drafts tabs render exact-scope `communications_email_drafts` rows, with only the fallback behavior allowed by EMAIL2; they never list the Gmail/Nylas Draft mailbox.
 EMAIL2 - Browser `localStorage` may be used only as a company/user-keyed fallback mirror for drafts and signatures. Every view filters it to the exact active personal account or shared inbox; after a successful database read, only rows explicitly marked pending sync may migrate, and stale/unmarked local rows cannot resurrect deleted or revoked drafts.
 EMAIL3 - Personal draft and signature rows are scoped to the actor's personal `user_email_connections` tuple of `user_id` plus `account_email`.
 EMAIL4 - Shared draft and signature rows are scoped to `shared_inbox_id`; `shared_inboxes` remains the Mango permission/resource wrapper and points to `company_email_connections` for provider grant plumbing.
 EMAIL5 - A draft or signature row must be either personal or shared, never both and never neither.
-EMAIL6 - Ordinary personal draft list/get/create/update/delete and draft-attachment access are owner-only in the exact personal account scope; company manager status does not bypass ownership. Ordinary shared-inbox draft list/get/attachment reads require view access to the exact inbox, while create/update/delete and attachment mutation require edit access. Collaboration shared drafts use the participant/revision exception in EMAIL65 through EMAIL69.
+EMAIL6 - Ordinary personal draft list/get/create/update/delete and draft-attachment access are owner-only in the exact personal account scope; company manager status does not bypass ownership. Ordinary shared-inbox draft list/get/attachment reads require edit access to the exact inbox, while create/update/delete and attachment mutation require edit access. Collaboration shared drafts use the participant/revision exception in EMAIL65 through EMAIL69.
 EMAIL7 - Draft IDs remain client-stable text IDs so reply/forward resume behavior and existing `email_draft` attachment resource IDs do not break; new personal reply/forward IDs include the connected personal mailbox scope to avoid cross-account collisions.
 EMAIL8 - Reply drafts are unique per company, mailbox scope, and source message ID; reopening Reply resumes the existing draft and preserves the original message context.
 EMAIL9 - Forward drafts are unique per company, mailbox scope, and source message ID; reopening Forward resumes the existing draft.
@@ -171,7 +171,7 @@ Given:
 
 Expected:
 - Mango saves the draft against `shared_inbox_id`.
-- Users with Shared Triage view access can see the draft; users with edit access can mutate it.
+- Users with Shared Triage edit access can see the draft; users with edit access can mutate it.
 - Attachments link to the draft through `resource_attachments` and remain permission-gated by the shared inbox.
 - Saving or sending flushes the mounted editor first and persists or submits the exact returned sanitized HTML.
 
@@ -386,7 +386,7 @@ Expected:
 - Conversation detail contains all provider-listed sent and received members, including the intervening Mango reply, without duplicate IDs, subject-based merging, cross-scope history, or loss of valid one-offs/forwards.
 - The unread dot/frame and visible count clear immediately on pointer/Enter/Space open and stay cleared after success; a failed provider write rolls back and reports the error. The selected full-card surface remains distinct.
 - The row shows a thread icon only for the proven multi-message conversation.
-- Every draft operation and attachment authorization uses one immutable exact scope. Personal owner and shared view/edit distinctions hold; cross-scope known IDs cannot expose content or mutate scope, spoofed shared account data is ignored, and stale browser mirrors cannot reappear as another scope's drafts.
+- Every draft operation and attachment authorization uses one immutable exact scope. Personal-owner and shared edit/no-access distinctions hold; cross-scope known IDs cannot expose content or mutate scope, spoofed shared account data is ignored, and stale browser mirrors cannot reappear as another scope's drafts.
 - Conversion and its follow-up unstar/archive/move commands preserve the exact source `account_email` or `shared_inbox_id` through committed-result handoffs; another connected mailbox grant is never substituted.
 
 ### Scenario EMAIL-S12: Mailbox Buckets, Thread Query Mode, And Database Drafts
@@ -409,7 +409,7 @@ Expected:
 - All remains `in:anywhere`, Starred remains `is:starred`, and Archive/Spam retain their existing Gmail-native expressions. Search text is grouped and unread-only is folded into the one native expression, so user operators cannot widen the selected bucket.
 - Every native provider request contains only `search_query_native`, `limit`, and optional `page_token`; the returned Mango list remains preview-only even if the provider returns extra body/content fields.
 - Thread previews use `thread_id`, `select`, `limit`, and optional `page_token` without native mailbox search. Authoritative thread `message_ids` remain the source of truth: members absent from bounded previews are recovered immediately by exact ID, while preview-resolved older bodies hydrate through per-card detail reads on expand or Expand all.
-- Opening Drafts makes no provider message-list request. Its ordinary private branch shows only the authenticated personal user/account or selected shared inbox according to view/edit permissions; the explicit collaboration branch adds only active drafts for which the current user is a permanent participant and labels the immutable source mailbox.
+- Opening Drafts makes no provider message-list request. Its ordinary private branch shows only the authenticated personal user/account or selected shared inbox according to edit/no-access permissions; the explicit collaboration branch adds only active drafts for which the current user is a permanent participant and labels the immutable source mailbox.
 
 ### Scenario EMAIL-S13: Lazy Email Collaboration And One Shared Chat
 
@@ -525,7 +525,7 @@ Business logic covered:
 Given:
 - A user starts an otherwise empty personal or shared compose and selects an attachment.
 - The draft is later deleted; the attachment may also have an independent sent-message link.
-- A wrong user/account, revoked shared viewer, company manager, or company administrator attempts draft-scoped access.
+- A wrong user/account, revoked shared editor, company manager, or company administrator attempts draft-scoped access.
 
 Expected:
 - Mango creates the exact durable draft before uploading or linking the attachment, and concurrent preparation creates that row once.

@@ -12,8 +12,8 @@ Coverage Status:
 ## Business Logic
 
 ST1 - Shared Triage shows shared inbox folders and mailboxes that are visible to the current user.
-ST2 - Normal `company_user` users only see shared inbox folders where effective access grants at least view access, and this folder-listing path must work without relying on a dev-admin or company-admin bypass.
-ST3 - Dev admins and company admins can see all shared inbox folders with admin-level effective access; company managers and normal users follow Shared Triage resource policy from default access, direct user grants, and group grants.
+ST2 - Normal `company_user` users only see shared inbox folders where effective access grants at least edit access, and this folder-listing path must work without relying on a dev-admin or company-admin bypass.
+ST3 - Dev admins and company admins resolve all shared inbox folders to edit access; company managers and normal users follow Shared Triage resource policy from default access, direct user grants, and group grants.
 ST4 - Creating a Shared Triage folder or mailbox-capable shared inbox requires manager/admin authority, a nonblank name, and edit access to the selected parent when the item is nested.
 ST5 - Creating a Shared Triage folder or mailbox-capable shared inbox does not create private creator grants; access remains controlled by the resource default and `resource_permissions` exception rows.
 ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
@@ -24,11 +24,11 @@ ST10 - Deleting a mailbox-capable shared inbox is destructive: it removes the Sh
 ST11 - Reading shared inbox folders and messages uses the company-owned shared mailbox grant instead of the viewer's personal mailbox grant.
 ST12 - Shared mailbox caches are scoped by shared account/grant so one shared mailbox does not leak into another.
 ST13 - Sending mail from a shared inbox requires edit access to that shared inbox.
-ST14 - View-only shared inbox access can read mailbox content but cannot send from that mailbox.
-ST15 - Reading shared inbox access settings requires manager/admin authority and view access to the shared inbox.
+ST14 - Shared inbox content and send actions both require edit access; a no-access user receives no mailbox content.
+ST15 - Reading shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
 ST16 - Updating shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
 ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, whether the actor can edit permissions, and whether the actor can edit manager permissions.
-ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants; GVIC assignments are notification/My Work/update routing data and must not grant Shared Triage view/edit access, elevate view to edit, or authorize delete/mutation actions.
+ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants; GVIC assignments are notification/My Work/update routing data and must not grant Shared Triage edit access or authorize delete/mutation actions.
 ST19 - Shared inbox access grants support user and group principals, and group grants resolve from `company_user_groups` and `company_user_group_members` source data instead of requiring a derived group closure/projection table to be populated after schema reset.
 ST20 - If required Shared Triage access or folder-list storage is unavailable, access and folder-list endpoints return service unavailable with `shared_inbox_storage_unavailable`, not a silent success or generic `failed_to_list_shared_inboxes` error.
 ST21 - Shared inbox GVIC assignment APIs apply only to mailbox/shared inbox resources, not plain organizational folders.
@@ -51,7 +51,7 @@ ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments 
 ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
 ST40 - Shared Triage consumes compact, permission-checked `mailbox:shared:<shared_inbox_id>` hints for only the exact selected mail-bearing shared inbox. First acceptance and reconnect acceptance each coalesce one canonical folder/list reconciliation; `message.created`, `message.updated` (including moves), `message.deleted`, and folder hints use the same one-active/one-queued-final coordinator. Event payloads never insert rows and no mail polling is used.
-ST41 - Shared subscription admission requires the exact existing mail-bearing resource plus current View access, and publication rechecks the current exact audience. My Work, Updates, GVIC matrix, Shared Triage root/headings/group rows/plain folders, inaccessible inboxes, and inactive inboxes retain no fallback personal/mailbox subscription and issue no provider GET because of a hint.
+ST41 - Shared subscription admission requires the exact existing mail-bearing resource plus current Edit access, and publication rechecks the current exact audience. My Work, Updates, GVIC matrix, Shared Triage root/headings/group rows/plain folders, inaccessible inboxes, and inactive inboxes retain no fallback personal/mailbox subscription and issue no provider GET because of a hint.
 ST42 - Navigating to a concrete shared mailbox performs its normal canonical load and installs that exact subscription. Navigating away cancels/discards captured timers and pending work, unsubscribes the old inbox, and prevents a hint or stale response from Shared Inbox A from refreshing/invalidation Shared Inbox B.
 ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 12 messages per page.
 ST44 - Shared Triage mailbox inboxes automatically prefetch the next message page after the selected-detail foreground path settles, without waiting for scrolling or the archive/advance action.
@@ -122,7 +122,7 @@ ST108 - Links in Shared Triage email bodies, forwarded/replied original-message 
 ST109 - Node editor, logic-gate editor, and inline comment/chat text opened from Shared Triage workflows must auto-detect plain HTTP(S) or `www.` links, render them as blue underlined link text, and open them on a normal left click.
 ST110 - The Shared Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox through the selected shared grant.
 ST111 - For Google shared mailboxes, Primary always uses `in:inbox -category:social -category:promotions`, with grouped user search and unread-only folded into that same native expression and the same exclusion enforced on fresh, refreshed, cached, and locally reconciled responses. All, Starred, Archive, and Spam retain their exact Gmail-native buckets under the selected `shared_inbox_id`; Spam, Social, and Promotions never leak into Primary or another shared inbox.
-ST112 - View-only Shared Triage users may read Spam when they can view the mailbox, but sending, scheduled sending, reply, reply-all, forward, Bcc, and draft send actions still require edit access to that shared inbox.
+ST112 - Reading Spam and sending, scheduled sending, reply, reply-all, forward, Bcc, and draft send actions all require edit access to the exact shared inbox; no-access users receive none of its mailbox content.
 ST113 - Shared Triage email drag/drop supports same-account Chrome window/tab drops onto Company Explorer Logic Gates, Logic Gate Kanban columns, project relationship panels, and Logic Gate groups inside a project; project drops create email-origin project node relationships, and Kanban or project drops open the created node popup after conversion succeeds.
 ST114 - Shared Triage mailbox rows group messages by provider/Nylas `thread_id` when present so replies in the same shared conversation appear as one visible inbox item instead of duplicate rows; messages without a thread ID remain single-message rows.
 ST115 - A grouped Shared Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
@@ -172,8 +172,8 @@ ST143 - Signed, deduplicated shared message/folder provider webhooks invalidate 
 ST144 - A shared mailbox hint received while another Home/shared view is selected issues no provider GET. Navigation cancels/discards the prior exact request key, and returning to that shared inbox performs its canonical load; Shared Inbox A cannot refresh, invalidate, display an error in, or reuse prefetched/detail state from Shared Inbox B. A delayed/queued hint for selected message or thread A rechecks that exact selection before detail reconciliation and cannot wake newly selected unrelated detail B.
 ST145 - Selecting an unread shared email by pointer, Enter, or Space immediately removes its unread dot/frame, updates the selected card and unread counter, and persists through the exact shared provider command. Stale responses cannot resurrect unread; failure rolls the row/counter back and surfaces the established error.
 ST146 - Shared conversation detail uses provider `thread.message_ids` to hydrate sent and received members missing from the bounded preview page, deduplicates IDs, and stays scoped to the exact shared inbox/company grant. Provider thread or exact reply metadata may establish membership; subject similarity never does, forwarded unrelated mail is not absorbed, and unresolved one-offs remain valid.
-ST147 - Ordinary shared-inbox durable draft list/get/create/update/delete operations require the exact `shared_inbox_id` plus effective view/edit permission. Scope is immutable, the stored account is canonicalized from the shared inbox, known IDs from personal/other shared scopes cannot be read, changed, reassigned, or deleted, and browser fallback is filtered to the active inbox with only explicit pending-sync migration. The Shared Triage Drafts tab renders that collection plus active collaboration shared drafts for which the current user is a permanent participant under EMAIL65 through EMAIL69; it never lists a private personal draft, an unauthorized collaboration draft, or provider Drafts.
-ST148 - Private personal drafts never appear in Shared Triage, and ordinary drafts for Shared Inbox A never appear in B. Collaboration shared drafts are the explicit participant-authorized exception and must display their immutable source mailbox rather than masquerading as an ordinary draft in the selected inbox. Ordinary shared-inbox view permission permits list/get and draft-attachment reads, edit permission is required for create/update/delete and attachment mutation, and company manager status alone never grants another user's personal-draft attachment access.
+ST147 - Ordinary shared-inbox durable draft list/get/create/update/delete operations require the exact `shared_inbox_id` plus effective edit access. Scope is immutable, the stored account is canonicalized from the shared inbox, known IDs from personal/other shared scopes cannot be read, changed, reassigned, or deleted, and browser fallback is filtered to the active inbox with only explicit pending-sync migration. The Shared Triage Drafts tab renders that collection plus active collaboration shared drafts for which the current user is a permanent participant under EMAIL65 through EMAIL69; it never lists a private personal draft, an unauthorized collaboration draft, or provider Drafts.
+ST148 - Private personal drafts never appear in Shared Triage, and ordinary drafts for Shared Inbox A never appear in B. Collaboration shared drafts are the explicit participant-authorized exception and must display their immutable source mailbox rather than masquerading as an ordinary draft in the selected inbox. Ordinary shared-inbox edit permission permits list/get and draft-attachment reads, edit permission is required for create/update/delete and attachment mutation, and company manager status alone never grants another user's personal-draft attachment access.
 ST149 - A Shared Triage row shows the established accessible thread indicator on its left only when canonical/loaded conversation count is greater than one; a one-off or unproven count shows no icon.
 ST150 - Shared read-on-open timers, optimistic overlays, and mutation responses use the authenticated company/user/shared-inbox scope plus provider message ID. Identical provider IDs in personal or other shared scopes cannot cancel or overlay one another, and a completion may update only the exact captured mailbox/filter and selection generation; stale failures cannot clear, refresh, or display errors in the newly selected inbox.
 ST151 - Shared Triage email cards use the same compact triage-row implementation as My Triage. Horizontal card padding is no more than 6 CSS pixels per side, and the left indicator rail is no more than 20 CSS pixels wide while retaining the approximately 9-pixel unread dot, thread indicator, keyboard focus, and drag hit behavior.
@@ -187,7 +187,7 @@ ST158 - Reply All exposes Create Shared Draft for the exact selected source mess
 ST159 - Collaboration shared drafts are immediate-send only under EMAIL68. Their compose footer omits scheduled send and the ordinary Shared Triage browser scheduler excludes them; this does not change scheduled-send behavior for ordinary shared-inbox drafts.
 ST160 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
 ST161 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
-ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads require current View access and mutations require Edit, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
+ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads and mutations require current Edit access, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
 ST163 - An open Shared Triage collaboration chat shows the EMAIL77 participant roster at the top: the prospective current actor before creation, then each durable participant represented once by a creator/direct-user avatar or deduplicated group-provenance cohort. Shared-inbox viewers, provider recipients, and current group membership do not define this roster, and the canonical collaboration is refreshed after a committed mention so new permanent participants appear in the open email-chat header; this does not require the unchanged standalone-Node caller to render the email-specific roster adapter.
 ST164 - A Shared Triage collaboration ensure/create or first-chat failure follows EMAIL78. It leaves the source email selected and the rail open, preserves typed chat text, mention selections, reply target, and email anchor, removes any failed optimistic row, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into a human recovery message rather than exposing either identifier as the complete banner text.
 ST165 - The exact shared-inbox signature, including authenticated Mango image references, is durably saved and automatically appended once to every new compose, Reply, and Reply All for that inbox. Settings eagerly render its authenticated image preview; late hydration preserves live typing, and rerender, autosave, restored drafts, reply-mode switches, or another shared inbox never duplicate or replace it.
@@ -216,13 +216,13 @@ Business logic covered:
 
 Given:
 - A company has several shared inbox folders and mailbox-capable shared inboxes.
-- User A has view access to one shared inbox and no access to another.
+- User A has edit access to one shared inbox and no access to another.
 - A company admin and a company manager belong to the same company.
 
 Expected:
 - User A only sees the shared inboxes where effective access grants view or higher.
 - User A does not see private personal mailbox messages in Shared Triage.
-- The company admin sees shared inboxes with admin-level effective access.
+- The company admin sees shared inboxes with edit effective access.
 - The company_user folder-listing path works without a dev-admin or company-admin bypass.
 - The company manager sees only shared inboxes where effective access grants view or higher through default, direct user, or group grants.
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
@@ -238,7 +238,7 @@ Business logic covered:
 - ST118
 
 Given:
-- A user has view access to a mailbox-capable Shared Triage inbox.
+- A user has edit access to a mailbox-capable Shared Triage inbox.
 - The company-owned shared mailbox provider grant has expired or been revoked.
 - The user selects that Shared Triage inbox.
 
@@ -272,7 +272,7 @@ Given:
 Expected:
 - The manager can create under the editable parent, and the new item stays governed by default access plus `resource_permissions` exceptions.
 - The regular user cannot create Shared Triage folders or shared inbox mailboxes even with edit access.
-- Creating under the view-only parent fails for the manager.
+- Creating under the no-access parent fails for the manager.
 - Rename and move require edit access; mailbox linkage changes require manager/admin authority and edit access.
 - Protected shared inbox folders cannot be renamed or deleted.
 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and linked company email connection everywhere.
@@ -292,7 +292,7 @@ Business logic covered:
 - ST35
 
 Given:
-- User A has view access to Shared Inbox 1.
+- User A has edit access to Shared Inbox 1.
 - User B has edit access to Shared Inbox 1.
 - Shared Inbox 2 uses a different shared mailbox grant.
 - The mailbox address for Shared Inbox 1 is not a Mango user.
@@ -320,14 +320,14 @@ Business logic covered:
 
 Given:
 - A shared inbox has default access, user grants, group grants, and GVIC assignments.
-- One regular user has view access and a company manager has edit access.
+- One regular user has edit access and a company manager has edit access.
 - The access store can be available or unavailable.
 
 Expected:
-- The regular view-only user cannot read or update access settings.
+- The regular no-access user cannot read or update access settings.
 - The company manager can update default access and explicit resource grants for regular company users.
 - The response includes default access, explicit grants, GVIC assignments, effective access, can-edit-permissions, and can-edit-manager-permissions.
-- GVIC assignments are not converted into resource permission grants and do not grant view/edit access, elevate view-only access, or authorize delete/mutation actions.
+- GVIC assignments are not converted into resource permission grants and do not grant edit access or authorize delete/mutation actions.
 - User and group grants are both accepted, and group grants resolve from source group membership tables rather than a derived group projection table.
 - Permissions and GVIC rows target the shared inbox resource, not the company email connection.
 - Shared Triage folder permissions use the `shared_inbox_folder` resource type, mailbox permissions use the `shared_inbox` resource type, and `shared_triage_folder` is not treated as a table name.
@@ -385,7 +385,7 @@ Business logic covered:
 
 Given:
 - A shared inbox is visible to User A and User B.
-- User A has view access only.
+- User A has edit access only.
 - User B can manage mail for that shared inbox.
 - The company-owned shared connection is missing, disconnected, or reauth-required.
 
@@ -472,7 +472,7 @@ Business logic covered:
 - ST140
 
 Given:
-- A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
+- A user opens a mailbox-capable Shared Triage inbox with edit access to the shared mailbox.
 - The shared mailbox has more than 12 messages available.
 - The first visible page and the next page can be read from the mailbox provider.
 
@@ -572,7 +572,7 @@ Expected:
 - The configured webhook secret matches `NYLAS_WEBHOOK_SECRET`; otherwise webhook POSTs are rejected and no shared receipt summary is written.
 - The backend stores open signals under the company email connection/shared mailbox scope and does not write them to the actor's personal receipt scope.
 - `message.link_clicked` and `thread.replied` webhook deliveries do not create or mutate read-receipt state under the current Shared Triage contract.
-- Canonical receipt reads remain scoped to the linked shared inbox and require view access.
+- Canonical receipt reads remain scoped to the linked shared inbox and require edit access.
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A selected affected Sent detail canonically reloads from its compact exact-mailbox `message.opened` hint while unrelated selections and cached list rows remain untouched.
 - If more than one Shared Triage mailbox entry points at the same company email connection, those entries share the stored receipt summary for the same provider message while read-time authorization remains tied to each linked shared inbox.
@@ -628,7 +628,7 @@ Business logic covered:
 
 Given:
 - A mailbox-capable Shared Triage inbox has multiple provider messages with the same Nylas `thread_id`.
-- The current user has view access to that shared inbox.
+- The current user has edit access to that shared inbox.
 - The user with edit access sends a rich formatted shared reply with indented content, explicit line breaks, and blank lines.
 - The provider send response may omit the body even though Mango submitted rich HTML.
 
@@ -764,7 +764,7 @@ Expected:
 - Reply/Reply all focuses the shared unified editor immediately; pointer-up, pointer-cancel, lost capture, and window blur all terminate vertical resize.
 - Accept, Tentative, and Decline use the shared inbox grant, require edit access, prevent duplicate submission while pending, and show a selected response only after provider success.
 - An expired/revoked shared grant, missing calendar scope, or provider failure leaves the RSVP unselected and presents a recoverable shared-mailbox reconnect/provider error without logging the user out of Mango.
-- A user with view-only access can inspect the invite but cannot send an RSVP.
+- A user with edit access can inspect the invite and send an RSVP; a no-access user receives neither the invite nor its actions.
 
 ### Scenario ST-S17: Live Arrival, Complete Shared History, Read State, And Draft Isolation
 
@@ -790,7 +790,7 @@ Business logic covered:
 
 Given:
 - An external sender starts a shared-mailbox conversation, an authorized Mango editor replies, and another message commits after the initial list but before first exact-inbox subscription acceptance.
-- Shared Inbox A and Shared Inbox B both have durable drafts, and users with view-only/edit access plus a company manager without personal-draft ownership attempt exact-ID operations.
+- Shared Inbox A and Shared Inbox B both have durable drafts, and users with no-access/edit access plus a company manager without personal-draft ownership attempt exact-ID operations.
 - Recoverable and definitive draft-list errors occur; overlapping exact-inbox loads complete out of order while a local save/delete occurs.
 - A shared draft attachment is read while active, the viewer loses permission, the draft is deleted, and an independent sent-message link remains.
 
@@ -802,7 +802,7 @@ Expected:
 - The multi-message row shows the accessible thread icon; a one-message row does not.
 - For ordinary inbox drafts, a viewer may list/get only A's database drafts and attachments and only an editor may create/update/delete or mutate them. A cannot enumerate or take over B/private-personal IDs; only a permanent-participant collaboration draft is the explicit cross-surface exception and it labels its true source. Provider drafts never appear, scope cannot be reassigned on conflict or soft-delete reuse, and a shared account-email spoof is replaced by the canonical inbox account.
 - Recoverable auth/provider/service/network errors retain pending drafts; only explicit revocation, deleted inbox, or non-mail-bearing scope purges A. Out-of-order loads cannot overwrite saves, deletes, B, or personal storage.
-- Compose persists the live exact-inbox draft before attachment upload. Permission revocation denies the former viewer, and draft deletion denies every draft-scoped actor including manager/admin attempts while the independent sent-message link stays valid.
+- Compose persists the live exact-inbox draft before attachment upload. Permission revocation denies the former editor, and draft deletion denies every draft-scoped actor including manager/admin attempts while the independent sent-message link stays valid.
 
 ### Scenario ST-S18: Compact Shared Triage Cards
 

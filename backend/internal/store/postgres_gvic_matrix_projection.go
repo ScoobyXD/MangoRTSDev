@@ -787,8 +787,8 @@ where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
   and entry.gvic_assignment in ('generated', 'verified', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $4::uuid, 'edit')
-  and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $4::uuid, 'view'))
-  and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $4::uuid, 'view'))
+  and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $4::uuid, 'edit'))
+  and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $4::uuid, 'edit'))
 order by entry.gvic_assignment asc, coalesce(entry.priority, 6) asc, entry.sort_order asc, entry.projection_row_id asc
 limit $3`, companyID, userID, query.Limit, viewerUserID)
 	if err != nil {
@@ -840,8 +840,8 @@ where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
   and entry.gvic_assignment in ('generated', 'verified', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $3::uuid, 'edit')
-  and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $3::uuid, 'view'))
-  and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $3::uuid, 'view'))
+  and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $3::uuid, 'edit'))
+  and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $3::uuid, 'edit'))
 order by entry.gvic_assignment asc, coalesce(entry.priority, 6) asc, entry.sort_order asc, entry.projection_row_id asc
 limit nullif($4, 0)`, companyID, userID, viewerUserID, limit)
 	if err != nil {
