@@ -139,15 +139,17 @@ export type RealtimeErrorMessage = RealtimeBaseMessage & {
   message?: string;
 };
 
-export type RealtimeEditorAtom = {
-  id: string;
-  after_id?: string;
-  value: string;
+export type RealtimeEditorEmbed = Record<string, unknown>;
+
+export type RealtimeEditorOp = {
+  insert?: string | RealtimeEditorEmbed;
+  retain?: number;
+  delete?: number;
+  attributes?: Record<string, unknown>;
 };
 
 export type RealtimeEditorDelta = {
-  inserts?: RealtimeEditorAtom[];
-  delete_ids?: string[];
+  ops: RealtimeEditorOp[];
 };
 
 export type RealtimeEditorDeltaCommittedMessage = RealtimeBaseMessage & {
@@ -220,7 +222,7 @@ type RealtimeInboundMessage =
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
-type RealtimeSubscriptionHandlers = {
+export type RealtimeSubscriptionHandlers = {
   onAccepted?: (message: RealtimeSubscriptionAcceptedMessage) => void;
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;

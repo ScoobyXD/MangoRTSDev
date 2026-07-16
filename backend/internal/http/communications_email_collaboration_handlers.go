@@ -127,7 +127,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		status := http.StatusOK
 		if result.Created {
 			status = http.StatusCreated
-			s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": result.Collaboration.NodeID, "email_collaboration_id": result.Collaboration.CollaborationID})
+			s.wakeRealtimeSpine()
 		}
 		writeJSON(w, status, result)
 	default:

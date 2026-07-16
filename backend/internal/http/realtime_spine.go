@@ -90,8 +90,37 @@ func (s *Server) flushRealtimeSpineLocked(preauthorized map[string]map[string]st
 			return deliveredByEventID
 		}
 		for _, event := range events {
-			deliveredByEventID[event.EventID] = s.deliverRealtimeOutboxEvent(event, preauthorized[event.EventID])
+			if s.realtimeSpineRetrySequence == event.Sequence && time.Now().Before(s.realtimeSpineRetryAt) {
+				return deliveredByEventID
+			}
+			outcome := s.deliverRealtimeOutboxEvent(event, preauthorized[event.EventID])
+			if outcome.retryable() {
+				if s.realtimeSpineRetrySequence == event.Sequence {
+					s.realtimeSpineRetryAttempts++
+				} else {
+					s.realtimeSpineRetrySequence = event.Sequence
+					s.realtimeSpineRetryAttempts = 1
+				}
+				backoff := 50 * time.Millisecond
+				for attempt := 1; attempt < s.realtimeSpineRetryAttempts && backoff < 5*time.Second; attempt++ {
+					backoff *= 2
+				}
+				if backoff > 5*time.Second {
+					backoff = 5 * time.Second
+				}
+				s.realtimeSpineRetryAt = time.Now().Add(backoff)
+				s.recordOperationalMetric("realtime.backplane_delivery_retry_count", realtimeScopeType(event.Scope), 1, 0)
+				if s.realtimeSpineRetryAttempts == 1 || s.realtimeSpineRetryAttempts%5 == 0 {
+					log.Printf("realtime_backplane_delivery_retry sequence=%d event_id=%s scope_type=%s attempt=%d category=%s backoff_ms=%d",
+						event.Sequence, event.EventID, realtimeScopeType(event.Scope), s.realtimeSpineRetryAttempts, outcome.Category, backoff.Milliseconds())
+				}
+				return deliveredByEventID
+			}
+			deliveredByEventID[event.EventID] = outcome.Delivered
 			s.realtimeSpineCursor = event.Sequence
+			s.realtimeSpineRetrySequence = 0
+			s.realtimeSpineRetryAttempts = 0
+			s.realtimeSpineRetryAt = time.Time{}
 		}
 		if len(events) < realtimeSpineBatchLimit {
 			return deliveredByEventID
@@ -140,16 +169,16 @@ func (s *Server) enqueueRealtimeOutbox(input store.RealtimeOutboxInput) (store.R
 	return event, nil
 }
 
-func (s *Server) deliverRealtimeOutboxEvent(event store.RealtimeOutboxEvent, preauthorized map[string]struct{}) int {
+func (s *Server) deliverRealtimeOutboxEvent(event store.RealtimeOutboxEvent, preauthorized map[string]struct{}) realtimeDeliveryOutcome {
 	companyID, scope := strings.TrimSpace(event.CompanyID), strings.TrimSpace(event.Scope)
 	if s == nil || s.realtimeRegistry == nil || companyID == "" || scope == "" {
-		return 0
+		return realtimeDeliveryOutcome{Disposition: realtimeDeliveryTerminal, Category: "invalid_or_inactive"}
 	}
 	unlock := s.realtimeRegistry.lockPublishScope(companyID, scope)
 	defer unlock()
 	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
 		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-		return 0
+		return realtimeDeliveryOutcome{Disposition: realtimeDeliveryTerminal, Category: "no_subscribers"}
 	}
 	var audience map[string]struct{}
 	if preauthorized != nil {
@@ -160,13 +189,13 @@ func (s *Server) deliverRealtimeOutboxEvent(event store.RealtimeOutboxEvent, pre
 		resolved, err := s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, event.ResourceType, event.ResourceID, event.Permission)
 		if err != nil {
 			s.recordOperationalMetric("realtime.backplane_authorization_failure_count", realtimeScopeType(scope), 1, 0)
-			return 0
+			return realtimeDeliveryOutcome{Disposition: realtimeDeliveryRetryable, Category: realtimeSpineErrorCategory(err)}
 		}
 		audience = resolved
 	}
 	delivered := s.publishRealtimePayloadWithAudienceUnlocked(companyID, scope, audience, event.Payload)
 	s.recordOperationalMetric("realtime.commit_to_fanout_latency", realtimeScopeType(scope), 1, time.Since(event.CreatedTimestamp))
-	return delivered
+	return realtimeDeliveryOutcome{Delivered: delivered, Disposition: realtimeDeliveryTerminal, Category: "delivered_or_no_authorized_recipient"}
 }
 
 func realtimeSpineErrorCategory(err error) string {
@@ -182,4 +211,21 @@ func realtimeSpineErrorCategory(err error) string {
 	default:
 		return "storage"
 	}
+}
+
+type realtimeDeliveryDisposition uint8
+
+const (
+	realtimeDeliveryTerminal realtimeDeliveryDisposition = iota
+	realtimeDeliveryRetryable
+)
+
+type realtimeDeliveryOutcome struct {
+	Delivered   int
+	Disposition realtimeDeliveryDisposition
+	Category    string
+}
+
+func (outcome realtimeDeliveryOutcome) retryable() bool {
+	return outcome.Disposition == realtimeDeliveryRetryable
 }

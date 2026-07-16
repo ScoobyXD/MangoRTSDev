@@ -273,6 +273,11 @@ values ($1::uuid, $2::uuid, $3::uuid, $3::uuid, 'creator', null, now())`, input.
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("load_created", err)
 	}
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
+		"node_id": nodeID, "email_collaboration_id": collaborationID,
+	})); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("append_workspace_event", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("commit_created", err)
 	}
@@ -534,6 +539,44 @@ where company_id=$1::uuid and collaboration_id=$2::uuid`, companyID, collaborati
 	participants, err := listPostgresEmailCollaborationParticipants(ctx, tx, companyID, collaborationID)
 	if err != nil {
 		return nil, err
+	}
+	for _, participant := range participants {
+		if scope.scopeType == CommunicationsEmailCollaborationScopePersonal && participant.UserID == scope.personalUserID {
+			continue
+		}
+		rows, err := tx.QueryContext(ctx, `
+select account_email
+from user_email_connections
+where user_id=$1::uuid and status='connected' and btrim(grant_id)<>''
+order by account_email`, participant.UserID)
+		if err != nil {
+			return nil, err
+		}
+		accountEmails := make([]string, 0)
+		for rows.Next() {
+			var accountEmail string
+			if err := rows.Scan(&accountEmail); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			accountEmails = append(accountEmails, accountEmail)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		for _, accountEmail := range accountEmails {
+			outbox, err := communicationsEmailCollaborationMailboxOutboxInput(companyID, participant.UserID, accountEmail, message)
+			if err != nil {
+				return nil, err
+			}
+			if err := insertRealtimeOutboxTx(ctx, tx, outbox); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

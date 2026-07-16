@@ -12,3 +12,15 @@ declare module "node:path" {
 declare const process: {
   cwd(): string;
 };
+
+declare module "jsdom" {
+  export class JSDOM {
+    constructor(html?: string, options?: { url?: string });
+    window: Window & { close(): void };
+  }
+}
+
+declare module "fake-indexeddb" {
+  export const indexedDB: IDBFactory;
+  export const IDBKeyRange: typeof globalThis.IDBKeyRange;
+}

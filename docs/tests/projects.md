@@ -1,10 +1,10 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-15
 
 # Projects Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`editor_collaboration`, realtime transport, and unified rich-editor suites cover exact Project document identities, bounded structured deltas, durable recovery plumbing, metadata/body separation, and mounted Project host wiring; project grouping, route, node-shell, attachment, and rich-editor suites retain their existing focused coverage).
+- Business Logic Covered By Automated Tests: Partial overall. Structured collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded Quill Delta operations, durable recovery, metadata/body separation, and mounted Project host wiring. `scripts/run_realtime_production_path_tests.mjs` proves real-browser Project-document isolation through the production HTTP/WebSocket/outbox path; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
 
 ## Business Logic
 

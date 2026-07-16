@@ -137,20 +137,3 @@ func requireAuthenticatedActorUserID(w http.ResponseWriter, r *http.Request) (st
 	}
 	return userID, true
 }
-
-func (s *Server) publishCompanyExplorerRestoredTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {
-	for _, target := range targets {
-		switch target.Kind {
-		case "folder":
-			s.publishWorkspaceEvent(companyID, "company_explorer_folder_created", map[string]any{"folder_id": target.ID, "folder_kind": target.FolderKind})
-		case "node":
-			s.publishWorkspaceEvent(companyID, "node_created", map[string]any{"node_id": target.ID})
-		case "logic_gate":
-			s.publishWorkspaceEvent(companyID, "logic_gate_created", map[string]any{"logic_gate_id": target.ID})
-		case "project":
-			s.publishWorkspaceEvent(companyID, "project_created", map[string]any{"project_id": target.ID})
-		case "kanban":
-			s.publishWorkspaceEvent(companyID, "kanban_board_saved", map[string]any{"board_id": target.ID})
-		}
-	}
-}

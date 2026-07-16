@@ -23,11 +23,28 @@ func main() {
 	repo, cleanup := buildRepository()
 	defer cleanup()
 	nylasConfig := buildNylasConfig()
+	var authValidator httpapi.AuthTokenValidator
+	if validator := buildAuthValidator(); validator != nil {
+		authValidator = validator
+	}
+	var cognitoAdmin httpapi.CognitoAdminClient
+	if client := buildCognitoAdminClient(); client != nil {
+		cognitoAdmin = client
+	}
+	var emailSender httpapi.AuthEmailSender
+	if sender := buildEmailSender(); sender != nil {
+		emailSender = sender
+	}
+	testAuthHeaderEnabled := strings.EqualFold(os.Getenv("APP_ENV"), "test") && strings.EqualFold(os.Getenv("MANGORTS_ENABLE_TEST_AUTH_HEADER"), "true")
+	if testAuthHeaderEnabled {
+		log.Print("test-only authentication header enabled")
+	}
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
-		AuthValidator: buildAuthValidator(),
-		CognitoAdmin:  buildCognitoAdminClient(),
-		EmailSender:   buildEmailSender(),
-		AppBaseURL:    strings.TrimSpace(os.Getenv("MANGORTS_APP_URL")),
+		AuthValidator:         authValidator,
+		TestAuthHeaderEnabled: testAuthHeaderEnabled,
+		CognitoAdmin:          cognitoAdmin,
+		EmailSender:           emailSender,
+		AppBaseURL:            strings.TrimSpace(os.Getenv("MANGORTS_APP_URL")),
 		BootstrapDevAdmin: httpapi.BootstrapDevAdminConfig{
 			Emails:      splitScopes(os.Getenv("MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS")),
 			CompanyName: getenvDefault("MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", "MangoRTS Bootstrap"),
@@ -347,7 +364,7 @@ func withCORS(next http.Handler) http.Handler {
 		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
 		// Node title updates use PUT, and destructive confirmations use a custom header.
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-None-Match,Last-Event-ID,X-Mango-Confirmation-Display-Name,X-Mango-Company-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-None-Match,Last-Event-ID,X-Mango-Confirmation-Display-Name,X-Mango-Company-ID,X-Mango-Test-Subject")
 		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {

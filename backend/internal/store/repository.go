@@ -14,6 +14,7 @@ var (
 	ErrInvalid                       = errors.New("invalid")
 	ErrAlreadyExists                 = errors.New("already exists")
 	ErrVersionConflict               = errors.New("version conflict")
+	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
 	ErrSendInProgress                = errors.New("send in progress")
 	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
 	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
@@ -483,7 +484,9 @@ type WorkGraphRepository interface {
 
 type LogicGateRepository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
+	CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
+	UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
 	ListVisibleLogicGates(companyID, userID string) ([]domain.LogicGate, error)
 	ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error)

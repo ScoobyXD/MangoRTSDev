@@ -409,7 +409,6 @@ func (s *Server) propagateCommunicationsEmailCollaborationMessage(ctx context.Co
 			return fmt.Errorf("update email collaboration snapshot: %w", err)
 		}
 	}
-	s.publishCommunicationsEmailCollaborationWebhookHints(grantContext, change, participantsByCompany)
 	return nil
 }
 
@@ -456,6 +455,7 @@ func (s *Server) updateCommunicationsEmailCollaborationWebhookInputs(inputs []st
 		if err != nil {
 			return nil, err
 		}
+		s.wakeRealtimeSpine()
 		companyID := strings.TrimSpace(input.CompanyID)
 		for _, userID := range userIDs {
 			if userID = strings.TrimSpace(userID); userID != "" {
@@ -477,40 +477,6 @@ func (s *Server) updateCommunicationsEmailCollaborationWebhookInputs(inputs []st
 		out[companyID] = userIDs
 	}
 	return out, nil
-}
-
-func (s *Server) publishCommunicationsEmailCollaborationWebhookHints(grantContext communicationsWebhookGrantContext, change nylasWebhookChange, participantsByCompany map[string][]string) {
-	personalSource := communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared"
-	sourceUserID := strings.TrimSpace(grantContext.connection.UserID)
-	for companyID, participantUserIDs := range participantsByCompany {
-		for _, userID := range participantUserIDs {
-			userID = strings.TrimSpace(userID)
-			if userID == "" || (personalSource && userID == sourceUserID) {
-				continue
-			}
-			connections, err := s.repo.ListUserEmailConnections(userID)
-			if err != nil {
-				log.Printf("skipping email collaboration realtime hint company_id=%s user_id=%s: %v", companyID, userID, err)
-				continue
-			}
-			publishedScopes := map[string]struct{}{}
-			for _, connection := range connections {
-				if strings.TrimSpace(connection.Status) != "connected" || strings.TrimSpace(connection.GrantID) == "" {
-					continue
-				}
-				accountEmail := normalizeEmailForCompare(connection.AccountEmail)
-				scope := realtimePersonalMailboxScope(userID, accountEmail)
-				if scope == "" {
-					continue
-				}
-				if _, published := publishedScopes[scope]; published {
-					continue
-				}
-				publishedScopes[scope] = struct{}{}
-				s.publishRealtimeMessage(companyID, scope, realtimeMailboxWebhookMessage(companyID, scope, "", change))
-			}
-		}
-	}
 }
 
 func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, change nylasWebhookChange) error {

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { deserializeEditorDocumentHTML } from "./richTextEditing.js";
 import {
   documentTargetKey,
@@ -34,6 +34,24 @@ type UseEditorDocumentPersistenceInput = {
   invalidateDocumentTargetCaches: (target: DocumentSaveTarget) => void;
 };
 
+export function editorCollaborationUserMessage(cause: unknown): string {
+  const code = cause instanceof Error ? cause.message : "";
+  switch (code) {
+    case "editor_collaboration_document_too_large":
+      return "This document is over Mango's 2 MiB limit. The last edit was rolled back; shorten or split the content before continuing.";
+    case "editor_collaboration_storage_quota_exceeded":
+      return "Mango could not safely store this edit because browser storage is full. The last edit was rolled back; free browser storage before continuing.";
+    case "editor_collaboration_storage_unavailable":
+    case "editor_collaboration_storage_blocked":
+    case "editor_collaboration_storage_failed":
+      return "Mango could not safely store this edit on this device. The last edit was rolled back; check browser storage settings and retry.";
+    case "editor_collaboration_sensitive_content_rejected":
+      return "This paste contains an unsafe or temporary attachment URL. The last edit was rolled back; attach the file through Mango instead.";
+    default:
+      return code || "Mango could not sync this document. Your queued work remains on this device and will retry.";
+  }
+}
+
 export function useEditorDocumentPersistence(input: UseEditorDocumentPersistenceInput) {
   const {
     apiBase, companyID, currentUserID, linkedEntityKind, linkedEntityID, documentInformationID,
@@ -57,7 +75,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
       ? { entityKind: linkedEntityKind, entityID: linkedEntityID, informationID: documentInformationIDRef.current }
       : null;
     documentDraftRef.current = html;
-    persistedDocumentRef.current = html;
+    if (!saveInFlightRef.current) persistedDocumentRef.current = html;
     if (target) {
       const key = documentTargetKey(target);
       currentDocumentTargetKeyRef.current = key;
@@ -87,8 +105,18 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
       if (count === 0) queuedSaveRef.current = null;
     },
     onDeleted: () => applyCommittedHTML(""),
-    onError: (cause) => setError(cause instanceof Error ? cause.message : "failed_to_sync_editor_operations"),
+    onError: (cause) => setError(editorCollaborationUserMessage(cause)),
   });
+
+  useEffect(() => {
+    const protectPendingWork = (event: BeforeUnloadEvent) => {
+      if (!saveInFlightRef.current && pendingSaveRef.current === null && queuedSaveRef.current === null) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectPendingWork);
+    return () => window.removeEventListener("beforeunload", protectPendingWork);
+  }, [pendingSaveRef, queuedSaveRef, saveInFlightRef]);
 
   const buildDocumentSaveRequest = useCallback((nextText: string): DocumentSaveRequest | null => {
     if (!currentUserID || !linkedEntityID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return null;

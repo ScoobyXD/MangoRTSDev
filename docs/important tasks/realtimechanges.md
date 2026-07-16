@@ -2,36 +2,34 @@
 
 Last updated: 2026-07-15
 
-Status: implementation and verification are complete. Visible editor convergence, lost-acknowledgement recovery, realistic large-paste batching, edit-or-no-access cleanup, real browser evidence, and the exhaustive Phase 1 transactional-producer conversion all pass the complete repository gate. Production rollout remains a human-controlled migration and deployment action.
+Status: implementation and verification are complete on the canonical worker branch. The authoritative `node scripts/run_all_tests.mjs` gate passes, including real disposable PostgreSQL and production-path Chrome DOM evidence. Production rollout remains blocked and human-controlled. The local commit SHA is intentionally recorded in the final worker report because a commit cannot contain its own identity; no live database, cloud resource, merge, push, handoff, or pull request has been used.
 
 ## Implementation Record
 
-This section is the live project-management record. It is updated as implementation and verification advance; the charter below remains the approved product destination.
+This is the live project-management record. The charter below remains the approved product direction; obsolete RGA/raw-HTML and simulated-browser completion claims are superseded by this record.
 
 ### Phase checklist
 
-- [x] Worker bootstrap and canonical branch creation.
-- [x] Read this charter, `AGENTS.md`, the database-agent access contract, current owner docs, and the committed realtime/editor sources.
-- [x] Inventory current retained realtime lanes, editor hosts, legacy full-document persistence, schema, and verification surfaces.
-- [x] Resolve the initial backplane, collaboration model, batching, heartbeat, and bounded reconstruction choices from repository evidence.
-- [x] Phase 0: reconciled owner contracts and deleted contradictory legacy expectations for the migrated surfaces.
-- [x] Phase 1: the exhaustive producer inventory below proves every applicable Mango-owned persisted mutation and outbox event share one atomic repository transaction; external mailbox signals and non-persisted control frames are classified explicitly.
-- [x] Phase 2: implemented confirmed application heartbeat, the central health state machine, Key Views indicator, and global mutation gate.
-- [x] Phase 3: exact documents, structured operations, revisions, idempotency, snapshots/ETags, durable pending work, visible acknowledgement reconciliation, and lost-ack deduplication recovery are implemented and browser-proven.
-- [x] Phase 4: Logic Gate, Node, individual Node text boxes, and Project text boxes use the unified structured-operation collaboration path; the old save/conflict system remains deleted.
-- [x] Phase 5: reconnect/gap infrastructure, compaction, metrics, health rendering, and the full browser/DOM interaction matrix pass.
-- [x] Run `node scripts/run_all_tests.mjs`, inspect the complete diff/status, record exact proof here, and commit every intended change locally. The final report supplies the resulting commit SHA because recording a commit's own SHA inside that commit is self-referential.
+- [x] Bootstrap the canonical worker branch and reread `AGENTS.md`, this charter, the database access contract, source, schema, migrations, runner, tests, and owner contracts.
+- [x] Phase 0: reopen the overstated completion claims and replace contradictory legacy expectations.
+- [x] Phase 1: exhaustively audit persisted realtime producers, convert every live mapped split boundary, and prove PostgreSQL transaction atomicity.
+- [x] Phase 2: retain the one shared socket, application heartbeat, centralized health state, and mutation gate.
+- [x] Phase 3: replace serialized-HTML atoms/homegrown RGA with structured Quill Delta OT; make IndexedDB authoritative and queues tab-isolated; enforce the 2 MiB canonical boundary.
+- [x] Phase 4: retain unified Node, Logic Gate, individual text-box, and Project collaboration without restoring whole-document conflict paths.
+- [x] Phase 5: make consumer delivery outcomes typed/retryable and replace the simulated harness with production frontend/backend/PostgreSQL/WebSocket/DOM automation.
+- [x] Execute both migrations on clean and realistic legacy disposable databases in repository order and prove runner idempotence.
+- [x] Run the complete repository gate, inspect final diff/status, and update this record with exact final proof. Commit every intended file locally as the final worker handoff; its SHA belongs in the final report because a commit cannot contain its own identity.
 
-### 2026-07-15 final combined completion record
+### Deployment-blocker resolutions
 
-- Canonical worker branch: `codex/finish-unified-realtime-collaboration-correctness0000589`.
-- Visible convergence: acknowledgement snapshots rebuild the optimistic state and invoke the actual editor render callback before same-revision broadcasts can be suppressed. Both delivery orders, bundled remote operations, duplicate delivery, and origin confirmation now converge canonical, collaboration, and visible DOM state exactly once without echo saves.
-- Lost acknowledgement: stable operation IDs and durable pending records survive reload. Snapshot reconciliation recognizes already-incorporated atoms without reapplying them, resubmits the same operation ID, accepts backend deduplication as commit proof, and removes pending work only after that proof. Saved never means local rendering.
-- Large paste: the explicit product boundary is 2 MiB of sanitized UTF-8 rich HTML. Ordered 1,024-code-point atoms and durable operations target below 48 KiB per request; the backend 64 KiB guard remains internal. Content is never truncated and any remainder stays pending until acknowledged.
-- Permission result: resource authorization now exposes only `can_edit`; stored/default outcomes are `edit` and `no_access`. Company roles still govern administrative actions but do not create another resource-access tier.
-- Phase 1 result: every Mango-owned persisted mutation that produces realtime inserts its outbox row in the same repository transaction. The optimized PostgreSQL multi-domain-event path was found to return before Kanban derivation; it now enqueues the coalesced board event before return or commit.
-- Focused store/HTTP, frontend collaboration, production build, real browser/DOM verification, and the complete repository gate pass.
-- No live database, cloud resource, provider setting, production infrastructure, merge, push, handoff, or pull request was used.
+1. **Structured collaboration:** `editorStructuredDocument.ts`, `quillDelta.ts`, and `editor_structured_document.go` model documents as structured Quill Delta `ops`. The mature Quill Delta compose/transform rules integrate stale concurrent operations using UTF-16 indexing on both Go and JavaScript. The HTML adapters preserve supported paragraphs, line breaks, Unicode, lists, formatting/highlights, mentions, tables, pasted rich structure, and durable attachment references. Raw HTML prefix/suffix patches, chunk atoms, and the legacy raw-HTML test were deleted.
+2. **Producer atomicity:** Logic Gate create/update, email-collaboration creation, and persisted participant mailbox hints moved into repository-owned transactions. The audit removed the remaining live mapped `publishWorkspaceEvent` calls and dead split-producer helpers. Non-realtime domain-history calls remain domain history; external Nylas mailbox cache hints remain non-persisted liveness signals.
+3. **Cursor safety:** delivery returns an explicit terminal or retryable outcome. Authorization-store failures retain the cursor at the failed sequence, block later sequence advancement, use 50 ms to 5 s exponential backoff, and emit retry metrics plus bounded logs. No-subscriber and no-current-authorized-recipient outcomes are terminal. Persistent poison events stay visible and head-of-line until recovery rather than silently skipping subscribed browsers.
+4. **Durable pending work:** IndexedDB v2 is the only pending-operation authority. Quota, blocked, unavailable, and transaction failures surface explicitly. `window.name` provides a stable refresh-preserving identity per tab without sharing queues across tabs. Records are deleted only after commit acknowledgement or backend deduplication proof.
+5. **Document/paste boundary:** the backend materializes the transformed canonical state inside the same transaction and rejects content beyond 2 MiB with stable HTTP 413 code `editor_collaboration_document_too_large`. Client preflight and deterministic canonical rollback keep oversized local DOM from masquerading as saved; navigation is protected while pending work exists. Insert payloads split into ordered bounded operations and durable remaining batches are never truncated.
+6. **Production-path evidence:** the deleted localStorage/BroadcastChannel/fake-WebSocket harness is replaced by `editor-collaboration-e2e.html`, the production controller/socket adapter, and `run_realtime_production_path_tests.mjs`. The runner launches two real API processes, Vite, installed Chrome, and a disposable PostgreSQL 18 cluster.
+7. **Migrations and permissions:** the unified migration and canonical schema now require model version 2, Quill Delta operations, structured snapshots, and bounded operation JSON. The edit/no-access migration relies on the migration runner's transaction and converts legacy `view`/`admin` resource values to `edit`; no executable collaboration view-only tier exists.
+8. **Evidence discipline:** behavior tests replace the obsolete raw-HTML and source-order claims. Source inventory remains supplemental only.
 
 ### 2026-07-15 connection-status false-positive correction
 
@@ -41,38 +39,60 @@ This section is the live project-management record. It is updated as implementat
 - Operational scope: this is a frontend bootstrap correction only. It does not treat `/healthz` as realtime health, alter backend protocol/authentication, change CORS or proxy behavior, apply infrastructure, or modify a database/schema.
 - Verification: `npm.cmd run test:node-relationships`, `npm.cmd run build`, and `node scripts/run_all_tests.mjs` all passed; the complete gate ended with `All test suites passed.`
 
-### Phase 1 persisted-realtime producer inventory
+### Persisted realtime producer inventory
 
-The executable protocol has five persisted application families plus external mailbox hints: editor documents, notifications, Node chat, mounted Kanban hints, and mailbox hints. Updates has no independent socket scope or event type; it is a canonical `domain_events` read model. Heartbeats, subscription authorization, and liveness/control frames are non-persisted transport signals.
-
-| Family | Handler and repository owner | Canonical write and final transaction boundary | Stable identity and exact scope | Risks closed and evidence |
+| Family | Handler/repository transaction owner | Canonical write plus outbox boundary | Stable identity and exact scope | Runtime proof |
 | --- | --- | --- | --- | --- |
-| Collaborative editor | `handleEditorCollaborationOperation` / `handleEditorCollaborationDelete`; `CommitEditorCollaborationOperation` / `DeleteEditorCollaborationDocument` | document state, operation/revision, snapshot metadata, and `editor.delta.committed` or `editor.document.deleted` outbox row are one PostgreSQL transaction or memory rollback unit; commit precedes dispatcher wake | stable client operation ID and revision; exact company + `editor:{resource_type}:{resource_id}:{document_id}`, resource edit authorization | duplicate operation, lost ack, outbox rollback, gap/reconnect, sensitive payload, and visible ordering tests pass |
-| Notifications | notification projection handlers/services; `CreateNotifications`, `DeleteNotifications`, `DeleteExpiredNotifications` | notification insert/delete and recipient outbox rows commit together; HTTP publish helpers only wake the spine | deterministic ID from notification ID or sorted clear set; exact `notifications:user:{recipient}` and restricted recipient | creation/deletion/expiry/clear rollback on outbox failure; business failure creates no row |
-| Node chat, including email-collaboration chat | Node information create/delete handlers; `AddNodeInformationWithActor`, `DeleteNodeProjectionWithActor`, and email-collaboration atomic chat methods | information/projection mutation, collaboration participant effects where applicable, and chat outbox row share one transaction or memory snapshot | deterministic event/company/node/message ID; exact `chat:node:{node_id}`, Node edit authorization | forced create/delete failure rolls back every business row; email-collaboration conversion test also forces outbox failure |
-| Mounted Kanban and all persisted workspace producers that can affect it | Kanban handlers and `*WithWorkspaceEvent`; Node, Logic Gate GVIC, assignment, project-scoped create, triage convert/revert/transfer, Company Explorer delete/restore, recycle-bin, and derived-projection transactions using `appendDomainEventTx` / `appendDomainEventsTx` | business mutation, canonical domain event, and coalesced `kanban.changed` row remain in the caller transaction. Single, sequential, and optimized batch paths enqueue before commit | domain event IDs form the deterministic board event ID; exact `board:{logic-gate-board-id}` and current Logic Gate edit audience, or a pre-delete restricted audience snapshot | forced failure rolls back mounted-board update, Company Explorer delete, and multi-event batch; PostgreSQL source-order guard prevents the optimized-path omission found in this pass |
-| Updates | workspace handlers and product repositories that append `domain_events` | Updates rows are the domain events themselves. No Updates WebSocket producer exists to dual-write. A board-relevant event uses the Kanban row above in the same transaction | event ID, stream sequence, and idempotency key; existing company/user feed visibility | exhaustive realtime type/scope inventory found no Updates event family, so no fake outbox or broad workspace broadcast was added |
-| Mailbox/email hints | `handleNylasWebhookNotification` and personal/shared/collaboration webhook publishers | Nylas owns the source mutation; Mango receives an external signal and durably enqueues only the hint. Mango-owned drafts/signatures/email metadata emit no mailbox realtime family and receive no fake event | outbox event ID; exact personal account or shared inbox with participant/current-edit audience | external non-Mango mutation classification; exact scope/audience tests remain; bodies, attachment bytes, base64, presigned URLs, credentials, and secrets never enter events |
+| Editor operation, canonical replacement, delete | editor collaboration HTTP handlers; `CommitEditorCollaborationOperation`, replacement helpers, `DeleteEditorCollaborationDocument` | structured state, revision, operation/dedupe row, projection boundary, and editor outbox row commit or roll back together | stable operation ID/event ID/revision; exact `editor:{resource_type}:{resource_id}:{document_id}`; current resource Edit authorization | forced outbox rollback, oversize rollback, retry/dedupe, concurrent transform, gap/delete/restore tests and real browser DOM |
+| Notifications | notification services; `CreateNotifications`, `DeleteNotifications`, `DeleteExpiredNotifications` | notification rows and created/deleted/cleared recipient rows share the caller transaction | deterministic notification or sorted-clear ID; exact `notifications:user:{recipient}`; restricted recipient | memory and real PostgreSQL forced-outbox rollback; invalid business input creates no row |
+| Node chat, including email-collaboration chat | Node information/projection and atomic email-chat repository methods | information/projection, participant/grant effects where applicable, and chat outbox row share one transaction | deterministic company/node/message identity; exact `chat:node:{node_id}`; current Node Edit authorization | create/delete/conversion rollback and real PostgreSQL failure injection |
+| Mounted Logic Gate Kanban | all `*WithWorkspaceEvent` methods plus Node, Logic Gate/GVIC, assignment, project-scoped create, triage conversion/transfer, Explorer delete/restore, recycle-bin, and derived-projection repository transactions | business rows, domain events, and coalesced `kanban.changed` rows share the repository transaction; publication happens only after commit | stable domain-event set; exact `board:{logic-gate-board-id}`; current Logic Gate Edit audience or captured pre-delete restricted audience | Logic Gate create/update, mounted board, multi-event, early-return, and outbox-failure tests in memory and real PostgreSQL |
+| Email collaboration creation and persisted mailbox snapshot | ensure/create handler and `EnsureCommunicationsEmailCollaboration`; webhook path and `UpdateCommunicationsEmailCollaborationMessage` | collaboration Node plus workspace event commit together; later canonical message snapshot and each participant personal-mailbox outbox row commit together | stable ID from company/user/account/provider message; exact `mailbox:personal:account:{user}:{account}`; restricted participant | memory and real PostgreSQL rollback plus duplicate stable-ID proof; source participant excluded for personal source |
+| External personal/shared mailbox hint | Nylas webhook receiver | Nylas owns the source mutation; Mango invalidates caches and emits a compact liveness hint only. There is no Mango business row to dual-write | exact active personal account or shared inbox; current authorization | existing exact-scope, revocation, dedupe-receipt, and retry tests; no body, attachment bytes, URLs, credentials, or secrets |
+| Updates | domain-event appenders/read model | Updates is the durable `domain_events` feed, not an independent WebSocket family. Board-relevant events use the mounted-board transaction above | domain event ID, stream sequence, idempotency key | realtime type/scope inventory proves no Updates socket producer; no fake broad event added |
 
-All families use the durable outbox, dispatcher claim/lease/retry, shared backplane, per-instance consumer cursor, local exact registry, and publication-time authorization. No producer publishes while a business transaction is open. Failure after commit but before publication leaves a retryable row; stable IDs and published-event deduplication make retry and duplicate delivery idempotent. The legacy direct Kanban broadcast helpers were removed from production and now exist only as transport-test helpers.
+The repository-wide `publishWorkspaceEvent` audit found no remaining handler call whose event type can map to the Kanban realtime outbox. Direct `publishRealtimeMessage` production calls are limited to external provider/liveness paths; Mango-owned persisted editor, notification, chat, board, and email-collaboration snapshot mutations use the durable outbox. Dispatch wakeups occur after commit and correctness does not depend on the wakeup succeeding.
 
-### Browser and visible-DOM completion evidence
+### PostgreSQL, cursor, and failure evidence
 
-- The Vite harness mounts the production `EditorCollaborationController` and `MangoRealtimeClient` into real `contenteditable` elements and exposes visible controls to browser automation.
-- Two same-user tabs and a second authorized user converged without refresh or polling. For acknowledgement-before-broadcast, both visible editors became `<p>hidden A</p><p>visible B</p>` with pending `0`; replaying the late hidden event left the receiver render count unchanged at `3`.
-- Broadcast-before-acknowledgement converged both DOMs. A duplicated broadcast changed the receiver render count by exactly one for the new operation and did not duplicate content.
-- Deliberately losing an acknowledgement after commit left exact visible content and pending `1`; reload recovered the snapshot, retried the stable operation ID, observed backend deduplication at revision 1, and mounted the exact DOM with pending `0`.
-- One page mounted Node, Logic Gate, Project, a second Node text box, and two consumers of one identical Node document. Only the two exact Node-document DOMs changed. Headings, bold/emphasis/highlight, list, table, mention, and durable attachment reference remained exact. The shared scope subscribed once; first unmount emitted zero unsubscribes and last unmount exactly one.
-- Revocation blocked later delivery and left that DOM empty. The authorized DOM updated, while an unrelated-company tab received zero deliveries and remained empty.
-- A 1,279,152-byte rich paste committed as 31 ordered batches. In-page FNV-32 and exact length matched the expected 1,237,752-code-unit DOM, prefix, and suffix with pending `0`; revision-gap recovery and reconnect preserved that exact hash/length.
+- `TestPostgresRealtimeProducersAreTransactionallyAtomic` forces outbox failures for Logic Gate create/update, mounted board, Node chat, notifications, email-collaboration mailbox snapshots, and structured editor writes. Business state and outbox state roll back together; oversized canonical editor state creates neither operation nor event.
+- `TestPostgresRealtimeOutboxRetryAndDuplicateCompletion` proves a committed unpublished row remains claimable, failed publication is retried, attempt count advances, and duplicate publication completion is idempotent.
+- The optimized single and batched domain-event paths enqueue mapped board rows before their caller commits; the former source-pattern ordering assertion was removed because the real PostgreSQL test is authoritative.
+- Cursor tests prove transient and persistent authorization-store failures do not advance the cursor, later events cannot pass the failed sequence, recovery delivers once, revocation/no-authorized-recipient terminates safely, and exact unrelated scopes receive nothing.
+- The clean-database gate exposed and repaired two canonical schema ordering defects (a too-early shared-inbox foreign key and a function body referencing later tables) and a PostgreSQL-invalid NUL advisory-lock key. These are recorded as failed baseline assumptions rather than hidden by static checks.
+
+### Browser/DOM evidence
+
+The real automation uses the production `EditorCollaborationController`, `MangoRealtimeClient`, authenticated HTTP commands, WebSocket tickets, exact subscriptions, the outbox dispatcher/consumer, and two backend instances against PostgreSQL.
+
+- Two authorized users connected to different backend instances converge visible `contenteditable` DOM without refresh or polling.
+- Concurrent inserts at positions 100 and 200 in a 5,000-character document produce exactly 5,002 visible characters with each insert once. A concurrent acknowledgement carries the other collaborator's operation for pending-batch OT rebase.
+- Bold versus italic and heading versus strong converge with unchanged visible text and valid structured DOM. Rich heading, highlight, list, table, mention, and durable attachment markup survive; payloads contain no base64 or signed credentials.
+- Acknowledgement-before-broadcast, broadcast-before-acknowledgement, duplicate delivery, a dropped revision followed by gap recovery, and lost acknowledgement after commit all converge exactly once. Refresh retains the tab identity, retries the stable operation ID, accepts backend dedupe proof, and clears pending work.
+- A rich paste of 28,000 repeated segments commits in ordered bounded batches and matches exact DOM text. Explicit socket reconnect/full-snapshot recovery preserves it. Terminating and relaunching one API process on the same port restores affected tabs to healthy exact subscriptions and canonical state; a later edit entering through the other API converges across the restarted instance.
+- Two pages in one browser context prove independent tab identities; the same user in a second browser context also converges. Shared local consumers send one subscribe, no unsubscribe on the first unmount, and one unsubscribe on the last.
+- Node document, second Node/text box, Logic Gate, Project, and unrelated-company documents remain isolated. Permission revocation stops later delivery and rejects reload recovery.
+
+### Migration and human rollout record
+
+The disposable gate applies `backend/db/schema.sql`, then runs `20260715_unified_realtime_collaboration.sql` followed by `20260715_zz_edit_or_no_access.sql` through the real migration runner. A second runner invocation reports no pending migrations. A realistic legacy fixture proves legacy `view`/`admin` values become `edit`, rank functions expose only `no_access=0` and `edit=1`, the obsolete single-text-box Logic Gate index is removed, and the multi-text-box index/constraints exist.
+
+Human-controlled rollout sequence:
+
+1. Back up and rehearse on a staging copy; audit that neither migration has already been partially applied.
+2. Stop or drain old writers, because raw model-version-1 collaboration rows/clients are not compatible with the model-version-2 constraints.
+3. Run the repository migration runner so the unified migration executes before edit/no-access.
+4. Deploy all matching backend instances, then the matching frontend, and require pre-cutover tabs to reload.
+5. Monitor migration status, outbox claim/retry/lag, consumer authorization retries, collaboration gaps, 413 rates, and IndexedDB recovery without logging document bodies or secrets.
+6. Rollback requires restoring the pre-migration database backup and the prior coordinated app version; there is intentionally no unsafe automatic down-conversion from structured v2 operations to raw atoms.
+
+No agent applied a migration to a live or production database.
 
 ### Current verification record
 
-- `npm.cmd run test:node-relationships` — passed, including ordering, lost acknowledgement, compact atoms, sensitive payload rejection, and 1+ MiB batching.
-- `npm.cmd run build` — passed after the browser harness and collaboration changes.
-- `go test ./internal/store ./internal/http -count=1` — passed after the PostgreSQL optimized-batch fix and test-only direct-publisher move.
-- `node scripts/run_all_tests.mjs` — passed with exit code 0 on 2026-07-15: all frontend feature and contract suites, the Vite production build, every backend Go package, source audits, and infrastructure attachment contract tests passed; runner ended with `All test suites passed.`
-
+- `go test ./internal/store ./internal/http` - passed after the producer and auth-boundary changes.
+- `node scripts/run_realtime_production_path_tests.mjs` - passed on a fresh disposable PostgreSQL 18 cluster, including clean/legacy migrations, real PostgreSQL atomicity/retry, two backend instances, Vite, Chrome, and actual DOM assertions.
+- `node scripts/run_all_tests.mjs` - passed with exit code 0 after final owner-contract reconciliation. It ran frontend unit/contract suites, the production build, all Go packages, clean and legacy disposable migration paths, real PostgreSQL transaction/retry tests, two API instances, Vite, and real Chrome DOM automation.
 
 ### Baseline source inventory
 
@@ -90,17 +110,17 @@ All families use the durable outbox, dispatcher claim/lease/retry, shared backpl
 ### Resolved implementation decisions
 
 1. **Shared backplane: PostgreSQL durable outbox plus published-event log, with in-memory deterministic adapter.** The API already requires PostgreSQL and `database/sql`/pgx. A dedicated realtime outbox will use a global sequence, bounded claims with expiring leases, retry metadata, stable event IDs, and published timestamps. Every backend instance independently consumes published rows after its own cursor and applies only its local exact registry. This provides cross-instance delivery without sticky sessions or a new production service; polling is backed by immediate local wakeups and a short bounded interval. Domain events are not repurposed because they lack delivery state and contain broader business payloads.
-2. **Collaboration engine: a replicated growable array (RGA) sequence CRDT over Unicode/serialized rich-document atoms.** Stable atom IDs and predecessor IDs integrate concurrent inserts deterministically; tombstoned stable IDs make concurrent deletion and retry safe. Operations contain inserted atoms and deleted atom IDs, never a replacement body. All supported rich HTML structures remain serializable, but attachment safety validation rejects bytes/data URLs/presigned credentials before commit. This is an established sequence-CRDT model rather than offset patches against browser-normalized `innerHTML`.
-3. **Micro-batch defaults: 160 ms; 48 KiB operation target; 2 MiB sanitized UTF-8 product boundary.** Local DOM rendering is immediate. Ordinary edits retain character precision, while substantial changes use 1,024-code-point atoms and ordered durable operations. Every request stays beneath the backend 64 KiB guard; retries, reconnect, and remaining batches preserve exact order without exposing that transport limit.
+2. **Collaboration engine: structured Quill Delta operational transform.** Browser and backend use the mature `quill-delta` and `go-quilljs-delta` compose/transform algorithms over retains, inserts, deletes, and attributes. Stale-base operations transform across committed intervening operations and acknowledgements return those concurrent operations so the origin rebases pending work. HTML is only a sanitized editor projection, never the collaboration merge unit. Attachment validation rejects bytes, data URLs, presigned credentials, and secrets before commit.
+3. **Micro-batch defaults: 160 ms; 24 KiB text-insert target; 2 MiB canonical structured-document boundary.** Local DOM rendering is immediate. Large inserts split into ordered durable Quill Delta operations, every request stays beneath the backend 64 KiB guard, and retries/reconnect preserve the exact remaining order without truncation.
 4. **Snapshot/compaction: bounded replay after an exact snapshot.** A document begins with an imported/full revision-zero CRDT snapshot. The server compacts after 128 committed operations since the physical snapshot or 512 KiB of accumulated delta JSON, whichever occurs first. Snapshot reads reconstruct at most 127 normal operations (or the smaller byte threshold), report the exact head revision/ETag, and never require a browser to replay history. User-visible saved versions remain separate.
-5. **Pending operations: IndexedDB primary store, scoped by user/company/document/client/operation, with a structured-operation local-storage fallback only when IndexedDB is unavailable.** The legacy full-body keys are deleted once and never read. Recovery recognizes pending atoms already in the snapshot without duplicating them, retries the same stable operation ID, and removes the record only after commit acknowledgement or backend deduplication proof.
+5. **Pending operations: IndexedDB is authoritative, scoped by user/company/document/per-tab-client/operation.** Storage/quota failures surface and block unsafe transmission; there is no `localStorage` pending fallback. The per-tab client identity survives refresh through `window.name` without collapsing independent tabs. Recovery retries the same stable operation ID and removes a record only after commit acknowledgement or backend deduplication proof.
 6. **Heartbeat/retry defaults:** application challenge/response travels on the existing socket immediately after connect and every 25 seconds alongside protocol Ping/Pong. A 35-second confirmation grace enters orange; one failed/overdue short recovery enters blinking red while background exponential reconnect continues; eight failed attempts or 60 seconds without confirmed recovery enters solid red. Socket open alone remains syncing until exact subscriptions, mounted-document recovery, pending acknowledgements, and a server-confirmed heartbeat complete.
 7. **No presence/cursors in the first release.** Correct content convergence, selection preservation while applying remote content, saved-state proof, and recovery ship first; collaborator presence is not required by the charter.
 
 ### Implemented source inventory
 
 - The migration and canonical schema add the realtime outbox plus collaboration documents, operations, physical snapshots, leases, retry state, and indexes. No live database was changed.
-- Store and HTTP collaboration paths implement RGA integration, stable operation idempotency, ordered revisions, bounded snapshots/ETags, compaction, tombstones, exact authorization, saved-version materialization, and an editor-state/outbox transaction.
+- Store and HTTP collaboration paths implement structured Quill Delta OT, stable operation idempotency, ordered revisions, bounded snapshots/ETags, compaction, deletion, exact authorization, saved-version materialization, and an editor-state/outbox transaction.
 - The shared realtime spine implements durable claim/lease/retry/publication, per-instance published-sequence consumption, local wakeups, cross-instance delivery, application heartbeat, bounded socket queues, and one final exact local-registry boundary.
 - Frontend collaboration implements structured deltas, 160 ms micro-batching, durable pending operations, duplicate/gap recovery, exact refcounted scopes, health/mutation gating, and atomic Node/Logic Gate/Project/text-box cutover without the obsolete whole-document conflict system.
 
@@ -114,9 +134,9 @@ All families use the durable outbox, dispatcher claim/lease/retry, shared backpl
 ### Problems, failed approaches, and resolutions
 
 - **Publication authorization race:** delivery now takes the exact-scope publication lock and re-resolves only current candidate users immediately before the local registry boundary.
-- **Saved-version stale projection:** save-version creation materializes the collaboration head first; restore commits a replacement snapshot/tombstone and publishes only `editor.snapshot.required`, never a full body.
-- **Replacement versus pending operations:** replacement snapshots retain the immediately prior live atoms as tombstones, preserving pending-operation anchors while keeping repeated replacement bounded.
-- **Recovery races (resolved):** snapshot/tombstone events arriving mid-recovery request another pass, buffered events are ordered above the accepted revision, and revision never rolls backward. Acknowledgement snapshots now render accepted remote state before later broadcasts can be suppressed, while already-incorporated pending atoms are recognized and retried only for stable deduplication proof.
+- **Saved-version stale projection:** save-version creation materializes the collaboration head first; restore commits a canonical structured replacement and publishes only `editor.snapshot.required`, never a full body.
+- **Replacement versus pending operations:** replacement advances the canonical structured snapshot and revision. A client based before replacement performs canonical recovery and reconciles its still-durable operation; obsolete serialized-markup anchors are never retained.
+- **Recovery races (resolved):** snapshot/deletion events arriving mid-recovery request another pass, buffered events are ordered above the accepted revision, and revision never rolls backward. Acknowledgements include any intervening collaborator operations so pending local batches rebase before later broadcasts can be suppressed; stable operation IDs are retried only until commit/deduplication proof.
 - **Browser render loop:** the initial browser smoke found a React maximum-update-depth loop from an unstable collaboration result object. Persistence now depends on the hook's stable callbacks; a clean browser reload showed no recurrence.
 - **Windows sandbox:** Vite/esbuild child-process startup failed with `spawn EPERM` inside the restricted launcher. Focused and full commands were rerun outside that restriction; the failure occurred before project code executed.
 - **Git-case gate:** the first full gate correctly rejected the referenced migration while it was untracked. Staging the migration made the source-audit path provable; the complete rerun passed.
@@ -197,14 +217,14 @@ This decision reverses only the earlier Phase 1 deferral. Cursor/selection/IME/u
 ### Acceptance-gap resolution
 
 1. **Visible acknowledgement/broadcast convergence — resolved:** acknowledgement snapshots render accepted remote state and both delivery orders converge exactly once in visible browser DOM.
-2. **Commit-before-lost-acknowledgement recovery — resolved:** snapshot reconciliation recognizes incorporated atoms, retains the stable operation ID for deduplication proof, and clears durable pending work only after that proof.
-3. **Realistically large paste — resolved:** compact atoms and ordered sub-48 KiB durable batches support the 2 MiB product boundary without truncation or whole-document fan-out.
+2. **Commit-before-lost-acknowledgement recovery — resolved:** snapshot reconciliation retains the stable operation ID for backend deduplication proof and clears durable IndexedDB work only after that proof.
+3. **Realistically large paste — resolved:** ordered sub-24 KiB text-insert operations support the 2 MiB product boundary beneath the 64 KiB request guard without truncation or whole-document fan-out.
 4. **Complete rich-editor browser matrix — resolved:** the browser record above covers multi-user/tab ordering, duplicates, lost ack, reconnect/gap, large rich paste, isolation, refcounting, revocation, and exact visible DOM.
 5. **Edit-or-no-access cleanup — resolved:** executable code, schema/defaults, APIs, tests, dialogs, and active owner contracts now expose only edit or no access.
 6. **Persisted realtime-producer transaction boundaries — resolved:** the exhaustive Phase 1 ledger covers every protocol family and the optimized PostgreSQL batch path is guarded.
 7. **Historical-row retention — owner-deferred:** published outbox rows and collaboration operations still have no time/size cleanup policy. Snapshot compaction bounds reconstruction, not database growth.
 
-All release-blocking acceptance gaps, Phase 5, and the implementation Definition of Done are closed by the browser evidence and passing complete repository gate recorded above. The local commit SHA is recorded in the final worker report.
+All release-blocking acceptance gaps, Phase 5, and the implementation Definition of Done are closed by the focused evidence and the passing complete repository gate. The local commit identity is recorded in the final worker report.
 
 
 
@@ -1141,8 +1161,8 @@ Given a platform with tens of thousands of companies and large employee director
 
 - PostgreSQL `realtime_outbox` is the durable shared backplane log; every instance claims/publishes and consumes published sequence rows.
 - `editor_collaboration_documents`, `editor_collaboration_operations`, and `editor_collaboration_snapshots` are the physical collaboration tables.
-- The collaboration engine is an RGA sequence CRDT over serialized rich-document atoms.
-- Client micro-batching defaults to 160 ms with a 64 KiB encoded-delta ceiling.
+- The collaboration engine is structured Quill Delta operational transform using mature browser and Go transform/compose implementations.
+- Client micro-batching defaults to 160 ms, splits large text inserts below 24 KiB, and enforces a 64 KiB encoded-operation ceiling.
 - Physical compaction occurs after 128 operations or 512 KiB of delta JSON, bounding reconstruction to at most 127 normal operations.
 - Heartbeats run roughly every 25 seconds; confirmation grace is 35 seconds, attempting is entered after the short recovery threshold, and disconnected is entered after eight failures or 60 seconds.
 - Presence/cursors do not ship in this release.
@@ -1183,12 +1203,12 @@ This charter is implemented only when all of the following are true:
 
 ### Completion audit
 
-- Complete with passing evidence: all items 1-14. The exhaustive producer table proves the atomic outbox boundaries and exact scopes; forced-failure tests prove rollback behavior; stable identities prove retry/deduplication; and production direct-broadcast bypasses are removed.
-- The 2 MiB sanitized-rich-HTML product boundary is browser-proven with a 1,279,152-byte, 31-batch paste whose visible DOM hash, length, prefix, and suffix remain exact through gap recovery and reconnect.
+- Complete with passing behavior evidence: all items 1-14. The exhaustive producer table proves atomic outbox boundaries and exact scopes; forced PostgreSQL failures prove rollback behavior; stable operation and event identities prove retry/deduplication; production direct-broadcast bypasses are removed; and the real browser proves visible convergence.
+- Bounded rich paste is browser-proven with 28,000 repeated rich segments committed through ordered Quill Delta batches; exact visible DOM text and structured markup remain intact through gap recovery and explicit reconnect. Backend PostgreSQL tests separately enforce the full 2 MiB canonical boundary and concurrent overflow rollback.
 - Acknowledgement/broadcast reordering and commit-before-lost-acknowledgement recovery are proven against actual visible editor DOM state, including duplicate delivery and stable-operation deduplication.
 - The real-browser matrix proves multi-user, multi-tab, exact document/company isolation, refcounted subscribe/unsubscribe, revocation, rich text, and durable inline attachment references.
 - The repository-wide permission cleanup and migration enforce only `edit` or `no_access`; user, manager, and administrator roles do not create a view-only resource outcome.
-- The full `node scripts/run_all_tests.mjs` gate passed with exit code 0 after the final implementation changes. The charter's implementation Definition of Done is complete; database migration, deployment, monitoring, and rollback control remain human-owned production rollout actions.
+- The final `node scripts/run_all_tests.mjs` gate passed with exit code 0 after owner-contract reconciliation. The implementation Definition of Done is complete; database migration, deployment, monitoring, and rollback control remain human-owned production rollout actions.
 
 ## Final Invariant
 

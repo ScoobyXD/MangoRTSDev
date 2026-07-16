@@ -369,7 +369,8 @@ test("project text bodies use exact-document collaboration while metadata keeps 
   assert.match(nodeWorkspaceParts, /useCollaborativeEditorDocument\(\{/);
   assert.match(nodeWorkspaceParts, /resourceType: surfaceKind === "project" \? "project" : "node"/);
   assert.match(nodeWorkspaceParts, /collaboration\.scheduleDocumentSave\(nextDocument, immediate\)/);
-  assert.match(collaboration, /mango-editor-collaboration-pending-v1/);
+  assert.match(collaboration, /mango-editor-collaboration-v2/);
+  assert.match(collaboration, /indexedDB\.open/);
   assert.match(collaboration, /microBatchMs \?\? 160/);
   assert.doesNotMatch(collaboration, /mango-editor-projection-draft-v2:[^"\]]/);
 });

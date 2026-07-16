@@ -1110,23 +1110,6 @@ func (s *Server) resolveCompanyExplorerFolderShareTarget(companyID, userID, emai
 	return companyUser.Email, companyUser.UserID, nil
 }
 
-func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {
-	for _, target := range targets {
-		switch target.Kind {
-		case "folder":
-			s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": target.ID, "folder_kind": target.FolderKind})
-		case "node":
-			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": target.ID})
-		case "logic_gate":
-			s.publishWorkspaceEvent(companyID, "logic_gate_deleted", map[string]any{"logic_gate_id": target.ID})
-		case "project":
-			s.publishWorkspaceEvent(companyID, "project_deleted", map[string]any{"project_id": target.ID})
-		case "kanban":
-			s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": target.ID})
-		}
-	}
-}
-
 func isValidCompanyExplorerFolderKind(value string) bool {
 	return value == "node" || value == "logic_gate" || value == "project"
 }

@@ -5,7 +5,7 @@ Last updated: 2026-07-15
 Coverage Status:
 - RW51-RW54 and RW57 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `backend/internal/http/realtime_websocket_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Backend realtime, collaboration HTTP/store, and cross-instance delivery tests cover exact admission/publication authorization, revocation, bounded stalled-client isolation, shared outbox recovery/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend realtime/editor tests cover one shared socket, exact refcount, ticket bootstrap while health is degraded, application heartbeat recovery states, mutation gating, structured deltas, legacy cleanup, and source inventory. Existing retained-family and mailbox suites remain; real multi-browser rich DOM coverage remains partial.
+- Business Logic Covered By Automated Tests: Partial overall. Backend realtime, collaboration HTTP/store, and disposable-PostgreSQL tests cover exact admission/publication authorization, revocation, retryable cursor behavior, atomic outbox rollback/retry/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend tests cover one shared socket, exact refcount, ticket bootstrap while health is degraded, heartbeat recovery, mutation gating, structured Quill Delta OT, IndexedDB recovery, and legacy cleanup. `scripts/run_realtime_production_path_tests.mjs` adds real Chrome DOM coverage through two API instances, PostgreSQL, authenticated HTTP, WebSocket/outbox delivery, multiple users/tabs, delivery reordering, lost acknowledgement, reconnect/gaps, rich paste, isolation, and revocation. Unrelated retained-family and mounted React races retain their stated partial coverage.
 
 ## Business Logic
 
@@ -33,7 +33,7 @@ RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that re
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
 RW24 - Attachment upload control, metadata, linking, and content reads are HTTP operations. No attachment WebSocket message exists, and socket payloads never carry file bytes, base64 blobs, presigned URLs, or S3 object contents.
-RW25 - Calendar invitation display uses authenticated `GET /v1/communications/calendar-invites/event` and responses use authenticated `POST /v1/communications/calendar-invites/respond`. Both commands supply exact company/mailbox plus source `message_id` scope; the backend derives the authenticated raw-MIME iCalendar UID and resolves exactly one provider event rather than accepting client-supplied grant, calendar, event, meeting, or attendee data. The GET returns authoritative event details/current mailbox-participant RSVP; the POST accepts only normalized `status` (`yes`, `maybe`, or `no`). Shared inbox access requires edit permission, WebSocket never carries event detail or RSVP commands, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
+RW25 - Calendar invitation responses use authenticated `POST /v1/communications/calendar-invites/respond` HTTP requests. The request supplies the company/mailbox scope plus `message_id` and `status` (`yes`, `maybe`, or `no`); the backend resolves the iCalendar UID and exactly one provider event under the authorized personal/shared mailbox scope instead of accepting client-supplied grant, calendar, or event identifiers. Shared inbox responses require edit access, WebSocket messages never send the RSVP, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
 RW26 - Normal browser upload uses Mango HTTP JSON endpoints for policy, intent creation/state, multipart signing, completion, and abort, then raw HTTPS PUT directly to private S3 through the presigned URL. Mango API requests and WebSocket payloads never carry the browser file body. Intent creation carries active company context only in the membership-validated `X-Mango-Company-ID` Mango header, never in intent JSON or an S3 request; the S3 request also never carries Mango Authorization/cookies.
 RW27 - `GET /v2/logic-gates/{logic_gate_id}/work` is the primary Kanban-specific Arena read and returns only `logic_gate`, actor `permissions`, `board`, `columns`, and minimal `cards`. The legacy `GET /v1/logic-gate-arena` route may delegate to the same representation but is not the primary path.
 RW28 - The Logic Gate work response omits top-level repeated IDs, statuses, assignments, nodes, cards limits, and the full GVIC collection; contract tests must assert both required fields and absent redundant fields.
@@ -66,7 +66,6 @@ RW54 - Mailbox work uses separate ownership domains. Message-list/detail work ma
 RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
 RW56 - The unified collaboration rollout is coordinated: apply `20260715_unified_realtime_collaboration.sql` before the matching backend/frontend release, then require pre-cutover tabs to reload. Migrated `Text box` projection POST/DELETE compatibility writes remain rejected; no revisionless or whole-document fallback is restored.
 RW57 - An otherwise healthy realtime WebSocket remains connected while idle. The backend sends an empty protocol-level ping every 25 seconds, below the deployed load balancer's 60-second idle timeout; the browser networking stack answers without JavaScript timers, API fetches, auth refreshes, or new realtime tickets. Only a genuine transport failure invokes bounded reconnect and scoped canonical recovery.
-RW58 - Realtime ticket acquisition is a bootstrap exception to the degraded-realtime mutation gate. Activating the shared client may mark health Reconnecting before `POST /v1/realtime/ticket`; that exact authenticated request must still reach the backend and advance to WebSocket construction. The exception must not permit any ordinary business mutation while realtime remains degraded.
 
 ## Scenarios
 
@@ -282,23 +281,22 @@ Expected:
 - S3 PUT requests include only exact signed headers and no Mango access token, cookies, company headers, or API-client interceptors.
 - Clients fetch attachment content through the attachment HTTP content route only when they need to render or download it.
 
-### Scenario RW-S11: Calendar Invitation Event Details And RSVP Use Scoped HTTP Commands
+### Scenario RW-S11: Calendar Invitation RSVP Uses A Scoped HTTP Command
 
 Business logic covered:
 - RW25
 
 Given:
 - A personal or shared mailbox message contains one valid `METHOD:REQUEST` iCalendar event.
-- The user opens the invitation card and may choose Accept, Tentative, or Decline in an email viewer.
+- The user chooses Accept, Tentative, or Decline in an email viewer.
 
 Expected:
-- The frontend gets authoritative event details with exact company/mailbox and source `message_id` scope from `/v1/communications/calendar-invites/event`.
-- When the user responds, the frontend posts the source `message_id`, normalized RSVP status, company scope, and shared inbox scope when applicable to `/v1/communications/calendar-invites/respond`.
-- Both endpoints require the authenticated communications connection and shared-inbox edit access when a shared scope is supplied.
-- The backend reads the source MIME, extracts the invitation UID, and resolves exactly one non-cancelled provider event. GET returns available title, timing/timezone, organizer, participants/current mailbox RSVP, location, conference URL, and calendar link; POST sends the provider RSVP.
+- The frontend posts the source `message_id`, normalized RSVP status, company scope, and shared inbox scope when applicable to `/v1/communications/calendar-invites/respond`.
+- The endpoint requires the authenticated communications connection and shared-inbox edit access when a shared scope is supplied.
+- The backend reads the source MIME, extracts the invitation UID, resolves exactly one non-cancelled event in the provider calendar, and sends the provider RSVP.
 - Missing invitations or events return a validation/not-found response, and ambiguous event matches return a conflict instead of choosing an arbitrary event.
-- Neither request accepts or trusts a client grant ID, provider event ID, calendar ID, provider token, event details, or attachment bytes.
-- Each provider request is rate-gated and event details/RSVP are not sent through WebSocket.
+- The request does not accept or trust a client grant ID, provider event ID, calendar ID, provider token, or attachment bytes.
+- Each provider request is rate-gated and the action is not sent through WebSocket.
 - Expired or revoked grants, insufficient calendar scope, and provider failures return a recoverable reconnect/provider response and never report a successful RSVP or force Mango logout.
 - Environment OAuth scopes must include Google/Microsoft calendar write access before integrated provider verification. Scope changes are not retroactive: existing grants must be reauthorized/reconsented after the configured scopes change. This route is invitation RSVP, not a full calendar workspace.
 
@@ -541,21 +539,3 @@ Reference defaults:
 - [Cloudflare Agents keepalive interval](https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/)
 - [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
 - [RFC 6455 Ping and Pong](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2)
-
-### Scenario RW-S22: Realtime Bootstrap Cannot Block Its Own Ticket
-
-Business logic covered:
-- RW12
-- RW22
-- RW58
-
-Given:
-- The first shared realtime consumer activates the client.
-- Activation correctly changes health from inactive to Reconnecting before a socket exists.
-- The client uses its production ticket path rather than a test-only injected ticket function.
-
-Expected:
-- The authenticated `POST /v1/realtime/ticket` reaches the configured API exactly once even though the global mutation gate is active.
-- A successful ticket response advances immediately to construction of `/v1/realtime/ws?company_id=...`.
-- The client still stays non-green until server readiness, confirmed application heartbeat, accepted subscriptions, and mounted-document recovery complete.
-- Unrelated POST, PUT, PATCH, and DELETE business requests remain blocked while realtime is degraded.

@@ -107,9 +107,9 @@ type communicationsEmailCollaborationScope struct {
 
 func communicationsEmailCollaborationScopeLockKey(companyID string, scope communicationsEmailCollaborationScope) string {
 	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
-		return strings.Join([]string{"communications-email-collaboration", companyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail}, "\x00")
+		return strings.Join([]string{"communications-email-collaboration", companyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail}, "\x1f")
 	}
-	return strings.Join([]string{"communications-email-collaboration", companyID, scope.scopeType, scope.sharedInboxID}, "\x00")
+	return strings.Join([]string{"communications-email-collaboration", companyID, scope.scopeType, scope.sharedInboxID}, "\x1f")
 }
 
 func normalizeCommunicationsEmailCollaborationScope(companyID, personalUserID, personalAccountEmail, sharedInboxID, accountEmail string) (string, communicationsEmailCollaborationScope, error) {

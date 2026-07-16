@@ -29,8 +29,34 @@ type ActorContext struct {
 	IsDevAdmin  bool                       `json:"is_dev_admin"`
 }
 
+func (s *Server) testAuthActor(r *http.Request) (ActorContext, error) {
+	subject := strings.TrimSpace(r.Header.Get("X-Mango-Test-Subject"))
+	if subject == "" || len(subject) > 160 {
+		return ActorContext{}, errors.New("test_auth_subject_required")
+	}
+	user, err := s.repo.UpsertAuthUser(subject, subject+"@mangorts.test", subject)
+	if err != nil {
+		return ActorContext{}, err
+	}
+	memberships, err := s.repo.ListUserMemberships(user.UserID)
+	if err != nil {
+		return ActorContext{}, err
+	}
+	actor := ActorContext{
+		Claims: auth.Claims{Subject: subject, Email: user.Email, Name: user.DisplayName},
+		User:   user, Memberships: normalizeMembershipRoles(memberships),
+	}
+	for _, membership := range actor.Memberships {
+		if membership.Role == domain.RoleDevAdmin {
+			actor.IsDevAdmin = true
+			break
+		}
+	}
+	return actor, nil
+}
+
 func (s *Server) withAuth(next http.Handler) http.Handler {
-	if s.authValidator == nil {
+	if s.authValidator == nil && !s.testAuthHeaderEnabled {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +73,35 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 		if actor, ok := s.consumeRealtimeTicketActor(r); ok {
+			ctx := context.WithValue(r.Context(), actorContextKey{}, actor)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		if s.authValidator == nil {
+			actor, err := s.testAuthActor(r)
+			if err != nil {
+				if s.testAuthHeaderEnabled {
+					log.Printf("test-only authentication failed path=%s header_present=%t: %v", r.URL.Path, strings.TrimSpace(r.Header.Get("X-Mango-Test-Subject")) != "", err)
+				}
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			companyID, err := requestCompanyID(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_company_id_payload")
+				return
+			}
+			if companyID != "" {
+				role := actorRoleForCompany(actor, companyID)
+				if !actor.IsDevAdmin && role == "" {
+					writeError(w, http.StatusForbidden, "company_access_denied")
+					return
+				}
+				actor.CompanyID, actor.CompanyRole = companyID, role
+				if !s.authorizeCompanyRequest(w, r, actor, companyID, role) {
+					return
+				}
+			}
 			ctx := context.WithValue(r.Context(), actorContextKey{}, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return

@@ -1,4 +1,4 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 # Logic Gates Tests
 
@@ -7,7 +7,7 @@ Detailed Logic Gate Kanban board behavior, including subgrouping, request card f
 Coverage Status:
 - Shared `@`/`!` people-picker palette key, fallback, and contrast behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/editor_collaboration_test.go`, `backend/internal/http/editor_collaboration_handlers_test.go`, and `backend/internal/http/realtime_delivery_test.go` cover structured convergence, idempotency, snapshots/ETags, authorization, exact cross-instance fan-out, revocation, compact saved-version recovery, and derived-snapshot materialization; `tests/frontend/modules/editor/editorCollaboration.test.ts`, `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`, and `unifiedRichEditorContract.test.ts` cover bounded rich-text deltas, legacy cleanup, one shared connection/health recovery, and Logic Gate host wiring).
+- Business Logic Covered By Automated Tests: Partial overall. `backend/internal/store/editor_structured_collaboration_test.go`, the collaboration HTTP/delivery suites, and the disposable-PostgreSQL producer suite cover structured OT convergence, idempotency, snapshots/ETags, authorization, transactional Logic Gate create/update outbox rows, exact cross-instance fan-out, revocation, saved-version recovery, and derived-snapshot materialization. Frontend unit suites cover bounded rich-text operations, legacy cleanup, shared connection/health recovery, and host wiring; `scripts/run_realtime_production_path_tests.mjs` proves exact Logic Gate document isolation and real DOM/WebSocket convergence.
 
 ## Business Logic
 

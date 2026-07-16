@@ -99,12 +99,12 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 		return
 	}
-	item, err := s.repo.CreateLogicGate(req.CompanyID, req.Header)
+	item, event, err := s.repo.CreateLogicGateWithWorkspaceEvent(req.CompanyID, req.Header)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
+	s.publishCommittedWorkspaceEvent(event)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -152,7 +152,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
-			item, err := s.repo.UpdateLogicGateHeader(req.CompanyID, logicGateID, strings.TrimSpace(req.Header))
+			item, event, err := s.repo.UpdateLogicGateHeaderWithWorkspaceEvent(req.CompanyID, logicGateID, strings.TrimSpace(req.Header))
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")
 				return
@@ -161,7 +161,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate")
 				return
 			}
-			s.publishWorkspaceEvent(req.CompanyID, "logic_gate_updated", map[string]any{"logic_gate_id": logicGateID, "logic_gate": item})
+			s.publishCommittedWorkspaceEvent(event)
 			writeJSON(w, http.StatusOK, item)
 			return
 		}

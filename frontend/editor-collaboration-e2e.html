@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mango collaboration production-path test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    #editor { min-height: 180px; border: 1px solid #888; padding: 12px; }
+    #status { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+    <div id="status" role="status">Connecting</div>
+    <div id="health" data-health="connecting">Connecting</div>
+    <div id="errors" role="alert"></div>
+  </main>
+  <script type="module" src="/src/testing/editorCollaborationE2E.ts"></script>
+</body>
+</html>

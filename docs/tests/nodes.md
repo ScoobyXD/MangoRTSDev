@@ -1,4 +1,4 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 # Nodes Tests
 
@@ -8,7 +8,7 @@ Coverage Status:
 - Shared conversion projection provenance is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
 - Browser-direct additions must prove the 1 GiB/64 MiB/16 MiB policy, node-level progress/cancel/retry/resume, completed-only counts, one completion refresh, and completion after origin text-box deletion without projection recreation.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. `backend/internal/store/editor_collaboration_test.go`, `backend/internal/http/editor_collaboration_handlers_test.go`, and `backend/internal/http/realtime_delivery_test.go` cover structured-operation convergence, commit idempotency, canonical snapshots/ETags, exact authorization, cross-instance exact-scope delivery, unrelated-scope isolation, revocation, compact restore recovery, and saved-version materialization. `tests/frontend/modules/editor/editorCollaboration.test.ts`, `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`, and `unifiedRichEditorContract.test.ts` cover bounded deltas, rich HTML/reference preservation, legacy-key cleanup, shared-socket refcount/recovery health, and mounted host wiring. Node shell, attachment, and rich-editor behavior retain their existing focused suites; browser-level simultaneous rich-edit coverage remains partial.
+- Business Logic Covered By Automated Tests: Partial overall. `backend/internal/store/editor_structured_collaboration_test.go`, `backend/internal/http/editor_collaboration_handlers_test.go`, `backend/internal/http/realtime_delivery_test.go`, and the disposable-PostgreSQL producer suite cover structured OT convergence, idempotency, snapshots/ETags, exact authorization, cross-instance delivery, unrelated-scope isolation, revocation, restore recovery, and saved-version materialization. Frontend unit suites cover bounded operations, rich structure/reference preservation, IndexedDB queue recovery, legacy cleanup, shared-socket refcount/health, and host wiring. `scripts/run_realtime_production_path_tests.mjs` proves simultaneous multi-user/tab rich editing and exact Node/text-box isolation against real browser DOM, PostgreSQL, HTTP, and WebSocket paths. Other Node shell, attachment, and editor behaviors retain their focused suites.
 
 ## Business Logic
 
