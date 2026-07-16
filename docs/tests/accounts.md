@@ -20,7 +20,7 @@ ACC9 - An account folder cannot be parented to itself or one of its descendants.
 ACC10 - Deleting an account folder detaches child folders and accounts instead of deleting those child records.
 ACC11 - Updating an account supports partial changes to name, folder, and position and requires company context.
 ACC12 - Deleting an account recomputes account-dependent node projection data for assigned nodes.
-ACC13 - Reading node account assignments requires view access to the node.
+ACC13 - Reading node account assignments requires edit access to the node.
 ACC14 - Replacing node account assignments requires edit access to the node.
 ACC15 - Replacing node account assignments cleans blank IDs, dedupes repeated account IDs, sorts them, and validates that every account exists in the company.
 ACC16 - Updating node account assignments recomputes node projection dependencies.
@@ -90,7 +90,7 @@ Given:
 - A replacement request includes blanks, duplicates, valid accounts, and an invalid account ID.
 
 Expected:
-- View access can read node account assignments.
+- Edit access can read node account assignments.
 - Edit access is required to replace node account assignments.
 - Replacement cleans blanks, dedupes IDs, sorts IDs, and rejects invalid accounts.
 - Successful replacement recomputes node projection dependencies.

@@ -194,7 +194,7 @@ func TestMemoryEmailCollaborationCanonicalNodeGuards(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions Nodes folder descendants: %v", err)
 	}
-	if allowed, err := repo.UserHasEffectiveAccess(companyID, other.UserID, EntityTypeNode, collaboration.NodeID, EntityPermissionView); err != nil || allowed {
+	if allowed, err := repo.UserHasEffectiveAccess(companyID, other.UserID, EntityTypeNode, collaboration.NodeID, EntityPermissionEdit); err != nil || allowed {
 		t.Fatalf("folder descendant access for nonparticipant = %v err=%v, want false", allowed, err)
 	}
 	if allowed, err := repo.UserHasEffectiveAccess(companyID, creator.UserID, EntityTypeNode, collaboration.NodeID, EntityPermissionEdit); err != nil || !allowed {

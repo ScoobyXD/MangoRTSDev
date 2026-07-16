@@ -296,7 +296,7 @@ func (r *MemoryRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.L
 		if gate.CompanyID != companyID {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
 		gate = r.withLogicGateGVICLocked(gate)
@@ -364,7 +364,7 @@ func (r *MemoryRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, u
 		if gate.CompanyID != companyID || !folderGates[gate.LogicGateID] {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
 		gate = r.withLogicGateGVICLocked(gate)
@@ -444,7 +444,7 @@ func (r *MemoryRepo) QueryVisibleLogicGates(companyID, userID string, query Logi
 		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
 		assignments := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(gate.CompanyID, gate.LogicGateID)

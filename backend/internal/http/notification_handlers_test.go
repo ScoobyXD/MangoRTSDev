@@ -39,8 +39,8 @@ func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, company
 		permissions = append(permissions, store.EntityPermissionInput{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   userID,
-			AccessLevel: store.EntityPermissionView,
-			Permission:  store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
+			Permission:  store.EntityPermissionEdit,
 		})
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{

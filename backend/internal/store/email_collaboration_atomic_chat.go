@@ -42,6 +42,35 @@ func (r *MemoryRepo) AddEmailCollaborationNodeInformationWithActor(input NodeInf
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	participantsBefore := cloneMemoryMap(r.emailCollaborationParticipants)
+	permissionsBefore := cloneMemoryMap(r.entityPermissions)
+	effectiveAccessBefore := cloneMemoryMap(r.effectiveAccess)
+	nodesBefore := cloneMemoryMap(r.nodes)
+	nodeInfoBefore := cloneMemorySliceMap(r.nodeInfo)
+	nodeTextBefore := cloneMemoryNodeText(r.nodeText)
+	contentChangesBefore := cloneMemoryMap(r.nodeContentChanges)
+	contentSeenBefore := cloneMemoryMap(r.nodeContentChangeSeen)
+	readVersionsBefore := cloneMemoryMap(r.workspaceReadVersions)
+	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
+	outboxSequenceBefore := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		r.emailCollaborationParticipants = participantsBefore
+		r.entityPermissions = permissionsBefore
+		r.effectiveAccess = effectiveAccessBefore
+		r.nodes = nodesBefore
+		r.nodeInfo = nodeInfoBefore
+		r.nodeText = nodeTextBefore
+		r.nodeContentChanges = contentChangesBefore
+		r.nodeContentChangeSeen = contentSeenBefore
+		r.workspaceReadVersions = readVersionsBefore
+		r.realtimeOutbox = outboxBefore
+		r.realtimeOutboxSequence = outboxSequenceBefore
+	}()
+
 	collaboration, ok := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID)
 	if !ok {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, ErrNotEmailCollaboration
@@ -58,6 +87,18 @@ func (r *MemoryRepo) AddEmailCollaborationNodeInformationWithActor(input NodeInf
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
 	}
 	item := r.addEmailCollaborationNodeInformationLocked(input)
+	messageID := input.InformationID
+	if messageID == "" {
+		messageID = item.InformationID
+	}
+	outboxInput, err := nodeChatCreatedOutboxInput(item, messageID)
+	if err != nil {
+		return CommunicationsEmailCollaborationInformationWriteResult{}, err
+	}
+	if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+		return CommunicationsEmailCollaborationInformationWriteResult{}, err
+	}
+	committed = true
 	return CommunicationsEmailCollaborationInformationWriteResult{
 		Information: item, CollaborationID: collaboration.CollaborationID, MentionedUserIDs: participants.MentionedUserIDs,
 	}, nil
@@ -182,6 +223,17 @@ func (r *PostgresRepo) AddEmailCollaborationNodeInformationWithActor(input NodeI
 	}
 	item, err := addEmailCollaborationNodeInformationTx(ctx, tx, input)
 	if err != nil {
+		return CommunicationsEmailCollaborationInformationWriteResult{}, err
+	}
+	messageID := input.InformationID
+	if messageID == "" {
+		messageID = item.InformationID
+	}
+	outboxInput, err := nodeChatCreatedOutboxInput(item, messageID)
+	if err != nil {
+		return CommunicationsEmailCollaborationInformationWriteResult{}, err
+	}
+	if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
 	}
 	if err := tx.Commit(); err != nil {

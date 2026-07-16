@@ -59,7 +59,7 @@ func companyExplorerFinalArgs(query CompanyExplorerV2RowsQuery) []any {
 		query.CompanyID,
 		companyExplorerLazyNullable(query.ParentEntityID),
 		companyExplorerLazyNullable(query.PermissionUserID),
-		EntityPermissionView,
+		EntityPermissionEdit,
 	}
 }
 
@@ -67,7 +67,7 @@ func companyExplorerRootArgs(query CompanyExplorerV2RowsQuery) []any {
 	return []any{
 		query.CompanyID,
 		companyExplorerLazyNullable(query.PermissionUserID),
-		EntityPermissionView,
+		EntityPermissionEdit,
 	}
 }
 
@@ -90,13 +90,13 @@ func companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, permissi
           membership.role='dev_admin'
           or (membership.company_id=$1::uuid and membership.role='company_admin')
         )
-    ) then 'admin'
-    when ` + entityTypeExpr + `='company' then 'view'
+    ) then 'edit'
+    when ` + entityTypeExpr + `='company' then 'edit'
     when ` + entityTypeExpr + `='folder'
       and mangorts_user_can_access_resource($1::uuid, 'company_explorer_folder', ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, 'edit') then 'edit'
     when ` + entityTypeExpr + ` in ('node', 'logic_gate', 'project')
       and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, 'edit') then 'edit'
-    else 'view'
+    else 'edit'
   end`
 }
 
@@ -383,7 +383,7 @@ order by case candidate.entity_type
   when 'node' then 4
   else 5
 end
-limit 1`, query.CompanyID, query.ParentEntityID, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionView))
+limit 1`, query.CompanyID, query.ParentEntityID, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionEdit))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}

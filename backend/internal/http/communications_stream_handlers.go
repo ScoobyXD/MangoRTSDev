@@ -551,7 +551,7 @@ func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string
 		scope,
 		store.EntityTypeSharedInbox,
 		sharedInboxID,
-		store.EntityPermissionView,
+		store.EntityPermissionEdit,
 		realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change),
 	)
 	return err

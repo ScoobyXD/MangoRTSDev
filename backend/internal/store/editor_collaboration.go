@@ -17,6 +17,8 @@ const (
 	EditorCollaborationSnapshotRequiredEventType = "editor.snapshot.required"
 	EditorCollaborationOperationMaxBytes         = 64 * 1024
 	EditorCollaborationOperationMaxAtomCount     = 10000
+	EditorCollaborationAtomMaxRunes              = 1024
+	EditorCollaborationSnapshotCharAtomMaxRunes  = 4096
 	EditorCollaborationCompactOperationCount     = 128
 	EditorCollaborationCompactDeltaBytes         = 512 * 1024
 	editorCollaborationTextBlockPrefix           = "<!-- mango-node-text-block-v1 -->"
@@ -211,7 +213,8 @@ func NormalizeEditorCollaborationOperation(input EditorCollaborationOperationInp
 		atom.ID = strings.TrimSpace(atom.ID)
 		atom.AfterID = strings.TrimSpace(atom.AfterID)
 		atom.Deleted = false
-		if atom.ID == "" || len(atom.ID) > 200 || len(atom.AfterID) > 200 || !utf8.ValidString(atom.Value) || utf8.RuneCountInString(atom.Value) != 1 {
+		valueRunes := utf8.RuneCountInString(atom.Value)
+		if atom.ID == "" || len(atom.ID) > 200 || len(atom.AfterID) > 200 || !utf8.ValidString(atom.Value) || valueRunes < 1 || valueRunes > EditorCollaborationAtomMaxRunes {
 			return EditorCollaborationOperationInput{}, nil, ErrInvalid
 		}
 	}
@@ -238,11 +241,16 @@ func EditorRealtimeScope(ref EditorDocumentRef) string {
 
 func NewEditorCollaborationState(html string) EditorCollaborationState {
 	runes := []rune(html)
-	atoms := make([]EditorCollaborationAtom, 0, len(runes))
+	atomRunes := 1
+	if len(runes) > EditorCollaborationSnapshotCharAtomMaxRunes {
+		atomRunes = EditorCollaborationAtomMaxRunes
+	}
+	atoms := make([]EditorCollaborationAtom, 0, (len(runes)+atomRunes-1)/atomRunes)
 	afterID := ""
-	for index, value := range runes {
+	for start, index := 0, 0; start < len(runes); start, index = start+atomRunes, index+1 {
+		end := min(start+atomRunes, len(runes))
 		id := fmt.Sprintf("0:%08x", index)
-		atoms = append(atoms, EditorCollaborationAtom{ID: id, AfterID: afterID, Value: string(value)})
+		atoms = append(atoms, EditorCollaborationAtom{ID: id, AfterID: afterID, Value: string(runes[start:end])})
 		afterID = id
 	}
 	return EditorCollaborationState{Atoms: atoms}

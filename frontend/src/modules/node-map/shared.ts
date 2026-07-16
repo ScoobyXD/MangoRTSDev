@@ -6,13 +6,11 @@ import type { Account } from "../accounts/accountsApi.js";
 export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
 // Core node row payload returned by backend APIs and workspace snapshot cache.
-export type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
+export type ResourceAccessLevel = "no_access" | "edit";
 
 export type ResourceAccessFields = {
   effective_access_level?: ResourceAccessLevel | string | null;
-  can_view?: boolean;
   can_edit?: boolean;
-  can_admin?: boolean;
 };
 
 export type NodeRecord = ResourceAccessFields & {
@@ -130,11 +128,7 @@ export function trimOrEmpty(value: string): string {
 
 export function accessLevelRank(accessLevel: string | null | undefined): number {
   switch ((accessLevel ?? "").trim()) {
-    case "admin":
-      return 3;
     case "edit":
-      return 2;
-    case "view":
       return 1;
     case "no_access":
       return 0;
@@ -143,29 +137,11 @@ export function accessLevelRank(accessLevel: string | null | undefined): number 
   }
 }
 
-export function canViewResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
-  if (!resource) return true;
-  if (typeof resource.can_view === "boolean") return resource.can_view;
-  if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
-    return accessLevelRank(resource.effective_access_level) >= accessLevelRank("view");
-  }
-  return true;
-}
-
 export function canEditResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
   if (!resource) return true;
   if (typeof resource.can_edit === "boolean") return resource.can_edit;
   if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
     return accessLevelRank(resource.effective_access_level) >= accessLevelRank("edit");
-  }
-  return true;
-}
-
-export function canAdminResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
-  if (!resource) return true;
-  if (typeof resource.can_admin === "boolean") return resource.can_admin;
-  if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
-    return accessLevelRank(resource.effective_access_level) >= accessLevelRank("admin");
   }
   return true;
 }

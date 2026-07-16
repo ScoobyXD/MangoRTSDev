@@ -470,7 +470,7 @@ Business logic covered:
 - RW54
 
 Given:
-- An authorized user has a mounted Logic Gate board while another local connection lacks View access, and the Logic Gate is deleted.
+- An authorized user has a mounted Logic Gate board while another local connection lacks Edit access, and the Logic Gate is deleted.
 - A retained entity publisher has local subscribers plus unrelated company users, then its repository lookup stalls or fails.
 - A signed shared-mailbox delivery repeats after that transient lookup failure.
 - Two HTTP callers join one provider folder/page/detail read; the joined caller cancels while the leader remains active.

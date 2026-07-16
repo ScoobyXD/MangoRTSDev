@@ -36,7 +36,7 @@ func (r *MemoryRepo) ListProjectManagementTimelineProjectionRows(query ProjectMa
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, cloneProjectManagementTimelineProjectionRow(row))

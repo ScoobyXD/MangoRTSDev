@@ -548,7 +548,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 		Permissions: []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: EntityPermissionView,
+			AccessLevel: EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions private folder: %v", err)
@@ -1028,7 +1028,7 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 			Permissions: []EntityPermissionInput{{
 				SubjectType: EntityPermissionSubjectUser,
 				SubjectID:   viewer.UserID,
-				AccessLevel: EntityPermissionView,
+				AccessLevel: EntityPermissionEdit,
 			}},
 		}); err != nil {
 			t.Fatalf("SetEntityPermissions %s/%s: %v", grant.entityType, grant.entityID, err)

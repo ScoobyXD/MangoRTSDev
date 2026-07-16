@@ -77,7 +77,7 @@ func (s *Server) handleRecycleBinRestore(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_restore_recycle_bin_items")
 		return
 	}
-	s.publishCompanyExplorerRestoredTargets(req.CompanyID, result.Targets)
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 

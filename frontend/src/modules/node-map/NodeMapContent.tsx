@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, canAdminResourceAccess, canEditResourceAccess, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
+import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, canEditResourceAccess, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
@@ -1728,7 +1728,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               const current = nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID);
               return current ? getNodeTitle(current) : permissionsNodeID;
             })()}
-            readOnly={!canAdminResourceAccess(nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID))}
+            readOnly={!canEditResourceAccess(nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID))}
             onClose={() => setPermissionsNodeID("")}
           />
         )}

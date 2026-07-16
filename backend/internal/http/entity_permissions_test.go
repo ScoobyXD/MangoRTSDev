@@ -48,7 +48,7 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   deniedUser.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions open: %v", err)
@@ -137,7 +137,7 @@ func TestNodeDeleteRequiresEditAndMovesToActorRecycleBin(t *testing.T) {
 		DefaultAccess: store.EntityPermissionNoAccess,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionNoAccess},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -149,8 +149,8 @@ func TestNodeDeleteRequiresEditAndMovesToActorRecycleBin(t *testing.T) {
 	viewerReq.Header.Set(confirmationDisplayNameHeader, viewer.DisplayName)
 	viewerRes := httptest.NewRecorder()
 	handler.ServeHTTP(viewerRes, viewerReq)
-	if viewerRes.Code != http.StatusForbidden {
-		t.Fatalf("view-only delete status = %d, want %d body=%s", viewerRes.Code, http.StatusForbidden, strings.TrimSpace(viewerRes.Body.String()))
+	if viewerRes.Code != http.StatusNotFound {
+		t.Fatalf("no-access delete status = %d, want %d body=%s", viewerRes.Code, http.StatusNotFound, strings.TrimSpace(viewerRes.Body.String()))
 	}
 
 	editorReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"?company_id="+companyID, nil)
@@ -235,7 +235,7 @@ func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 	}
 }
 
-func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
+func TestResourceEditorCannotManagePermissionRules(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -243,27 +243,27 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 	companyID := "11111111-1111-4111-8111-111111111117"
 	repo.EnsureCompany(companyID, "Permission Company Manager Co")
 
-	resourceAdmin, err := repo.UpsertAuthUser("permission-resource-admin", "resource-admin@example.com", "Resource Admin")
+	resourceEditor, err := repo.UpsertAuthUser("permission-resource-editor", "resource-editor@example.com", "Resource Editor")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser resource admin: %v", err)
+		t.Fatalf("UpsertAuthUser resource editor: %v", err)
 	}
 	if _, err := repo.UpsertAuthUser("permission-company-admin", "company-admin@example.com", "Company Admin"); err != nil {
 		t.Fatalf("UpsertAuthUser company admin: %v", err)
 	}
-	targetUser, err := repo.UpsertAuthUser("permission-view-target", "view-target@example.com", "View Target")
+	targetUser, err := repo.UpsertAuthUser("permission-rule-target", "rule-target@example.com", "Rule Target")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser target: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("permission-resource-admin", companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatalf("AddCompanyMembership resource admin: %v", err)
+	if _, err := repo.AddCompanyMembership("permission-resource-editor", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership resource editor: %v", err)
 	}
 	if _, err := repo.AddCompanyMembership("permission-company-admin", companyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatalf("AddCompanyMembership company admin: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("permission-view-target", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("permission-rule-target", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership target: %v", err)
 	}
-	logicGate, err := repo.CreateLogicGate(companyID, "View-only permission gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "Resource editor permission gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
@@ -273,22 +273,22 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   resourceAdmin.UserID,
-			AccessLevel: store.EntityPermissionAdmin,
+			SubjectID:   resourceEditor.UserID,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
-	resourceAdminToken := "Bearer " + testJWT(t, key, "kid", "permission-resource-admin", "resource-admin@example.com")
+	resourceEditorToken := "Bearer " + testJWT(t, key, "kid", "permission-resource-editor", "resource-editor@example.com")
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
-	getReq.Header.Set("Authorization", resourceAdminToken)
+	getReq.Header.Set("Authorization", resourceEditorToken)
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusForbidden {
-		t.Fatalf("resource admin GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusForbidden, strings.TrimSpace(getRes.Body.String()))
+		t.Fatalf("resource editor GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusForbidden, strings.TrimSpace(getRes.Body.String()))
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -296,16 +296,16 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 		"permissions": []map[string]string{{
 			"subject_type": "user",
 			"subject_id":   targetUser.UserID,
-			"access_level": store.EntityPermissionView,
+			"access_level": store.EntityPermissionEdit,
 		}},
 	})
 	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
-	putReq.Header.Set("Authorization", resourceAdminToken)
+	putReq.Header.Set("Authorization", resourceEditorToken)
 	putReq.Header.Set("Content-Type", "application/json")
 	putRes := httptest.NewRecorder()
 	handler.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusForbidden {
-		t.Fatalf("resource admin PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusForbidden, strings.TrimSpace(putRes.Body.String()))
+		t.Fatalf("resource editor PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusForbidden, strings.TrimSpace(putRes.Body.String()))
 	}
 
 	companyAdminToken := "Bearer " + testJWT(t, key, "kid", "permission-company-admin", "company-admin@example.com")

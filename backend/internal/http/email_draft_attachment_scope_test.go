@@ -243,7 +243,7 @@ func TestCommunicationsEmailDraftResponseIncludesOwnerOnlyLegacyPersonalAttachme
 	}
 }
 
-func TestSharedEmailDraftAttachmentsUseSharedInboxViewAndEditPermissions(t *testing.T) {
+func TestSharedEmailDraftAttachmentsUseSharedInboxEditPermissions(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	const draftID = "shared-attachment-draft"
 	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
@@ -260,11 +260,8 @@ func TestSharedEmailDraftAttachmentsUseSharedInboxViewAndEditPermissions(t *test
 	server := NewServer(fixture.repo)
 	viewerRequest := emailDraftAttachmentScopeRequest(fixture.viewer, fixture.companyID, domain.RoleCompanyUser)
 	viewerRecorder := httptest.NewRecorder()
-	if server.requireAttachmentResourceEdit(viewerRecorder, viewerRequest, fixture.companyID, "email_draft", resourceID) {
-		t.Fatal("view-only shared-inbox member unexpectedly received draft attachment edit access")
-	}
-	if viewerRecorder.Code != http.StatusForbidden {
-		t.Fatalf("view-only edit denial status=%d body=%s", viewerRecorder.Code, viewerRecorder.Body.String())
+	if !server.requireAttachmentResourceEdit(viewerRecorder, viewerRequest, fixture.companyID, "email_draft", resourceID) {
+		t.Fatalf("shared-inbox edit member denied status=%d body=%s", viewerRecorder.Code, viewerRecorder.Body.String())
 	}
 	editorRequest := emailDraftAttachmentScopeRequest(fixture.editor, fixture.companyID, domain.RoleCompanyUser)
 	if recorder := httptest.NewRecorder(); !server.requireAttachmentResourceEdit(recorder, editorRequest, fixture.companyID, "email_draft", resourceID) {

@@ -107,6 +107,23 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, i
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeState := r.snapshotRecycleStateLocked()
+	beforeRecycleBin := cloneMap(r.recycleBin)
+	beforeDomainEvents := cloneMap(r.domainEvents)
+	beforeWorkspaceReadVersions := cloneMap(r.workspaceReadVersions)
+	beforeOutbox := cloneMap(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if !committed {
+			r.restoreRecycleSnapshotLocked(beforeState)
+			r.recycleBin = beforeRecycleBin
+			r.domainEvents = beforeDomainEvents
+			r.workspaceReadVersions = beforeWorkspaceReadVersions
+			r.realtimeOutbox = beforeOutbox
+			r.realtimeOutboxSequence = beforeOutboxSequence
+		}
+	}()
 	items := make([]domain.RecycleBinItem, 0)
 	targets := make([]CompanyExplorerDeletedTarget, 0)
 	seenTargets := map[string]bool{}
@@ -127,10 +144,15 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, i
 		return RecycleBinRestoreResult{}, ErrNotFound
 	}
 	r.restoreRecycleSnapshotLocked(*snapshot)
+	events, err := r.appendDomainEventsLocked(companyExplorerTargetWorkspaceEventInputs(companyID, targets, true))
+	if err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
 	for _, item := range items {
 		delete(r.recycleBin, key(companyID, item.RecycleBinItemID))
 	}
-	return RecycleBinRestoreResult{Items: items, Targets: targets}, nil
+	committed = true
+	return RecycleBinRestoreResult{Items: items, Targets: targets, Events: events}, nil
 }
 
 func (r *MemoryRepo) createRecycleBinItemsLocked(companyID, deletedByUserID string, targets []CompanyExplorerDeletedTarget, snapshot memoryRecycleBinSnapshot) {
@@ -163,7 +185,7 @@ func (r *MemoryRepo) createRecycleBinItemsLocked(companyID, deletedByUserID stri
 		}
 		r.recycleBin[key(companyID, itemID)] = memoryRecycleBinItem{
 			Item:     item,
-			Targets:  []CompanyExplorerDeletedTarget{target},
+			Targets:  append([]CompanyExplorerDeletedTarget(nil), targets...),
 			Snapshot: snapshot,
 		}
 	}

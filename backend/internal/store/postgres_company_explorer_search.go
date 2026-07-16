@@ -310,7 +310,7 @@ order by matched.type_priority,
          lower(matched.display_name),
          matched.created_timestamp desc,
          matched.entity_id
-limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionView, query.Limit, strings.Join(query.ResourceTypes, ","))
+limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionEdit, query.Limit, strings.Join(query.ResourceTypes, ","))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompanyExplorerSearchResults{Results: []CompanyExplorerSearchResult{}}, nil
 	}

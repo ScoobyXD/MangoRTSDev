@@ -176,7 +176,7 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   allowed.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -189,19 +189,16 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 	allowedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-allowed", companyID, allowed.UserID, scope)
 	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-denied", companyID, denied.UserID, scope)
 
-	captured := server.captureKanbanBoardsForDeleteTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
+	result, err := repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
 		Kind: "logic_gate",
 		ID:   gate.LogicGateID,
-	}})
-	if len(captured) != 1 {
-		t.Fatalf("captured board deletes = %+v, want one", captured)
+	}}, allowed.UserID)
+	if err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets: %v", err)
 	}
-	if err := repo.DeleteLogicGate(companyID, gate.LogicGateID); err != nil {
-		t.Fatal(err)
-	}
-	server.publishCapturedKanbanDeletes(companyID, captured)
+	server.publishCommittedWorkspaceEvents(result.Events)
 
-	messages := allowedNetwork.messages(t)
+	messages := waitForRecordingRealtimeMessages(t, allowedNetwork, 1)
 	if len(messages) != 1 || messages[0]["type"] != realtimeMessageKanbanChanged || messages[0]["change_type"] != "resource_deleted" {
 		t.Fatalf("authorized deletion messages = %+v, want one resource_deleted tombstone", messages)
 	}
@@ -246,36 +243,64 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 	}
 	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
 	defer server.Close()
+	waitForPublishedRealtimeOutboxSequence(t, repo, 1)
 
 	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
 	scope := realtimeBoardScope(boardID)
 	beforeNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-before", companyID, beforeCapture.UserID, scope)
 	afterNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-after", companyID, afterCapture.UserID, scope)
 
-	captured := server.captureKanbanBoardsForDeleteTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
-		Kind: "node",
-		ID:   node.NodeID,
-	}})
-	if len(captured) != 1 || captured[0].allowedUserIDs != nil {
-		t.Fatalf("node delete capture = %+v, want board identity without tombstone audience", captured)
-	}
 	if calls := repo.snapshotCalls(); len(calls) != 0 {
-		t.Fatalf("node delete captured audience before publication: %+v", calls)
+		t.Fatalf("node delete resolved an audience before publication: %+v", calls)
 	}
 
 	repo.mu.Lock()
 	repo.allowed = []string{afterCapture.UserID}
 	repo.mu.Unlock()
-	server.publishCapturedKanbanDeletes(companyID, captured)
+	result, err := repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: node.NodeID}}, beforeCapture.UserID)
+	if err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets: %v", err)
+	}
+	server.publishCommittedWorkspaceEvents(result.Events)
 
 	if messages := beforeNetwork.messages(t); len(messages) != 0 {
 		t.Fatalf("viewer removed after capture received surviving-board refresh: %+v", messages)
 	}
-	messages := afterNetwork.messages(t)
+	messages := waitForRecordingRealtimeMessages(t, afterNetwork, 1)
 	if len(messages) != 1 || messages[0]["change_type"] != "resource_deleted" {
 		t.Fatalf("current viewer messages = %+v, want one reauthorized board refresh", messages)
 	}
 	if calls := repo.snapshotCalls(); len(calls) != 1 {
 		t.Fatalf("node delete publication audience calls = %+v, want one post-delete lookup", calls)
 	}
+}
+
+func waitForRecordingRealtimeMessages(t *testing.T, connection *recordingRealtimeNetConn, count int) []map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		messages := connection.messages(t)
+		if len(messages) >= count {
+			return messages
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d realtime messages", count)
+	return nil
+}
+
+func waitForPublishedRealtimeOutboxSequence(t *testing.T, repo store.RealtimeOutboxRepository, minimum int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		sequence, err := repo.CurrentPublishedRealtimeOutboxSequence()
+		if err != nil {
+			t.Fatalf("CurrentPublishedRealtimeOutboxSequence: %v", err)
+		}
+		if sequence >= minimum {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for published realtime outbox sequence %d", minimum)
 }

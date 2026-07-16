@@ -229,22 +229,20 @@ func (r *PostgresRepo) LogicGateWorkAccessFlags(companyID, userID, logicGateID s
 	if companyID == "" || userID == "" || logicGateID == "" {
 		return domain.EffectiveAccessFlags{}, ErrInvalid
 	}
-	var flags domain.EffectiveAccessFlags
+	var canEdit bool
 	err := r.db.QueryRowContext(context.Background(), `
 select
-  mangorts_user_can_access_resource($1::uuid, 'logic_gate', $2::uuid, $3::uuid, 'view'),
-  mangorts_user_can_access_resource($1::uuid, 'logic_gate', $2::uuid, $3::uuid, 'edit'),
-  mangorts_user_can_access_resource($1::uuid, 'logic_gate', $2::uuid, $3::uuid, 'admin')
+  mangorts_user_can_access_resource($1::uuid, 'logic_gate', $2::uuid, $3::uuid, 'edit')
 from logic_gates
 where company_id=$1::uuid and logic_gate_id=$2::uuid`,
 		companyID,
 		logicGateID,
 		userID,
-	).Scan(&flags.CanView, &flags.CanEdit, &flags.CanAdmin)
+	).Scan(&canEdit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EffectiveAccessFlags{}, ErrNotFound
 	}
-	return flags, err
+	return domain.EffectiveAccessFlags{CanEdit: canEdit}, err
 }
 
 func (r *PostgresRepo) CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error) {

@@ -255,7 +255,7 @@ func (s *Server) handleCommunicationsFolders(w http.ResponseWriter, r *http.Requ
 	if strings.TrimSpace(companyID) != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionView)
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
 	if !ok {
 		return
 	}
@@ -282,7 +282,7 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		if strings.TrimSpace(query.CompanyID) != "" && !requireCompanyAccess(w, r, query.CompanyID) {
 			return
 		}
-		connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID, store.EntityPermissionView)
+		connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID, store.EntityPermissionEdit)
 		if !ok {
 			return
 		}
@@ -338,7 +338,7 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	requiredSharedInboxAccess := store.EntityPermissionView
+	requiredSharedInboxAccess := store.EntityPermissionEdit
 	if sharedInboxID != "" {
 		requiredSharedInboxAccess = store.EntityPermissionEdit
 	}
@@ -441,7 +441,7 @@ func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.R
 	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionView)
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
 	if !ok {
 		return
 	}
@@ -530,7 +530,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "collaboration_id_only_supported_for_email_attachments")
 		return
 	}
-	requiredSharedInboxAccess := store.EntityPermissionView
+	requiredSharedInboxAccess := store.EntityPermissionEdit
 	if sharedInboxID != "" && (action == "archive" || action == "unarchive" || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
 		requiredSharedInboxAccess = store.EntityPermissionEdit
 	}

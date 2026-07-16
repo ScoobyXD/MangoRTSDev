@@ -34,6 +34,7 @@ export type EditorCollaborationControllerOptions = {
   onDeleted?: () => void;
   onError?: (cause: unknown) => void;
   microBatchMs?: number;
+  subscribe?: typeof subscribeRealtimeScope;
 };
 type PendingEditorOperation = {
   storage_key: string;
@@ -54,6 +55,11 @@ const CLIENT_PREFIX = "mango-editor-collaboration-client-v1:";
 const LEGACY_PREFIXES = ["mango-editor-projection-draft-v2", "mango-editor-projection-tab-v1"];
 const DB_NAME = "mango-editor-collaboration-v1";
 const DB_STORE = "pending_operations";
+export const EDITOR_COLLABORATION_OPERATION_TARGET_BYTES = 48 * 1024;
+export const EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES = 2 * 1024 * 1024;
+export const EDITOR_COLLABORATION_ATOM_TARGET_CODE_POINTS = 1024;
+const EDITOR_COLLABORATION_SNAPSHOT_CHAR_ATOM_MAX_CODE_POINTS = 4096;
+const EDITOR_COLLABORATION_FORBIDDEN_CONTENT = ["data:image/", ";base64,", "x-amz-credential", "x-amz-signature", "awsaccesskeyid", "presigned_url", "secret_access_key"];
 
 function stableID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -137,12 +143,23 @@ function clear(record: PendingEditorOperation): void {
 
 export function newEditorCollaborationState(html: string): EditorCollaborationState {
   let afterID = "";
-  return { atoms: Array.from(html).map((value, index) => {
+  const codePoints = Array.from(html);
+  const values = codePoints.length <= EDITOR_COLLABORATION_SNAPSHOT_CHAR_ATOM_MAX_CODE_POINTS
+    ? codePoints
+    : chunkEditorCollaborationCodePoints(codePoints);
+  return { atoms: values.map((value, index) => {
     const id = `0:${index.toString(16).padStart(8, "0")}`;
     const atom = { id, after_id: afterID, value };
     afterID = id;
     return atom;
   }) };
+}
+function chunkEditorCollaborationCodePoints(codePoints: string[]): string[] {
+  const chunks: string[] = [];
+  for (let index = 0; index < codePoints.length; index += EDITOR_COLLABORATION_ATOM_TARGET_CODE_POINTS) {
+    chunks.push(codePoints.slice(index, index + EDITOR_COLLABORATION_ATOM_TARGET_CODE_POINTS).join(""));
+  }
+  return chunks;
 }
 export function applyEditorCollaborationDelta(state: EditorCollaborationState, delta: RealtimeEditorDelta): EditorCollaborationState {
   const atoms = state.atoms.map((atom) => ({ ...atom }));
@@ -170,29 +187,50 @@ export function materializeEditorCollaborationState(state: EditorCollaborationSt
   for (const bucket of children.values()) bucket.sort((left, right) => right.id.localeCompare(left.id));
   const visited = new Set<string>();
   let html = "";
-  const visit = (afterID: string) => {
-    for (const atom of children.get(afterID) ?? []) {
-      if (visited.has(atom.id)) throw new Error("invalid_editor_collaboration_state");
-      visited.add(atom.id);
-      if (!atom.deleted) html += atom.value;
-      visit(atom.id);
+  const stack = [...(children.get("") ?? [])].reverse();
+  while (stack.length > 0) {
+    const atom = stack.pop();
+    if (!atom || visited.has(atom.id)) throw new Error("invalid_editor_collaboration_state");
+    visited.add(atom.id);
+    if (!atom.deleted) html += atom.value;
+    const descendants = children.get(atom.id) ?? [];
+    for (let index = descendants.length - 1; index >= 0; index -= 1) {
+      stack.push(descendants[index]);
     }
-  };
-  visit("");
+  }
   if (visited.size !== state.atoms.length) throw new Error("invalid_editor_collaboration_state");
   return html;
 }
 export function editorCollaborationDeltaForHTML(state: EditorCollaborationState, nextHTML: string, atomPrefix: string): RealtimeEditorDelta {
   const visible = state.atoms.filter((atom) => !atom.deleted);
-  const current = visible.map((atom) => atom.value);
+  const current = Array.from(visible.map((atom) => atom.value).join(""));
   const next = Array.from(nextHTML);
   let prefix = 0;
   while (prefix < current.length && prefix < next.length && current[prefix] === next[prefix]) prefix += 1;
   let suffix = 0;
   while (suffix < current.length - prefix && suffix < next.length - prefix && current[current.length - suffix - 1] === next[next.length - suffix - 1]) suffix += 1;
-  const deleteIDs = visible.slice(prefix, current.length - suffix).map((atom) => atom.id);
-  let afterID = prefix > 0 ? visible[prefix - 1]?.id ?? "" : "";
-  const inserts = next.slice(prefix, next.length - suffix).map((value, index) => {
+
+  let preservedPrefixAtoms = 0;
+  let preservedPrefixCodePoints = 0;
+  while (preservedPrefixAtoms < visible.length) {
+    const atomSize = Array.from(visible[preservedPrefixAtoms].value).length;
+    if (preservedPrefixCodePoints + atomSize > prefix) break;
+    preservedPrefixCodePoints += atomSize;
+    preservedPrefixAtoms += 1;
+  }
+  let preservedSuffixStart = visible.length;
+  let preservedSuffixCodePoints = 0;
+  while (preservedSuffixStart > preservedPrefixAtoms) {
+    const atomSize = Array.from(visible[preservedSuffixStart - 1].value).length;
+    if (preservedSuffixCodePoints + atomSize > suffix) break;
+    preservedSuffixCodePoints += atomSize;
+    preservedSuffixStart -= 1;
+  }
+
+  const deleteIDs = visible.slice(preservedPrefixAtoms, preservedSuffixStart).map((atom) => atom.id);
+  let afterID = preservedPrefixAtoms > 0 ? visible[preservedPrefixAtoms - 1]?.id ?? "" : "";
+  const insertedValues = chunkEditorCollaborationCodePoints(next.slice(preservedPrefixCodePoints, next.length - preservedSuffixCodePoints));
+  const inserts = insertedValues.map((value, index) => {
     const id = `${atomPrefix}:${index.toString(36)}`;
     const atom = { id, after_id: afterID, value };
     afterID = id;
@@ -204,6 +242,75 @@ function mergeDeltas(left: RealtimeEditorDelta, right: RealtimeEditorDelta): Rea
   return { inserts: [...(left.inserts ?? []), ...(right.inserts ?? [])], delete_ids: [...(left.delete_ids ?? []), ...(right.delete_ids ?? [])] };
 }
 function emptyDelta(delta: RealtimeEditorDelta): boolean { return (delta.inserts?.length ?? 0) === 0 && (delta.delete_ids?.length ?? 0) === 0; }
+function encodedBytes(value: unknown): number { return new TextEncoder().encode(JSON.stringify(value)).byteLength; }
+function utf8Bytes(value: string): number { return new TextEncoder().encode(value).byteLength; }
+function editorHTMLContainsForbiddenRealtimeContent(value: string): boolean { const lower = value.toLowerCase(); return EDITOR_COLLABORATION_FORBIDDEN_CONTENT.some((item) => lower.includes(item)); }
+function deltaFitsTransport(delta: RealtimeEditorDelta): boolean {
+  return encodedBytes(delta) <= EDITOR_COLLABORATION_OPERATION_TARGET_BYTES;
+}
+export function splitEditorCollaborationDelta(delta: RealtimeEditorDelta): RealtimeEditorDelta[] {
+  if (emptyDelta(delta)) return [];
+  const parts: RealtimeEditorDelta[] = [];
+  let current: RealtimeEditorDelta = {};
+  let currentBytes = encodedBytes(current);
+  const flush = () => {
+    if (!emptyDelta(current)) parts.push(current);
+    current = {};
+    currentBytes = encodedBytes(current);
+  };
+  for (const atom of delta.inserts ?? []) {
+    const itemBytes = encodedBytes(atom);
+    const candidateBytes = current.inserts
+      ? currentBytes + 1 + itemBytes
+      : encodedBytes({ inserts: [atom] });
+    if (!emptyDelta(current) && candidateBytes > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) flush();
+    const nextBytes = current.inserts ? currentBytes + 1 + itemBytes : encodedBytes({ inserts: [atom] });
+    if (nextBytes > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) throw new Error("editor_collaboration_atom_exceeds_transport_limit");
+    current.inserts = [...(current.inserts ?? []), atom];
+    currentBytes = nextBytes;
+  }
+  for (const id of delta.delete_ids ?? []) {
+    const itemBytes = encodedBytes(id);
+    const candidateBytes = current.delete_ids
+      ? currentBytes + 1 + itemBytes
+      : current.inserts
+        ? currentBytes - 1 + encodedBytes(`,"delete_ids":[${JSON.stringify(id)}]}`)
+        : encodedBytes({ delete_ids: [id] });
+    if (!emptyDelta(current) && candidateBytes > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) flush();
+    const nextBytes = current.delete_ids
+      ? currentBytes + 1 + itemBytes
+      : current.inserts
+        ? currentBytes - 1 + encodedBytes(`,"delete_ids":[${JSON.stringify(id)}]}`)
+        : encodedBytes({ delete_ids: [id] });
+    if (nextBytes > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) throw new Error("editor_collaboration_delete_exceeds_transport_limit");
+    current.delete_ids = [...(current.delete_ids ?? []), id];
+    currentBytes = nextBytes;
+  }
+  flush();
+  return parts;
+}
+
+function applyPendingDeltaForRecovery(state: EditorCollaborationState, delta: RealtimeEditorDelta): EditorCollaborationState {
+  const byID = new Map(state.atoms.map((atom) => [atom.id, atom]));
+  const inserts = delta.inserts ?? [];
+  const existing = inserts.filter((atom) => byID.has(atom.id));
+  if (existing.length > 0 && existing.length !== inserts.length) throw new Error("collaboration_snapshot_required");
+  if (existing.length === inserts.length && inserts.length > 0) {
+    for (const atom of inserts) {
+      const committed = byID.get(atom.id);
+      if (!committed || committed.after_id !== atom.after_id || committed.value !== atom.value) throw new Error("collaboration_snapshot_required");
+    }
+    const atoms = state.atoms.map((atom) => ({ ...atom }));
+    const indexes = new Map(atoms.map((atom, index) => [atom.id, index]));
+    for (const id of delta.delete_ids ?? []) {
+      const index = indexes.get(id);
+      if (index === undefined) throw new Error("collaboration_snapshot_required");
+      atoms[index] = { ...atoms[index], deleted: true };
+    }
+    return { atoms };
+  }
+  return applyEditorCollaborationDelta(state, delta);
+}
 
 export class EditorCollaborationController {
   private readonly clientID: string;
@@ -222,18 +329,21 @@ export class EditorCollaborationController {
   private drainPromise: Promise<void> | undefined;
   private buffered: RealtimeEditorDeltaCommittedMessage[] = [];
   private deleted = false;
+  private renderedHTML: string;
 
   constructor(private readonly options: EditorCollaborationControllerOptions) {
     this.clientID = clientIDFor(options);
     this.confirmed = newEditorCollaborationState(options.initialHTML);
     this.optimistic = newEditorCollaborationState(options.initialHTML);
+    this.renderedHTML = options.initialHTML;
     this.path = `/v1/editor-collaboration/${options.resourceType}/${options.resourceID}/documents/${options.documentID}?company_id=${encodeURIComponent(options.companyID)}`;
     this.scope = realtimeEditorScope(options.resourceType, options.resourceID, options.documentID);
     this.pendingPrefix = scopePrefix(options, this.clientID);
   }
   start(): void {
     cleanupLegacyEditorProjectionStorage();
-    this.unsubscribe = subscribeRealtimeScope(this.options.apiBase, this.options.companyID, this.scope, {
+    const subscribe = this.options.subscribe ?? ((apiBase, companyID, scope, handlers) => subscribeRealtimeScope(apiBase, companyID, scope, handlers));
+    this.unsubscribe = subscribe(this.options.apiBase, this.options.companyID, this.scope, {
       onEditorDeltaCommitted: (message) => this.handleCommitted(message),
       onEditorSnapshotRequired: (message) => this.handleSnapshotRequired(message),
       onEditorDocumentDeleted: (message) => this.handleDeleted(message),
@@ -250,7 +360,30 @@ export class EditorCollaborationController {
   }
   schedule(nextHTML: string, immediate = false): void {
     if (this.deleted) return;
-    if (!this.active) {
+    if (editorHTMLContainsForbiddenRealtimeContent(nextHTML)) {
+      this.options.onError?.(new Error("editor_collaboration_sensitive_content_rejected"));
+      return;
+    }
+    if (utf8Bytes(nextHTML) > EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES) {
+      this.options.onError?.(new Error("editor_collaboration_document_too_large"));
+      return;
+    }
+    const delta = editorCollaborationDeltaForHTML(this.optimistic, nextHTML, `${this.clientID}:${stableID()}`);
+    if (emptyDelta(delta)) return;
+    this.optimistic = applyEditorCollaborationDelta(this.optimistic, delta);
+    this.renderedHTML = nextHTML;
+    const parts = splitEditorCollaborationDelta(delta);
+    parts.forEach((part, index) => {
+      if (this.active) {
+        const merged = mergeDeltas(this.active.delta, part);
+        if (deltaFitsTransport(merged)) {
+          this.active.delta = merged;
+          retain(this.active);
+          if (index < parts.length - 1) this.seal();
+          return;
+        }
+        this.seal();
+      }
       const operationID = stableID();
       this.active = {
         storage_key: `${this.pendingPrefix}${encodeURIComponent(operationID)}`,
@@ -262,17 +395,13 @@ export class EditorCollaborationController {
         client_id: this.clientID,
         operation_id: operationID,
         base_revision: this.revision,
-        delta: {},
-        created_at: Date.now(),
+        delta: part,
+        created_at: Date.now() + index,
       };
       this.pending.push(this.active);
-    }
-    const batch = this.active;
-    const delta = editorCollaborationDeltaForHTML(this.optimistic, nextHTML, `${this.clientID}:${batch.operation_id}:${batch.delta.inserts?.length ?? 0}`);
-    if (emptyDelta(delta)) return;
-    this.optimistic = applyEditorCollaborationDelta(this.optimistic, delta);
-    batch.delta = mergeDeltas(batch.delta, delta);
-    retain(batch);
+      retain(this.active);
+      if (index < parts.length - 1) this.seal();
+    });
     this.options.onPendingChange?.(this.pending.length);
     if (this.batchTimer !== undefined) window.clearTimeout(this.batchTimer);
     if (immediate) { this.seal(); void this.drain().catch((cause) => this.options.onError?.(cause)); return; }
@@ -322,7 +451,7 @@ export class EditorCollaborationController {
       if (local) { clear(local); this.pending = this.pending.filter((item) => item !== local); }
     }
     this.rebuild();
-    this.options.onHTML(materializeEditorCollaborationState(this.optimistic), "recovery");
+    this.renderOptimistic("recovery", true);
     this.options.onPendingChange?.(this.pending.length);
     await this.drain();
   }
@@ -352,12 +481,19 @@ export class EditorCollaborationController {
         this.confirmed = commit.snapshot.state;
       }
       this.rebuild();
+      this.renderOptimistic("remote");
       this.options.onPendingChange?.(this.pending.length);
     }
   }
   private rebuild(): void {
     this.optimistic = { atoms: this.confirmed.atoms.map((atom) => ({ ...atom })) };
-    for (const record of this.pending) this.optimistic = applyEditorCollaborationDelta(this.optimistic, record.delta);
+    for (const record of this.pending) this.optimistic = applyPendingDeltaForRecovery(this.optimistic, record.delta);
+  }
+  private renderOptimistic(source: "remote" | "recovery", force = false): void {
+    const html = materializeEditorCollaborationState(this.optimistic);
+    if (!force && html === this.renderedHTML) return;
+    this.renderedHTML = html;
+    this.options.onHTML(html, source);
   }
   private handleCommitted(message: RealtimeEditorDeltaCommittedMessage): void {
     if (this.recovery) { this.buffered.push(message); return; }
@@ -373,7 +509,7 @@ export class EditorCollaborationController {
         if (this.active === local) this.active = null;
       }
       this.rebuild();
-      if (!local) this.options.onHTML(materializeEditorCollaborationState(this.optimistic), "remote");
+      if (!local) this.renderOptimistic("remote");
       this.options.onPendingChange?.(this.pending.length);
     } catch (cause) {
       this.options.onError?.(cause);

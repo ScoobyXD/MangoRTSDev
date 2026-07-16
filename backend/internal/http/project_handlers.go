@@ -310,7 +310,7 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			s.writeProjectMutationError(w, err, "failed_to_delete_project")
 			return
 		}
-		s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+		s.publishCommittedWorkspaceEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]any{"deleted_project_id": projectID, "targets": result.Targets})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

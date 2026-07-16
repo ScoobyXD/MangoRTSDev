@@ -217,7 +217,7 @@ func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	for _, want := range []string{
 		"query.companyid",
 		"companyexplorerlazynullable(query.permissionuserid)",
-		"entitypermissionview",
+		"entitypermissionedit",
 	} {
 		if !strings.Contains(rootArgs, want) {
 			t.Fatalf("companyExplorerRootArgs missing %q", want)

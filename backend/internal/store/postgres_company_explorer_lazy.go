@@ -75,7 +75,7 @@ func companyExplorerLazyArgs(query CompanyExplorerLazyRowsQuery) []any {
 		companyExplorerLazyNullable(query.ScopeUserID),
 		companyExplorerLazyNullable(query.PermissionUserID),
 		companyExplorerLazyNullable(query.ParentID),
-		EntityPermissionView,
+		EntityPermissionEdit,
 	}
 }
 
@@ -103,9 +103,9 @@ func companyExplorerLazyFolderAccessSelect(alias string) string {
           membership.role='dev_admin'
           or (membership.company_id=$1::uuid and membership.role='company_admin')
         )
-    ) then 'admin'
+    ) then 'edit'
     when mangorts_user_can_access_resource(` + alias + `.company_id, 'company_explorer_folder', ` + alias + `.folder_id, $4::uuid, 'edit') then 'edit'
-    else 'view'
+    else 'edit'
   end as effective_access`
 }
 

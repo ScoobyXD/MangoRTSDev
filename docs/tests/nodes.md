@@ -17,14 +17,14 @@ Coverage Status:
 - Deleting a node text box removes that text-box projection and its local UI, but it must not treat node files or attached emails referenced from that box as child records to delete. File `resource_attachments` links and attached-email projections remain associated with the node unless an editor separately invokes **Remove from node** for the specific row.
 - The node header attachment counter/list remains available independently of text boxes and includes files uploaded from deleted text boxes. A missing `information_id` target is displayed with an explicit deleted-text-box origin label instead of hiding the file or assigning it to another box.
 - The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
-- A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has view-only access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
+- A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has no access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
 - Clicking a file row opens an authenticated in-app preview without starting a download. Images, PDF, text/code/CSV/JSON/XML, audio, and video are previewable when browser-supported; text preview decodes only the first 256 KiB and renders at most 200,000 decoded characters. Larger text is shown as a bounded/truncated preview with `Preview limited to 256 KiB / 200,000 characters.`, while Office/archive/unknown binary files show preview-unavailable state and retain their explicit download control.
 - Browser node attachments default to a backend-authoritative 1 GiB per-file limit with no 12 MiB text-box aggregate. Files through 64 MiB use one presigned S3 PUT; larger files use resumable 16 MiB multipart parts. Pending work is node-level upload-progress state and never inflates the completed node attachment count.
 
 Required regression scenario:
 - Attach files and emails from multiple text boxes, select an attached email, delete one originating text box, and then delete all remaining text boxes.
 - Confirm the node-level file and email counters do not decrease because of text-box deletion, deleted-origin files remain labeled and usable, and the global email list opens the retained conversation in the standalone node-level organizer with zero live text boxes.
-- Confirm a view-only user can list, preview, and download retained files and can open retained attached emails, while upload and other edit operations remain unavailable.
+- Confirm an edit-authorized user can list, preview, download, and upload retained files and open retained attached emails, while a no-access user receives neither list.
 
 N1 - Nodes support generated, verified, consulted, and informed GVIC assignments.
 N2 - Node generated and verified GVIC assignments are single-user slots.
@@ -35,7 +35,7 @@ N6 - Node GVIC assignment pickers should display the company user-group tree as 
 N7 - Node GVIC picker subgroups and users should be visually indented according to their hierarchy depth.
 N8 - A generated or verified node assignment chip should show the assigned user's name and provide a direct remove action.
 N9 - DELETE `/v1/nodes/{node_id}` is a soft delete that moves the node and related placements/projections to the deleting actor's Recycle Bin.
-N10 - Node soft delete requires edit access to the node; resource admin access is not required, and view-only access is not enough.
+N10 - Node soft delete requires edit access to the node; no access is denied.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
 N12 - The node Assign to Logic Gate picker should not preload or display Logic Gates when opened; it should search only after the user enters text, using the Company Explorer search contract for visible folders, subfolders, and Logic Gates.
 N13 - Pasted rich text in node editor surfaces must normalize to the app/editor font family instead of preserving source document fonts.
@@ -93,12 +93,12 @@ N64 - Node text-box formatting is driven by the shared editor toolbar and format
 N65 - Each node text box exposes an attachment-list control beside its attachment-upload control. Its count and rows include only active node `file_attachment` resource links whose `information_id` matches that text block.
 N66 - The shared node workspace toolbar exposes one node-wide attachment counter and list. It aggregates all active `file_attachment` resource links for the node across its text boxes, labels each row with its text-box title when available, and excludes inline images, chat attachments, email attachments, and attached emails.
 N67 - A node attachment row displays the original filename and byte size and exposes a download action on the right. Download requests the attachment's `original` variant through Mango's authenticated attachment-content API and preserves the original filename; the UI must not use a raw S3 URL, storage key, or legacy durable `dataURL` as the download source.
-N68 - Node users with view access may see attachment counts/lists and download authorized files even when the node is read-only. Upload remains limited to users with edit access.
+N68 - Node users with edit access may see attachment counts/lists and download authorized files even when the node is read-only. Upload remains limited to users with edit access.
 N69 - Node attachment counts and lists are rebuilt from the backend node resource-link list when the workspace loads. Projection attachment references may support editor persistence, but they are not the canonical source for list/download availability.
 N70 - Per-text-box and node-wide attachment controls are part of the shared node workspace body, so every full node-window surface using that body receives the same attachment scope, count, list, permission, and download behavior.
 N71 - Node permissions opened from any full node-window entry point use the shared permissions contract in `docs/tests/permissions.md`: editable views always display `Save`, successful Save persists the current selection without closing, and read-only, denied, or failed-load views remain dismissible without writing.
 N72 - Node-attached email viewers use the shared email-thread contract: a subject-only conversation header; accessible per-message disclosure whose collapsed row shows sender/date/snippet and hides From/To/Cc/Bcc; expanded-only labeled participant details, full body, attachments, and exact-message Reply/Reply All; full-height body, expand-all, authenticated image actions, immediate reply focus, original-message context, calendar RSVP, and resize termination after pointer-up/cancel, lost capture, or window blur.
-N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while view-only users receive no destructive action.
+N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while no-access users receive no destructive action.
 N74 - Node chat detects safe `http://`, `https://`, `www.`, and bare-domain links, excludes trailing punctuation and email-address domains, renders links blue and underlined with opener isolation, and leaves unsafe/non-HTTP schemes as plain text.
 N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, attachment, Reply/Reply All, draft, and calendar operations use those stored fields instead of falling back to another grant.
 N76 - Normal browser node file bytes go directly to the private attachment S3 bucket through intent-owned presigned PUTs. Mango API authenticates/authorizes, chooses IDs and keys, enforces limits, completes/aborts/verifies storage, and writes metadata/node links, but it never receives the browser file body.
@@ -202,11 +202,11 @@ Business logic covered:
 - N11
 
 Given:
-- One user has view access to a node.
+- One user has edit access to a node.
 - Another user has edit access to the same node.
 
 Expected:
-- The view-only user's DELETE request is rejected.
+- The no-access user's DELETE request is rejected.
 - The edit user's DELETE request succeeds.
 - The deleted node appears in the edit user's Recycle Bin with `deleted_by_user_id` set to that user.
 
@@ -441,7 +441,7 @@ Business logic covered:
 Given:
 - A node has two text boxes with explicit file attachments uploaded from each text box's attachment control.
 - The same node may also contain inline images, chat attachments, attached emails, or email attachments.
-- One user has edit access and another user has view-only access to the node.
+- One user has edit access and another user has no access to the node.
 
 Expected:
 - Each text box shows a list/count control beside its upload control and includes only `file_attachment` links whose `information_id` is that text-box ID.
@@ -449,7 +449,7 @@ Expected:
 - Inline images, chat attachments, email attachments, and attached emails do not inflate either explicit-file count.
 - Every row shows the original filename and byte size with a download action on its right edge.
 - Download reads the authorized `original` S3-backed variant through Mango's attachment-content API and uses the original filename.
-- The view-only user can open both lists and download attachments but cannot upload new attachments.
+- The edit-authorized user can open both lists, download, and upload; the no-access user receives neither list.
 - Reloading the node reconstructs the same lists from active backend node resource links even if a projection attachment reference is stale or absent.
 
 ### Scenario N-S12: Node-Attached Email Thread Parity
@@ -498,7 +498,7 @@ Expected:
 - Right-clicking an email row or attachment row shows `Remove from node` in red.
 - Removing an email deletes only its attached-email projection from the node.
 - Removing an attachment unlinks the active node resource attachment and refreshes counts without deleting the stored attachment object.
-- View-only users do not receive either removal action.
+- No-access users do not receive either removal action.
 
 ### Scenario N-S14: Node Chat Links
 

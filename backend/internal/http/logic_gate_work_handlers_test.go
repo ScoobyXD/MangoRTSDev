@@ -70,9 +70,9 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions visible gate: %v", err)
@@ -87,7 +87,7 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden gate: %v", err)
 	}
-	if hasNodeView, err := repo.UserHasEffectiveAccess(companyID, viewer.UserID, store.EntityTypeNode, visibleNode.NodeID, store.EntityPermissionView); err != nil {
+	if hasNodeView, err := repo.UserHasEffectiveAccess(companyID, viewer.UserID, store.EntityTypeNode, visibleNode.NodeID, store.EntityPermissionEdit); err != nil {
 		t.Fatalf("UserHasEffectiveAccess contextual node: %v", err)
 	} else if !hasNodeView {
 		t.Fatalf("viewer lacks contextual node visibility for assigned node")
@@ -111,8 +111,8 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		work.Columns[5].ColumnID != store.LogicGateWorkStatusDone {
 		t.Fatalf("columns = %+v, want canonical status columns", work.Columns)
 	}
-	if !work.Permissions.CanView || work.Permissions.CanEdit || work.Permissions.CanAdmin {
-		t.Fatalf("viewer permissions = %+v, want view only", work.Permissions)
+	if !work.Permissions.CanEdit {
+		t.Fatalf("member permissions = %+v, want the single positive edit outcome", work.Permissions)
 	}
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, admin, http.StatusOK)
@@ -509,7 +509,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)

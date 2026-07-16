@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestEditorCollaborationRGAConvergesIndependentOfCommitOrder(t *testing.T) {
@@ -40,6 +41,41 @@ func TestEditorCollaborationRGAConvergesIndependentOfCommitOrder(t *testing.T) {
 	}
 	if first != second || first != "aYXb" {
 		t.Fatalf("concurrent states did not converge: first=%q second=%q", first, second)
+	}
+}
+
+func TestEditorCollaborationCompactAtomsSupportLargeDocuments(t *testing.T) {
+	html := strings.Repeat("<p><strong>Ω🙂</strong><span data-mention-user-id=\"user-1\">@Ada</span></p>", 16_000)
+	state := NewEditorCollaborationState(html)
+	if len(state.Atoms) >= 2_000 {
+		t.Fatalf("compact snapshot atoms = %d, want fewer than 2000", len(state.Atoms))
+	}
+	for _, atom := range state.Atoms {
+		if count := utf8.RuneCountInString(atom.Value); count < 1 || count > EditorCollaborationAtomMaxRunes {
+			t.Fatalf("atom rune count = %d, want 1..%d", count, EditorCollaborationAtomMaxRunes)
+		}
+	}
+	materialized, err := MaterializeEditorCollaborationState(state)
+	if err != nil || materialized != html {
+		t.Fatalf("large compact state materialization err=%v exact=%v", err, materialized == html)
+	}
+
+	ref := EditorDocumentRef{
+		CompanyID: "11111111-1111-4111-8111-111111111119", ResourceType: EntityTypeNode,
+		ResourceID: "22222222-2222-4222-8222-222222222229", DocumentID: "33333333-3333-4333-8333-333333333339",
+	}
+	value := strings.Repeat("Ω", EditorCollaborationAtomMaxRunes)
+	if _, _, err := NormalizeEditorCollaborationOperation(EditorCollaborationOperationInput{
+		Document: ref, OperationID: "compact-operation", ClientID: "compact-client",
+		Delta: EditorCollaborationDelta{Inserts: []EditorCollaborationAtom{{ID: "compact-operation:0", Value: value}}},
+	}); err != nil {
+		t.Fatalf("bounded compact atom rejected: %v", err)
+	}
+	if _, _, err := NormalizeEditorCollaborationOperation(EditorCollaborationOperationInput{
+		Document: ref, OperationID: "oversized-atom", ClientID: "compact-client",
+		Delta: EditorCollaborationDelta{Inserts: []EditorCollaborationAtom{{ID: "oversized-atom:0", Value: value + "Ω"}}},
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("oversized compact atom err=%v, want ErrInvalid", err)
 	}
 }
 

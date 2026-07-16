@@ -544,7 +544,6 @@ type EntityPermissionRepository interface {
 	ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error)
 	SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error)
 	ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error)
-	UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error)
 	UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error)
 }
 
@@ -1370,9 +1369,7 @@ const (
 	EntityTypeSharedInbox           = "shared_inbox"
 
 	EntityPermissionNoAccess = "no_access"
-	EntityPermissionView     = "view"
 	EntityPermissionEdit     = "edit"
-	EntityPermissionAdmin    = "admin"
 
 	ResourceDefaultAccessEdit     = EntityPermissionEdit
 	ResourceDefaultAccessNoAccess = EntityPermissionNoAccess
@@ -1687,6 +1684,7 @@ type CompanyExplorerDeletedTarget struct {
 
 type CompanyExplorerDeleteResult struct {
 	Targets []CompanyExplorerDeletedTarget `json:"targets"`
+	Events  []domain.DomainEvent           `json:"-"`
 }
 
 type CompanyExplorerRelationshipDeleteResult struct {
@@ -1698,6 +1696,7 @@ type CompanyExplorerRelationshipDeleteResult struct {
 type RecycleBinRestoreResult struct {
 	Items   []domain.RecycleBinItem        `json:"items"`
 	Targets []CompanyExplorerDeletedTarget `json:"targets"`
+	Events  []domain.DomainEvent           `json:"-"`
 }
 
 type RecycleBinRepository interface {
@@ -1809,6 +1808,7 @@ type CommunicationsTriageRevertResult struct {
 	DeletedNodeID string                          `json:"deleted_node_id"`
 	DeletedCardID string                          `json:"deleted_card_id"`
 	BoardID       string                          `json:"board_id"`
+	Events        []domain.DomainEvent            `json:"-"`
 }
 
 type CommunicationsEmailNodeTransferInput struct {
@@ -1830,6 +1830,7 @@ type CommunicationsEmailNodeTransferResult struct {
 	TargetNodeID   string                              `json:"target_node_id"`
 	TargetBoardID  string                              `json:"target_board_id"`
 	TargetCardID   string                              `json:"target_card_id"`
+	Events         []domain.DomainEvent                `json:"-"`
 }
 
 const KanbanMaxCardsLimit = 500
@@ -2055,6 +2056,7 @@ type NotificationDeleteInput struct {
 	Role             string
 	LogicGateID      string
 	NodeID           string
+	RealtimeMode     string
 }
 
 type NotificationSummaryInput struct {
@@ -2502,14 +2504,10 @@ func NormalizeEntityPermissionSubjectType(subjectType string) (string, bool) {
 
 func NormalizeEntityPermission(permission string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(permission)) {
-	case "", EntityPermissionView:
-		return EntityPermissionView, true
 	case EntityPermissionNoAccess:
 		return EntityPermissionNoAccess, true
 	case EntityPermissionEdit:
 		return EntityPermissionEdit, true
-	case EntityPermissionAdmin, "manage":
-		return EntityPermissionAdmin, true
 	default:
 		return "", false
 	}
@@ -2545,12 +2543,8 @@ func EntityPermissionRank(permission string) int {
 	switch permission {
 	case EntityPermissionNoAccess:
 		return 0
-	case EntityPermissionView:
-		return 1
 	case EntityPermissionEdit:
-		return 2
-	case EntityPermissionAdmin:
-		return 3
+		return 1
 	default:
 		return 0
 	}

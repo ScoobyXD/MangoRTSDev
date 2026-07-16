@@ -233,7 +233,7 @@ Business logic covered:
 Given:
 - A user has personal triage messages ready to convert.
 - The request targets an existing logic gate, or an existing node with optional logic gate context.
-- The user may have view-only or edit access to those targets.
+- The user may have no-access or edit access to those targets.
 
 Expected:
 - Conversion fails when company, messages, or target data is missing.

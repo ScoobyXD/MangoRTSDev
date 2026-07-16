@@ -100,9 +100,7 @@ function nodeDetailsFromViewPayload(payload: NodeViewResponse): NodeDetails {
     information_count: payload.information_count,
     relationships_count: payload.relationships_count,
     effective_access_level: payload.effective_access_level ?? payload.node?.effective_access_level,
-    can_view: payload.can_view,
     can_edit: payload.can_edit,
-    can_admin: payload.can_admin,
   };
 }
 
@@ -223,9 +221,7 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
       information_count: 0,
       relationships_count: entry.relationships?.length ?? 0,
       effective_access_level: entry.node.effective_access_level,
-      can_view: entry.node.can_view,
       can_edit: entry.node.can_edit,
-      can_admin: entry.node.can_admin,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
     contentChangeCache.set(cacheKey, []);

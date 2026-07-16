@@ -14,7 +14,7 @@ P3 - The inline node window shows node text boxes, attached emails, and text-blo
 P4 - Selecting a different node-backed critical-path row replaces the inline node window with the newly selected node.
 P5 - Closing the inline node window returns the critical-path table to its normal row-only view without changing the critical-path data.
 P6 - Logic-gate critical-path rows do not render the node editor window.
-P7 - Project view access alone does not reveal node editor content; the selected node must still pass node-level view access.
+P7 - Project edit access alone does not reveal node editor content; the selected node must still pass node-level edit access.
 P8 - Multiple node text boxes, emails, and chats remain scrollable inside the inline node window without changing critical-path row ordering.
 P9 - Node editor mutations made inside the inline node window follow the existing node editor update, attachment, chat, highlight, and intent behavior.
 P10 - Opening the selected node in the standalone node popup remains available from the inline node window.
@@ -38,7 +38,7 @@ P27 - Successful project email drops dispatch the same Home triage conversion re
 P28 - Successful project email drops open the created node in the normal node popup.
 P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, Bold, Underline, Italic, Highlight, left/center/right alignment, table insertion, Automatic Numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, text-labeled `New Text Box`, or per-text-box table controls.
 P30 - Project text-box toolbar controls must use the shared compact editor toolbar inventory and formatting controller path. Font-size minus/value/plus, Bold, Underline, Italic, Highlight with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node, Logic Gate, and mail editor surfaces in selected-range and collapsed-caret behavior. Hover/focus/active styling applies only to the individual control.
-P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
+P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and email-drop conversion requests carry the active normalized `account_email`; shared-inbox conversion requests carry `shared_inbox_id` and suppress personal identity while the projection retains both the shared inbox and canonical company account email. The project reader uses that exact scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
 P33 - The Project Logic Gates / Nodes tab renders visible Logic Gates and nodes as one recursive row list, not as a multi-column set of Logic Gate cards with embedded node lists.
 P34 - The project relationship grouper supports Logic Gate, Type, Status, Date Added, and Email Origin levels. Levels can be added, removed, reordered, and sorted ascending or descending; an explicitly empty stack is valid and renders all visible relationships as flat rows. The compatibility default is Logic Gate ascending. Status grouping follows the shared universal order in P40. This project-local control stores one browser preference per company/current user and applies it across that user's projects; it is not a named My Work/Updates Key View.
@@ -240,7 +240,7 @@ Expected:
 - Every editable project permissions view displays an explicit `Save` button.
 - Choosing users, groups, default access, or descendant behavior does not remove or hide the Save action.
 - Clicking Save commits the current selection, reports completion through the shared permissions dialog behavior, and leaves the view open.
-- The view-only or denied state remains dismissible and does not issue a permission update.
+- The no-access or denied state remains dismissible and does not issue a permission update.
 
 ### Scenario P-S10: Project Attached-Email Scope And Viewer
 

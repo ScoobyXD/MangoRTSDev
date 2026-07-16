@@ -183,6 +183,7 @@ func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Requ
 		Role:             firstNonEmptyString(req.Role, r.URL.Query().Get("role")),
 		LogicGateID:      firstNonEmptyString(req.LogicGateID, r.URL.Query().Get("logic_gate_id")),
 		NodeID:           firstNonEmptyString(req.NodeID, r.URL.Query().Get("node_id")),
+		RealtimeMode:     store.NotificationRealtimeClear,
 	})
 	if errorsIsInvalid(err) {
 		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
@@ -440,55 +441,24 @@ func (s *Server) publishNotificationsCleared(items []domain.Notification) {
 }
 
 func (s *Server) publishNotificationCreatedRealtime(item domain.Notification) {
-	if s == nil || s.realtimeRegistry == nil {
+	if s == nil || strings.TrimSpace(item.CompanyID) == "" || realtimeNotificationScope(item.RecipientUserID) == "" {
 		return
 	}
-	scope := realtimeNotificationScope(item.RecipientUserID)
-	if scope == "" || strings.TrimSpace(item.CompanyID) == "" {
-		return
-	}
-	s.publishRealtimeMessage(item.CompanyID, scope, realtimeNotificationCreatedMessage{
-		Type:         realtimeMessageNotificationCreated,
-		CompanyID:    item.CompanyID,
-		Scope:        scope,
-		Notification: item,
-		TS:           time.Now().UTC(),
-	})
+	s.wakeRealtimeSpine()
 }
 
 func (s *Server) publishNotificationDeletedRealtime(item domain.Notification) {
-	if s == nil || s.realtimeRegistry == nil {
+	if s == nil || strings.TrimSpace(item.CompanyID) == "" || strings.TrimSpace(item.NotificationID) == "" || realtimeNotificationScope(item.RecipientUserID) == "" {
 		return
 	}
-	scope := realtimeNotificationScope(item.RecipientUserID)
-	if scope == "" || strings.TrimSpace(item.CompanyID) == "" || strings.TrimSpace(item.NotificationID) == "" {
-		return
-	}
-	s.publishRealtimeMessage(item.CompanyID, scope, realtimeNotificationDeletedMessage{
-		Type:           realtimeMessageNotificationDeleted,
-		CompanyID:      item.CompanyID,
-		Scope:          scope,
-		NotificationID: item.NotificationID,
-		TS:             time.Now().UTC(),
-	})
+	s.wakeRealtimeSpine()
 }
 
 func (s *Server) publishNotificationsClearedRealtime(companyID, recipientUserID string, deletedCount int) {
-	if s == nil || s.realtimeRegistry == nil {
+	if s == nil || strings.TrimSpace(companyID) == "" || realtimeNotificationScope(recipientUserID) == "" || deletedCount <= 0 {
 		return
 	}
-	companyID = strings.TrimSpace(companyID)
-	scope := realtimeNotificationScope(recipientUserID)
-	if scope == "" || companyID == "" || deletedCount <= 0 {
-		return
-	}
-	s.publishRealtimeMessage(companyID, scope, realtimeNotificationsClearedMessage{
-		Type:         realtimeMessageNotificationsCleared,
-		CompanyID:    companyID,
-		Scope:        scope,
-		DeletedCount: deletedCount,
-		TS:           time.Now().UTC(),
-	})
+	s.wakeRealtimeSpine()
 }
 
 func notificationActorPayload(r *http.Request) (string, string) {

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -192,34 +191,17 @@ func nodeChatProjectionDetails(items []domain.NodeProjection, messageID string) 
 	return "", false
 }
 func (s *Server) publishNodeChatCreated(companyID, nodeID, messageID string, item domain.NodeInformation) {
-	if strings.TrimSpace(item.Type) != "Text block chat" {
+	if s == nil || strings.TrimSpace(item.Type) != "Text block chat" || strings.TrimSpace(companyID) == "" || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(messageID) == "" {
 		return
 	}
-	var payload struct {
-		BlockID string `json:"block_id"`
-	}
-	_ = json.Unmarshal([]byte(item.Information), &payload)
-	scope := realtimeChatScope(nodeID)
-	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit, realtimeChatMessage{
-		Type:      realtimeMessageChatCreated,
-		CompanyID: strings.TrimSpace(companyID),
-		Scope:     scope,
-		NodeID:    strings.TrimSpace(nodeID),
-		BlockID:   strings.TrimSpace(payload.BlockID),
-		MessageID: strings.TrimSpace(messageID),
-	})
+	s.wakeRealtimeSpine()
 }
 
 func (s *Server) publishNodeChatDeleted(companyID, nodeID, blockID, messageID string) {
-	scope := realtimeChatScope(nodeID)
-	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit, realtimeChatMessage{
-		Type:      realtimeMessageChatDeleted,
-		CompanyID: strings.TrimSpace(companyID),
-		Scope:     scope,
-		NodeID:    strings.TrimSpace(nodeID),
-		BlockID:   strings.TrimSpace(blockID),
-		MessageID: strings.TrimSpace(messageID),
-	})
+	if s == nil || strings.TrimSpace(companyID) == "" || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	s.wakeRealtimeSpine()
 }
 
 type capturedKanbanDelete struct {
@@ -269,7 +251,7 @@ func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets [
 			unlockPublishScope()
 			continue
 		}
-		resolved, err := s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+		resolved, err := s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 		if err != nil {
 			resolved = map[string]struct{}{}
 		}
@@ -281,117 +263,10 @@ func (s *Server) captureKanbanBoardsForDeleteTargets(companyID string, targets [
 }
 
 func (s *Server) publishCapturedKanbanDeletes(companyID string, captured []capturedKanbanDelete) {
-	for _, item := range captured {
-		boardID := strings.TrimSpace(item.boardID)
-		if item.allowedUserIDs == nil {
-			s.publishKanbanChanged(companyID, boardID, "resource_deleted")
-			continue
-		}
-		scope := realtimeBoardScope(boardID)
-		if scope == "" {
-			continue
-		}
-		s.publishRealtimeMessageWithAudience(companyID, scope, item.allowedUserIDs, realtimeKanbanChangedMessage{
-			Type:       realtimeMessageKanbanChanged,
-			CompanyID:  strings.TrimSpace(companyID),
-			Scope:      scope,
-			BoardID:    boardID,
-			ChangeType: "resource_deleted",
-		})
-	}
-}
-func (s *Server) publishKanbanChanged(companyID, boardID, changeType string) {
-	scope := realtimeBoardScope(boardID)
-	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
-	if logicGateID == "" {
+	if s == nil || strings.TrimSpace(companyID) == "" || len(captured) == 0 {
 		return
 	}
-	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView, realtimeKanbanChangedMessage{
-		Type:       realtimeMessageKanbanChanged,
-		CompanyID:  strings.TrimSpace(companyID),
-		Scope:      scope,
-		BoardID:    strings.TrimSpace(boardID),
-		ChangeType: strings.TrimSpace(changeType),
-	})
-}
-
-func (s *Server) publishKanbanChangesForEvents(events []domain.DomainEvent) {
-	type boardChange struct {
-		companyID  string
-		boardID    string
-		changeType string
-	}
-	changes := map[string]boardChange{}
-	for _, event := range events {
-		companyID := strings.TrimSpace(event.CompanyID)
-		if companyID == "" {
-			continue
-		}
-		if isKanbanRealtimeDomainEvent(event.Type) {
-			for _, boardPayloadKey := range []string{"board_id", "source_board_id"} {
-				if boardID := domainEventPayloadString(event.Payload, boardPayloadKey); boardID != "" {
-					key := companyID + "\x00" + boardID
-					changes[key] = boardChange{companyID: companyID, boardID: boardID, changeType: event.Type}
-				}
-			}
-		}
-		if strings.TrimSpace(event.Type) != "node_updated" {
-			continue
-		}
-		if !s.realtimeRegistry.hasScopeTypeSubscribers(companyID, "board") {
-			continue
-		}
-		nodeID := domainEventPayloadString(event.Payload, "node_id")
-		if nodeID == "" {
-			continue
-		}
-		rows, err := s.repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeID)
-		if err != nil {
-			log.Printf("failed to resolve mounted board changes for node company_id=%s node_id=%s: %v", companyID, nodeID, err)
-			continue
-		}
-		for _, row := range rows {
-			boardID := strings.TrimSpace(row.BoardID)
-			if boardID == "" {
-				continue
-			}
-			key := companyID + "\x00" + boardID
-			if _, exists := changes[key]; !exists {
-				changes[key] = boardChange{companyID: companyID, boardID: boardID, changeType: "node_updated"}
-			}
-		}
-	}
-	for _, change := range changes {
-		s.publishKanbanChanged(change.companyID, change.boardID, change.changeType)
-	}
-}
-
-func isKanbanRealtimeDomainEvent(eventType string) bool {
-	switch strings.TrimSpace(eventType) {
-	case "kanban_board_saved", "kanban_board_updated", "kanban_board_deleted",
-		"kanban_column_created", "kanban_column_updated", "kanban_column_deleted",
-		"kanban_card_upserted", "kanban_card_moved", "kanban_card_deleted":
-		return true
-	default:
-		return false
-	}
-}
-
-func domainEventPayloadString(data map[string]any, key string) string {
-	if data == nil {
-		return ""
-	}
-	value, ok := data[key]
-	if !ok || value == nil {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case *string:
-		if typed != nil {
-			return strings.TrimSpace(*typed)
-		}
-	}
-	return strings.TrimSpace(fmt.Sprint(value))
+	// The repository transaction already persisted exact-scope delete events,
+	// including a pre-delete audience snapshot when the resource ceased to exist.
+	s.wakeRealtimeSpine()
 }

@@ -65,11 +65,11 @@ with visible as (
     )
     and (
       case
-        when notifications.entity_type='project' then mangorts_user_can_access_resource(notifications.company_id, 'project', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
-        when btrim(notifications.logic_gate_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.logic_gate_id::uuid, notifications.recipient_user_id, 'view')
-        when btrim(notifications.node_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.node_id::uuid, notifications.recipient_user_id, 'view')
-        when notifications.entity_type='logic_gate' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
-        when notifications.entity_type='node' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
+        when notifications.entity_type='project' then mangorts_user_can_access_resource(notifications.company_id, 'project', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
+        when btrim(notifications.logic_gate_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.logic_gate_id::uuid, notifications.recipient_user_id, 'edit')
+        when btrim(notifications.node_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.node_id::uuid, notifications.recipient_user_id, 'edit')
+        when notifications.entity_type='logic_gate' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
+        when notifications.entity_type='node' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
         else true
       end
     )
@@ -102,7 +102,7 @@ with visible as (
   join projects project
     on project.company_id=relationship.company_id
    and project.project_id=relationship.project_id
-  where mangorts_user_can_access_resource(relationship.company_id, 'project', relationship.project_id, $1::uuid, 'view')
+  where mangorts_user_can_access_resource(relationship.company_id, 'project', relationship.project_id, $1::uuid, 'edit')
 ), roots as (
   select 'project'::text as field, 'project'::text as resource_type, project_context.project_id as resource_id, project_context.project_name as label
   from project_context
@@ -330,7 +330,7 @@ func (r *PostgresRepo) filterVisiblePostgresUpdateNotifications(ctx context.Cont
 
 	allowedByType := make(map[string]map[string]bool, len(resourceIDsByType))
 	for resourceType, resourceIDs := range resourceIDsByType {
-		allowed, err := r.ListEffectiveResourceIDsForUser(input.CompanyID, input.UserID, resourceType, EntityPermissionView, resourceIDs)
+		allowed, err := r.ListEffectiveResourceIDsForUser(input.CompanyID, input.UserID, resourceType, EntityPermissionEdit, resourceIDs)
 		if errors.Is(err, ErrInvalid) {
 			allowed = map[string]bool{}
 		} else if err != nil {
@@ -540,7 +540,7 @@ where relationship.company_id=$1::uuid
     ($2 <> '' and relationship.node_id = any(string_to_array($2, ',')::uuid[]))
     or ($3 <> '' and relationship.logic_gate_id = any(string_to_array($3, ',')::uuid[]))
   )
-  and mangorts_user_can_access_resource(relationship.company_id, 'project', relationship.project_id, $4::uuid, 'view')
+  and mangorts_user_can_access_resource(relationship.company_id, 'project', relationship.project_id, $4::uuid, 'edit')
 order by relationship.position asc, lower(coalesce(nullif(project.name, ''), relationship.project_id::text)) asc, relationship.relationship_created_timestamp asc, relationship.relationship_id asc`,
 		companyID, nodeIDList, logicGateIDList, userID)
 	if err != nil {

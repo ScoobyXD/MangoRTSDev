@@ -352,11 +352,11 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 	}
 	switch resourceType {
 	case "email_draft", "email_message":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionView)
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, false)
 	case "email_signature":
-		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView)
+		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
 	case "attached_email":
-		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView)
+		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
@@ -373,7 +373,7 @@ func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Re
 	}
 	switch resourceType {
 	case "email_draft", "email_message":
-		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, store.EntityPermissionEdit)
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, true)
 	case "email_signature":
 		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
 	case "attached_email":
@@ -430,13 +430,13 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 		if !ok {
 			return false, nil
 		}
-		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionView)
+		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
 		return false, nil
 	}
-	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionView)
+	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionEdit)
 }
 
 type emailScopedAttachmentResource struct {
@@ -448,7 +448,7 @@ type emailScopedAttachmentResource struct {
 	itemID          string
 }
 
-func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID, accessLevel string) bool {
+func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string, mutation bool) bool {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -479,13 +479,13 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 			writeAccessResourceNotFound(w)
 			return false
 		}
-		if accessLevel == store.EntityPermissionEdit && draft.SendState == "sending" {
+		if mutation && draft.SendState == "sending" {
 			writeError(w, http.StatusConflict, "email_draft_send_in_progress")
 			return false
 		}
 		return true
 	}
-	if resourceType == "email_draft" && accessLevel == store.EntityPermissionEdit && parsed.scope == "personal" && parsed.accountEmail == "" {
+	if resourceType == "email_draft" && mutation && parsed.scope == "personal" && parsed.accountEmail == "" {
 		// Accountless personal draft IDs are read-only compatibility for links
 		// created before mailbox scope became immutable.
 		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
@@ -513,7 +513,7 @@ func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWrite
 		}
 		return true
 	}
-	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, parsed.sharedInboxID, accessLevel)
+	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, parsed.sharedInboxID, store.EntityPermissionEdit)
 	if !ok {
 		return false
 	}
@@ -546,7 +546,7 @@ func (s *Server) canViewEmailMessageAttachmentResource(companyID, userID, resour
 	if parsed.scope == "personal" {
 		return userID == parsed.userID, nil
 	}
-	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionEdit)
 }
 
 func (s *Server) canViewEmailDraftAttachmentResource(actor ActorContext, companyID, resourceID string) (bool, error) {
@@ -583,7 +583,7 @@ func (s *Server) canViewEmailDraftAttachmentResource(actor ActorContext, company
 	if actorCanManageCompany(actor, companyID) {
 		return true, nil
 	}
-	return s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+	return s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionEdit)
 }
 
 func (s *Server) emailDraftAttachmentResourceExists(companyID string, parsed emailScopedAttachmentResource) (bool, error) {
@@ -681,7 +681,7 @@ func (s *Server) canViewEmailSignatureAttachmentResource(companyID, userID, reso
 	if parsed.scope == "personal" {
 		return userID == parsed.userID, nil
 	}
-	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionEdit)
 }
 
 func (s *Server) requireAttachedEmailAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {
@@ -690,7 +690,7 @@ func (s *Server) requireAttachedEmailAttachmentResourceAccess(w http.ResponseWri
 		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
 		return false
 	}
-	if accessLevel == store.EntityPermissionView {
+	if accessLevel == store.EntityPermissionEdit {
 		return s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
 	}
 	return s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")

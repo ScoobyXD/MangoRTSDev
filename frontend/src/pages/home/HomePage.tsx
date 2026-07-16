@@ -4681,9 +4681,7 @@ export function HomePage({
           accounts: row.accounts ?? previousNode?.accounts ?? [],
           created_timestamp: row.created_timestamp || previousNode?.created_timestamp || new Date().toISOString(),
           effective_access_level: previousNode?.effective_access_level ?? "edit",
-          can_view: previousNode?.can_view ?? true,
           can_edit: previousNode?.can_edit ?? true,
-          can_admin: previousNode?.can_admin ?? false,
         });
         invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
       }
@@ -4718,9 +4716,7 @@ export function HomePage({
           created_timestamp: projectedLogicGate?.created_timestamp || previousLogicGate?.created_timestamp || new Date().toISOString(),
           gvic_assignments: projectedLogicGate?.gvic_assignments ?? previousLogicGate?.gvic_assignments ?? [],
           effective_access_level: projectedLogicGate?.effective_access_level ?? previousLogicGate?.effective_access_level ?? "edit",
-          can_view: projectedLogicGate?.can_view ?? previousLogicGate?.can_view ?? true,
           can_edit: projectedLogicGate?.can_edit ?? previousLogicGate?.can_edit ?? true,
-          can_admin: projectedLogicGate?.can_admin ?? previousLogicGate?.can_admin ?? false,
         });
       }
       const reconciledLogicGates = foldCommittedEntityTitlesSince(

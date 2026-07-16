@@ -1,34 +1,34 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-15
 
 # Permissions Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save and duplicate-write prevention still require focused interaction coverage.
-- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node view denial. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
+- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node access denial. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
 
 ## Business Logic
 
 P1 - Resource permission checks require company access before resource-level access is evaluated.
-P2 - Permission levels rank no access, view, edit, then admin.
-P3 - Blank permission input normalizes to view.
-P4 - The manage permission alias normalizes to admin.
+P2 - Resource access has exactly two outcomes: edit or no access.
+P3 - Blank permission input is invalid and must not create an implicit grant.
+P4 - Legacy `view`, `admin`, and `manage` resource permission values are invalid; compatibility aliases must not recreate a third access outcome.
 P5 - Default access participates in effective access calculation.
 P6 - Resource permissions support user and group source principals.
 P7 - A resource can have at most 1000 explicit permission assignments in one update.
-P8 - Dev admins and company admins receive admin-level effective access for company-managed resources.
-P9 - GVIC assignments do not grant resource permission access and must not satisfy view, edit, admin, delete, or mutation authorization checks.
-P10 - GVIC assignments must not elevate a user's permission level; for example, generated or verified GVIC plus view permission still does not allow edit/delete.
-P11 - If a user cannot view a resource, read-style access checks hide the resource instead of exposing it.
-P12 - If a user can view a resource but lacks the required edit/admin level, mutation checks return an access denied error.
+P8 - Dev admins and company admins resolve company-managed resource access to edit, not to a separate resource-admin tier.
+P9 - GVIC assignments do not grant resource permission access and must not satisfy edit, delete, or mutation authorization checks.
+P10 - GVIC assignments must not elevate a user from no access to edit; edit/delete authority comes only from the resource permission policy.
+P11 - If a user lacks edit access, read-style access checks hide the resource instead of exposing it.
+P12 - Resource mutations require edit access; a no-access actor is denied without any intermediate read-only state.
 P13 - Invalid requested access levels return a bad request error.
-P14 - Reading entity permission settings requires manager/admin authority and view access to the entity.
+P14 - Reading entity permission settings requires manager/admin authority and edit access to the entity.
 P15 - Updating entity permission settings requires dev admin, company admin, or company manager authority with edit access to the entity.
 P16 - Permission setting responses include default access, explicit user/group permission rows, legacy override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
-P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective view access.
+P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective edit access.
 P18 - Map positions and relationship rows are filtered by the viewer's access to the related resources.
 P19 - Kanban board and card access derives from the access level of the owning logic gate.
-P20 - Regular users cannot load or update permission settings, even when they have resource edit/admin access.
+P20 - Regular users cannot load or update permission settings even when they have resource edit access; company manager/admin authority is a separate settings-management gate.
 P21 - Malformed or unknown resource IDs do not crash visibility checks.
 P22 - Permission changes recompute effective access for affected users and resources, including descendants when the change is explicitly applied to descendants.
 P23 - Permission changes synchronously update effective access, canonical projection rows, and read versions for affected resources, including descendants changed by an apply-to-descendants command. Clients reconcile from the committed response or a later canonical read; no generic permission or workspace browser event is published.
@@ -47,7 +47,7 @@ P35 - Reordering or re-saving a project, Logic Gate, or node under the same pare
 P36 - Detaching a resource from a parent or moving it to a non-template/root location preserves its current permission policy.
 P37 - Project permissions do not template Logic Gates or nodes through project relationships; folder templates apply to Explorer placement, and Logic Gate templates apply to node assignment.
 P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
-P39 - Permission settings denial copy explains that only managers and admins can view or edit permissions.
+P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
 P41 - Direct user permission rows override group permission rows for that user; group rows override default access, and the nearest matching group row wins before same-depth access-rank tie breaking.
 P42 - On company Explorer folders, apply-to-descendants applies the changed permission rule keys to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
@@ -62,14 +62,14 @@ P50 - Removing a permission rule with apply-to-descendants requires an explicit 
 P51 - Apply-to-descendants overwrites existing descendant special rules for the same changed rule keys as of that operation; later descendant edits can override again until a newer ancestor apply occurs.
 P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
 P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
-P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; resource admin is not required, view-only is not enough, and GVIC assignments must not authorize the delete.
+P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and GVIC assignments never authorize the delete.
 P55 - If a user is denied permission-settings visibility, the permissions dialog remains dismissible with the X control and must not attempt to autosave a panel that never loaded editable permission data.
-P56 - Logic Gate work reads return actor-specific `can_view`, `can_edit`, and `can_admin` flags while preserving the existing default, direct-user, group, ancestor-application, and manager/admin authorization semantics.
-P57 - Logic Gate work authorization is evaluated before conditional ETag handling; losing view access cannot produce a cached `304` or preserve readable board data.
+P56 - Logic Gate work reads return the single actor-specific `can_edit` resource flag while preserving default, direct-user, group, ancestor-application, and company-role authorization semantics.
+P57 - Logic Gate work authorization is evaluated before conditional ETag handling; losing edit access cannot produce a cached `304` or preserve readable board data.
 P58 - Direct Logic Gate permission/default changes, gate policy revisions, inherited Explorer permission applications, Logic Gate Explorer placement changes, and ancestor folder moves/default changes invalidate the affected Logic Gate work version.
 P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags conservatively invalidate all Logic Gate work versions in that company.
 P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
-P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set any of the work response permission flags.
+P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
 P63 - A newly created email-collaboration Node has default access `no_access` and one system-managed direct edit binding for its creator. It never inherits the Unfiled/Nodes folder policy, source shared-inbox policy, Logic Gate policy, project policy, GVIC assignments, or broad company-member edit access.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
@@ -106,10 +106,10 @@ Given:
 
 Expected:
 - Company access is checked before resource access.
-- Permission ranking follows no access, view, edit, admin.
-- Blank input becomes view and manage becomes admin.
+- Every effective resource result is exactly edit or no access.
+- Blank, `view`, `admin`, and `manage` inputs are rejected; they do not normalize into another resource permission.
 - Default access, direct user rows, and group rows participate in effective permission access.
-- GVIC assignments do not participate in effective permission access and cannot grant or elevate view/edit/admin authorization.
+- GVIC assignments do not participate in effective permission access and cannot grant or elevate edit authorization.
 - Dev admins and company admins bypass resource permissions.
 - Company managers follow resource permissions.
 - `resource_permissions` stores user/group source rows with explicit access levels.
@@ -134,22 +134,22 @@ Business logic covered:
 - P54
 
 Given:
-- One user cannot view a resource.
-- One user can view but not edit the resource.
-- One regular user has resource admin access.
+- One user has no access to a resource.
+- One regular user has edit access to the resource.
+- One regular user lacks company manager/admin authority.
 - One company manager has edit access to the resource.
 - One company manager is also listed on the resource.
 
 Expected:
-- The no-view user receives a hidden/not-found style denial for read checks.
-- The view-only user receives access denied for edit/admin mutations.
-- The view-only user cannot soft-delete the resource.
+- The no-access user receives a hidden/not-found style denial for read checks.
+- The no-access user is denied every resource mutation; no read-only branch exists.
+- The no-access user cannot soft-delete the resource.
 - A user with edit access can soft-delete the resource to that user's own Recycle Bin.
 - Invalid access level input returns bad request.
-- Permission settings can be read only by managers/admins who can view the resource.
+- Permission settings can be read only by managers/admins who can edit the resource.
 - Permission settings can be updated by managers/admins with edit access to the resource.
 - Responses include default access, explicit user/group permission rows, legacy override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
-- Regular resource admin access does not allow loading or updating permission settings.
+- Regular-user resource edit access does not allow loading or updating permission settings.
 - A non-manager/non-admin opening the permissions tab sees a manager/admin permission message instead of a generic permissions failure.
 - Company managers can change company user exceptions but cannot change other manager exceptions.
 - When a manager flips the default, manager effective access is preserved and regular company user access follows the new default plus exceptions.
@@ -241,7 +241,7 @@ Given:
 
 Expected:
 - An explicit Save button is always visible in both dialog and embedded variants and persists the current selection without closing the view.
-- Save is disabled while the view is loading, saving, or read-only.
+- Save is disabled while the permission surface is loading, saving, or denied.
 - Closing with X persists the pending permission change.
 - A successful explicit save leaves the view open and displays saved state.
 - Closing after a successful explicit Save does not issue the same permission write again.
@@ -253,7 +253,7 @@ Business logic covered:
 - P55
 
 Given:
-- A regular user opens a node, Logic Gate, or Explorer resource where the user cannot view permission settings.
+- A regular user opens a node, Logic Gate, or Explorer resource where the user cannot edit permission settings.
 - The permissions dialog or tab displays the manager/admin permission message.
 
 Expected:
@@ -272,16 +272,16 @@ Business logic covered:
 - P61
 
 Given:
-- Two users have different effective permission levels on the same Logic Gate.
+- Two users hold edit access to the same Logic Gate through different permission sources, and one later loses edit access.
 - A direct rule, an inherited Explorer rule, and group membership are changed while one user holds an older work ETag.
 
 Expected:
-- Each response reports permission flags for its authenticated actor.
+- Each response reports only `can_edit` for its authenticated actor.
 - Access is recalculated before `If-None-Match` can return `304`.
 - Direct and inherited policy changes bump the affected gate, while actor membership/hierarchy changes conservatively bump company gate versions.
 - Actor permission identity/flags prevent cross-user validator reuse.
-- Removing view access returns denial and does not expose cached card data.
-- GVIC assignment alone does not set view, edit, or admin permission.
+- Removing edit access returns denial and does not expose cached card data.
+- GVIC assignment alone does not set `can_edit`.
 
 ### Scenario P-S8: Email Collaboration Participant Policy
 

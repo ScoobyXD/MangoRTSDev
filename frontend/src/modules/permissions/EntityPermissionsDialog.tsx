@@ -5,7 +5,7 @@ import { listCompanyUsers } from "../communications/communicationsApi";
 
 type PermissionEntityType = "node" | "logic_gate" | "project" | "company_explorer_folder" | "shared_triage_folder" | "shared_inbox_folder" | "shared_inbox";
 type PermissionSubjectType = "user" | "group";
-type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
+type ResourceAccessLevel = "no_access" | "edit";
 
 type CompanyUser = {
   company_id: string;
@@ -74,9 +74,7 @@ type PermissionPayload = {
 
 const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label: string }> = [
   { value: "no_access", label: "No Access" },
-  { value: "view", label: "View" },
   { value: "edit", label: "Edit" },
-  { value: "admin", label: "Admin" },
 ];
 const CUSTOM_GROUP_ACCESS = "__custom__";
 const PERMISSIONS_VIEW_DENIED_MESSAGE = "You do not have permission to view permissions. Only managers and admins can.";
@@ -424,7 +422,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           const userKey = `user:${member.user_id}` as PermissionSelectionKey;
           const user = usersByID.get(member.user_id);
           const roleForcesAdmin = companyUserRoleForcesAdmin(user?.role);
-          const forcedAccessLevel = roleForcesAdmin ? "admin" : groupAccessLevel;
+          const forcedAccessLevel = roleForcesAdmin ? "edit" : groupAccessLevel;
           const forceOverridesDirect = !roleForcesAdmin && !!groupAccessLevel;
           return (
             <div key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
@@ -592,7 +590,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
             <div style={permissionSubheadStyle}>Ungrouped Users</div>
             {ungroupedUsers.map((user) => {
               const key = `user:${user.user_id}` as PermissionSelectionKey;
-              const forcedAccessLevel = companyUserRoleForcesAdmin(user.role) ? "admin" : "";
+              const forcedAccessLevel = companyUserRoleForcesAdmin(user.role) ? "edit" : "";
               return (
                 <div key={user.user_id} style={permissionRowStyle}>
                   <span>{companyUserLabel(user)}</span>
@@ -660,12 +658,8 @@ function accessLevelLabel(accessLevel: ResourceAccessLevel): string {
   switch (accessLevel) {
     case "no_access":
       return "No Access";
-    case "view":
-      return "View";
     case "edit":
       return "Edit";
-    case "admin":
-      return "Admin";
   }
 }
 
@@ -696,13 +690,13 @@ function companyUserRoleLabel(role: string | undefined): string {
 }
 
 function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType, defaultAccess: "edit" | "no_access"): string {
-  if (saved) return "Permissions saved. Dev admins and company admins always keep admin access. Managers follow resource permissions.";
+  if (saved) return "Permissions saved. Dev admins and company admins always keep edit access. Managers follow resource permissions.";
   if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder" || entityType === "shared_inbox_folder" || entityType === "shared_inbox") {
     const defaultLabel = defaultAccess === "edit" ? "Default edit" : "Default no access";
-    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} explicit permission ${assignmentCount === 1 ? "row" : "rows"}. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
-    return `${defaultLabel}. No explicit permission rows. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
+    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} explicit permission ${assignmentCount === 1 ? "row" : "rows"}. Dev admins and company admins always keep edit access. Managers follow resource permissions.`;
+    return `${defaultLabel}. No explicit permission rows. Dev admins and company admins always keep edit access. Managers follow resource permissions.`;
   }
-  if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
+  if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep edit access. Managers follow resource permissions.`;
   return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 
@@ -725,7 +719,7 @@ function permissionsToMap(permissions: EntityPermission[]): Map<PermissionSelect
   const out = new Map<PermissionSelectionKey, ResourceAccessLevel>();
   for (const permission of permissions) {
     const accessLevel = permission.access_level ?? permission.permission;
-    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (accessLevel !== "no_access" && accessLevel !== "edit") continue;
     out.set(`${permission.subject_type}:${permission.subject_id}` as PermissionSelectionKey, accessLevel);
   }
   return out;
@@ -737,7 +731,7 @@ function effectiveAccessToMap(items: EntityEffectiveAccess[]): Map<string, Resou
     const userID = item.user_id?.trim();
     const accessLevel = item.access_level;
     if (!userID) continue;
-    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (accessLevel !== "no_access" && accessLevel !== "edit") continue;
     out.set(userID, accessLevel);
   }
   return out;

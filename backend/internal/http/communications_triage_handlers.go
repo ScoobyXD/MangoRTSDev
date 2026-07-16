@@ -210,11 +210,7 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "failed_to_revert_triage_card")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "kanban_card_deleted", map[string]any{
-		"board_id": result.BoardID,
-		"card_id":  result.DeletedCardID,
-	})
-	s.publishWorkspaceEvent(req.CompanyID, "node_deleted", map[string]any{"node_id": result.DeletedNodeID})
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -318,12 +314,7 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "failed_to_transfer_email_node")
 		return
 	}
-	s.publishWorkspaceEvent(input.CompanyID, "kanban_card_deleted", map[string]any{
-		"board_id": result.SourceBoardID,
-		"card_id":  result.DeletedCardID,
-	})
-	s.publishWorkspaceEvent(input.CompanyID, "node_deleted", map[string]any{"node_id": result.DeletedNodeID})
-	s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": result.TargetNodeID})
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 

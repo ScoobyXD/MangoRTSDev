@@ -43,7 +43,7 @@ MW20 - My Work GET reads flat projection rows directly from `gvic_matrix_project
 MW21 - The backend must not recursively build a tree for My Work reads.
 MW22 - The frontend must not lazy-fetch My Work branches to derive the matrix.
 MW23 - The projection row carries denormalized `node_name`, path context, row status, due date, accounts, timestamps, and `sort_order`.
-MW24 - Hidden work is filtered out: the viewer needs node work access and view access to any projected project or logic-gate context.
+MW24 - Hidden work is filtered out: the viewer needs node work access and edit access to any projected project or logic-gate context.
 MW25 - My Work grouping supports account, due date, logic gate, person, project, status, and team fields.
 MW26 - The default My Work grouping is project ascending.
 MW27 - Saved grouping settings are scoped by company and current user.

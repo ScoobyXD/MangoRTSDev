@@ -825,8 +825,8 @@ with admin_actor as (
   ) as allowed
 )
 select case
-  when (select allowed from admin_actor) then 'admin'
-  when mangorts_user_can_access_resource($1::uuid, $3::text, $4::uuid, $2::uuid, 'view') then 'edit'
+  when (select allowed from admin_actor) then 'edit'
+  when mangorts_user_can_access_resource($1::uuid, $3::text, $4::uuid, $2::uuid, 'edit') then 'edit'
   else 'no_access'
 end`, companyID, userID, resourceType, resourceID).Scan(&accessLevel)
 	return accessLevel, err

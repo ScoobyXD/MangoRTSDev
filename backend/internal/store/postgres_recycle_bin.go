@@ -224,6 +224,10 @@ order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, deletedByUs
 			return RecycleBinRestoreResult{}, err
 		}
 	}
+	events, err := r.appendDomainEventsTx(ctx, tx, companyExplorerTargetWorkspaceEventInputs(companyID, targets, true))
+	if err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from recycle_bin_items
 where company_id=$1::uuid
@@ -234,7 +238,7 @@ where company_id=$1::uuid
 	if err := tx.Commit(); err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
-	return RecycleBinRestoreResult{Items: items, Targets: targets}, nil
+	return RecycleBinRestoreResult{Items: items, Targets: targets, Events: events}, nil
 }
 
 var recycleSnapshotTables = map[string]bool{

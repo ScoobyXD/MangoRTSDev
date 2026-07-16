@@ -258,7 +258,7 @@ func (s *Server) authorizeProjectManagementEntity(w http.ResponseWriter, viewerU
 		writeError(w, http.StatusBadRequest, "invalid_entity")
 		return "", "", false
 	}
-	allowed, err := s.repo.UserHasEffectiveAccess(companyID, viewerUserID, normalizedType, entityID, store.EntityPermissionView)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, viewerUserID, normalizedType, entityID, store.EntityPermissionEdit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_check_entity_access")
 		return "", "", false

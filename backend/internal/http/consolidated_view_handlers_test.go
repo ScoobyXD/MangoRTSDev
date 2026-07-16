@@ -61,9 +61,9 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		EntityType: store.EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions node: %v", err)
@@ -73,9 +73,9 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionNoAccess},
 		},
 	}); err != nil {
@@ -98,8 +98,8 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, viewer, http.StatusOK)
-	if !view.CanView || view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanEdit {
+		t.Fatalf("member can_edit = false, want the single positive edit outcome")
 	}
 	if view.Node.NodeID != node.NodeID || view.ProjectionCount != 1 || view.AssignmentCount != 1 {
 		t.Fatalf("node view = %+v, want summary, projection, and assignment metadata", view)
@@ -109,12 +109,12 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	}
 
 	editView, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, editor, http.StatusOK)
-	if !editView.CanView || !editView.CanEdit || editView.CanAdmin {
-		t.Fatalf("editor flags = view:%v edit:%v admin:%v, want view/edit", editView.CanView, editView.CanEdit, editView.CanAdmin)
+	if !editView.CanEdit {
+		t.Fatalf("editor can_edit = false, want edit")
 	}
 	adminView, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, admin, http.StatusOK)
-	if !adminView.CanView || !adminView.CanEdit || adminView.CanAdmin {
-		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want view/edit without role admin", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
+	if !adminView.CanEdit {
+		t.Fatalf("company admin can_edit = false, want edit")
 	}
 
 	_, blockedBody := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, blocked, http.StatusNotFound)
@@ -157,7 +157,7 @@ func TestNodeCreateRefreshesEffectiveAccessForV2View(t *testing.T) {
 	}
 
 	view, _ := getNodeViewV2ForTest(t, handler, companyID, created.NodeID, creator, http.StatusOK)
-	if view.Node.NodeID != created.NodeID || !view.CanView || !view.CanEdit {
+	if view.Node.NodeID != created.NodeID || !view.CanEdit {
 		t.Fatalf("created node v2 view = %+v, want creator access", view)
 	}
 }
@@ -276,9 +276,9 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
@@ -300,8 +300,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, viewBody := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
-	if !view.CanView || view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanEdit {
+		t.Fatalf("member can_edit = false, want the single positive edit outcome")
 	}
 	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.GVICAssignmentCount != 1 {
 		t.Fatalf("logic gate view = %+v, want details, projection, and GVIC", view)
@@ -316,8 +316,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 
 	getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	adminView, _ := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, admin, http.StatusOK)
-	if !adminView.CanView || !adminView.CanEdit || adminView.CanAdmin {
-		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want view/edit without role admin", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
+	if !adminView.CanEdit {
+		t.Fatalf("company admin can_edit = false, want edit")
 	}
 
 	_, blockedBody := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, blocked, http.StatusNotFound)
@@ -394,11 +394,6 @@ type phase5ForbiddenLegacyAndKanbanReadsRepo struct {
 func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
 	r.legacyAccessReadCount++
 	return nil, store.ErrInvalid
-}
-
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
-	r.legacyAccessReadCount++
-	return false, store.ErrInvalid
 }
 
 func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
@@ -569,7 +564,7 @@ func TestNodeProjectionAnchorCleanEndpointIsIdempotentAndDoesNotConsumeUnseen(t 
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)

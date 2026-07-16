@@ -189,7 +189,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate")
 				return
 			}
-			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			s.publishCommittedWorkspaceEvents(result.Events)
 			s.publishCapturedKanbanDeletes(companyID, capturedBoardDeletes)
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return

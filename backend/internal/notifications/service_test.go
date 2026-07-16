@@ -89,10 +89,10 @@ func TestPhase6NotificationRecipientsUseNodeGVICRouting(t *testing.T) {
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -192,8 +192,8 @@ func TestProcessDomainEventsLogicGateWorkUsesNodeGVICMatrixOnly(t *testing.T) {
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
@@ -203,7 +203,7 @@ func TestProcessDomainEventsLogicGateWorkUsesNodeGVICMatrixOnly(t *testing.T) {
 		EntityType: store.EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: nodeOnlyViewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: nodeOnlyViewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions node: %v", err)
@@ -367,8 +367,8 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesGVICRecipients(t *test
 		EntityType: store.EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -476,8 +476,8 @@ func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *t
 		EntityType: store.EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: allowed.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: allowed.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -554,9 +554,9 @@ func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActo
 		EntityType: store.EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: assignee.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: assignee.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -706,11 +706,11 @@ func TestProcessDomainEventSharedInboxGVICUsesNotificationRoles(t *testing.T) {
 		EntityType: store.EntityTypeSharedInbox,
 		EntityID:   folder.FolderID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: accountable.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: accountable.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -813,8 +813,8 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
-			Permission:  store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
+			Permission:  store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
@@ -862,8 +862,8 @@ func TestProcessDomainEventDuplicateReturnsNoNewNotifications(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   assignee.UserID,
-			AccessLevel: store.EntityPermissionView,
-			Permission:  store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
+			Permission:  store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)

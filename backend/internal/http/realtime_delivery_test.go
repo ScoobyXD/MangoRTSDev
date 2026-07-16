@@ -309,7 +309,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 
 			resourceType := ""
 			resourceID := ""
-			permission := store.EntityPermissionView
+			permission := store.EntityPermissionEdit
 			scope := ""
 			var publish func(*Server)
 			switch surface {
@@ -323,9 +323,15 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 				permission = store.EntityPermissionEdit
 				scope = realtimeChatScope(node.NodeID)
 				publish = func(server *Server) {
-					server.publishNodeChatCreated(companyID, node.NodeID, "queued-chat-message", domain.NodeInformation{
-						Type: "Text block chat", Information: `{"block_id":"queued-chat-block"}`,
+					item, err := base.AddNodeInformationWithActor(store.NodeInformationInput{
+						CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
+						Information: `{"block_id":"queued-chat-block"}`, InformationID: "71717171-7171-4171-8171-000000000001",
 					})
+					if err != nil {
+						t.Errorf("AddNodeInformationWithActor: %v", err)
+						return
+					}
+					server.publishNodeChatCreated(companyID, node.NodeID, "71717171-7171-4171-8171-000000000001", item)
 				}
 			case "kanban":
 				gate, err := base.CreateLogicGate(companyID, "Queued board")

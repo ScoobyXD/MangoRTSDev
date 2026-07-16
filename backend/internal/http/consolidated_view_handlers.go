@@ -68,7 +68,7 @@ func (s *Server) nodeViewETag(companyID, nodeID, actorUserID string, flags domai
 	if err != nil {
 		return "", err
 	}
-	permissionKey := strconv.FormatBool(flags.CanView) + ":" + strconv.FormatBool(flags.CanEdit) + ":" + strconv.FormatBool(flags.CanAdmin)
+	permissionKey := strconv.FormatBool(flags.CanEdit)
 	return strongETagFromString(
 		"node-view:v1:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(nodeID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
@@ -224,7 +224,7 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		if s.authValidator == nil {
-			return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, "", true
+			return domain.EffectiveAccessFlags{CanEdit: true}, "", true
 		}
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return domain.EffectiveAccessFlags{}, "", false
@@ -235,37 +235,21 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 	}
 	actorUserID := strings.TrimSpace(actor.User.UserID)
 	if actorCanManageCompany(actor, companyID) {
-		return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, actorUserID, true
+		return domain.EffectiveAccessFlags{CanEdit: true}, actorUserID, true
 	}
-	canView, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionView)
+	canEdit, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_effective_access_check")
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
 	if err != nil {
-		log.Printf("failed to check v2 root view access company_id=%s resource_type=%s resource_id=%s user_id=%s: %v", companyID, resourceType, resourceID, actorUserID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_check_effective_access")
-		return domain.EffectiveAccessFlags{}, actorUserID, false
-	}
-	if !canView {
-		writeAccessResourceNotFound(w)
-		return domain.EffectiveAccessFlags{}, actorUserID, false
-	}
-	canEdit, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
-	if err != nil {
 		log.Printf("failed to check v2 root edit access company_id=%s resource_type=%s resource_id=%s user_id=%s: %v", companyID, resourceType, resourceID, actorUserID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_check_effective_access")
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
-	canAdmin, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionAdmin)
-	if err != nil {
-		log.Printf("failed to check v2 root admin access company_id=%s resource_type=%s resource_id=%s user_id=%s: %v", companyID, resourceType, resourceID, actorUserID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_check_effective_access")
+	if !canEdit {
+		writeAccessResourceNotFound(w)
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
-	return domain.EffectiveAccessFlags{
-		CanView:  canView,
-		CanEdit:  canEdit,
-		CanAdmin: canAdmin,
-	}, actorUserID, true
+	return domain.EffectiveAccessFlags{CanEdit: true}, actorUserID, true
 }

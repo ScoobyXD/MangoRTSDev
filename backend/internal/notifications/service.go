@@ -622,7 +622,7 @@ func (s *Service) notificationEffectiveUsers(companyID, resourceType, resourceID
 	if companyID == "" || resourceID == "" || !ok {
 		return []string{}, nil
 	}
-	userIDs, err := s.Repo.ListEffectiveUsersForResource(companyID, resourceType, resourceID, store.EntityPermissionView)
+	userIDs, err := s.Repo.ListEffectiveUsersForResource(companyID, resourceType, resourceID, store.EntityPermissionEdit)
 	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
 		return []string{}, nil
 	}

@@ -426,7 +426,7 @@ select item.company_id,
        item.created_timestamp,
        item.updated_timestamp,
        case
-         when actor_access.is_admin then 'admin'
+         when actor_access.is_admin then 'edit'
          when actor_access.is_member
           and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit') then 'edit'
           else 'no_access'
@@ -436,7 +436,7 @@ cross join actor_access
 where actor_access.is_admin
    or (
       actor_access.is_member
-      and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')
+      and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit')
     )
 order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit)
 	if err != nil {

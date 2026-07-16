@@ -86,6 +86,7 @@ type MemoryRepo struct {
 	domainEvents                   map[string]domain.DomainEvent
 	realtimeOutbox                 map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence         int64
+	realtimeOutboxErr              error
 	editorCollaborationDocuments   map[string]memoryEditorCollaborationDocument
 	editorCollaborationOperations  map[string][]memoryEditorCollaborationOperation
 	effectiveAccessErr             error

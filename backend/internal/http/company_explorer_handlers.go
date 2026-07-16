@@ -681,7 +681,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		return
 	}
 
-	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
+	s.publishCommittedWorkspaceEvents(result.Events)
 	s.publishCapturedKanbanDeletes(req.CompanyID, capturedBoardDeletes)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 }
@@ -721,7 +721,7 @@ func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *h
 		if !ok {
 			return
 		}
-		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionView) {
+		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionEdit) {
 			return
 		}
 		folder, err := s.repo.GetCommunicationsSharedInboxFolder(companyID, folderID)
@@ -831,7 +831,7 @@ func (s *Server) filterCommunicationsSharedInboxFoldersForActor(companyID string
 	if actorCanManageCompany(actor, companyID) {
 		out := append([]domain.CompanyExplorerFolder{}, folders...)
 		for index := range out {
-			out[index].EffectiveAccess = store.EntityPermissionAdmin
+			out[index].EffectiveAccess = store.EntityPermissionEdit
 		}
 		return out, nil
 	}
@@ -864,7 +864,7 @@ func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.Co
 			accessLevel = store.EntityPermissionNoAccess
 		}
 		accessByFolderID[folder.FolderID] = accessLevel
-		if !store.EntityPermissionSatisfies(accessLevel, store.EntityPermissionView) {
+		if !store.EntityPermissionSatisfies(accessLevel, store.EntityPermissionEdit) {
 			continue
 		}
 		includeFolderIDs[folder.FolderID] = true
@@ -876,7 +876,7 @@ func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.Co
 		}
 		item := folder
 		item.EffectiveAccess = accessByFolderID[folder.FolderID]
-		if !store.EntityPermissionSatisfies(item.EffectiveAccess, store.EntityPermissionView) {
+		if !store.EntityPermissionSatisfies(item.EffectiveAccess, store.EntityPermissionEdit) {
 			item.EffectiveAccess = store.EntityPermissionNoAccess
 		}
 		out = append(out, item)

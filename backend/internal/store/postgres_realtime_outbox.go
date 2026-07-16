@@ -41,6 +41,38 @@ func (r *PostgresRepo) EnqueueRealtimeOutbox(input RealtimeOutboxInput) (Realtim
 	return scanRealtimeOutboxEvent(row)
 }
 
+func (r *PostgresRepo) enqueueRealtimeOutboxTx(ctx context.Context, tx *sql.Tx, input RealtimeOutboxInput) (RealtimeOutboxEvent, error) {
+	input, err := normalizeRealtimeOutboxInput(input)
+	if err != nil {
+		return RealtimeOutboxEvent{}, err
+	}
+	if input.EventID == "" {
+		input.EventID = newUUIDv7String()
+	}
+	allowed, err := json.Marshal(input.AllowedUserIDs)
+	if err != nil {
+		return RealtimeOutboxEvent{}, err
+	}
+	row := tx.QueryRowContext(ctx, `
+		insert into realtime_outbox (
+			event_id, company_id, scope, event_type, resource_type, resource_id,
+			permission, resource_revision, payload, allowed_user_ids, audience_restricted
+		) values (
+			$1::uuid, $2::uuid, $3, $4, nullif($5, ''), nullif($6, ''),
+			nullif($7, ''), $8, $9::jsonb, $10::jsonb, $11
+		)
+		on conflict (event_id) do update set event_id = excluded.event_id
+		returning outbox_sequence, event_id::text, company_id::text, scope, event_type,
+			coalesce(resource_type, ''), coalesce(resource_id, ''), coalesce(permission, ''),
+			resource_revision, payload, allowed_user_ids, audience_restricted, attempt_count,
+			coalesce(claim_token::text, ''), claim_expires_at, published_timestamp,
+			created_timestamp, coalesce(last_error_category, '')`,
+		input.EventID, input.CompanyID, input.Scope, input.EventType, input.ResourceType,
+		input.ResourceID, input.Permission, input.ResourceRevision, []byte(input.Payload), allowed, input.AudienceRestricted,
+	)
+	return scanRealtimeOutboxEvent(row)
+}
+
 func (r *PostgresRepo) ClaimRealtimeOutbox(query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error) {
 	query = normalizeRealtimeOutboxClaimQuery(query)
 	rows, err := r.db.QueryContext(context.Background(), `

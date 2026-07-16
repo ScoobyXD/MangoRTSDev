@@ -66,7 +66,7 @@ test("Kanban board content store loads Logic Gate board contents from v2 work re
     calls.push(url);
     return jsonResponse({
       logic_gate: { logic_gate_id: logicGateID, header: "Gate", default_access: "edit", request_owner_user_id: "user-1" },
-      permissions: { can_view: true, can_edit: true, can_admin: false },
+      permissions: { can_edit: true },
       board,
       columns,
       cards,
@@ -352,7 +352,7 @@ function boardContents(companyID: string, logicGateID: string, cardID: string, _
   const boardID = logicGateKanbanBoardID(logicGateID);
   return {
     logicGate: { logic_gate_id: logicGateID, header: `Gate ${logicGateID}`, default_access: "edit", request_owner_user_id: "user-1" },
-    permissions: { can_view: true, can_edit: true, can_admin: false },
+    permissions: { can_edit: true },
     board: {
       company_id: companyID,
       board_id: boardID,

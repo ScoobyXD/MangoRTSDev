@@ -2555,7 +2555,7 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -3133,7 +3133,7 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -3313,7 +3313,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	body := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body"}`
 	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusNotFound)
 	if nylas.lastSendGrantID != "" {
-		t.Fatalf("send grant after view-only request = %q, want none", nylas.lastSendGrantID)
+		t.Fatalf("send grant after denied request = %q, want none", nylas.lastSendGrantID)
 	}
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
@@ -4667,7 +4667,7 @@ func TestSharedNylasWebhookAudienceFailureRetriesOpenedWithoutInflatingSignalCou
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -4962,7 +4962,7 @@ func TestNylasWebhookStoresSharedReadStatusForSharedInbox(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   visible.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -5090,7 +5090,7 @@ func TestNylasWebhookAdvancesSharedEmailCollaborationThroughPersonalFallback(t *
 		CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: folder.FolderID,
 		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser, SubjectID: creator.UserID, AccessLevel: store.EntityPermissionView,
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: creator.UserID, AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -5194,7 +5194,7 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 			permissions = append(permissions, store.EntityPermissionInput{
 				SubjectType: store.EntityPermissionSubjectUser,
 				SubjectID:   userID,
-				AccessLevel: store.EntityPermissionView,
+				AccessLevel: store.EntityPermissionEdit,
 			})
 		}
 		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
@@ -5478,7 +5478,7 @@ func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -5562,7 +5562,7 @@ func TestCommunicationsStoredSharedReauthRequiredReturnsConflict(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatal(err)

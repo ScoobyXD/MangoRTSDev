@@ -138,7 +138,7 @@ func TestCalendarInviteResponseUsesAuthenticatedPersonalGrant(t *testing.T) {
 	}
 }
 
-func TestCalendarInviteResponseRejectsSharedViewOnlyAccess(t *testing.T) {
+func TestCalendarInviteResponseRejectsSharedNoAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "33333333-3333-4333-8333-333333333302"
 	repo.EnsureCompany(companyID, "Shared Calendar Company")
@@ -160,7 +160,7 @@ func TestCalendarInviteResponseRejectsSharedViewOnlyAccess(t *testing.T) {
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}},
+		Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionNoAccess}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,10 +170,10 @@ func TestCalendarInviteResponseRejectsSharedViewOnlyAccess(t *testing.T) {
 	req = sharedInboxRequestWithActor(req, user, companyID, domain.RoleCompanyUser)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("shared view-only calendar response status = %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("shared no-access calendar response status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	if client.lastRawMIMEMessageID != "" || client.rsvpEventID != "" {
-		t.Fatalf("view-only request reached provider: %+v", client)
+		t.Fatalf("no-access request reached provider: %+v", client)
 	}
 }

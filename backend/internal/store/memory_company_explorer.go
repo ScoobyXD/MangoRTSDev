@@ -202,7 +202,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, us
 			continue
 		}
 		item := folder
-		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView)
+		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit)
 		if accessLevel == "" {
 			continue
 		}
@@ -238,7 +238,7 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderIDsLocked(companyID, folderKind
 			if parentID != "" && !ids[parentID] {
 				continue
 			}
-			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
+			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit) {
 				continue
 			}
 			ids[folder.FolderID] = true
@@ -262,13 +262,13 @@ func sortCompanyExplorerFolders(items []domain.CompanyExplorerFolder) {
 
 func (r *MemoryRepo) effectiveAccessLevelLocked(companyID, userID, resourceType, resourceID, accessLevel string) string {
 	if r.userHasRoleAdminAccessLocked(companyID, userID) {
-		return EntityPermissionAdmin
+		return EntityPermissionEdit
 	}
 	if r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, EntityPermissionEdit) {
 		return EntityPermissionEdit
 	}
 	if r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, accessLevel) {
-		return EntityPermissionView
+		return EntityPermissionEdit
 	}
 	return ""
 }
@@ -321,7 +321,7 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, fol
 		if folderKind != "" && folder.FolderKind != folderKind {
 			return ids
 		}
-		if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
+		if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit) {
 			return ids
 		}
 		ids[folder.FolderID] = true
@@ -343,7 +343,7 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, fol
 			if !ids[*folder.ParentFolderID] || ids[folder.FolderID] {
 				continue
 			}
-			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
+			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit) {
 				continue
 			}
 			ids[folder.FolderID] = true
@@ -414,7 +414,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID
 			continue
 		}
 		item := folder
-		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView)
+		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit)
 		if accessLevel == "" {
 			continue
 		}
@@ -589,6 +589,22 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	recycleSnapshot := r.snapshotRecycleStateLocked()
+	beforeRecycleBin := cloneMap(r.recycleBin)
+	beforeDomainEvents := cloneMap(r.domainEvents)
+	beforeWorkspaceReadVersions := cloneMap(r.workspaceReadVersions)
+	beforeOutbox := cloneMap(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if !committed {
+			r.restoreRecycleSnapshotLocked(recycleSnapshot)
+			r.recycleBin = beforeRecycleBin
+			r.domainEvents = beforeDomainEvents
+			r.workspaceReadVersions = beforeWorkspaceReadVersions
+			r.realtimeOutbox = beforeOutbox
+			r.realtimeOutboxSequence = beforeOutboxSequence
+		}
+	}()
 
 	folderIDs := map[string]bool{}
 	folderKinds := map[string]string{}
@@ -721,6 +737,11 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
+	events, err := r.appendDomainEventsLocked(companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false))
+	if err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	result.Events = events
 	r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
 
 	for folderID := range folderIDs {
@@ -781,6 +802,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			delete(r.folderShares, shareKey)
 		}
 	}
+	committed = true
 	return result, nil
 }
 
@@ -1052,16 +1074,16 @@ func (r *MemoryRepo) companyExplorerFolderItemVisibleLocked(companyID, userID st
 	if !ok {
 		return false
 	}
-	if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
+	if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionEdit) {
 		return false
 	}
 	switch item.ItemType {
 	case "node":
-		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, item.ItemID, EntityPermissionView)
+		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, item.ItemID, EntityPermissionEdit)
 	case "logic_gate":
-		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, item.ItemID, EntityPermissionView)
+		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, item.ItemID, EntityPermissionEdit)
 	case EntityTypeProject:
-		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeProject, item.ItemID, EntityPermissionView)
+		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeProject, item.ItemID, EntityPermissionEdit)
 	default:
 		return false
 	}
@@ -1187,7 +1209,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID s
 		if node.CompanyID != companyID {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
@@ -1263,7 +1285,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, use
 		if gate.CompanyID != companyID {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))

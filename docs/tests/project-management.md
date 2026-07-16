@@ -9,22 +9,22 @@ Coverage Status:
 ## Business Logic
 
 PM1 - Listing projects requires company access.
-PM2 - Project lists only include projects the viewer can access with view permission or higher.
+PM2 - Project lists only include projects the viewer can access with edit permission or higher.
 PM3 - Creating a project requires a company ID and nonblank project name.
 PM4 - Project creation stores project status, health, account IDs, and team IDs when those values are provided.
-PM5 - Reading a project requires view access to that project.
-PM6 - Project detail responses include project metadata, information/projections, relationships, critical path, counts, and edit/admin capability flags.
+PM5 - Reading a project requires edit access to that project.
+PM6 - Project detail responses include project metadata, information/projections, relationships, critical path, counts, and the single `can_edit` capability flag.
 PM7 - Updating project metadata requires edit access to the project.
-PM8 - Deleting a project requires admin access to the project.
+PM8 - Deleting a project requires edit access to the project.
 PM9 - Project deletion uses the Company Explorer target deletion path so tree placement and project data are removed consistently.
 PM10 - Adding or changing project information/projection rows requires edit access to the project.
 PM11 - Deleting project information/projection rows requires edit access to the project.
-PM12 - Listing project relationships requires view access to the project.
+PM12 - Listing project relationships requires edit access to the project.
 PM13 - Project relationship lists filter related nodes and logic gates by the viewer's access to those related resources.
 PM14 - Creating a project relationship requires edit access to the project.
 PM15 - Deleting a project relationship requires edit access to the project.
 PM16 - Project relationships can target nodes and logic gates.
-PM17 - Reading a project's critical path requires view access to the project.
+PM17 - Reading a project's critical path requires edit access to the project.
 PM18 - Critical path rows are filtered by the viewer's access to the underlying node or logic gate.
 PM19 - Creating, updating, reordering, or deleting critical path rows requires edit access to the project.
 PM20 - Critical path rows sort by position, then creation time, then ID.
@@ -49,7 +49,7 @@ PM38 - Opening a node from Project Management preserves node-level access, node 
 PM39 - The node workspace project assignment control is a content-sized action, not a spacer. The unassigned `Assign to Project` button must remain compact, and the assigned `Project: <project name>` button may grow only until the node header project-control maximum before ellipsizing.
 PM40 - The node workspace project assignment menu must use the compact project-picker width contract: nominal minimum 280px, desktop maximum 390px, compact-layout maximum 320px, and no wider than the browser viewport allows.
 PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
-PM42 - Project permission controls use the canonical permissions contract in `docs/tests/permissions.md`: every editable dialog or embedded view exposes **Save**, saving persists the current selection without closing, and read-only/denied states never issue a write.
+PM42 - Project permission controls use the canonical permissions contract in `docs/tests/permissions.md`: every editable dialog or embedded view exposes **Save**, saving persists the current selection without closing, and denied states never issue a write.
 PM43 - Project Management attached-email views follow `docs/tests/projects.md` P32: personal picker attachments and personal email-drop conversions retain `account_email`, shared conversions retain both `shared_inbox_id` and `account_email`, and subsequent thread, attachment, reply, draft, and calendar operations use that stored mailbox scope.
 PM44 - Project Logic Gates / Nodes uses the shared universal grouping engine to render recursive group headers and relationship rows instead of Logic Gate cards. Logic Gate ascending is the default, while an explicit empty grouping stack renders a flat list.
 PM45 - Project relationship grouping supports Logic Gate, Type, Status, Date Added, and Email Origin with ordered levels and ascending/descending direction. Changing these settings changes presentation only and never mutates relationship data. The stack is a browser-local preference scoped to company/current user and shared across that user's projects, not an API-backed named My Work/Updates saved view.
@@ -89,9 +89,9 @@ Expected:
 - The project list requires company access and returns only viewable projects.
 - Creating a project fails without company ID or name.
 - Creating a project stores provided status, health, accounts, and teams.
-- Project detail requires view access and returns metadata, projections, relationships, critical path, counts, and capability flags.
+- Project detail requires edit access and returns metadata, projections, relationships, critical path, counts, and capability flags.
 - Updating metadata requires edit access.
-- Deleting a project requires admin access and removes it through the Company Explorer target deletion path.
+- Deleting a project requires edit access and removes it through the Company Explorer target deletion path.
 
 ### Scenario PM-S2: Project Information, Relationships, And Critical Path
 
@@ -114,10 +114,10 @@ Given:
 
 Expected:
 - Information/projection mutations require edit access.
-- Relationship listing requires project view access and hides related resources the viewer cannot view.
+- Relationship listing requires project edit access and hides related resources the viewer cannot view.
 - Relationship create/delete requires project edit access.
 - Relationships accept node and logic gate targets.
-- Critical path listing requires project view access and hides inaccessible underlying resources.
+- Critical path listing requires project edit access and hides inaccessible underlying resources.
 - Critical path mutations require project edit access.
 - Critical path ordering is deterministic by position, creation time, and ID.
 
@@ -154,7 +154,7 @@ Given:
 Expected:
 - The project information/projection mutation stores attachment references, not inline file bytes.
 - Project detail reads return metadata/content references small enough for normal project load paths.
-- Reads and writes follow project view/edit permissions.
+- Reads and writes require project edit access; no access hides the project.
 - Deleting the project information/projection row does not require deleting the underlying S3 object while other resource links may still reference it.
 - Project text-block saves do not overlap. Later edits coalesce into one follow-up containing the latest title, document, and attachment references, and an older completion cannot mark newer content saved.
 - A stale project reload cannot replace dirty local text-block content; deletion waits for the in-progress save, and leaving the project drains changed blocks from that project scope.
@@ -261,7 +261,7 @@ Given:
 Expected:
 - The view follows the shared permission component and authorization rules documented in `docs/tests/permissions.md`.
 - An editable view always shows **Save**, persists the selected permissions on save, and remains open after success.
-- A read-only or denied view stays dismissible and does not submit a permission mutation.
+- A denied view stays dismissible and does not submit a permission mutation.
 
 ### Scenario PM-S8: Project Attached-Email Provenance
 

@@ -71,11 +71,8 @@ func (r *MemoryRepo) LogicGateWorkAccessFlags(companyID, userID, logicGateID str
 	if !r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID) {
 		return domain.EffectiveAccessFlags{}, ErrNotFound
 	}
-	return domain.EffectiveAccessFlags{
-		CanView:  r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionView),
-		CanEdit:  r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionEdit),
-		CanAdmin: r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionAdmin),
-	}, nil
+	canEdit := r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionEdit)
+	return domain.EffectiveAccessFlags{CanEdit: canEdit}, nil
 }
 
 func (r *MemoryRepo) CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error) {

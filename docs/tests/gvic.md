@@ -14,7 +14,7 @@ GVIC3 - GVIC resource types include node, logic gate, project, shared triage fol
 GVIC4 - GVIC principal types include user and group.
 GVIC5 - A GVIC assignment requires company, resource type, resource ID, principal type, principal ID, and role.
 GVIC6 - Generated and verified assignments identify GVIC responsibility/notification roles only; they do not imply edit permission, delete permission, or any other resource authorization.
-GVIC7 - Consulted and informed assignments identify GVIC visibility/notification roles only; they do not imply view permission or any other resource authorization.
+GVIC7 - Consulted and informed assignments identify GVIC visibility/notification roles only; they do not imply edit permission or any other resource authorization.
 GVIC8 - Group GVIC assignments expand into effective user assignments for group members.
 GVIC9 - Effective GVIC assignment records preserve enough source/inheritance data to explain whether access came from a direct or group assignment.
 GVIC10 - Updating logic gate GVIC applies precise effective-assignment deltas for the logic gate; unchanged effective rows must not be deleted, rewritten, or retimestamped.
@@ -61,7 +61,7 @@ GVIC50 - GVIC audit/explainability must identify whether a user's role came from
 GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic Gate Generated user and does not serialize the full GVIC assignment collection.
 GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
 GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
-GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_view`, `can_edit`, or `can_admin`.
+GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_edit`.
 GVIC55 - Email-collaboration Nodes are a system-managed exception to ordinary standalone-node GVIC editing: generic GVIC add, set/update, and remove commands reject them. Permanent collaboration participation grants are not GVIC assignments and must not create source or effective GVIC rows.
 GVIC56 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
 
@@ -88,7 +88,7 @@ Expected:
 - Generated, verified, consulted, and informed are accepted after normalization.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
 - Generated and verified do not produce edit/delete permission access.
-- Consulted and informed do not produce view permission access.
+- Consulted and informed do not produce edit permission access.
 - Resource authorization remains controlled by permission policy: default access, direct user rows, and group rows.
 - Different principals can hold different GVIC roles on the same resource without losing the role meaning.
 - Node and logic gate generated and verified fields reject group principals and keep only one user for each role.
