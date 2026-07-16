@@ -521,3 +521,105 @@ This task is complete only when all of the following are true:
 ## Copy-paste implementation prompt for a future Codex agent
 
 > Read AGENTS.md, docs/important tasks/makeemailsgood.md, docs/tests/email.md, and the committed email data path before changing code. Diagnose the exact same-message duplication across provider payloads, backend shaping, collaboration/local representations, and frontend merge paths. Implement one shared canonical thread normalizer so one provider message identity renders exactly once while legitimate identical-content messages with different IDs remain separate. Preserve raw body fidelity, sanitization, reply/forward behavior, attachments, and collaboration fallbacks. Then make the Home, shared, and node-attached viewers use one compact oldest-to-newest Mango neumorphic activity timeline with authored content prominent, quoted history deliberately collapsed, attachments owned by their source message, non-email events distinct, and contextual actions. Add behavior-level identity/reconciliation, quote, attachment, DOM, responsive, and action-target tests. Validate a representative version of the screenshot thread in a real browser, prove that Giang Tran's Jul 14 11:13 AM remittance message and Wire Details attachment each appear once, run the full repository gate, review the diff, update the relevant docs, and do not call the work complete without browser evidence.
+---
+
+The short version: Nylas is limiting in places, but it is not the reason screenshot #1 is broken. Mango damages that forwarded message before Nylas sends it. Nylas can support much of the desired experience if Mango builds the right product layer around it.
+
+The useful mental model is simple: an email thread is a collection of separate messages. Each message has its own identity, body, attachments, and reply links. A forward is a new message containing a safe, faithful copy of an old message—not plain text scraped from its HTML.
+
+I found the referenced charter at [docs/important tasks/makeemailsgood.md](</C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/docs/important tasks/makeemailsgood.md:1>), rather than `docs/tests/makeemailsgood.md`.
+
+## 1. Email threads
+
+Gmail primarily uses its thread ID plus reply headers and matching subjects. Microsoft exposes similar conversation IDs and standard message headers. Nylas normalizes those provider conversations into `thread_id`, `message_ids`, and individual message objects. Front follows provider/header relationships, displays each real message once, and always presents the conversation oldest-to-newest. [Gmail threading](https://developers.google.com/workspace/gmail/api/guides/threads), [Microsoft message model](https://learn.microsoft.com/en-us/graph/api/resources/message?view=graph-rest-1.0), [Nylas Threads API](https://developer.nylas.com/docs/v3/email/threads/), [Front threading](https://help.front.com/en/articles/2039).
+
+Mango now has the correct foundation: [emailThreadMessages.ts](/C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/frontend/src/modules/communications/emailThreadMessages.ts:173) reconciles provider, collaboration, and temporary local copies before rendering. It scopes identity by mailbox plus message ID, keeps legitimate separate messages separate, and displays oldest-to-newest with quoted history collapsed.
+
+What remains is product hardening:
+
+- Prove the real provider-backed AP thread has exactly one visible item per provider message.
+- Finish the unchecked visual cases: long signatures, wide marketing HTML, focus styling, comments/events, and side-by-side Front comparison.
+- Later add manual “Split conversation” and “Merge conversations” tools for the inevitable provider-threading mistakes—Front provides these because no automatic threading system is perfect.
+- Never group messages merely because their subjects or bodies look alike.
+
+## 2. Forwarding
+
+The failure shown in screenshot #1 is explained directly by [HomePage.tsx](/C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/frontend/src/pages/home/HomePage.tsx:260). Mango currently removes HTML tags with a regular expression, but leaves the text inside `<style>` blocks. That is why the recipient sees `@font-face`, Outlook CSS, and layout rules as prose. It also destroys the Equifax design and does not automatically carry the original attachments into the forward.
+
+Nylas sends the HTML body and attachments Mango supplies; it does not magically reconstruct the original message. [Nylas Send Message](https://developer.nylas.com/docs/reference/api/messages/send-message/). Outlook’s native forwarding APIs preserve the original message and attachments, while Front offers both “Forward in this conversation” and “Forward as a new conversation.” [Microsoft forwarding](https://learn.microsoft.com/en-us/graph/api/message-createforward?view=graph-rest-1.0), [Front forwarding](https://help.front.com/en/articles/2247).
+
+The correct Mango implementation should:
+
+- Start from the complete original message, not its snippet or plain-text approximation.
+- Preserve the sanitized HTML body as one locked forwarded block.
+- Remove scripts, forms, hidden trackers, and unsafe content without flattening visible styling.
+- Reattach ordinary attachments automatically.
+- Resolve `cid:` inline images and give them new outbound content IDs.
+- Preserve visible remote banners/images through a safe image proxy or forwarded inline copy.
+- Show a real send preview using the same rendering path the recipient will receive.
+- Offer “Forward as attachment (.eml)” when exact original fidelity matters.
+- Keep “Forward in conversation” and “Forward as new conversation” as distinct product choices.
+
+That work should be the immediate priority because today’s behavior can send visibly corrupted mail to customers.
+
+## 3. Calendar invitations and meeting links
+
+Mango already detects `.ics`/`text/calendar` messages, resolves the event securely through its calendar UID, and sends Accept/Tentative/Decline through Nylas. The existing slice is documented in [calendar-invite-rsvp.md](/C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/docs/tasks/calendar-invite-rsvp.md:1), with the current controls in [HomeParts.tsx](/C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/frontend/src/pages/home/HomeParts.tsx:4188).
+
+But this is only three buttons. Gmail, Outlook, and Front treat an invitation as an event card: title, date, timezone, organizer, attendees, location, availability/conflict, current response, and a prominent Join button. Nylas already exposes event timing, participants, location, RSVP state, and conferencing details for Google Meet, Teams, Zoom, WebEx, and others. [Nylas Calendar API](https://developer.nylas.com/docs/v3/calendar/), [Nylas conferencing](https://developer.nylas.com/docs/v3/calendar/add-conferencing/), [Nylas RSVP](https://developer.nylas.com/docs/reference/api/events/send-rsvp/), [Front Calendar](https://help.front.com/en/articles/2237).
+
+Recommended next step:
+
+- Replace the generic invitation strip with a proper event card.
+- Load the authoritative Nylas event and display its date/timezone, organizer, attendees, location, response, and conferencing URL.
+- Add `Join meeting`, `Open in calendar`, and `Copy meeting link`.
+- Persist the provider response so it survives refresh; the current UI remembers it only in component state.
+- Reconcile cancellations, reschedules, and event updates through calendar webhooks.
+- Treat the full day/week/month calendar as a later project. The email-invite experience can become excellent first.
+
+## 4. Read receipts
+
+Mango already enables Nylas open tracking on every outbound send and stores `message.opened` timestamps. The current [MessageReadReceiptChip.tsx](/C:/Users/Jonat/.codex/worktrees/1250/MangoRTSDev/frontend/src/pages/home/MessageReadReceiptChip.tsx:12) correctly warns that the recipient’s identity is unavailable.
+
+The hard truth: Nylas records a tracking-pixel download, not a verified human read. Image blocking causes missing signals; Gmail, security gateways, and Apple privacy proxies can create immediate or false signals. Nylas itself recommends treating opens as soft signals. [Nylas open tracking](https://developer.nylas.com/docs/cookbook/use-cases/build/track-email-opens/).
+
+Front gets closer to the screenshot by sending separately tracked copies when it can. It tracks names separately for up to four recipients; five or more lose names, and Office 365 cannot provide named multi-recipient tracking through Front’s approach. [Front Seen receipts](https://help.front.com/en/articles/2034).
+
+My recommendation for Mango:
+
+- Call the external signal `Likely opened`, not definitively `Read`.
+- For one recipient, display the contact name as inferred attribution, with the reliability warning.
+- For multi-recipient messages, remain anonymous unless Mango deliberately adopts separate-per-recipient sends.
+- Do not silently split multi-recipient mail: it affects Sent folders, threading, Cc/Bcc semantics, rate limits, and provider behavior.
+- Track three confidence levels: `Likely opened`, `Link clicked`, and `Replied`.
+- Group repeated activity as `David Phuong · 16 opens`, then expand to timestamps—cleaner than repeating the same name 16 times.
+- Track Mango teammates separately with exact internal `Seen by` events. Internal app reads can be authoritative; external email opens cannot.
+- Provide a mailbox-level tracking/privacy setting and appropriate disclosure.
+
+Native Gmail and Outlook read-receipt requests are a separate mechanism, but they are also optional and unreliable: Gmail restricts them to eligible work/school accounts, and Outlook recipients can refuse them. [Gmail receipts](https://support.google.com/mail/answer/9413651), [Outlook receipts](https://support.microsoft.com/en-us/outlook/change-how-outlook-processes-read-receipts-and-meeting-responses).
+
+## Recommended order
+
+1. Fix forwarding fidelity and attachments.
+2. Complete real-browser acceptance for threaded conversations.
+3. Build the full invitation card with Join/Open/RSVP state.
+4. Improve receipts with honest confidence levels and grouped history.
+5. Only then consider named multi-recipient tracking and a complete calendar workspace.
+
+Worktree: `C:\Users\Jonat\.codex\worktrees\1250\MangoRTSDev`
+Branch: `codex/plan-email-user-experience0000590`
+HEAD: `013b35ca7b860009b9a7727b381b596c86cc0296`
+Final Git status: clean; no code or documentation changes, commits, merges, or pushes.
+
+<oai-mem-citation>
+<citation_entries>
+MEMORY.md:47-49|note=[thread reconciliation and viewer routing context]
+MEMORY.md:198-199|note=[exact account read receipt storage context]
+MEMORY.md:1038-1046|note=[Nylas provider boundary and email architecture context]
+</citation_entries>
+<rollout_ids>
+019f641b-9ac6-7802-b4f2-9b2e69535763
+019f5f17-6245-7e23-8241-ad33ba917e4e
+019f43ef-b078-7ea2-9f35-f5be5133c50a
+</rollout_ids>
+</oai-mem-citation>
