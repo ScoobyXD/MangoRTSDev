@@ -122,3 +122,9 @@ This requires local untracked config such as `infra/aws-dev/terraform.tfvars` an
 ## Current machine setup snapshot
 
 On Jonat's current Windows laptop the repo is cloned at `C:\Users\Jonat\MangoRTSDev`. Verified tools at setup time included Git, GitHub CLI, Node LTS, npm, Go 1.23.12, PostgreSQL 18 psql, AWS CLI v2, Terraform, PowerShell 7, and VS Code.
+
+## Response Patterns
+
+Respond to the user plainly without jargon and be concise and to the point.
+Do not use a bunch of weird vocabulary, if you use a vocab word explain what it means.
+Do not use made-up words that you just invent on the fly to describe something. Just plainly explain the process.
