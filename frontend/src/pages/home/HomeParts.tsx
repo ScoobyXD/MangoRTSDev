@@ -5555,6 +5555,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           surfaceText="#111827"
           accent={HOME_CYAN}
           indentGuideColor="rgba(14,165,233,0.38)"
+          mentionUsers={companyUsers}
           formattingControllerRef={bodyEditorControllerRef}
           style={richEditorStyle}
           onSelectionFontSizeChange={setBodySelectionFontSize}
@@ -5695,6 +5696,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               surfaceText="#111827"
               accent={HOME_CYAN}
               indentGuideColor="rgba(14,165,233,0.38)"
+              mentionUsers={companyUsers}
               formattingControllerRef={signatureEditorControllerRef}
               style={mailComposeSignatureTextareaStyle}
               onSelectionFontSizeChange={setSignatureSelectionFontSize}
