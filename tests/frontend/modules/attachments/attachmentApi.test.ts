@@ -4,6 +4,7 @@ import {
   fetchMangoAttachmentBlob,
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
+  importRemoteMangoImageAttachment,
   invalidateMangoResourceAttachmentsCache,
   linkMangoResourceAttachment,
   listMangoResourceAttachments,
@@ -127,6 +128,55 @@ test("links an existing attachment to the destination editor resource", async ()
     information_id: undefined,
     message_id: undefined,
     editor_surface: "personal-email-signature",
+  });
+  assert.equal(result, expected);
+});
+
+test("imports a remote rich-document image into the exact editor attachment resource", async () => {
+  const expectedLink = resourceAttachment("attachment-imported", {
+    resource_type: "project",
+    resource_id: "project-1",
+    relationship_kind: "inline_image",
+    information_id: "block-1",
+    editor_surface: "project_text_block",
+  });
+  const expected = {
+    attachment: expectedLink.attachment!,
+    resource_attachment: expectedLink,
+  };
+  let requestedPath = "";
+  let requestedMethod = "";
+  let requestedBody: unknown;
+  const request: AttachmentRequestJSON = async <T>(
+    path: string,
+    init?: Parameters<AttachmentRequestJSON>[1],
+  ): Promise<T> => {
+    requestedPath = path;
+    requestedMethod = init?.method ?? "GET";
+    requestedBody = init?.json;
+    return expected as T;
+  };
+
+  const result = await importRemoteMangoImageAttachment(request, {
+    companyID: " company-1 ",
+    resourceType: "project",
+    resourceID: " project-1 ",
+    sourceURL: " https://assets.example.test/sop.png?temporary=1 ",
+    originalFilename: " SOP screenshot.png ",
+    informationID: " block-1 ",
+    editorSurface: " project_text_block ",
+  });
+
+  assert.equal(requestedPath, "/v1/attachments/imports/remote-image");
+  assert.equal(requestedMethod, "POST");
+  assert.deepEqual(requestedBody, {
+    company_id: "company-1",
+    resource_type: "project",
+    resource_id: "project-1",
+    source_url: "https://assets.example.test/sop.png?temporary=1",
+    original_filename: "SOP screenshot.png",
+    information_id: "block-1",
+    editor_surface: "project_text_block",
   });
   assert.equal(result, expected);
 });

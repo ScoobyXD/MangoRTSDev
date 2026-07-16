@@ -398,7 +398,8 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   assert.equal((pasted.match(/Rich paste line /g) || []).length, 28_000);
   assert.equal((pasted.match(/Tail one/g) || []).length, 1);
   assert.equal((pasted.match(/Tail two/g) || []).length, 1);
-  assert.equal(await pageA.locator("#editor strong").count(), 1);
+  assert.equal(await pageA.locator("#editor strong").count(), 2);
+  assert.equal(await pageA.locator("#editor strong").first().textContent(), "Large paste");
   assert.equal(await pageA.locator("#editor li").count(), 2);
   await pageA.evaluate(() => window.__mangoE2E.reconnect());
   await waitConverged([pageA, pageB]);

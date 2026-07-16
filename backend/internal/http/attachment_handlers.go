@@ -41,6 +41,14 @@ func (s *Server) handleAttachments(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/attachments/"), "/")
+	if trimmed == "imports/remote-image" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		s.handleAttachmentRemoteImageImport(w, r)
+		return
+	}
 	if s.handleAttachmentDirectUploadRoute(w, r, trimmed) {
 		return
 	}

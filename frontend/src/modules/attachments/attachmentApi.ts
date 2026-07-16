@@ -94,6 +94,16 @@ export type UploadMangoAttachmentInput = {
   onProgress?: (progress: MangoAttachmentUploadProgress) => void;
 };
 
+export type ImportRemoteMangoImageAttachmentInput = {
+  companyID: string;
+  resourceType: MangoAttachmentResourceType;
+  resourceID: string;
+  sourceURL: string;
+  originalFilename?: string;
+  informationID?: string;
+  editorSurface?: string;
+};
+
 export type ListMangoResourceAttachmentsInput = {
   apiBase?: string;
   cacheScope?: string;
@@ -328,6 +338,33 @@ export async function uploadMangoAttachment(
   input: UploadMangoAttachmentInput,
 ): Promise<MangoAttachmentUploadResponse> {
   const response = await uploadBrowserAttachment(request, input);
+  invalidateMangoResourceAttachmentsCache(request, input);
+  return response;
+}
+
+export async function importRemoteMangoImageAttachment(
+  request: AttachmentRequestJSON,
+  input: ImportRemoteMangoImageAttachmentInput,
+): Promise<MangoAttachmentUploadResponse> {
+  const companyID = input.companyID.trim();
+  const resourceID = input.resourceID.trim();
+  const sourceURL = input.sourceURL.trim();
+  if (!companyID || !resourceID || !sourceURL) throw new Error("attachment_resource_context_required");
+  const response = await request<MangoAttachmentUploadResponse>(
+    "/v1/attachments/imports/remote-image",
+    {
+      method: "POST",
+      json: {
+        company_id: companyID,
+        resource_type: input.resourceType,
+        resource_id: resourceID,
+        source_url: sourceURL,
+        original_filename: input.originalFilename?.trim() || undefined,
+        information_id: input.informationID?.trim() || undefined,
+        editor_surface: input.editorSurface?.trim() || undefined,
+      },
+    },
+  );
   invalidateMangoResourceAttachmentsCache(request, input);
   return response;
 }

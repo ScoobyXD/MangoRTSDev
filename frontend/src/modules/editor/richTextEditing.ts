@@ -590,11 +590,23 @@ function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, owner
   target.appendChild(createSanitizedEditorTableFromCells(rowCells.map((row) => row.filter((cell): cell is HTMLElement => cell !== null)), ownerDocument, source));
 }
 
+function directExternalChecklistInput(source: HTMLElement): HTMLElement | null {
+  return Array.from(source.children).find((child): child is HTMLElement => (
+    child instanceof HTMLElement
+    && child.tagName === "INPUT"
+    && (child.getAttribute("type") ?? "").trim().toLowerCase() === "checkbox"
+  )) ?? null;
+}
+
 function appendSanitizedEditorListItem(source: HTMLElement, list: HTMLUListElement, ownerDocument: Document, kind: EditorListKind) {
   const item = ownerDocument.createElement("li");
   item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
   if (kind === "checklist") {
-    item.setAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE, source.getAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE) === "true" ? "true" : "false");
+    const sourceCheckbox = directExternalChecklistInput(source);
+    const checked = source.getAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE) === "true"
+      || sourceCheckbox?.hasAttribute("checked") === true
+      || sourceCheckbox?.getAttribute("aria-checked") === "true";
+    item.setAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE, checked ? "true" : "false");
   }
   appendSanitizedChildren(source, item, ownerDocument);
   if (item.childNodes.length === 0) item.appendChild(ownerDocument.createElement("br"));
@@ -602,7 +614,13 @@ function appendSanitizedEditorListItem(source: HTMLElement, list: HTMLUListEleme
 }
 
 function appendSanitizedEditorList(source: HTMLElement, target: Node, ownerDocument: Document, fallbackKind: EditorListKind) {
-  const kind = readEditorListKind(source.getAttribute(EDITOR_LIST_ATTRIBUTE)) ?? fallbackKind;
+  const hasExternalChecklist = Array.from(source.children).some((child) => (
+    child instanceof HTMLElement
+    && child.tagName.toLowerCase() === "li"
+    && directExternalChecklistInput(child) !== null
+  ));
+  const kind = readEditorListKind(source.getAttribute(EDITOR_LIST_ATTRIBUTE))
+    ?? (hasExternalChecklist ? "checklist" : fallbackKind);
   const list = ownerDocument.createElement("ul");
   list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
   Array.from(source.children)
@@ -778,6 +796,31 @@ function appendSanitizedAlignedBlock(element: HTMLElement, target: Node, ownerDo
   appendSanitizedChildren(element, block, ownerDocument);
   target.appendChild(block);
 }
+const EDITOR_HEADING_FONT_SIZE_PX: Readonly<Record<string, number>> = {
+  h1: 28,
+  h2: 24,
+  h3: 20,
+  h4: 18,
+  h5: 16,
+  h6: 14,
+};
+
+function appendSanitizedHeading(element: HTMLElement, target: Node, ownerDocument: Document, tagName: string) {
+  const block = ownerDocument.createElement("div");
+  const align = readEditorTextAlign(element);
+  if (align) applyEditorTextAlign(block, align);
+  const indent = safeBlockIndentForElement(element, tagName);
+  if (indent) block.style.marginLeft = indent;
+  const fontSize = ownerDocument.createElement("span");
+  fontSize.style.fontSize = `${EDITOR_HEADING_FONT_SIZE_PX[tagName] ?? 14}px`;
+  const strong = ownerDocument.createElement("strong");
+  appendSanitizedChildren(element, strong, ownerDocument);
+  fontSize.appendChild(strong);
+  block.appendChild(fontSize);
+  target.appendChild(block);
+  target.appendChild(ownerDocument.createTextNode("\n"));
+}
+
 function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
   if (source.nodeType === Node.TEXT_NODE) {
     target.appendChild(ownerDocument.createTextNode(normalizeEditorArrowLigatureText(source.textContent ?? "")));
@@ -875,6 +918,11 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     target.appendChild(inline);
     return;
   }
+  if (Object.prototype.hasOwnProperty.call(EDITOR_HEADING_FONT_SIZE_PX, tagName)) {
+    appendSanitizedHeading(element, target, ownerDocument, tagName);
+    return;
+  }
+
 
   if (tagName === "table") {
     appendNativeTableAsEditorTable(element, target, ownerDocument);
