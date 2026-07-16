@@ -1,10 +1,10 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain and U82's shared GVIC/Priority group-title presentation. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -90,6 +90,9 @@ U79 - Email collaboration mention/chat rows use the shared email icon token requ
 U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
 U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> GVIC -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
 U82 - GVIC and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. GVIC titles reuse the shared Generated cyan, Verified pink, Consulted purple, and Informed green editor palette; Other, No GVIC, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
+U83 - Opening the built-in Updates tab or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
+U84 - The Updates page header provides Collapse all and Expand all actions. Collapse all closes every currently rendered grouping level, and Expand all opens every currently rendered grouping level without changing the active grouping view, filter, selection, or notification data.
+U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Icons and counts fill those cells at a larger readable size. A zero-count cell stays neutral; a nonzero urgent cell uses a fiery red-orange gradient, a nonzero normal-mention cell uses a teal-blue gradient, and a nonzero regular-update cell uses a yellow-orange gradient.
 
 ## Update Row Copy And Visual Language
 
@@ -483,3 +486,27 @@ Expected:
 - The real hint performs one coalesced background canonical feed reconciliation without blanking visible rows, selection, preview, or expansion state; failure leaves the prior feed visible.
 - Row changes do not reopen a group the user collapsed.
 - Built-in Updates uses Date -> GVIC -> Priority -> Logic Gate exactly, while custom and empty stacks reload unchanged.
+
+### Scenario U-S12: Updates Expansion Controls And Sidebar Counters
+
+Business logic covered:
+- U69
+- U80
+- U83
+- U84
+- U85
+
+Given:
+- A user opens Mango in a fresh browser session and selects the built-in Updates tab.
+- The user also activates a saved Updates grouping view with multiple nested grouping levels.
+- The user has zero or nonzero urgent mentions, normal mentions, and regular updates.
+- The user manually collapses one group and later receives a background feed refresh.
+
+Expected:
+- The built-in Updates grouping and each newly activated saved grouping view render every available grouping level expanded.
+- Collapse all closes all rendered groups, and Expand all reopens all rendered groups without changing the selected view, filter, rows, or selection.
+- A background refresh preserves the one group the user explicitly collapsed while opening any newly introduced groups by default.
+- The Updates sidebar rectangle gives exactly half its width to the icon/title and half to the three count cells.
+- The count half is divided into three equal cells for urgent ! mentions, normal @ mentions, and regular updates, with larger icons and numbers.
+- Every zero-count cell stays neutral.
+- A nonzero urgent cell uses the fiery red-orange gradient, a nonzero normal-mention cell uses the teal-blue gradient, and a nonzero regular-update cell uses the yellow-orange gradient.

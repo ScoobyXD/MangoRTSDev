@@ -1242,10 +1242,11 @@ export function AppSidebar({
           label="Updates"
           active={homeActive && activeHomeView === "updates"}
           icon={<HeaderUpdatesIcon color="#f59e0b" />}
-          trailing={<SidebarNotificationBadges badges={[
+          splitTrailing
+          trailing={<SidebarNotificationBadges large badges={[
             { key: "updates-urgent", label: "!", count: updatesUrgentNotificationCount, tone: "urgent", title: `${updatesUrgentNotificationCount} urgent mentions`, showZero: true },
             { key: "updates-mentions", label: "@", count: updatesMentionNotificationCount, tone: "mention", title: `${updatesMentionNotificationCount} mentions`, showZero: true },
-            { key: "updates-other", label: "*", count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} other updates`, showZero: true },
+            { key: "updates-other", label: <HeaderUpdatesIcon />, count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} regular updates`, showZero: true },
           ]} />}
           elevated
           onClick={() => {
@@ -1691,7 +1692,7 @@ type SidebarNotificationBadgeTone = "mail" | "urgent" | "mention" | "updates";
 
 type SidebarNotificationBadge = {
   key: string;
-  label?: string;
+  label?: React.ReactNode;
   count: number;
   tone: SidebarNotificationBadgeTone;
   title: string;
@@ -1703,17 +1704,17 @@ function normalizeSidebarNotificationCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
-function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadge[] }): React.ReactElement | null {
+function SidebarNotificationBadges({ badges, large = false }: { badges: SidebarNotificationBadge[]; large?: boolean }): React.ReactElement | null {
   const visible = badges.filter((badge) => badge.showZero || normalizeSidebarNotificationCount(badge.count) > 0);
   if (visible.length === 0) return null;
   return (
-    <span style={appSidebarBadgeStripStyle} aria-label="Update counts">
+    <span style={large ? appSidebarLargeBadgeStripStyle : appSidebarBadgeStripStyle} aria-label="Update counts">
       {visible.map((badge) => (
         <span
           key={badge.key}
           title={badge.title}
           aria-label={badge.title}
-          style={appSidebarNotificationBadgeStyle(badge.tone)}
+          style={appSidebarNotificationBadgeStyle(badge.tone, !large || normalizeSidebarNotificationCount(badge.count) > 0, large)}
           onClick={(event) => {
             if (!badge.onClick) return;
             event.preventDefault();
@@ -1721,7 +1722,7 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
             badge.onClick(event);
           }}
         >
-          {badge.label && <span style={appSidebarNotificationBadgeLabelStyle}>{badge.label}</span>}
+          {badge.label && <span style={appSidebarNotificationBadgeLabelStyle(large)}>{badge.label}</span>}
           {formatSidebarNotificationCount(badge.count)}
         </span>
       ))}
@@ -1739,6 +1740,7 @@ function AppSidebarButton({
   active,
   icon,
   trailing,
+  splitTrailing = false,
   elevated = false,
   onClick,
   onPointerEnter,
@@ -1749,6 +1751,7 @@ function AppSidebarButton({
   active: boolean;
   icon?: React.ReactNode;
   trailing?: React.ReactNode;
+  splitTrailing?: boolean;
   elevated?: boolean;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onPointerEnter?: () => void;
@@ -1759,7 +1762,7 @@ function AppSidebarButton({
   return (
     <button
       type="button"
-      style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated, raised)}
+      style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated, raised, splitTrailing)}
       onPointerEnter={() => {
         setRaised(true);
         onPointerEnter?.();
@@ -1773,9 +1776,18 @@ function AppSidebarButton({
       onPointerDown={onPointerDown}
       onClick={onClick}
     >
-      {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
-      <span style={appSidebarTextStyle}>{label}</span>
-      {trailing && <span style={appSidebarTrailingStyle}>{trailing}</span>}
+      {splitTrailing ? (
+        <span style={appSidebarLeadingStyle}>
+          {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
+          <span style={appSidebarTextStyle}>{label}</span>
+        </span>
+      ) : (
+        <>
+          {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
+          <span style={appSidebarTextStyle}>{label}</span>
+        </>
+      )}
+      {trailing && <span style={splitTrailing ? appSidebarSplitTrailingStyle : appSidebarTrailingStyle}>{trailing}</span>}
     </button>
   );
 }
@@ -2427,7 +2439,7 @@ const appSidebarSectionTitleStyle: React.CSSProperties = {
   letterSpacing: 0,
 };
 
-function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean, raised = false): React.CSSProperties {
+function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean, raised = false, splitTrailing = false): React.CSSProperties {
   if (elevated) {
     const framed = active || raised;
     const surface = active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE;
@@ -2435,9 +2447,9 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       width: "100%",
       minHeight: 44,
       display: "grid",
-      gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
+      gridTemplateColumns: splitTrailing ? "repeat(2, minmax(0, 1fr))" : appSidebarButtonGridColumns(hasIcon, hasTrailing),
       alignItems: "center",
-      gap: 8,
+      gap: splitTrailing ? 0 : 8,
       margin: 0,
       border: `1px solid ${framed ? "transparent" : SIDEBAR_SOFT_BORDER}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
@@ -2451,9 +2463,10 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       fontWeight: active ? 700 : 650,
       letterSpacing: 0,
       lineHeight: 1.1,
-      padding: hasIcon ? "0 12px" : "0 12px 0 14px",
+      padding: splitTrailing ? 0 : hasIcon ? "0 12px" : "0 12px 0 14px",
       textAlign: "left",
       minWidth: 0,
+      overflow: splitTrailing ? "hidden" : undefined,
       transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
     };
   }
@@ -2461,9 +2474,9 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     width: "100%",
     minHeight: 31,
     display: "grid",
-    gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
+    gridTemplateColumns: splitTrailing ? "repeat(2, minmax(0, 1fr))" : appSidebarButtonGridColumns(hasIcon, hasTrailing),
     alignItems: "center",
-    gap: 7,
+    gap: splitTrailing ? 0 : 7,
     border: `1px solid ${active ? SIDEBAR_STATE_ACTIVE_BORDER : "transparent"}`,
     borderRadius: 6,
     background: active ? SIDEBAR_STATE_ACTIVE_BG : "transparent",
@@ -2473,7 +2486,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     fontSize: 12,
     fontWeight: active ? 600 : 500,
     letterSpacing: 0,
-    padding: "0 8px",
+    padding: splitTrailing ? 0 : "0 8px",
     textAlign: "left",
     minWidth: 0,
   };
@@ -2483,6 +2496,16 @@ const appSidebarButtonIconStyle: React.CSSProperties = {
   width: 16,
   display: "grid",
   placeItems: "center",
+};
+
+const appSidebarLeadingStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: "100%",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 8px 0 12px",
+  boxSizing: "border-box",
 };
 
 const appSidebarTextStyle: React.CSSProperties = {
@@ -2507,6 +2530,17 @@ const appSidebarTrailingStyle: React.CSSProperties = {
   gap: 4,
 };
 
+const appSidebarSplitTrailingStyle: React.CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  height: "100%",
+  alignSelf: "stretch",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 0,
+};
+
 const appSidebarBadgeStripStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
@@ -2516,8 +2550,44 @@ const appSidebarBadgeStripStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): React.CSSProperties {
-  const colors = sidebarNotificationBadgeColors(tone);
+const appSidebarLargeBadgeStripStyle: React.CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  alignItems: "stretch",
+  overflow: "hidden",
+};
+
+function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone, highlighted: boolean, large: boolean): React.CSSProperties {
+  const colors = sidebarNotificationBadgeColors(tone, highlighted);
+  if (large) {
+    return {
+      minWidth: 0,
+      width: "100%",
+      height: "100%",
+      display: "inline-flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 1,
+      border: "none",
+      borderLeft: `1px solid ${colors.border}`,
+      borderRadius: 0,
+      background: colors.background,
+      color: colors.color,
+      cursor: "inherit",
+      fontFamily: "inherit",
+      fontSize: 13,
+      fontWeight: 900,
+      lineHeight: 1,
+      padding: 2,
+      boxSizing: "border-box",
+      flex: "0 0 auto",
+      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.68)",
+    };
+  }
   return {
     minWidth: 22,
     height: 20,
@@ -2541,16 +2611,25 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
   };
 }
 
-const appSidebarNotificationBadgeLabelStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 950,
-  lineHeight: 1,
-};
+function appSidebarNotificationBadgeLabelStyle(large: boolean): React.CSSProperties {
+  if (large) {
+    return {
+      minHeight: 14,
+      display: "grid",
+      placeItems: "center",
+      fontSize: 15,
+      fontWeight: 950,
+      lineHeight: 1,
+    };
+  }
+  return { fontSize: 10, fontWeight: 950, lineHeight: 1 };
+}
 
-function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
-  if (tone === "urgent") return { background: "#fef2f2", border: "rgba(239, 68, 68, 0.42)", color: "#b91c1c" };
-  if (tone === "mention") return { background: "#eff6ff", border: "rgba(59, 130, 246, 0.36)", color: "#1d4ed8" };
-  if (tone === "updates") return { background: "#f8fafc", border: "rgba(148, 163, 184, 0.42)", color: "#475569" };
+function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone, highlighted = true): { background: string; border: string; color: string } {
+  if (!highlighted) return { background: "linear-gradient(135deg, rgba(248, 250, 252, 0.72), rgba(226, 232, 240, 0.42))", border: "rgba(148, 163, 184, 0.34)", color: "#94a3b8" };
+  if (tone === "urgent") return { background: "linear-gradient(135deg, rgba(254, 226, 226, 0.98), rgba(251, 146, 60, 0.62))", border: "rgba(239, 68, 68, 0.48)", color: "#b91c1c" };
+  if (tone === "mention") return { background: "linear-gradient(135deg, rgba(204, 251, 241, 0.98), rgba(125, 211, 252, 0.72))", border: "rgba(13, 148, 136, 0.44)", color: "#0f766e" };
+  if (tone === "updates") return { background: "linear-gradient(135deg, rgba(254, 249, 195, 0.98), rgba(251, 146, 60, 0.62))", border: "rgba(245, 158, 11, 0.48)", color: "#b45309" };
   if (tone === "mail") return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
   return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
 }

@@ -33,6 +33,7 @@ import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNes
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
+import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
 import {
@@ -192,6 +193,7 @@ export function UpdatesView({
   const notificationReloadQueuedRef = useRef(false);
   const canonicalLoadScopeRef = useRef("");
   const displayGroupingSignatureRef = useRef("");
+  const manuallyCollapsedGroupIDsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -300,6 +302,7 @@ export function UpdatesView({
       canonicalLoadInFlightRef.current = false;
       notificationReloadQueuedRef.current = false;
       canonicalLoadScopeRef.current = "";
+      manuallyCollapsedGroupIDsRef.current = new Set();
       setRootGroups([]);
       setBranchByRootID({});
       setExpandedGroupIDs(new Set());
@@ -313,6 +316,7 @@ export function UpdatesView({
     canonicalLoadInFlightRef.current = true;
     setError("");
     if (!preserveVisibleState) {
+      manuallyCollapsedGroupIDsRef.current = new Set();
       setBranchByRootID({});
       setBranchLoadingIDs(new Set());
       setExpandedGroupIDs(new Set());
@@ -434,13 +438,15 @@ export function UpdatesView({
   }), [companyID, filter, selectedSetting.groupings, selectedSetting.setting_id]);
 
   useEffect(() => {
-    if (displayGroups.length === 0 || displayGroupingSignatureRef.current === groupingSignature) return;
+    if (displayGroups.length === 0) return;
+    const resetExpansion = displayGroupingSignatureRef.current !== groupingSignature;
     displayGroupingSignatureRef.current = groupingSignature;
-    const nextExpanded = new Set<string>();
-    for (const group of displayGroups) {
-      for (const groupID of collectUpdateGroupIDs(group)) nextExpanded.add(groupID);
-    }
-    setExpandedGroupIDs(nextExpanded);
+    if (resetExpansion) manuallyCollapsedGroupIDsRef.current = new Set();
+    setExpandedGroupIDs(reconcileExpandedUpdateGroupIDs({
+      groups: displayGroups,
+      manuallyCollapsedGroupIDs: manuallyCollapsedGroupIDsRef.current,
+      reset: resetExpansion,
+    }));
   }, [displayGroups, groupingSignature]);
 
   useEffect(() => {
@@ -482,6 +488,10 @@ export function UpdatesView({
     const isRoot = rootGroups.some((group) => group.id === groupID);
     const willOpen = !expandedGroupIDs.has(groupID);
     if (willOpen && isRoot && !branchByRootID[groupID]) loadBranch(groupID);
+    const nextManuallyCollapsed = new Set(manuallyCollapsedGroupIDsRef.current);
+    if (willOpen) nextManuallyCollapsed.delete(groupID);
+    else nextManuallyCollapsed.add(groupID);
+    manuallyCollapsedGroupIDsRef.current = nextManuallyCollapsed;
     setExpandedGroupIDs((current) => {
       const next = new Set(current);
       if (willOpen) next.add(groupID);
@@ -489,6 +499,17 @@ export function UpdatesView({
       return next;
     });
   }, [branchByRootID, expandedGroupIDs, loadBranch, rootGroups]);
+
+  const collapseAllGroups = useCallback(() => {
+    const allGroupIDs = collectAllUpdateGroupIDs(displayGroups);
+    manuallyCollapsedGroupIDsRef.current = allGroupIDs;
+    setExpandedGroupIDs(new Set());
+  }, [displayGroups]);
+
+  const expandAllGroups = useCallback(() => {
+    manuallyCollapsedGroupIDsRef.current = new Set();
+    setExpandedGroupIDs(collectAllUpdateGroupIDs(displayGroups));
+  }, [displayGroups]);
 
   const selectedNotificationItems = useMemo(() => {
     if (selectedNotificationKeys.size === 0) return [];
@@ -699,7 +720,27 @@ export function UpdatesView({
           <div style={updatesHeaderControlsStyle}>
             <button
               type="button"
-              style={updatesSeenAllButtonStyle}
+              aria-label="Collapse all Update groups"
+              title="Collapse all Update groups"
+              style={updatesHeaderActionButtonStyle}
+              disabled={displayGroups.length === 0}
+              onClick={collapseAllGroups}
+            >
+              Collapse all
+            </button>
+            <button
+              type="button"
+              aria-label="Expand all Update groups"
+              title="Expand all Update groups"
+              style={updatesHeaderActionButtonStyle}
+              disabled={displayGroups.length === 0}
+              onClick={expandAllGroups}
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              style={updatesHeaderActionButtonStyle}
               disabled={visibleNotifications.length === 0}
               onClick={markAllUpdatesSeen}
             >
@@ -1438,14 +1479,6 @@ function updateStatusColor(status: string): string {
   return "#64748b";
 }
 
-type UpdateGroupIDTree = { id: string; groups: UpdateGroupIDTree[] };
-
-function collectUpdateGroupIDs(group: UpdateGroupIDTree): string[] {
-  const ids = [group.id];
-  for (const child of group.groups) ids.push(...collectUpdateGroupIDs(child));
-  return ids;
-}
-
 function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<string>): UpdateFeedRow[] {
   const rows: UpdateFeedRow[] = [];
   const visit = (group: UpdateGroup, path: { project?: UpdateRowResource; logicGate?: UpdateRowResource; node?: UpdateRowResource }) => {
@@ -1770,8 +1803,8 @@ const updatesHeaderStyle: React.CSSProperties = {
 const updatesTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4 };
 const updatesTitleStyle: React.CSSProperties = { margin: 0, color: "#111827", fontSize: 16, lineHeight: 1.2, fontWeight: 800, letterSpacing: 0 };
 const updatesMetaStyle: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 700 };
-const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 8 };
-const updatesSeenAllButtonStyle: React.CSSProperties = {
+const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 };
+const updatesHeaderActionButtonStyle: React.CSSProperties = {
   minHeight: 30,
   border: "1px solid rgba(15, 23, 42, 0.18)",
   borderRadius: 6,
