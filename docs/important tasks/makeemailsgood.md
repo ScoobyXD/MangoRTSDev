@@ -638,3 +638,39 @@ The email experience in this branch now reflects the product decisions above:
 - External open tracking is labeled **Likely opened**. Exact provider identity is used only when actually reported; a single recipient may be labeled as inferred; multi-recipient unknown activity remains anonymous. Repeated signals are grouped under one person/unknown label with every available timestamp.
 
 Still intentionally outside this change: manual thread splitting/merging, forwarding as an `.eml` attachment, safe proxying of every remote image, calendar conflict detection/webhook reconciliation, separate-per-recipient multi-send tracking, and a full calendar workspace.
+
+## Current implementation progress (July 2026)
+
+This section is the authoritative current status. The research and recommendations above remain as the original project context.
+
+### Email threads - implemented
+
+- Mango keeps canonical provider/header thread identity, exact mailbox scoping, one visible item per canonical message, and deterministic conversation rendering.
+- Manual **Split conversation** and **Merge conversations** controls remain deliberately deferred.
+
+### Forwarding - implemented
+
+- Forward is an explicit draft/send mode, separate from Reply, and never sends a reply reference that would accidentally continue the source thread.
+- The complete original message is retained as a locked, sanitized HTML block. Safe visible HTML/CSS survives while scripts, forms, unsafe URLs, event handlers, and obvious tracking pixels are removed.
+- Ordinary source attachments and referenced inline images are copied into the exact Mango forward-draft scope. Inline CIDs are rewritten to copied durable attachment references and the existing 24,000,000-byte outbound limit is enforced before copying.
+- Compose displays a locked preview produced by the same forwarding renderer used to construct the outbound body; partial attachment-copy failure remains visible and recoverable.
+
+### Calendar invitation email experience - implemented
+
+- Home email and node/project-attached email use one shared event card backed by authenticated invitation UID resolution plus the authoritative Nylas event.
+- The card displays available title, time/timezone, organizer, guests, location, current RSVP, meeting join/copy controls, and provider calendar link. Accept, Tentative, and Decline show saved state only after provider success.
+
+### Read receipts - implemented
+
+- External open tracking is labeled **Likely opened**, never definitive Read/Seen. Provider-reported identity is used only when present; a sole recipient may be labeled **inferred**; unknown multi-recipient activity remains anonymous.
+- Repeated signals are grouped under one identity/unknown label and every distinct provider timestamp is available on hover or keyboard focus with a tracking-pixel reliability warning.
+
+### Verification
+
+- Forwarding, draft semantics, calendar event lookup/card usage, communications API requests, thread-viewer contracts, and receipt presentation have automated coverage.
+- The complete repository gate passes: frontend relationship/feature tests, production build, backend Go tests, and infrastructure attachment contracts.
+
+### Still deliberately deferred
+
+- Manual thread split/merge, forwarding as an `.eml` attachment, proxying every remote image, calendar conflict detection and webhook reconciliation, separate-per-recipient multi-send tracking, and a full calendar workspace.
+- The next quality step is real-provider/browser acceptance against representative complex threads, forwarded marketing/Outlook HTML, and live Google/Microsoft invitations.
