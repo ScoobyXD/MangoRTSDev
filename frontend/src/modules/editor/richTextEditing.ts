@@ -1019,65 +1019,10 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   return collapseRedundantFontSizeSpanHTML(canonicalizeEditorStrikethroughHTML(clean.innerHTML));
 }
 
-const LEGACY_ESCAPED_EDITOR_TAG_PATTERN = /<\/?(?:a|blockquote|br|div|em|h[1-6]|img|li|mark|ol|p|s|span|strong|table|tbody|td|th|thead|tr|u|ul)\b[^>]*>/gi;
-const LEGACY_ESCAPED_EDITOR_STRONG_SIGNAL_PATTERN = /<(?:strong|em|table|ul|ol)\b|<span\b[^>]*(?:font-size|data-(?:mango|mention))/i;
-
-function looksLikeLegacyEscapedEditorMarkup(value: string): boolean {
-  const tags = value.match(LEGACY_ESCAPED_EDITOR_TAG_PATTERN) ?? [];
-  if (tags.length < 4 || !tags.some((tag) => /^<\//.test(tag)) || !tags.some((tag) => !/^<\//.test(tag))) {
-    return false;
-  }
-  return LEGACY_ESCAPED_EDITOR_STRONG_SIGNAL_PATTERN.test(value) || tags.length >= 8;
-}
-
-export type RecoveredLegacyEditorDocument = Readonly<{
-  document: string;
-  recovered: boolean;
-}>;
-
-/**
- * Repairs the exact double-escaped rich-document shape emitted by the first
- * structured-collaboration rollout. The guard deliberately requires several
- * paired supported tags so ordinary prose such as "use <strong> here" stays
- * literal. Every promoted fragment is passed through the normal editor
- * sanitizer before it can be rendered or committed.
- */
-export function recoverLegacyEscapedEditorDocumentHTML(storedDocument: string): RecoveredLegacyEditorDocument {
-  if (!storedDocument.startsWith(EDITOR_RICH_TEXT_PREFIX) || typeof document === "undefined") {
-    return { document: storedDocument, recovered: false };
-  }
-  const root = document.createElement("div");
-  root.innerHTML = storedDocument.slice(EDITOR_RICH_TEXT_PREFIX.length);
-  let recovered = false;
-  const visit = (parent: Node) => {
-    for (const child of Array.from(parent.childNodes)) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        const value = child.textContent ?? "";
-        if (!looksLikeLegacyEscapedEditorMarkup(value)) continue;
-        const candidate = document.createElement("template");
-        candidate.innerHTML = sanitizeEditorDocumentHTML(value);
-        const candidateText = candidate.content.textContent?.trim() ?? "";
-        if (!candidateText) continue;
-        child.replaceWith(candidate.content);
-        recovered = true;
-        continue;
-      }
-      visit(child);
-    }
-  };
-  visit(root);
-  if (!recovered) return { document: storedDocument, recovered: false };
-  return {
-    document: `${EDITOR_RICH_TEXT_PREFIX}${root.innerHTML}`,
-    recovered: true,
-  };
-}
-
 export function deserializeEditorDocumentHTML(storedDocument: string): string {
   if (!storedDocument) return "";
   if (storedDocument.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
-    const recovered = recoverLegacyEscapedEditorDocumentHTML(storedDocument);
-    return sanitizeEditorDocumentHTML(recovered.document.slice(EDITOR_RICH_TEXT_PREFIX.length));
+    return sanitizeEditorDocumentHTML(storedDocument.slice(EDITOR_RICH_TEXT_PREFIX.length));
   }
   return linkifyEditorPlainTextToHTML(storedDocument);
 }

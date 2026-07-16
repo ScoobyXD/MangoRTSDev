@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -14,12 +15,8 @@ const (
 	EditorCollaborationTombstoneEventType        = "editor.document.deleted"
 	EditorCollaborationSnapshotRequiredEventType = "editor.snapshot.required"
 	EditorCollaborationOperationMaxBytes         = 64 * 1024
-	EditorCollaborationOperationMaxOpCount       = 10000
 	EditorCollaborationDocumentMaxBytes          = 2 * 1024 * 1024
-	EditorCollaborationCompactOperationCount     = 128
-	EditorCollaborationCompactDeltaBytes         = 512 * 1024
 	editorCollaborationTextBlockPrefix           = "<!-- mango-node-text-block-v1 -->"
-	editorCollaborationRichTextPrefix            = "<!-- mango-editor-html-v1 -->"
 )
 
 type EditorDocumentRef struct {
@@ -29,45 +26,38 @@ type EditorDocumentRef struct {
 	DocumentID   string `json:"document_id"`
 }
 
-type EditorCollaborationOp struct {
-	Insert     any            `json:"insert,omitempty"`
-	Retain     int            `json:"retain,omitempty"`
-	Delete     int            `json:"delete,omitempty"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-}
-
-type EditorCollaborationState struct {
-	Ops []EditorCollaborationOp `json:"ops"`
-}
-
-type EditorCollaborationDelta struct {
-	Ops []EditorCollaborationOp `json:"ops"`
+// EditorHTMLPatch is a bounded edit to the canonical rich-HTML string. Offsets
+// are UTF-8 byte offsets so browsers and Go use the same unambiguous positions.
+// It is deliberately not a second rich-text document representation.
+type EditorHTMLPatch struct {
+	StartUTF8  int    `json:"start_utf8"`
+	DeleteUTF8 int    `json:"delete_utf8"`
+	Insert     string `json:"insert"`
 }
 
 type EditorCollaborationSnapshot struct {
-	Document         EditorDocumentRef        `json:"document"`
-	Revision         int64                    `json:"revision"`
-	SnapshotRevision int64                    `json:"snapshot_revision"`
-	State            EditorCollaborationState `json:"state"`
-	HTML             string                   `json:"html"`
-	ETag             string                   `json:"etag"`
-	Deleted          bool                     `json:"deleted,omitempty"`
-	ReplayCount      int                      `json:"replay_count"`
-	UpdatedTimestamp time.Time                `json:"updated_timestamp"`
+	Document         EditorDocumentRef `json:"document"`
+	Revision         int64             `json:"revision"`
+	HTML             string            `json:"html"`
+	ETag             string            `json:"etag"`
+	Deleted          bool              `json:"deleted,omitempty"`
+	UpdatedTimestamp time.Time         `json:"updated_timestamp"`
 }
 
 type EditorCollaborationOperationInput struct {
-	Document     EditorDocumentRef        `json:"document"`
-	OperationID  string                   `json:"operation_id"`
-	ClientID     string                   `json:"client_id"`
-	ActorUserID  string                   `json:"actor_user_id"`
-	BaseRevision int64                    `json:"base_revision"`
-	Delta        EditorCollaborationDelta `json:"delta"`
+	Document     EditorDocumentRef `json:"document"`
+	OperationID  string            `json:"operation_id"`
+	ClientID     string            `json:"client_id"`
+	ActorUserID  string            `json:"actor_user_id"`
+	BaseRevision int64             `json:"base_revision"`
+	Patch        EditorHTMLPatch   `json:"patch"`
 }
 
 type EditorCollaborationRevisionOperation struct {
-	Revision int64                    `json:"revision"`
-	Delta    EditorCollaborationDelta `json:"delta"`
+	Revision    int64           `json:"revision"`
+	OperationID string          `json:"operation_id"`
+	ClientID    string          `json:"client_id"`
+	Patch       EditorHTMLPatch `json:"patch"`
 }
 
 type EditorCollaborationCommit struct {
@@ -76,9 +66,8 @@ type EditorCollaborationCommit struct {
 	Revision             int64                                  `json:"revision"`
 	CommittedAt          time.Time                              `json:"committed_at"`
 	Deduplicated         bool                                   `json:"deduplicated,omitempty"`
-	Delta                EditorCollaborationDelta               `json:"delta"`
+	Patch                EditorHTMLPatch                        `json:"patch"`
 	ConcurrentOperations []EditorCollaborationRevisionOperation `json:"concurrent_operations,omitempty"`
-	Snapshot             EditorCollaborationSnapshot            `json:"snapshot"`
 }
 
 type EditorCollaborationDeleteInput struct {
@@ -157,27 +146,20 @@ func NormalizeEditorCollaborationMetadata(input EditorCollaborationMetadataInput
 		}
 	}
 	encoded, err := json.Marshal(input.Attachments)
-	if err != nil || len(encoded) > EditorCollaborationOperationMaxBytes {
+	if err != nil || len(encoded) > EditorCollaborationOperationMaxBytes || editorBytesContainSensitiveContent(encoded) {
 		return EditorCollaborationMetadataInput{}, ErrInvalid
-	}
-	lower := strings.ToLower(string(encoded))
-	for _, forbidden := range []string{"data:image/", ";base64,", "x-amz-credential", "x-amz-signature", "presigned_url", "secret_access_key"} {
-		if strings.Contains(lower, forbidden) {
-			return EditorCollaborationMetadataInput{}, ErrInvalid
-		}
 	}
 	return input, nil
 }
 
 func editorProjectionInformationWithMetadata(input EditorCollaborationMetadataInput, document string) (string, error) {
-	encoded, err := json.Marshal(map[string]any{
-		"title": input.Title, "document": document, "attachments": input.Attachments,
-	})
+	encoded, err := json.Marshal(map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments})
 	if err != nil {
 		return "", err
 	}
 	return editorCollaborationTextBlockPrefix + string(encoded), nil
 }
+
 func NormalizeEditorDocumentRef(ref EditorDocumentRef) (EditorDocumentRef, error) {
 	ref.CompanyID = strings.TrimSpace(ref.CompanyID)
 	ref.ResourceType = strings.TrimSpace(ref.ResourceType)
@@ -206,14 +188,108 @@ func NormalizeEditorCollaborationOperation(input EditorCollaborationOperationInp
 	if input.OperationID == "" || len(input.OperationID) > 160 || input.ClientID == "" || len(input.ClientID) > 160 || input.BaseRevision < 0 {
 		return EditorCollaborationOperationInput{}, nil, ErrInvalid
 	}
-	if err := ValidateEditorCollaborationDelta(input.Delta); err != nil {
+	if err := ValidateEditorHTMLPatch(input.Patch, false); err != nil {
 		return EditorCollaborationOperationInput{}, nil, err
 	}
-	payload, err := json.Marshal(input.Delta)
+	payload, err := json.Marshal(input.Patch)
 	if err != nil || len(payload) > EditorCollaborationOperationMaxBytes || editorBytesContainSensitiveContent(payload) {
 		return EditorCollaborationOperationInput{}, nil, ErrInvalid
 	}
 	return input, payload, nil
+}
+
+func ValidateEditorHTMLPatch(patch EditorHTMLPatch, allowEmpty bool) error {
+	if patch.StartUTF8 < 0 || patch.DeleteUTF8 < 0 || (!allowEmpty && patch.DeleteUTF8 == 0 && patch.Insert == "") || !utf8.ValidString(patch.Insert) {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func editorBytesContainSensitiveContent(value []byte) bool {
+	lower := strings.ToLower(string(value))
+	for _, forbidden := range []string{"data:image/", ";base64,", "x-amz-credential", "x-amz-signature", "awsaccesskeyid", "presigned_url", "secret_access_key"} {
+		if strings.Contains(lower, forbidden) {
+			return true
+		}
+	}
+	return false
+}
+
+func ApplyEditorHTMLPatch(html string, patch EditorHTMLPatch) (string, error) {
+	if err := ValidateEditorHTMLPatch(patch, true); err != nil {
+		return "", err
+	}
+	value := []byte(html)
+	end := patch.StartUTF8 + patch.DeleteUTF8
+	if patch.StartUTF8 > len(value) || end < patch.StartUTF8 || end > len(value) {
+		return "", ErrVersionConflict
+	}
+	if !utf8.Valid(value[:patch.StartUTF8]) || !utf8.Valid(value[:end]) {
+		return "", ErrVersionConflict
+	}
+	next := make([]byte, 0, len(value)-patch.DeleteUTF8+len([]byte(patch.Insert)))
+	next = append(next, value[:patch.StartUTF8]...)
+	next = append(next, patch.Insert...)
+	next = append(next, value[end:]...)
+	if !utf8.Valid(next) {
+		return "", ErrInvalid
+	}
+	return string(next), nil
+}
+
+// TransformEditorHTMLPatch moves an incoming HTML-text patch across an already
+// accepted patch. Disjoint edits retain both users' work. Exact overlapping
+// edits use server order; the product explicitly accepts that narrow edge risk.
+func TransformEditorHTMLPatch(committed, incoming EditorHTMLPatch, incomingAfter bool) EditorHTMLPatch {
+	aStart := committed.StartUTF8
+	aEnd := committed.StartUTF8 + committed.DeleteUTF8
+	aInsert := len([]byte(committed.Insert))
+	bStart := incoming.StartUTF8
+	bEnd := incoming.StartUTF8 + incoming.DeleteUTF8
+	delta := aInsert - committed.DeleteUTF8
+	if incoming.DeleteUTF8 == 0 {
+		switch {
+		case bStart < aStart:
+			return incoming
+		case bStart > aEnd:
+			incoming.StartUTF8 += delta
+		case bStart == aStart && committed.DeleteUTF8 == 0:
+			if incomingAfter {
+				incoming.StartUTF8 += aInsert
+			}
+		case bStart >= aEnd:
+			incoming.StartUTF8 += delta
+		default:
+			incoming.StartUTF8 = aStart
+			if incomingAfter {
+				incoming.StartUTF8 += aInsert
+			}
+		}
+		return incoming
+	}
+	if bEnd <= aStart {
+		return incoming
+	}
+	if bStart >= aEnd {
+		incoming.StartUTF8 += delta
+		return incoming
+	}
+	newStart := bStart
+	if bStart >= aStart {
+		newStart = aStart + aInsert
+	}
+	newEnd := bEnd
+	if bEnd >= aEnd {
+		newEnd = bEnd + delta
+	} else if bEnd > aStart {
+		newEnd = aStart
+	}
+	if newEnd < newStart {
+		newEnd = newStart
+	}
+	incoming.StartUTF8 = newStart
+	incoming.DeleteUTF8 = newEnd - newStart
+	return incoming
 }
 
 func EditorRealtimeScope(ref EditorDocumentRef) string {
@@ -224,46 +300,9 @@ func EditorRealtimeScope(ref EditorDocumentRef) string {
 	return "editor:" + ref.ResourceType + ":" + ref.ResourceID + ":" + ref.DocumentID
 }
 
-func NewEditorCollaborationState(html string) EditorCollaborationState {
-	state, err := EditorCollaborationStateFromHTML(html)
-	if err != nil {
-		return EditorCollaborationState{Ops: []EditorCollaborationOp{}}
-	}
-	return state
-}
-
-func CloneEditorCollaborationState(state EditorCollaborationState) EditorCollaborationState {
-	next := EditorCollaborationState{Ops: make([]EditorCollaborationOp, len(state.Ops))}
-	for index, operation := range state.Ops {
-		next.Ops[index] = cloneEditorOp(operation)
-	}
-	return next
-}
-
-func ApplyEditorCollaborationDelta(state EditorCollaborationState, delta EditorCollaborationDelta) (EditorCollaborationState, error) {
-	return ApplyStructuredEditorOperation(state, delta)
-}
-
-func MaterializeEditorCollaborationState(state EditorCollaborationState) (string, error) {
-	html, err := MaterializeStructuredEditorState(state)
-	if err != nil {
-		return "", err
-	}
-	if html == "" {
-		return "", nil
-	}
-	return editorCollaborationRichTextPrefix + html, nil
-}
-
-func EditorCollaborationSnapshotETag(revision int64, state EditorCollaborationState) string {
-	payload, _ := json.Marshal(state)
-	digest := sha256.Sum256(payload)
+func EditorCollaborationSnapshotETag(revision int64, html string) string {
+	digest := sha256.Sum256([]byte(html))
 	return fmt.Sprintf("\"editor-%d-%s\"", revision, hex.EncodeToString(digest[:8]))
-}
-
-func editorDeltaContainsSensitiveContent(delta EditorCollaborationDelta) bool {
-	encoded, _ := json.Marshal(delta)
-	return editorBytesContainSensitiveContent(encoded)
 }
 
 func editorDocumentHTMLFromProjectionInformation(information string) string {

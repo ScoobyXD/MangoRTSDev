@@ -4,26 +4,21 @@ import { JSDOM } from "jsdom";
 import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 
 import {
-  applyEditorCollaborationDelta,
+  applyEditorHTMLPatch,
   cleanupLegacyEditorProjectionStorage,
-  editorCollaborationDeltaForHTML,
+  editorHTMLPatchForChange,
   EDITOR_COLLABORATION_OPERATION_TARGET_BYTES,
   EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES,
   EditorCollaborationController,
-  materializeEditorCollaborationState,
-  newEditorCollaborationState,
-  splitEditorCollaborationDelta,
+  splitEditorHTMLPatch,
+  transformEditorHTMLPatch,
   type EditorCollaborationSnapshot,
 } from "../../../../frontend/src/modules/editor/editorCollaboration.js";
-import {
-  transformStructuredEditorOperation,
-  type StructuredEditorOperation,
-} from "../../../../frontend/src/modules/editor/editorStructuredDocument.js";
-import {
-  deserializeEditorDocumentHTML,
-  EDITOR_RICH_TEXT_PREFIX,
-} from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import type { RealtimeEditorDelta } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
+import type {
+  RealtimeEditorHTMLPatch,
+  RealtimeEditorPatchCommittedMessage,
+  RealtimeSubscriptionHandlers,
+} from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -35,13 +30,9 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
 
-type InstalledDOM = {
-  window: Window;
-  renders: string[];
-  restore: () => void;
-};
+type InstalledDOM = { window: Window; editor: HTMLElement; restore: () => void };
 
-function installEditorDOM(initialHTML = "A"): InstalledDOM {
+function installEditorDOM(initialHTML = ""): InstalledDOM {
   const previous = {
     window: globalThis.window,
     document: globalThis.document,
@@ -49,28 +40,20 @@ function installEditorDOM(initialHTML = "A"): InstalledDOM {
     IDBKeyRange: globalThis.IDBKeyRange,
     Node: globalThis.Node,
     HTMLElement: globalThis.HTMLElement,
-    HTMLLIElement: globalThis.HTMLLIElement,
-    HTMLUListElement: globalThis.HTMLUListElement,
-    HTMLTableCellElement: globalThis.HTMLTableCellElement,
-    HTMLSpanElement: globalThis.HTMLSpanElement,
   };
-  const dom = new JSDOM("<!doctype html><div id=\"editor\"></div>", { url: "https://mango.test/" });
+  const dom = new JSDOM('<!doctype html><div id="editor" contenteditable="true"></div>', { url: "https://mango.test/" });
   const domGlobals = dom.window as unknown as typeof globalThis;
-  const renders: string[] = [];
   Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
   Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
   Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
   Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
   Object.defineProperty(globalThis, "Node", { configurable: true, value: domGlobals.Node });
   Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
-  Object.defineProperty(globalThis, "HTMLLIElement", { configurable: true, value: domGlobals.HTMLLIElement });
-  Object.defineProperty(globalThis, "HTMLUListElement", { configurable: true, value: domGlobals.HTMLUListElement });
-  Object.defineProperty(globalThis, "HTMLTableCellElement", { configurable: true, value: domGlobals.HTMLTableCellElement });
-  Object.defineProperty(globalThis, "HTMLSpanElement", { configurable: true, value: domGlobals.HTMLSpanElement });
-  dom.window.document.querySelector("#editor")!.innerHTML = initialHTML;
+  const editor = dom.window.document.querySelector<HTMLElement>("#editor")!;
+  editor.innerHTML = initialHTML;
   return {
     window: dom.window as unknown as Window,
-    renders,
+    editor,
     restore: () => {
       dom.window.close();
       for (const [key, value] of Object.entries(previous)) {
@@ -81,52 +64,105 @@ function installEditorDOM(initialHTML = "A"): InstalledDOM {
   };
 }
 
-function snapshot(revision: number, state: ReturnType<typeof newEditorCollaborationState>): EditorCollaborationSnapshot {
-  return {
-    revision,
-    snapshot_revision: revision,
-    state,
-    html: materializeEditorCollaborationState(state),
-    etag: `"editor-${revision}"`,
-  };
-}
+type ServerOperation = {
+  revision: number;
+  operationID: string;
+  clientID: string;
+  patch: RealtimeEditorHTMLPatch;
+};
+type CommitBody = {
+  operation_id: string;
+  client_id: string;
+  base_revision: number;
+  patch: RealtimeEditorHTMLPatch;
+};
+type TestCommit = {
+  operation_id: string;
+  event_id: string;
+  revision: number;
+  patch: RealtimeEditorHTMLPatch;
+  concurrent_operations: Array<{
+    revision: number;
+    operation_id: string;
+    client_id: string;
+    patch: RealtimeEditorHTMLPatch;
+  }>;
+  deduplicated?: boolean;
+};
 
-class StructuredTestServer {
-  state = newEditorCollaborationState("A");
+class HTMLPatchTestServer {
   revision = 0;
-  readonly operations: Array<{ revision: number; operationID: string; delta: RealtimeEditorDelta }> = [];
-  private readonly dedupe = new Map<string, { operation_id: string; revision: number; delta: RealtimeEditorDelta; snapshot: EditorCollaborationSnapshot; deduplicated?: boolean }>();
+  readonly operations: ServerOperation[] = [];
+  readonly dedupe = new Map<string, TestCommit>();
+
+  constructor(public html: string) {}
 
   currentSnapshot(): EditorCollaborationSnapshot {
-    return snapshot(this.revision, this.state);
+    return { revision: this.revision, html: this.html, etag: `"editor-${this.revision}"` };
   }
 
-  commit(body: { operation_id: string; base_revision: number; delta: RealtimeEditorDelta }) {
-    const found = this.dedupe.get(body.operation_id);
-    if (found) return { ...found, deduplicated: true, snapshot: this.currentSnapshot() };
-    let transformed = body.delta as StructuredEditorOperation;
-    for (const operation of this.operations) {
-      if (operation.revision > body.base_revision) {
-        transformed = transformStructuredEditorOperation(operation.delta as StructuredEditorOperation, transformed, true);
-      }
-    }
-    const delta = transformed as RealtimeEditorDelta;
-    this.state = applyEditorCollaborationDelta(this.state, delta);
+  commit(body: CommitBody): TestCommit {
+    const duplicate = this.dedupe.get(body.operation_id);
+    if (duplicate) return { ...duplicate, deduplicated: true };
+    const concurrent = this.operations.filter((operation) => operation.revision > body.base_revision);
+    let transformed = body.patch;
+    for (const operation of concurrent) transformed = transformEditorHTMLPatch(operation.patch, transformed, true);
+    this.html = applyEditorHTMLPatch(this.html, transformed);
     this.revision += 1;
-    this.operations.push({ revision: this.revision, operationID: body.operation_id, delta });
-    const result = {
-      operation_id: body.operation_id,
+    this.operations.push({
       revision: this.revision,
-      delta,
-      snapshot: this.currentSnapshot(),
+      operationID: body.operation_id,
+      clientID: body.client_id,
+      patch: transformed,
+    });
+    const result: TestCommit = {
+      operation_id: body.operation_id,
+      event_id: `event-${this.revision}`,
+      revision: this.revision,
+      patch: transformed,
+      concurrent_operations: concurrent.map((operation) => ({
+        revision: operation.revision,
+        operation_id: operation.operationID,
+        client_id: operation.clientID,
+        patch: operation.patch,
+      })),
     };
     this.dedupe.set(body.operation_id, result);
     return result;
   }
 }
 
+class RealtimeBus {
+  private readonly subscriptions = new Map<string, Set<RealtimeSubscriptionHandlers>>();
+
+  subscribe = (_apiBase: string, _companyID: string, scope: string, handlers: RealtimeSubscriptionHandlers) => {
+    const bucket = this.subscriptions.get(scope) ?? new Set<RealtimeSubscriptionHandlers>();
+    bucket.add(handlers);
+    this.subscriptions.set(scope, bucket);
+    return () => bucket.delete(handlers);
+  };
+
+  publish(scope: string, commit: TestCommit, resourceType: "node" | "logic_gate" | "project" = "node"): void {
+    const parts = scope.split(":");
+    const message: RealtimeEditorPatchCommittedMessage = {
+      type: "editor.delta.committed",
+      company_id: "company-1",
+      scope,
+      event_id: commit.event_id,
+      resource_type: resourceType,
+      resource_id: parts[2]!,
+      document_id: parts[3]!,
+      resource_revision: commit.revision,
+      operation_id: commit.operation_id,
+      client_id: "server-client",
+      patch: commit.patch,
+    };
+    for (const handlers of this.subscriptions.get(scope) ?? []) handlers.onEditorPatchCommitted?.(message);
+  }
+}
+
 function controllerOptions(
-  server: StructuredTestServer,
+  server: HTMLPatchTestServer,
   documentID: string,
   overrides: Partial<ConstructorParameters<typeof EditorCollaborationController>[0]> = {},
 ) {
@@ -137,10 +173,10 @@ function controllerOptions(
     resourceType: "node" as const,
     resourceID: "node-1",
     documentID,
-    initialHTML: "A",
+    initialHTML: server.html,
     requestJSON: async <T,>(_path: string, init?: RequestInit) => {
       if (!init?.method) return server.currentSnapshot() as T;
-      return server.commit(JSON.parse(String(init.body))) as T;
+      return server.commit(JSON.parse(String(init.body)) as CommitBody) as T;
     },
     onHTML: () => undefined,
     subscribe: (() => () => undefined) as never,
@@ -148,375 +184,298 @@ function controllerOptions(
   };
 }
 
-test("structured rich documents roundtrip with lists, formatting, tables, mentions, and attachment references", () => {
-  const dom = installEditorDOM();
+async function eventually(predicate: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.fail(`timed out waiting for ${label}`);
+}
+
+const completeRichHTML = '<!-- mango-editor-html-v1 --><h2 style="text-align:center"><strong>Heading</strong></h2><p>First&nbsp; row<br>second</p><p><br></p><ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">Bullet</li></ul><ul data-mango-editor-list="checklist"><li data-mango-editor-list-item="checklist" data-mango-editor-checklist-checked="true">✓ Checked</li></ul><ol><li>One</li><li style="margin-left:32px">Indented</li></ol><p><span style="font-size:18px;background-color:#fff59d"><em><u>Format</u></em></span> <a href="https://example.test">link</a> <span data-mango-mention="true" data-mango-mention-user-id="user-2" contenteditable="false">@Ada</span></p><table data-mango-editor-table-id="table-1"><tbody><tr><th>Key</th><td>Value</td></tr></tbody></table><p><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img src="mango-attachment:attachment-1" data-mango-attachment-id="attachment-1" alt="diagram"></span></p>';
+
+test("rich HTML patches preserve every supported structure and UTF-8 boundary exactly", () => {
+  const next = completeRichHTML.replace("second", "second🙂 row");
+  const patch = editorHTMLPatchForChange(completeRichHTML, next);
+  assert.equal(applyEditorHTMLPatch(completeRichHTML, patch), next);
+  assert.throws(
+    () => applyEditorHTMLPatch("<p>🙂</p>", { start_utf8: 4, delete_utf8: 1, insert: "x" }),
+    /breaks_utf8/,
+  );
+  const dom = installEditorDOM(next);
   try {
-    const html = '<h2><strong>Bold</strong> <em>text</em></h2><ol><li>One</li></ol><p><span data-mention-user-id="u-1">@Ada</span></p><table data-mango-editor-table-id="t-1"><tbody><tr><td>A</td></tr></tbody></table><p><span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img data-mango-attachment-id="attachment-1" alt="diagram"></span></p>';
-    const state = newEditorCollaborationState(html);
-    const canonical = materializeEditorCollaborationState(state);
-    for (const required of ["<h2>", "<strong>Bold</strong>", "<em>text</em>", "<ol", "data-mango-mention-user-id", "<table", "data-mango-editor-attachment-id"]) {
-      assert.ok(canonical.includes(required), required);
-    }
-    assert.equal(materializeEditorCollaborationState(newEditorCollaborationState(canonical)), canonical);
+    assert.equal(dom.editor.querySelectorAll("h2, p, ul, ol, li, table, a, img").length, 15);
+    assert.equal(dom.editor.textContent?.includes("<strong>"), false);
+    assert.equal(dom.editor.querySelector("img")?.getAttribute("data-mango-attachment-id"), "attachment-1");
   } finally {
     dom.restore();
   }
 });
 
-test("collaboration materialization renders rich markup and durable attachment images instead of literal HTML", () => {
-  const dom = installEditorDOM();
-  try {
-    const stored = EDITOR_RICH_TEXT_PREFIX
-      + '<br><span style="font-size: 14px; font-size: 14px;">Business Logic &quot;Email&quot;</span>'
-      + '<span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1">'
-      + '<img src="mango-attachment:attachment-1" data-mango-attachment-id="attachment-1" alt="Diagram" width="320" height="180"></span>';
-    const materialized = materializeEditorCollaborationState(newEditorCollaborationState(stored));
-
-    assert.ok(materialized.startsWith(EDITOR_RICH_TEXT_PREFIX));
-    const rendered = deserializeEditorDocumentHTML(materialized);
-    const editor = dom.window.document.querySelector("#editor");
-    if (!editor) {
-      throw new Error("editor fixture was not mounted");
-    }
-    editor.innerHTML = rendered;
-
-    assert.equal(editor.textContent?.includes("<br>"), false);
-    assert.match(editor.textContent ?? "", /Business Logic "Email"/);
-    const image = editor.querySelector("img");
-    if (!image) {
-      throw new Error("durable attachment image was not rendered");
-    }
-    const frame = image.parentElement;
-    if (!frame) {
-      throw new Error("durable attachment frame was not rendered");
-    }
-    assert.equal(image.getAttribute("src"), "mango-attachment:attachment-1");
-    assert.equal(frame.getAttribute("data-mango-editor-attachment-id"), "attachment-1");
-    assert.equal(image.getAttribute("alt"), "Diagram");
-    assert.equal(frame.style.width, "320px");
-    assert.equal(frame.style.height, "180px");
-  } finally {
-    dom.restore();
+test("large pasted rich HTML is split into ordered bounded patches without translation or truncation", () => {
+  const html = '<!-- mango-editor-html-v1 --><p><strong>' + "Bold🙂 text ".repeat(100_000) + "</strong></p><ol><li>One</li><li>Two</li></ol><table><tbody><tr><td>@Ada</td></tr></tbody></table>";
+  assert.ok(new TextEncoder().encode(html).byteLength > 1024 * 1024);
+  assert.ok(new TextEncoder().encode(html).byteLength < EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES);
+  const parts = splitEditorHTMLPatch(editorHTMLPatchForChange("", html));
+  assert.ok(parts.length > 1);
+  let rebuilt = "";
+  for (const part of parts) {
+    assert.ok(new TextEncoder().encode(JSON.stringify(part)).byteLength <= EDITOR_COLLABORATION_OPERATION_TARGET_BYTES);
+    rebuilt = applyEditorHTMLPatch(rebuilt, part);
   }
+  assert.equal(rebuilt, html);
 });
 
-test("recovery promotes already-corrupted Logic Gate markup and durably commits one stable repair", async () => {
-  const dom = installEditorDOM();
+test("Enter then typing keeps rows and caret intact when acknowledgement and duplicate broadcast arrive", async () => {
+  const initial = '<!-- mango-editor-html-v1 --><p>First row</p>';
+  const next = '<!-- mango-editor-html-v1 --><p>First row</p><p>N</p>';
+  const dom = installEditorDOM(initial);
   try {
-    const broken = EDITOR_RICH_TEXT_PREFIX
-      + "&lt;strong&gt;&lt;span style=\"font-size: 16px; font-size: 16px;\"&gt;nice prompt&lt;/span&gt;&lt;/strong&gt;"
-      + "&lt;span style=\"font-size: 14px; font-size: 14px;\"&gt;review everything&lt;/span&gt;";
-    const server = new StructuredTestServer();
-    server.state = newEditorCollaborationState(broken);
-    const renders: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "legacy-escaped-logic-gate", {
-      onHTML: (html) => renders.push(html),
+    const server = new HTMLPatchTestServer(initial);
+    const bus = new RealtimeBus();
+    let renders = 0;
+    const scope = "editor:node:node-1:enter-caret";
+    const controller = new EditorCollaborationController(controllerOptions(server, "enter-caret", {
+      subscribe: bus.subscribe,
+      onHTML: (html) => { renders += 1; dom.editor.innerHTML = html; },
+      requestJSON: async <T,>(_path: string, init?: RequestInit) => {
+        if (!init?.method) return server.currentSnapshot() as T;
+        const commit = server.commit(JSON.parse(String(init.body)) as CommitBody);
+        return commit as T;
+      },
     }));
-    controller.start();
     await controller.recover();
+    renders = 0;
+    dom.editor.innerHTML = next;
+    const text = dom.editor.lastElementChild!.firstChild!;
+    const range = dom.window.document.createRange();
+    range.setStart(text, 1);
+    range.collapse(true);
+    const selection = dom.window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    controller.schedule(next, true);
     await controller.flush();
-
-    assert.equal(server.revision, 1);
-    assert.equal(server.operations[0]?.operationID, "legacy-escaped-rich-html-v1-0-0");
-    const canonical = materializeEditorCollaborationState(server.state);
-    assert.match(canonical, /<strong><span style="font-size: 16px;?">nice prompt<\/span><\/strong>/);
-    assert.doesNotMatch(canonical, /font-size: 16px[^"]*font-size/);
-    assert.doesNotMatch(canonical, /&lt;strong&gt;/);
-    assert.ok(renders.length > 0);
-    assert.ok(renders.every((html) => !html.includes("&lt;strong&gt;")));
-    const editor = dom.window.document.querySelector("#editor");
-    if (!editor) throw new Error("editor fixture was not mounted");
-    editor.innerHTML = deserializeEditorDocumentHTML(renders[renders.length - 1]);
-    assert.equal(editor.querySelectorAll("strong").length, 1);
-    assert.equal(editor.textContent, "nice promptreview everything");
+    const commit = server.dedupe.values().next().value as TestCommit;
+    bus.publish(scope, commit);
+    await controller.flush();
+    assert.equal(renders, 0, "own acknowledgement/broadcast must not replace the live editor DOM");
+    assert.equal(dom.editor.innerHTML, next);
+    assert.equal(dom.editor.children.length, 2);
+    assert.equal(selection.anchorNode?.textContent, "N");
+    assert.equal(selection.anchorOffset, 1);
     controller.stop();
   } finally {
     dom.restore();
-
   }
 });
-test("structured OT converges formatting versus formatting and block versus inline formatting", () => {
+
+test("Node and Logic Gate recovery render rich DOM directly and never flatten when collaboration arrives", async () => {
   const dom = installEditorDOM();
   try {
-    const initial = newEditorCollaborationState("<p>abcdef</p>");
-    const bold = { ops: [{ retain: 1 }, { retain: 3, attributes: { bold: true } }] };
-    const italic = { ops: [{ retain: 2 }, { retain: 3, attributes: { italic: true } }] };
-    const heading = { ops: [{ retain: 6 }, { retain: 1, attributes: { block: "h2" } }] };
-    for (const concurrent of [italic, heading]) {
-      const first = applyEditorCollaborationDelta(
-        applyEditorCollaborationDelta(initial, bold),
-        transformStructuredEditorOperation(bold, concurrent, true) as RealtimeEditorDelta,
-      );
-      const second = applyEditorCollaborationDelta(
-        applyEditorCollaborationDelta(initial, concurrent),
-        transformStructuredEditorOperation(concurrent, bold, false) as RealtimeEditorDelta,
-      );
-      assert.equal(materializeEditorCollaborationState(first), materializeEditorCollaborationState(second));
-      assert.equal(dom.window.document.createElement("div").textContent, "");
+    for (const resourceType of ["node", "logic_gate"] as const) {
+      const server = new HTMLPatchTestServer(completeRichHTML);
+      const documentID = `rich-load-${resourceType}`;
+      const controller = new EditorCollaborationController(controllerOptions(server, documentID, {
+        resourceType,
+        resourceID: `${resourceType}-1`,
+        initialHTML: "",
+        onHTML: (html) => { dom.editor.innerHTML = html; },
+      }));
+      await controller.recover();
+      assert.equal(dom.editor.querySelector("strong")?.textContent, "Heading");
+      assert.equal(dom.editor.querySelectorAll("p").length, 4);
+      assert.equal(dom.editor.querySelectorAll("ul, ol").length, 3);
+      assert.equal(dom.editor.querySelector("img")?.getAttribute("src"), "mango-attachment:attachment-1");
+      assert.equal(dom.editor.textContent?.includes("<span>"), false);
+      controller.stop();
     }
   } finally {
     dom.restore();
   }
 });
 
-test("disjoint edits in a formerly shared large chunk converge without duplication, including astral Unicode", () => {
-  const dom = installEditorDOM();
+test("two browser contexts converge on disjoint HTML edits without refresh and exact scopes stay isolated", async () => {
+  const initial = '<!-- mango-editor-html-v1 --><p>abcd</p>';
+  const dom = installEditorDOM(initial);
   try {
-    const emoji = "\u{1F642}";
-    const initial = newEditorCollaborationState("<p>" + "a".repeat(5000) + emoji + "b".repeat(5000) + "</p>");
-    const left = { ops: [{ retain: 100 }, { insert: "LEFT" }] };
-    const right = { ops: [{ retain: 5202 }, { insert: "RIGHT" }] };
-    const first = applyEditorCollaborationDelta(applyEditorCollaborationDelta(initial, left), transformStructuredEditorOperation(left, right, true) as RealtimeEditorDelta);
-    const second = applyEditorCollaborationDelta(applyEditorCollaborationDelta(initial, right), transformStructuredEditorOperation(right, left, false) as RealtimeEditorDelta);
-    const firstHTML = materializeEditorCollaborationState(first);
-    assert.equal(firstHTML, materializeEditorCollaborationState(second));
-    assert.equal(firstHTML.match(/LEFT/g)?.length, 1);
-    assert.equal(firstHTML.match(/RIGHT/g)?.length, 1);
-    assert.equal(firstHTML.match(new RegExp(emoji, "gu"))?.length, 1);
-  } finally {
-    dom.restore();
-  }
-});
-
-test("large rich paste is split into ordered bounded operations without truncation", () => {
-  const dom = installEditorDOM();
-  try {
-    const html = '<p><strong>' + "Bold text ".repeat(120_000) + '</strong></p><ol><li>One</li><li>Two</li></ol><table><tbody><tr><td data-mention-user-id="user-2">@Ada</td></tr></tbody></table>';
-    assert.ok(new TextEncoder().encode(html).byteLength > 1024 * 1024);
-    assert.ok(new TextEncoder().encode(html).byteLength < EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES);
-    const expected = materializeEditorCollaborationState(newEditorCollaborationState(html));
-    const delta = editorCollaborationDeltaForHTML(newEditorCollaborationState(""), html);
-    const parts = splitEditorCollaborationDelta(delta);
-    assert.ok(parts.length > 1);
-    let state = newEditorCollaborationState("");
-    for (const part of parts) {
-      assert.ok(new TextEncoder().encode(JSON.stringify(part)).byteLength <= EDITOR_COLLABORATION_OPERATION_TARGET_BYTES);
-      state = applyEditorCollaborationDelta(state, part);
-    }
-    assert.equal(materializeEditorCollaborationState(state), expected);
-  } finally {
-    dom.restore();
-  }
-});
-
-test("cleanup removes obsolete whole-body and v1 collaboration storage", () => {
-  const local = new MemoryStorage();
-  const session = new MemoryStorage();
-  local.setItem("mango-editor-projection-draft-v2:old", "full body");
-  local.setItem("mango-editor-collaboration-pending-v1:old", "raw html operation");
-  session.setItem("mango-editor-projection-tab-v1", "tab");
-  assert.equal(cleanupLegacyEditorProjectionStorage(local, session), 3);
-  assert.equal(local.length, 0);
-  assert.equal(session.length, 0);
-});
-
-test("storage unavailability rolls back visible content and never reports a pending save", async () => {
-  const dom = installEditorDOM("A");
-  try {
-    Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: undefined });
-    const server = new StructuredTestServer();
-    const errors: string[] = [];
-    const renders: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "storage-failure", {
-      onHTML: (html) => renders.push(html),
-      onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
-    }));
-    controller.schedule("AL", true);
-    await controller.flush();
-    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A"]);
-    assert.deepEqual(errors, ["editor_collaboration_storage_unavailable"]);
-    assert.equal(server.revision, 0);
-  } finally {
-    dom.restore();
-  }
-});
-
-test("IndexedDB quota failure rolls back visible content with a stable user-safe error", async () => {
-  const dom = installEditorDOM("A");
-  try {
-    const quotaFactory = {
-      open: () => {
-        const request: {
-          error: { name: string };
-          onerror: null | (() => void);
-          onblocked: null | (() => void);
-          onupgradeneeded: null | (() => void);
-          onsuccess: null | (() => void);
-        } = {
-          error: { name: "QuotaExceededError" },
-          onerror: null,
-          onblocked: null,
-          onupgradeneeded: null,
-          onsuccess: null,
-        };
-        queueMicrotask(() => request.onerror?.());
-        return request;
-      },
+    const server = new HTMLPatchTestServer(initial);
+    const bus = new RealtimeBus();
+    const scope = "editor:node:node-1:shared-document";
+    let htmlA = initial;
+    let htmlB = initial;
+    const request = async <T,>(_path: string, init?: RequestInit) => {
+      if (!init?.method) return server.currentSnapshot() as T;
+      const commit = server.commit(JSON.parse(String(init.body)) as CommitBody);
+      bus.publish(scope, commit);
+      return commit as T;
     };
-    Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: quotaFactory });
-    const server = new StructuredTestServer();
-    const errors: string[] = [];
-    const renders: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "quota-failure", {
-      onHTML: (html) => renders.push(html),
-      onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
+    dom.window.name = "";
+    const first = new EditorCollaborationController(controllerOptions(server, "shared-document", {
+      subscribe: bus.subscribe, requestJSON: request, onHTML: (html) => { htmlA = html; },
     }));
-    controller.schedule("AL", true);
-    await controller.flush();
-    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A"]);
-    assert.deepEqual(errors, ["editor_collaboration_storage_quota_exceeded"]);
-    assert.equal(server.revision, 0);
+    dom.window.name = "";
+    const second = new EditorCollaborationController(controllerOptions(server, "shared-document", {
+      subscribe: bus.subscribe, requestJSON: request, onHTML: (html) => { htmlB = html; },
+    }));
+    const isolated = new HTMLPatchTestServer(initial);
+    let isolatedRenders = 0;
+    const third = new EditorCollaborationController(controllerOptions(isolated, "other-document", {
+      subscribe: bus.subscribe, onHTML: () => { isolatedRenders += 1; },
+    }));
+    first.start(); second.start(); third.start();
+    await Promise.all([first.recover(), second.recover(), third.recover()]);
+    htmlA = initial; htmlB = initial; isolatedRenders = 0;
+    htmlA = initial.replace("abcd", "aLbcd");
+    htmlB = initial.replace("abcd", "abcRd");
+    first.schedule(htmlA, true);
+    second.schedule(htmlB, true);
+    await Promise.all([first.flush(), second.flush()]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(htmlA, server.html, `first editor diverged; second=${htmlB}`);
+    assert.equal(htmlB, server.html, `second editor diverged; first=${htmlA}`);
+    assert.match(server.html, /aLbcRd/);
+    assert.equal((server.html.match(/L/g) ?? []).length, 1);
+    assert.equal((server.html.match(/R/g) ?? []).length, 1);
+    assert.equal(isolatedRenders, 0);
+    first.stop(); second.stop(); third.stop();
   } finally {
     dom.restore();
   }
 });
 
-test("oversized and sensitive visible edits roll back deterministically", () => {
-  const dom = installEditorDOM("A");
+test("lost acknowledgement, retry, and duplicate acknowledgement/broadcast apply a stable operation once", async () => {
+  const dom = installEditorDOM();
   try {
-    const server = new StructuredTestServer();
-    const errors: string[] = [];
-    const renders: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "preflight", {
-      onHTML: (html) => renders.push(html),
-      onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
-    }));
-    controller.schedule('<img src="data:image/png;base64,AAAA">', true);
-    controller.schedule("x".repeat(EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES + 1), true);
-    assert.deepEqual(errors, ["editor_collaboration_sensitive_content_rejected", "editor_collaboration_document_too_large"]);
-    assert.deepEqual(renders, [EDITOR_RICH_TEXT_PREFIX + "A", EDITOR_RICH_TEXT_PREFIX + "A"]);
-  } finally {
-    dom.restore();
-  }
-});
-
-test("lost acknowledgement survives refresh, retries the stable operation, and deduplicates without visible duplication", async () => {
-  const dom = installEditorDOM("A");
-  try {
-    const server = new StructuredTestServer();
+    const server = new HTMLPatchTestServer("A");
+    let lostOperationID = "";
     let loseAck = true;
-    let retriedOperationID = "";
-    const first = new EditorCollaborationController(controllerOptions(server, "lost-ack", {
+    const first = new EditorCollaborationController(controllerOptions(server, "lost-ack-html", {
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
-        const body = JSON.parse(String(init.body));
-        const committed = server.commit(body);
-        retriedOperationID = body.operation_id;
-        if (loseAck) {
-          loseAck = false;
-          throw new Error("acknowledgement_lost_after_commit");
-        }
-        return committed as T;
+        const body = JSON.parse(String(init.body)) as CommitBody;
+        lostOperationID = body.operation_id;
+        const commit = server.commit(body);
+        if (loseAck) { loseAck = false; throw new Error("acknowledgement_lost_after_commit"); }
+        return commit as T;
       },
     }));
-    first.start();
     await first.recover();
     first.schedule("AL", true);
     await assert.rejects(first.flush(), /acknowledgement_lost_after_commit/);
     first.stop();
 
-    const renders: string[] = [];
-    let retryID = "";
-    const second = new EditorCollaborationController(controllerOptions(server, "lost-ack", {
+    let retryOperationID = "";
+    const second = new EditorCollaborationController(controllerOptions(server, "lost-ack-html", {
       initialHTML: "AL",
-      onHTML: (html) => renders.push(html),
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
-        const body = JSON.parse(String(init.body));
-        retryID = body.operation_id;
+        const body = JSON.parse(String(init.body)) as CommitBody;
+        retryOperationID = body.operation_id;
         return server.commit(body) as T;
       },
     }));
-    second.start();
     await second.recover();
-    assert.equal(retryID, retriedOperationID);
+    assert.equal(retryOperationID, lostOperationID);
+    assert.equal(server.html, "AL");
     assert.equal(server.revision, 1);
-    assert.equal(materializeEditorCollaborationState(server.state), EDITOR_RICH_TEXT_PREFIX + "AL");
-    assert.ok(renders.every((html) => html === EDITOR_RICH_TEXT_PREFIX + "AL"));
     second.stop();
   } finally {
     dom.restore();
   }
 });
 
-test("snapshot-required during a durable batch refreshes canonical state and retries the same operation once", async () => {
-  const dom = installEditorDOM("A");
+test("revision gap and reconnect load full canonical HTML recovery without erasing rich content", async () => {
+  const initial = '<!-- mango-editor-html-v1 --><p>First</p>';
+  const recovered = completeRichHTML.replace("Heading", "Recovered");
+  const dom = installEditorDOM(initial);
   try {
-    const server = new StructuredTestServer();
-    const renders: string[] = [];
-    let reads = 0;
-    let posts = 0;
-    let firstOperationID = "";
-    let retriedOperationID = "";
-    const controller = new EditorCollaborationController(controllerOptions(server, "snapshot-interleaving", {
-      onHTML: (html) => renders.push(html),
-      requestJSON: async <T,>(_path: string, init?: RequestInit) => {
-        if (!init?.method) {
-          reads += 1;
-          return server.currentSnapshot() as T;
-        }
-        const body = JSON.parse(String(init.body));
-        posts += 1;
-        if (posts === 1) {
-          firstOperationID = body.operation_id;
-          throw new Error("collaboration_snapshot_required");
-        }
-        retriedOperationID = body.operation_id;
-        assert.equal(body.base_revision, server.revision);
-        return server.commit(body) as T;
-      },
+    const server = new HTMLPatchTestServer(initial);
+    const bus = new RealtimeBus();
+    const errors: string[] = [];
+    let visible = initial;
+    const scope = "editor:node:node-1:revision-gap";
+    const controller = new EditorCollaborationController(controllerOptions(server, "revision-gap", {
+      subscribe: bus.subscribe,
+      onHTML: (html) => { visible = html; dom.editor.innerHTML = html; },
+      onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
     }));
     controller.start();
     await controller.recover();
-    const readsBeforeRetry = reads;
-    controller.schedule("AL", true);
-    await controller.flush();
-
-    assert.equal(posts, 2);
-    assert.equal(reads, readsBeforeRetry + 1);
-    assert.equal(retriedOperationID, firstOperationID);
-    assert.equal(server.revision, 1);
-    assert.equal(materializeEditorCollaborationState(server.state), EDITOR_RICH_TEXT_PREFIX + "AL");
-    assert.equal(renders[renders.length - 1], EDITOR_RICH_TEXT_PREFIX + "AL");
+    server.html = recovered;
+    server.revision = 2;
+    bus.publish(scope, {
+      operation_id: "gap-operation", event_id: "gap-event", revision: 2,
+      patch: { start_utf8: 0, delete_utf8: 0, insert: "ignored-gap" }, concurrent_operations: [],
+    });
+    await eventually(() => visible === recovered, "revision-gap snapshot recovery");
+    assert.ok(errors.includes("collaboration_revision_gap"));
+    assert.equal(dom.editor.querySelector("strong")?.textContent, "Recovered");
+    assert.equal(dom.editor.querySelector("img")?.getAttribute("data-mango-attachment-id"), "attachment-1");
     controller.stop();
   } finally {
     dom.restore();
   }
 });
 
-test("separate tabs use different durable queue identities while refresh keeps the same tab identity", async () => {
-  const dom = installEditorDOM("A");
+test("snapshot-required retry keeps the stable operation ID and rebases the HTML patch", async () => {
+  const dom = installEditorDOM();
   try {
-    const server = new StructuredTestServer();
-    const clientIDs: string[] = [];
-    const make = (documentID: string) => new EditorCollaborationController(controllerOptions(server, documentID, {
+    const server = new HTMLPatchTestServer("A");
+    let posts = 0;
+    const operationIDs: string[] = [];
+    const controller = new EditorCollaborationController(controllerOptions(server, "snapshot-retry-html", {
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
-        const body = JSON.parse(String(init.body));
-        clientIDs.push(body.client_id);
+        const body = JSON.parse(String(init.body)) as CommitBody;
+        posts += 1;
+        operationIDs.push(body.operation_id);
+        if (posts === 1) throw new Error("collaboration_snapshot_required");
         return server.commit(body) as T;
       },
     }));
+    await controller.recover();
+    controller.schedule("AL", true);
+    await controller.flush();
+    assert.equal(posts, 2);
+    assert.equal(operationIDs[0], operationIDs[1]);
+    assert.equal(server.html, "AL");
+    controller.stop();
+  } finally {
+    dom.restore();
+  }
+});
 
-    dom.window.name = "";
-    const tabOne = make("tab-one");
-    tabOne.schedule("A1", true);
-    await tabOne.flush();
-    const firstID = clientIDs[clientIDs.length - 1]!;
+test("cleanup removes obsolete whole-body and structured collaboration storage keys", () => {
+  const local = new MemoryStorage();
+  const session = new MemoryStorage();
+  local.setItem("mango-editor-projection-draft-v2:old", "full body");
+  local.setItem("mango-editor-collaboration-pending-v1:old", "old operation");
+  session.setItem("mango-editor-collaboration-tab-v2:old", "structured tab");
+  assert.equal(cleanupLegacyEditorProjectionStorage(local, session), 3);
+  assert.equal(local.length, 0);
+  assert.equal(session.length, 0);
+});
 
-    const refresh = make("tab-one-refresh");
-    refresh.schedule("A2", true);
-    await refresh.flush();
-    const refreshID = clientIDs[clientIDs.length - 1]!;
-
-    dom.window.name = "";
-    const tabTwo = make("tab-two");
-    tabTwo.schedule("A3", true);
-    await tabTwo.flush();
-    const secondID = clientIDs[clientIDs.length - 1]!;
-
-    assert.equal(refreshID, firstID);
-    assert.notEqual(secondID, firstID);
+test("storage failure, unsafe content, and oversize edits roll the visible DOM back deterministically", async () => {
+  const dom = installEditorDOM("A");
+  try {
+    const server = new HTMLPatchTestServer("A");
+    const errors: string[] = [];
+    const renders: string[] = [];
+    const controller = new EditorCollaborationController(controllerOptions(server, "preflight-html", {
+      onHTML: (html) => { renders.push(html); dom.editor.innerHTML = html; },
+      onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
+    }));
+    controller.schedule('<img src="data:image/png;base64,AAAA">', true);
+    controller.schedule("x".repeat(EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES + 1), true);
+    assert.deepEqual(errors, ["editor_collaboration_sensitive_content_rejected", "editor_collaboration_document_too_large"]);
+    assert.deepEqual(renders, ["A", "A"]);
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: undefined });
+    controller.schedule("AL", true);
+    await controller.flush();
+    assert.equal(errors[errors.length - 1], "editor_collaboration_storage_unavailable");
+    assert.equal(server.revision, 0);
   } finally {
     dom.restore();
   }

@@ -8,21 +8,21 @@ import (
 )
 
 type memoryEditorCollaborationDocument struct {
-	Ref                   EditorDocumentRef
-	Revision              int64
-	SnapshotRevision      int64
-	SnapshotState         EditorCollaborationState
-	AccumulatedDeltaBytes int
-	Deleted               bool
-	UpdatedTimestamp      time.Time
+	Ref              EditorDocumentRef
+	Revision         int64
+	CanonicalHTML    string
+	Deleted          bool
+	UpdatedTimestamp time.Time
 }
 
 type memoryEditorCollaborationOperation struct {
-	Input       EditorCollaborationOperationInput
-	DeltaBytes  []byte
-	EventID     string
-	Revision    int64
-	CommittedAt time.Time
+	Input            EditorCollaborationOperationInput
+	PatchBytes       []byte
+	EventID          string
+	Revision         int64
+	CommittedAt      time.Time
+	RequiresSnapshot bool
+	Tombstone        bool
 }
 
 func editorDocumentMemoryKey(ref EditorDocumentRef) string {
@@ -32,11 +32,12 @@ func editorDocumentMemoryKey(ref EditorDocumentRef) string {
 func memoryConcurrentEditorOperations(operations []memoryEditorCollaborationOperation, baseRevision, beforeRevision int64) []EditorCollaborationRevisionOperation {
 	result := make([]EditorCollaborationRevisionOperation, 0)
 	for _, operation := range operations {
-		if operation.Revision <= baseRevision || operation.Revision >= beforeRevision || operation.Input.Delta.Ops == nil {
+		if operation.Revision <= baseRevision || operation.Revision >= beforeRevision || operation.RequiresSnapshot || operation.Tombstone {
 			continue
 		}
 		result = append(result, EditorCollaborationRevisionOperation{
-			Revision: operation.Revision, Delta: operation.Input.Delta,
+			Revision: operation.Revision, OperationID: operation.Input.OperationID,
+			ClientID: operation.Input.ClientID, Patch: operation.Input.Patch,
 		})
 	}
 	return result
@@ -59,41 +60,20 @@ func (r *MemoryRepo) editorCollaborationSnapshotLocked(ref EditorDocumentRef) (E
 	document, exists := r.editorCollaborationDocuments[editorDocumentMemoryKey(ref)]
 	if !exists {
 		now := time.Now().UTC()
-		state := NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))
-		html, err := MaterializeEditorCollaborationState(state)
-		if err != nil {
-			return EditorCollaborationSnapshot{}, err
-		}
+		html := r.initialEditorDocumentHTMLLocked(ref)
 		return EditorCollaborationSnapshot{
-			Document: ref, State: state, HTML: html, ETag: EditorCollaborationSnapshotETag(0, state), UpdatedTimestamp: now,
+			Document: ref, HTML: html, ETag: EditorCollaborationSnapshotETag(0, html), UpdatedTimestamp: now,
 		}, nil
 	}
-	state := CloneEditorCollaborationState(document.SnapshotState)
-	replayCount := 0
-	for _, operation := range r.editorCollaborationOperations[editorDocumentMemoryKey(ref)] {
-		if operation.Revision <= document.SnapshotRevision {
-			continue
-		}
-		var err error
-		state, err = ApplyEditorCollaborationDelta(state, operation.Input.Delta)
-		if err != nil {
-			return EditorCollaborationSnapshot{}, err
-		}
-		replayCount++
-	}
-	html, err := MaterializeEditorCollaborationState(state)
-	if err != nil {
-		return EditorCollaborationSnapshot{}, err
-	}
 	return EditorCollaborationSnapshot{
-		Document: ref, Revision: document.Revision, SnapshotRevision: document.SnapshotRevision,
-		State: state, HTML: html, ETag: EditorCollaborationSnapshotETag(document.Revision, state),
-		Deleted: document.Deleted, ReplayCount: replayCount, UpdatedTimestamp: document.UpdatedTimestamp,
+		Document: ref, Revision: document.Revision, HTML: document.CanonicalHTML,
+		ETag:    EditorCollaborationSnapshotETag(document.Revision, document.CanonicalHTML),
+		Deleted: document.Deleted, UpdatedTimestamp: document.UpdatedTimestamp,
 	}, nil
 }
 
 func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaborationOperationInput) (EditorCollaborationCommit, error) {
-	input, deltaBytes, err := NormalizeEditorCollaborationOperation(input)
+	input, patchBytes, err := NormalizeEditorCollaborationOperation(input)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
 	}
@@ -107,19 +87,18 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 		if operation.Input.OperationID != input.OperationID {
 			continue
 		}
-		snapshot, snapshotErr := r.editorCollaborationSnapshotLocked(input.Document)
 		concurrent := memoryConcurrentEditorOperations(r.editorCollaborationOperations[key], operation.Input.BaseRevision, operation.Revision)
 		return EditorCollaborationCommit{
 			OperationID: input.OperationID, EventID: operation.EventID, Revision: operation.Revision,
-			CommittedAt: operation.CommittedAt, Deduplicated: true, Delta: operation.Input.Delta,
-			ConcurrentOperations: concurrent, Snapshot: snapshot,
-		}, snapshotErr
+			CommittedAt: operation.CommittedAt, Deduplicated: true, Patch: operation.Input.Patch,
+			ConcurrentOperations: concurrent,
+		}, nil
 	}
 
 	document, exists := r.editorCollaborationDocuments[key]
 	if !exists {
 		document = memoryEditorCollaborationDocument{
-			Ref: input.Document, SnapshotState: NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(input.Document)),
+			Ref: input.Document, CanonicalHTML: r.initialEditorDocumentHTMLLocked(input.Document),
 			UpdatedTimestamp: time.Now().UTC(),
 		}
 	}
@@ -129,34 +108,26 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	if input.BaseRevision > document.Revision {
 		return EditorCollaborationCommit{}, ErrVersionConflict
 	}
-	transformed := input.Delta
+	transformed := input.Patch
 	concurrent := make([]EditorCollaborationRevisionOperation, 0)
-	state := CloneEditorCollaborationState(document.SnapshotState)
 	for _, operation := range r.editorCollaborationOperations[key] {
-		if operation.Revision > document.SnapshotRevision {
-			state, err = ApplyEditorCollaborationDelta(state, operation.Input.Delta)
-			if err != nil {
-				return EditorCollaborationCommit{}, err
-			}
-		}
 		if operation.Revision > input.BaseRevision {
-			concurrent = append(concurrent, EditorCollaborationRevisionOperation{Revision: operation.Revision, Delta: operation.Input.Delta})
-			transformed, err = TransformStructuredEditorOperation(operation.Input.Delta, transformed, true)
-			if err != nil {
-				return EditorCollaborationCommit{}, err
+			if operation.RequiresSnapshot || operation.Tombstone {
+				return EditorCollaborationCommit{}, ErrVersionConflict
 			}
+			concurrent = append(concurrent, EditorCollaborationRevisionOperation{
+				Revision: operation.Revision, OperationID: operation.Input.OperationID,
+				ClientID: operation.Input.ClientID, Patch: operation.Input.Patch,
+			})
+			transformed = TransformEditorHTMLPatch(operation.Input.Patch, transformed, true)
 		}
 	}
-	input.Delta = transformed
-	deltaBytes, err = json.Marshal(input.Delta)
-	if err != nil || len(deltaBytes) > EditorCollaborationOperationMaxBytes {
+	input.Patch = transformed
+	patchBytes, err = json.Marshal(input.Patch)
+	if err != nil || len(patchBytes) > EditorCollaborationOperationMaxBytes {
 		return EditorCollaborationCommit{}, ErrInvalid
 	}
-	state, err = ApplyEditorCollaborationDelta(state, transformed)
-	if err != nil {
-		return EditorCollaborationCommit{}, err
-	}
-	html, err := MaterializeEditorCollaborationState(state)
+	html, err := ApplyEditorHTMLPatch(document.CanonicalHTML, transformed)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
 	}
@@ -172,7 +143,7 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 		"type": EditorCollaborationEventType, "event_id": eventID, "company_id": input.Document.CompanyID,
 		"scope": scope, "resource_type": input.Document.ResourceType, "resource_id": input.Document.ResourceID,
 		"document_id": input.Document.DocumentID, "resource_revision": revision, "committed_at": now,
-		"operation_id": input.OperationID, "client_id": input.ClientID, "delta": input.Delta,
+		"operation_id": input.OperationID, "client_id": input.ClientID, "patch": input.Patch,
 	})
 	if err != nil {
 		return EditorCollaborationCommit{}, err
@@ -186,27 +157,15 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	}
 
 	r.editorCollaborationOperations[key] = append(r.editorCollaborationOperations[key], memoryEditorCollaborationOperation{
-		Input: input, DeltaBytes: append([]byte(nil), deltaBytes...), EventID: eventID, Revision: revision, CommittedAt: now,
+		Input: input, PatchBytes: append([]byte(nil), patchBytes...), EventID: eventID, Revision: revision, CommittedAt: now,
 	})
-	document.Revision = revision
-	document.UpdatedTimestamp = now
-	document.AccumulatedDeltaBytes += len(deltaBytes)
-	shouldCompact := revision-document.SnapshotRevision >= EditorCollaborationCompactOperationCount ||
-		document.AccumulatedDeltaBytes >= EditorCollaborationCompactDeltaBytes
-	if shouldCompact {
-		document.SnapshotState = CloneEditorCollaborationState(state)
-		document.SnapshotRevision = revision
-		document.AccumulatedDeltaBytes = 0
-	}
+	document.Revision, document.CanonicalHTML, document.UpdatedTimestamp = revision, html, now
 	r.editorCollaborationDocuments[key] = document
-	if !exists || shouldCompact {
-		r.materializeEditorProjectionLocked(input.Document, html, revision, now)
-	}
-	snapshot, err := r.editorCollaborationSnapshotLocked(input.Document)
+	r.materializeEditorProjectionLocked(input.Document, html, revision, now)
 	return EditorCollaborationCommit{
-		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Delta: input.Delta,
-		ConcurrentOperations: concurrent, Snapshot: snapshot,
-	}, err
+		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Patch: input.Patch,
+		ConcurrentOperations: concurrent,
+	}, nil
 }
 
 func (r *MemoryRepo) replaceEditorCollaborationSnapshotLocked(ref EditorDocumentRef, html, operationID, clientID, actorUserID string, now time.Time) error {
@@ -217,19 +176,14 @@ func (r *MemoryRepo) replaceEditorCollaborationSnapshotLocked(ref EditorDocument
 	key := editorDocumentMemoryKey(ref)
 	document, exists := r.editorCollaborationDocuments[key]
 	if !exists {
-		document = memoryEditorCollaborationDocument{Ref: ref, SnapshotState: NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))}
+		document = memoryEditorCollaborationDocument{Ref: ref, CanonicalHTML: r.initialEditorDocumentHTMLLocked(ref)}
 	}
 	eventID := newUUIDv7String()
-	replacementState, err := EditorCollaborationStateFromHTML(html)
-	if err != nil {
-		return err
-	}
-	html, err = MaterializeEditorCollaborationState(replacementState)
-	if err != nil {
-		return err
-	}
 	if len([]byte(html)) > EditorCollaborationDocumentMaxBytes {
 		return ErrEditorDocumentTooLarge
+	}
+	if editorBytesContainSensitiveContent([]byte(html)) {
+		return ErrInvalid
 	}
 	revision := document.Revision + 1
 	scope := EditorRealtimeScope(ref)
@@ -249,16 +203,16 @@ func (r *MemoryRepo) replaceEditorCollaborationSnapshotLocked(ref EditorDocument
 	}); err != nil {
 		return err
 	}
-	emptyDelta := EditorCollaborationDelta{}
+	emptyPatch := EditorHTMLPatch{}
 	r.editorCollaborationOperations[key] = append(r.editorCollaborationOperations[key], memoryEditorCollaborationOperation{
 		Input: EditorCollaborationOperationInput{
 			Document: ref, OperationID: operationID, ClientID: clientID, ActorUserID: actorUserID,
-			BaseRevision: document.Revision, Delta: emptyDelta,
+			BaseRevision: document.Revision, Patch: emptyPatch,
 		},
-		DeltaBytes: []byte(`{}`), EventID: eventID, Revision: revision, CommittedAt: now,
+		PatchBytes: []byte(`{"start_utf8":0,"delete_utf8":0,"insert":""}`), EventID: eventID,
+		Revision: revision, CommittedAt: now, RequiresSnapshot: true,
 	})
-	document.Ref, document.Revision, document.SnapshotRevision = ref, revision, revision
-	document.SnapshotState, document.AccumulatedDeltaBytes = CloneEditorCollaborationState(replacementState), 0
+	document.Ref, document.Revision, document.CanonicalHTML = ref, revision, html
 	document.Deleted, document.UpdatedTimestamp = false, now
 	r.editorCollaborationDocuments[key] = document
 	r.materializeEditorProjectionLocked(ref, html, revision, now)
@@ -269,14 +223,12 @@ func (r *MemoryRepo) tombstoneEditorCollaborationDocumentLocked(ref EditorDocume
 	key := editorDocumentMemoryKey(ref)
 	document, exists := r.editorCollaborationDocuments[key]
 	if !exists {
-		document = memoryEditorCollaborationDocument{Ref: ref, SnapshotState: NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))}
+		document = memoryEditorCollaborationDocument{Ref: ref, CanonicalHTML: r.initialEditorDocumentHTMLLocked(ref)}
 	}
 	if document.Deleted {
 		return nil
 	}
 	document.Revision++
-	document.Deleted, document.UpdatedTimestamp = true, now
-	r.editorCollaborationDocuments[key] = document
 	eventID, scope := newUUIDv7String(), EditorRealtimeScope(ref)
 	payload, _ := json.Marshal(map[string]any{
 		"type": EditorCollaborationTombstoneEventType, "event_id": eventID, "company_id": ref.CompanyID,
@@ -291,6 +243,16 @@ func (r *MemoryRepo) tombstoneEditorCollaborationDocumentLocked(ref EditorDocume
 	}); err != nil {
 		return err
 	}
+	r.editorCollaborationOperations[key] = append(r.editorCollaborationOperations[key], memoryEditorCollaborationOperation{
+		Input: EditorCollaborationOperationInput{
+			Document: ref, OperationID: operationID, ClientID: clientID, ActorUserID: actorUserID,
+			BaseRevision: document.Revision - 1, Patch: EditorHTMLPatch{},
+		},
+		PatchBytes: []byte(`{"start_utf8":0,"delete_utf8":0,"insert":""}`), EventID: eventID,
+		Revision: document.Revision, CommittedAt: now, RequiresSnapshot: true, Tombstone: true,
+	})
+	document.Deleted, document.UpdatedTimestamp = true, now
+	r.editorCollaborationDocuments[key] = document
 	r.deleteEditorProjectionLocked(ref)
 	return nil
 }
@@ -376,8 +338,8 @@ func (r *MemoryRepo) DeleteEditorCollaborationDocument(input EditorCollaboration
 	if err != nil {
 		return EditorCollaborationCommit{}, err
 	}
-	input.OperationID, input.ClientID = strings.TrimSpace(input.OperationID), strings.TrimSpace(input.ClientID)
-	if input.OperationID == "" || input.ClientID == "" {
+	input.OperationID, input.ClientID, input.ActorUserID = strings.TrimSpace(input.OperationID), strings.TrimSpace(input.ClientID), strings.TrimSpace(input.ActorUserID)
+	if input.OperationID == "" || input.ClientID == "" || len(input.OperationID) > 160 || len(input.ClientID) > 160 {
 		return EditorCollaborationCommit{}, ErrInvalid
 	}
 	r.mu.Lock()
@@ -386,34 +348,25 @@ func (r *MemoryRepo) DeleteEditorCollaborationDocument(input EditorCollaboration
 		return EditorCollaborationCommit{}, ErrNotFound
 	}
 	key := editorDocumentMemoryKey(ref)
-	document, exists := r.editorCollaborationDocuments[key]
-	if !exists {
-		document = memoryEditorCollaborationDocument{Ref: ref, SnapshotState: NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))}
+	for _, operation := range r.editorCollaborationOperations[key] {
+		if operation.Input.OperationID == input.OperationID {
+			return EditorCollaborationCommit{
+				OperationID: input.OperationID, EventID: operation.EventID, Revision: operation.Revision,
+				CommittedAt: operation.CommittedAt, Deduplicated: true,
+			}, nil
+		}
+	}
+	if document, exists := r.editorCollaborationDocuments[key]; exists && document.Deleted {
+		return EditorCollaborationCommit{}, ErrNotFound
 	}
 	now := time.Now().UTC()
-	document.Revision++
-	document.Deleted = true
-	document.UpdatedTimestamp = now
-	r.editorCollaborationDocuments[key] = document
-	eventID, scope := newUUIDv7String(), EditorRealtimeScope(ref)
-	payload, _ := json.Marshal(map[string]any{
-		"type": EditorCollaborationTombstoneEventType, "event_id": eventID, "company_id": ref.CompanyID,
-		"scope": scope, "resource_type": ref.ResourceType, "resource_id": ref.ResourceID,
-		"document_id": ref.DocumentID, "resource_revision": document.Revision, "committed_at": now,
-		"operation_id": input.OperationID, "client_id": input.ClientID,
-	})
-	if _, err := r.enqueueRealtimeOutboxLocked(RealtimeOutboxInput{
-		EventID: eventID, CompanyID: ref.CompanyID, Scope: scope, EventType: EditorCollaborationTombstoneEventType,
-		ResourceType: ref.ResourceType, ResourceID: ref.ResourceID, Permission: EntityPermissionEdit,
-		ResourceRevision: document.Revision, Payload: payload,
-	}); err != nil {
+	if err := r.tombstoneEditorCollaborationDocumentLocked(ref, input.OperationID, input.ClientID, input.ActorUserID, now); err != nil {
 		return EditorCollaborationCommit{}, err
 	}
-	r.deleteEditorProjectionLocked(ref)
-	snapshot, err := r.editorCollaborationSnapshotLocked(ref)
+	operation := r.editorCollaborationOperations[key][len(r.editorCollaborationOperations[key])-1]
 	return EditorCollaborationCommit{
-		OperationID: input.OperationID, EventID: eventID, Revision: document.Revision, CommittedAt: now, Snapshot: snapshot,
-	}, err
+		OperationID: input.OperationID, EventID: operation.EventID, Revision: operation.Revision, CommittedAt: now,
+	}, nil
 }
 
 func (r *MemoryRepo) editorResourceExistsLocked(ref EditorDocumentRef) bool {

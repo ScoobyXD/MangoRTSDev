@@ -39,7 +39,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import { editorCollaborationDeltaForHTML, newEditorCollaborationState } from "./editorCollaboration";
+import { editorHTMLPatchForChange } from "./editorCollaboration";
 import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
@@ -838,6 +838,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     linkedEntityID: linkedNodeID,
     documentInformationID,
     editorDocumentRef,
+    attachmentHydrationCleanupRef,
     documentDraftRef,
     persistedDocumentRef,
     documentRevisionRef,
@@ -1410,7 +1411,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         operation_id: operationID,
         client_id: `editor-image-node:${currentUserID}`,
         base_revision: 0,
-        delta: editorCollaborationDeltaForHTML(newEditorCollaborationState(""), document, operationID),
+        patch: editorHTMLPatchForChange("", document),
       }),
     });
     await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {

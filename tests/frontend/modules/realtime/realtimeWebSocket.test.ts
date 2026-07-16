@@ -94,8 +94,8 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(mailboxFolder.shared_inbox_id, "shared-1");
 });
 
-test("parses exact editor deltas, tombstones, and application heartbeats", () => {
-  const delta = parseRealtimeMessage(JSON.stringify({
+test("parses exact editor HTML patches, tombstones, and application heartbeats", () => {
+  const committed = parseRealtimeMessage(JSON.stringify({
     type: "editor.delta.committed",
     company_id: "company-1",
     scope: "editor:node:node-1:document-1",
@@ -106,10 +106,12 @@ test("parses exact editor deltas, tombstones, and application heartbeats", () =>
     resource_revision: 2,
     operation_id: "operation-1",
     client_id: "client-1",
-    delta: { inserts: [{ id: "atom-1", value: "A" }] },
+    patch: { start_utf8: 17, delete_utf8: 0, insert: "<strong>A</strong>" },
   }));
-  assert.equal(delta.type, "editor.delta.committed");
-  assert.equal(delta.scope, "editor:node:node-1:document-1");  const snapshotRequired = parseRealtimeMessage(JSON.stringify({
+  assert.equal(committed.type, "editor.delta.committed");
+  assert.equal(committed.scope, "editor:node:node-1:document-1");
+  assert.deepEqual("patch" in committed ? committed.patch : undefined, { start_utf8: 17, delete_utf8: 0, insert: "<strong>A</strong>" });
+  const snapshotRequired = parseRealtimeMessage(JSON.stringify({
     type: "editor.snapshot.required",
     company_id: "company-1",
     scope: "editor:node:node-1:document-1",
@@ -123,7 +125,7 @@ test("parses exact editor deltas, tombstones, and application heartbeats", () =>
     reason: "canonical_snapshot_replaced",
   }));
   assert.equal(snapshotRequired.type, "editor.snapshot.required");
-  assert.equal("delta" in snapshotRequired, false, "snapshot replacement events never fan out a full document delta");
+  assert.equal("patch" in snapshotRequired, false, "snapshot replacement events never fan out a full document body");
   const heartbeat = parseRealtimeMessage(JSON.stringify({ type: "heartbeat.confirmed", nonce: "nonce-1" }));
   assert.equal(heartbeat.type, "heartbeat.confirmed");
 });

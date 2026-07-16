@@ -949,6 +949,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     attachmentHydrationOwnerRef.current = null;
     owner?.cleanup();
   }, []);
+  const startAttachmentHydration = useCallback((element: HTMLDivElement) => {
+    if (!apiBase.trim() || !companyID.trim()) return;
+    attachmentHydrationOwnerRef.current = {
+      contextKey: `${apiBase.trim()}\u0000${companyID.trim()}`,
+      cleanup: hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
+        loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
+      )),
+    };
+  }, [apiBase, companyID]);
 
   const collaborationRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const applyCollaborativeDocument = useCallback((nextDocument: string) => {
@@ -959,11 +968,13 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onDocumentChange(nextDocument);
     if (editor) {
       const nextHTML = deserializeEditorDocumentHTML(nextDocument);
+      stopAttachmentHydration();
       if (editor.innerHTML !== nextHTML) editor.innerHTML = nextHTML;
+      startAttachmentHydration(editor);
       if (selection) setEditorSelectionByOffsets(editor, selection.start, selection.end);
       scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(editor));
     }
-  }, [onDocumentChange, scheduleTextBlockIndentGuideUpdate]);
+  }, [onDocumentChange, scheduleTextBlockIndentGuideUpdate, startAttachmentHydration, stopAttachmentHydration]);
   const collaboration = useCollaborativeEditorDocument({
     enabled: editable && Boolean(companyID.trim() && currentUserID.trim() && attachmentResourceID?.trim() && blockID.trim()),
     apiBase,
@@ -1048,14 +1059,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const selectionOffsets = preserveSelection ? getEditorSelectionOffsets(element) : null;
     stopAttachmentHydration();
     element.innerHTML = deserializeEditorDocumentHTML(value);
-    if (apiBase.trim() && companyID.trim()) {
-      attachmentHydrationOwnerRef.current = {
-        contextKey: `${apiBase.trim()}\u0000${companyID.trim()}`,
-        cleanup: hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
-          loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
-        )),
-      };
-    }
+    startAttachmentHydration(element);
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     pendingFontSizeRef.current = null;
     pendingHighlightColorRef.current = undefined;
@@ -1067,7 +1071,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     deferredExternalDocumentRef.current = null;
     scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(element));
     if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
-  }, [apiBase, companyID, documentTargetKey, restoreSelection, scheduleTextBlockIndentGuideUpdate, stopAttachmentHydration]);
+  }, [documentTargetKey, restoreSelection, scheduleTextBlockIndentGuideUpdate, startAttachmentHydration, stopAttachmentHydration]);
 
   useLayoutEffect(() => {
     const element = editorRef.current;

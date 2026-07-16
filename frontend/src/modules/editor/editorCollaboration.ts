@@ -1,48 +1,31 @@
-import type { EditorDeltaOp as Op } from "./quillDelta.js";
 import {
   realtimeEditorScope,
   subscribeRealtimeScope,
-  type RealtimeEditorDelta,
-  type RealtimeEditorDeltaCommittedMessage,
+  type RealtimeEditorHTMLPatch,
+  type RealtimeEditorPatchCommittedMessage,
   type RealtimeEditorDocumentDeletedMessage,
   type RealtimeEditorSnapshotRequiredMessage,
 } from "../realtime/realtimeWebSocket.js";
-import {
-  applyStructuredEditorOperation,
-  composeStructuredEditorOperations,
-  structuredEditorDocumentFromHTML,
-  structuredEditorDocumentToHTML,
-  structuredEditorOperationEmpty,
-  structuredEditorOperationForHTML,
-  transformStructuredEditorOperation,
-  type StructuredEditorDocument,
-  type StructuredEditorOperation,
-} from "./editorStructuredDocument.js";
-import {
-  EDITOR_RICH_TEXT_PREFIX,
-  recoverLegacyEscapedEditorDocumentHTML,
-} from "./richTextEditing.js";
 
 export type EditorCollaborationResourceType = "node" | "logic_gate" | "project";
-export type EditorCollaborationState = StructuredEditorDocument;
 export type EditorCollaborationSnapshot = {
   revision: number;
-  snapshot_revision: number;
-  state: EditorCollaborationState;
   html: string;
   etag: string;
   deleted?: boolean;
 };
 type EditorCollaborationCommit = {
   operation_id: string;
+  event_id?: string;
   revision: number;
   deduplicated?: boolean;
-  delta: RealtimeEditorDelta;
+  patch: RealtimeEditorHTMLPatch;
   concurrent_operations?: Array<{
     revision: number;
-    delta: RealtimeEditorDelta;
+    operation_id: string;
+    client_id: string;
+    patch: RealtimeEditorHTMLPatch;
   }>;
-  snapshot: EditorCollaborationSnapshot;
 };
 export type EditorCollaborationRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 export type EditorCollaborationControllerOptions = {
@@ -71,18 +54,26 @@ type PendingEditorOperation = {
   client_id: string;
   operation_id: string;
   base_revision: number;
-  delta: RealtimeEditorDelta;
+  patch: RealtimeEditorHTMLPatch;
   created_at: number;
 };
+type CommittedEditorPatch = {
+  revision: number;
+  operationID: string;
+  clientID: string;
+  patch: RealtimeEditorHTMLPatch;
+};
 
-const CLIENT_PREFIX = "mango-editor-collaboration-tab-v2:";
+const CLIENT_PREFIX = "mango-editor-collaboration-html-tab-v1:";
 const LEGACY_PREFIXES = [
   "mango-editor-projection-draft-v2",
   "mango-editor-projection-tab-v1",
   "mango-editor-collaboration-pending-v1:",
   "mango-editor-collaboration-client-v1:",
+  "mango-editor-collaboration-tab-v2:",
 ];
-const DB_NAME = "mango-editor-collaboration-v2";
+const LEGACY_STRUCTURED_DB_NAME = "mango-editor-collaboration-v2";
+const DB_NAME = "mango-editor-collaboration-html-v1";
 const DB_STORE = "pending_operations";
 const DB_VERSION = 1;
 export const EDITOR_COLLABORATION_OPERATION_TARGET_BYTES = 48 * 1024;
@@ -91,6 +82,8 @@ const EDITOR_COLLABORATION_FORBIDDEN_CONTENT = [
   "data:image/", ";base64,", "x-amz-credential", "x-amz-signature",
   "awsaccesskeyid", "presigned_url", "secret_access_key",
 ];
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", { fatal: true });
 
 function stableID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -136,6 +129,7 @@ export function cleanupLegacyEditorProjectionStorage(
       removed += 1;
     }
   }
+  if (typeof indexedDB !== "undefined") indexedDB.deleteDatabase(LEGACY_STRUCTURED_DB_NAME);
   return removed;
 }
 
@@ -146,15 +140,11 @@ function storageError(code: string, cause?: unknown): Error {
 }
 
 function openPendingDB(): Promise<IDBDatabase> {
-  if (typeof indexedDB === "undefined") {
-    return Promise.reject(storageError("editor_collaboration_storage_unavailable"));
-  }
+  if (typeof indexedDB === "undefined") return Promise.reject(storageError("editor_collaboration_storage_unavailable"));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(DB_STORE)) {
-        request.result.createObjectStore(DB_STORE, { keyPath: "storage_key" });
-      }
+      if (!request.result.objectStoreNames.contains(DB_STORE)) request.result.createObjectStore(DB_STORE, { keyPath: "storage_key" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(storageError(
@@ -175,30 +165,17 @@ async function pendingTransaction<T>(
   try {
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
-      const succeed = (value: T) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
+      const succeed = (value: T) => { if (!settled) { settled = true; resolve(value); } };
       const fail = (cause: unknown) => {
         if (settled) return;
         settled = true;
         const name = cause instanceof DOMException ? cause.name : "";
-        reject(storageError(
-          name === "QuotaExceededError"
-            ? "editor_collaboration_storage_quota_exceeded"
-            : "editor_collaboration_storage_failed",
-          cause,
-        ));
+        reject(storageError(name === "QuotaExceededError" ? "editor_collaboration_storage_quota_exceeded" : "editor_collaboration_storage_failed", cause));
       };
       const transaction = db.transaction(DB_STORE, mode);
       transaction.onerror = () => fail(transaction.error);
       transaction.onabort = () => fail(transaction.error);
-      try {
-        work(transaction.objectStore(DB_STORE), succeed, fail);
-      } catch (cause) {
-        fail(cause);
-      }
+      try { work(transaction.objectStore(DB_STORE), succeed, fail); } catch (cause) { fail(cause); }
     });
   } finally {
     db.close();
@@ -239,10 +216,7 @@ async function deletePending(records: PendingEditorOperation[]): Promise<void> {
   });
 }
 
-async function replacePending(
-  previous: PendingEditorOperation[],
-  replacement: PendingEditorOperation[],
-): Promise<void> {
+async function replacePending(previous: PendingEditorOperation[], replacement: PendingEditorOperation[]): Promise<void> {
   if (previous.length === 0 && replacement.length === 0) return;
   await pendingTransaction<void>("readwrite", (store, resolve, reject) => {
     const replacementKeys = new Set(replacement.map((record) => record.storage_key));
@@ -259,53 +233,12 @@ async function replacePending(
   });
 }
 
-function asStructured(operation: RealtimeEditorDelta): StructuredEditorOperation {
-  return operation as StructuredEditorOperation;
-}
-
-function asRealtime(operation: StructuredEditorOperation): RealtimeEditorDelta {
-  return operation as RealtimeEditorDelta;
-}
-
-export function newEditorCollaborationState(html: string): EditorCollaborationState {
-  return structuredEditorDocumentFromHTML(html);
-}
-
-export function applyEditorCollaborationDelta(
-  state: EditorCollaborationState,
-  delta: RealtimeEditorDelta,
-): EditorCollaborationState {
-  return applyStructuredEditorOperation(state, asStructured(delta));
-}
-
-function materializeRawEditorCollaborationState(state: EditorCollaborationState): string {
-  const html = structuredEditorDocumentToHTML(state);
-  return html ? EDITOR_RICH_TEXT_PREFIX + html : "";
-}
-
-export function materializeEditorCollaborationState(state: EditorCollaborationState): string {
-  const raw = materializeRawEditorCollaborationState(state);
-  return raw ? recoverLegacyEscapedEditorDocumentHTML(raw).document : "";
-}
-
-export function editorCollaborationDeltaForHTML(
-  state: EditorCollaborationState,
-  nextHTML: string,
-  _operationPrefix?: string,
-): RealtimeEditorDelta {
-  return asRealtime(structuredEditorOperationForHTML(state, nextHTML));
-}
-
-function emptyDelta(delta: RealtimeEditorDelta): boolean {
-  return structuredEditorOperationEmpty(asStructured(delta));
+function utf8Bytes(value: string): number {
+  return encoder.encode(value).byteLength;
 }
 
 function encodedBytes(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
-}
-
-function utf8Bytes(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
+  return encoder.encode(JSON.stringify(value)).byteLength;
 }
 
 function editorHTMLContainsForbiddenRealtimeContent(value: string): boolean {
@@ -313,12 +246,72 @@ function editorHTMLContainsForbiddenRealtimeContent(value: string): boolean {
   return EDITOR_COLLABORATION_FORBIDDEN_CONTENT.some((item) => lower.includes(item));
 }
 
-function operationRetain(position: number): Op[] {
-  return position > 0 ? [{ retain: position }] : [];
+function isHighSurrogate(value: number): boolean { return value >= 0xd800 && value <= 0xdbff; }
+function isLowSurrogate(value: number): boolean { return value >= 0xdc00 && value <= 0xdfff; }
+
+export function editorHTMLPatchForChange(currentHTML: string, nextHTML: string): RealtimeEditorHTMLPatch {
+  let prefix = 0;
+  const limit = Math.min(currentHTML.length, nextHTML.length);
+  while (prefix < limit && currentHTML.charCodeAt(prefix) === nextHTML.charCodeAt(prefix)) prefix += 1;
+  if (prefix > 0 && prefix < currentHTML.length && isHighSurrogate(currentHTML.charCodeAt(prefix - 1)) && isLowSurrogate(currentHTML.charCodeAt(prefix))) prefix -= 1;
+  let suffix = 0;
+  while (
+    suffix < currentHTML.length - prefix
+    && suffix < nextHTML.length - prefix
+    && currentHTML.charCodeAt(currentHTML.length - 1 - suffix) === nextHTML.charCodeAt(nextHTML.length - 1 - suffix)
+  ) suffix += 1;
+  const currentEnd = currentHTML.length - suffix;
+  const nextEnd = nextHTML.length - suffix;
+  return {
+    start_utf8: utf8Bytes(currentHTML.slice(0, prefix)),
+    delete_utf8: utf8Bytes(currentHTML.slice(prefix, currentEnd)),
+    insert: nextHTML.slice(prefix, nextEnd),
+  };
 }
 
-function insertedLength(insert: NonNullable<Op["insert"]>): number {
-  return typeof insert === "string" ? insert.length : 1;
+export function applyEditorHTMLPatch(html: string, patch: RealtimeEditorHTMLPatch): string {
+  const value = encoder.encode(html);
+  const end = patch.start_utf8 + patch.delete_utf8;
+  if (!Number.isInteger(patch.start_utf8) || !Number.isInteger(patch.delete_utf8) || patch.start_utf8 < 0 || patch.delete_utf8 < 0 || end > value.length) {
+    throw new Error("editor_collaboration_patch_out_of_range");
+  }
+  const inserted = encoder.encode(patch.insert);
+  const next = new Uint8Array(value.length - patch.delete_utf8 + inserted.length);
+  next.set(value.slice(0, patch.start_utf8), 0);
+  next.set(inserted, patch.start_utf8);
+  next.set(value.slice(end), patch.start_utf8 + inserted.length);
+  try { return decoder.decode(next); } catch { throw new Error("editor_collaboration_patch_breaks_utf8"); }
+}
+
+export function transformEditorHTMLPatch(
+  committed: RealtimeEditorHTMLPatch,
+  incoming: RealtimeEditorHTMLPatch,
+  incomingAfter = true,
+): RealtimeEditorHTMLPatch {
+  const result = { ...incoming };
+  const aStart = committed.start_utf8;
+  const aEnd = committed.start_utf8 + committed.delete_utf8;
+  const aInsert = utf8Bytes(committed.insert);
+  const bStart = incoming.start_utf8;
+  const bEnd = incoming.start_utf8 + incoming.delete_utf8;
+  const delta = aInsert - committed.delete_utf8;
+  if (incoming.delete_utf8 === 0) {
+    if (bStart < aStart) return result;
+    if (bStart > aEnd) result.start_utf8 += delta;
+    else if (bStart === aStart && committed.delete_utf8 === 0) { if (incomingAfter) result.start_utf8 += aInsert; }
+    else if (bStart >= aEnd) result.start_utf8 += delta;
+    else { result.start_utf8 = aStart + (incomingAfter ? aInsert : 0); }
+    return result;
+  }
+  if (bEnd <= aStart) return result;
+  if (bStart >= aEnd) { result.start_utf8 += delta; return result; }
+  const newStart = bStart >= aStart ? aStart + aInsert : bStart;
+  let newEnd = bEnd;
+  if (bEnd >= aEnd) newEnd = bEnd + delta;
+  else if (bEnd > aStart) newEnd = aStart;
+  result.start_utf8 = newStart;
+  result.delete_utf8 = Math.max(0, newEnd - newStart);
+  return result;
 }
 
 function splitInsertText(text: string): string[] {
@@ -326,74 +319,37 @@ function splitInsertText(text: string): string[] {
   let current = "";
   let currentBytes = 0;
   for (const codePoint of text) {
-    const codePointBytes = utf8Bytes(codePoint);
-    if (current && currentBytes + codePointBytes > 24 * 1024) {
+    const bytes = utf8Bytes(codePoint);
+    if (current && currentBytes + bytes > 24 * 1024) {
       chunks.push(current);
       current = codePoint;
-      currentBytes = codePointBytes;
+      currentBytes = bytes;
     } else {
       current += codePoint;
-      currentBytes += codePointBytes;
+      currentBytes += bytes;
     }
   }
-  if (current) chunks.push(current);
+  if (current || chunks.length === 0) chunks.push(current);
   return chunks;
 }
 
-function atomicStructuredOperations(delta: RealtimeEditorDelta): StructuredEditorOperation[] {
-  const output: StructuredEditorOperation[] = [];
-  let position = 0;
-  for (const operation of delta.ops) {
-    if (operation.retain) {
-      if (operation.attributes && Object.keys(operation.attributes).length > 0) {
-        output.push({ ops: [
-          ...operationRetain(position),
-          { retain: operation.retain, attributes: operation.attributes },
-        ] as Op[] });
-      }
-      position += operation.retain;
-      continue;
-    }
-    if (operation.delete) {
-      output.push({ ops: [...operationRetain(position), { delete: operation.delete }] });
-      continue;
-    }
-    if (operation.insert !== undefined) {
-      const values = typeof operation.insert === "string"
-        ? splitInsertText(operation.insert)
-        : [operation.insert];
-      for (const value of values) {
-        output.push({ ops: [
-          ...operationRetain(position),
-          { insert: value, attributes: operation.attributes },
-        ] as Op[] });
-        position += insertedLength(value as NonNullable<Op["insert"]>);
-      }
-    }
-  }
-  return output;
+export function splitEditorHTMLPatch(patch: RealtimeEditorHTMLPatch): RealtimeEditorHTMLPatch[] {
+  if (patch.delete_utf8 === 0 && patch.insert === "") return [];
+  if (encodedBytes(patch) <= EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) return [patch];
+  const chunks = splitInsertText(patch.insert);
+  const parts: RealtimeEditorHTMLPatch[] = [];
+  let position = patch.start_utf8;
+  chunks.forEach((chunk, index) => {
+    const part = { start_utf8: position, delete_utf8: index === 0 ? patch.delete_utf8 : 0, insert: chunk };
+    if (encodedBytes(part) > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) throw new Error("editor_collaboration_operation_exceeds_transport_limit");
+    parts.push(part);
+    position += utf8Bytes(chunk);
+  });
+  return parts;
 }
 
-export function splitEditorCollaborationDelta(delta: RealtimeEditorDelta): RealtimeEditorDelta[] {
-  if (emptyDelta(delta)) return [];
-  const parts: StructuredEditorOperation[] = [];
-  let current: StructuredEditorOperation = { ops: [] };
-  for (const atomic of atomicStructuredOperations(delta)) {
-    const candidate = current.ops.length === 0
-      ? atomic
-      : composeStructuredEditorOperations(current, atomic);
-    if (current.ops.length > 0 && encodedBytes(candidate) > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) {
-      parts.push(current);
-      current = atomic;
-    } else {
-      current = candidate;
-    }
-    if (encodedBytes(current) > EDITOR_COLLABORATION_OPERATION_TARGET_BYTES) {
-      throw new Error("editor_collaboration_operation_exceeds_transport_limit");
-    }
-  }
-  if (current.ops.length > 0) parts.push(current);
-  return parts.map(asRealtime);
+function patchesEqual(left: RealtimeEditorHTMLPatch, right: RealtimeEditorHTMLPatch): boolean {
+  return left.start_utf8 === right.start_utf8 && left.delete_utf8 === right.delete_utf8 && left.insert === right.insert;
 }
 
 export class EditorCollaborationController {
@@ -401,8 +357,9 @@ export class EditorCollaborationController {
   private readonly path: string;
   private readonly scope: string;
   private readonly pendingPrefix: string;
-  private confirmed: EditorCollaborationState;
-  private optimistic: EditorCollaborationState;
+  private confirmedHTML: string;
+  private optimisticHTML: string;
+  private renderedHTML: string;
   private revision = 0;
   private pending: PendingEditorOperation[] = [];
   private batchTimer: number | undefined;
@@ -411,16 +368,15 @@ export class EditorCollaborationController {
   private recoveryRequested = false;
   private drainPromise: Promise<void> | undefined;
   private persistenceChain: Promise<void> = Promise.resolve();
-  private eventChain: Promise<void> = Promise.resolve();
-  private buffered: RealtimeEditorDeltaCommittedMessage[] = [];
+  private stateChain: Promise<void> = Promise.resolve();
+  private buffered: RealtimeEditorPatchCommittedMessage[] = [];
   private deleted = false;
-  private renderedHTML: string;
   private stopped = false;
 
   constructor(private readonly options: EditorCollaborationControllerOptions) {
     this.clientID = tabClientID();
-    this.confirmed = newEditorCollaborationState(options.initialHTML);
-    this.optimistic = newEditorCollaborationState(options.initialHTML);
+    this.confirmedHTML = options.initialHTML;
+    this.optimisticHTML = options.initialHTML;
     this.renderedHTML = options.initialHTML;
     this.path = `/v1/editor-collaboration/${options.resourceType}/${options.resourceID}/documents/${options.documentID}?company_id=${encodeURIComponent(options.companyID)}`;
     this.scope = realtimeEditorScope(options.resourceType, options.resourceID, options.documentID);
@@ -433,7 +389,7 @@ export class EditorCollaborationController {
     const subscribe = this.options.subscribe ??
       ((apiBase, companyID, scope, handlers) => subscribeRealtimeScope(apiBase, companyID, scope, handlers));
     this.unsubscribe = subscribe(this.options.apiBase, this.options.companyID, this.scope, {
-      onEditorDeltaCommitted: (message) => this.enqueueCommitted(message),
+      onEditorPatchCommitted: (message) => this.enqueueCommitted(message),
       onEditorSnapshotRequired: (message) => this.handleSnapshotRequired(message),
       onEditorDocumentDeleted: (message) => this.handleDeleted(message),
       onRecover: () => this.recover(),
@@ -470,9 +426,9 @@ export class EditorCollaborationController {
     }
     this.renderedHTML = nextHTML;
     this.persistenceChain = this.persistenceChain.then(async () => {
-      const delta = editorCollaborationDeltaForHTML(this.optimistic, nextHTML);
-      if (emptyDelta(delta)) return;
-      const parts = splitEditorCollaborationDelta(delta);
+      const patch = editorHTMLPatchForChange(this.optimisticHTML, nextHTML);
+      const parts = splitEditorHTMLPatch(patch);
+      if (parts.length === 0) return;
       const createdAt = Date.now();
       const records = parts.map((part, index): PendingEditorOperation => {
         const operationID = operationIDForPart(index);
@@ -486,14 +442,14 @@ export class EditorCollaborationController {
           client_id: this.clientID,
           operation_id: operationID,
           base_revision: this.revision,
-          delta: part,
+          patch: part,
           created_at: createdAt + index,
         };
       });
       await putPending(records);
       for (const record of records) {
         this.pending.push(record);
-        this.optimistic = applyEditorCollaborationDelta(this.optimistic, record.delta);
+        this.optimisticHTML = applyEditorHTMLPatch(this.optimisticHTML, record.patch);
       }
       this.options.onPendingChange?.(this.pending.length);
       this.armDrain(immediate);
@@ -525,8 +481,9 @@ export class EditorCollaborationController {
     if (this.batchTimer !== undefined) window.clearTimeout(this.batchTimer);
     this.batchTimer = undefined;
     await this.persistenceChain;
-    await this.eventChain;
+    await this.stateChain;
     await this.drain();
+    await this.stateChain;
   }
 
   async recover(): Promise<void> {
@@ -539,9 +496,7 @@ export class EditorCollaborationController {
         this.recoveryRequested = false;
         await this.performRecovery();
       } while (this.recoveryRequested);
-    })().finally(() => {
-      this.recovery = undefined;
-    });
+    })().finally(() => { this.recovery = undefined; });
     return this.recovery;
   }
 
@@ -551,11 +506,12 @@ export class EditorCollaborationController {
     const snapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
     this.deleted = Boolean(snapshot.deleted);
     this.revision = snapshot.revision;
-    this.confirmed = snapshot.state;
+    this.confirmedHTML = snapshot.html;
     const records = new Map<string, PendingEditorOperation>();
     for (const record of [...mirrored, ...this.pending]) records.set(record.operation_id, record);
     this.pending = [...records.values()]
       .sort((left, right) => left.created_at - right.created_at || left.operation_id.localeCompare(right.operation_id));
+    this.optimisticHTML = this.confirmedHTML;
     if (this.deleted) {
       this.options.onPendingChange?.(this.pending.length);
       this.options.onDeleted?.();
@@ -563,48 +519,36 @@ export class EditorCollaborationController {
       this.unsubscribe = undefined;
       return;
     }
-
+    if (this.pending.length > 0) await this.drain();
+    const finalSnapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
+    if (finalSnapshot.deleted) {
+      this.deleted = true;
+      this.options.onDeleted?.();
+      return;
+    }
+    this.revision = finalSnapshot.revision;
+    this.confirmedHTML = finalSnapshot.html;
+    this.optimisticHTML = finalSnapshot.html;
     const buffered = this.buffered.splice(0)
       .filter((event) => event.resource_revision > this.revision)
       .sort((left, right) => left.resource_revision - right.resource_revision);
     for (const event of buffered) {
-      if (event.resource_revision !== this.revision + 1) {
-        this.recoveryRequested = true;
-        return;
-      }
-      await this.applyCommitted(event);
+      await this.applyCommittedCore({
+        revision: event.resource_revision,
+        operationID: event.operation_id,
+        clientID: event.client_id,
+        patch: event.patch,
+      }, false);
     }
-
-    if (this.pending.length > 0) await this.drain();
-    this.rebuild();
-    if (await this.repairLegacyEscapedDocumentIfNeeded()) return;
+    this.rebuildOptimistic();
     this.renderOptimistic("recovery", true);
-    this.options.onPendingChange?.(0);
-  }
-
-  private async repairLegacyEscapedDocumentIfNeeded(): Promise<boolean> {
-    const raw = materializeRawEditorCollaborationState(this.optimistic);
-    const recovered = recoverLegacyEscapedEditorDocumentHTML(raw);
-    if (!recovered.recovered) return false;
-    this.renderedHTML = recovered.document;
-    this.options.onHTML(recovered.document, "recovery");
-    const repairRevision = this.revision;
-    this.queueDocumentChange(
-      recovered.document,
-      true,
-      (index) => `legacy-escaped-rich-html-v1-${repairRevision}-${index}`,
-    );
-    await this.persistenceChain;
-    await this.drain();
-    return true;
+    this.options.onPendingChange?.(this.pending.length);
   }
 
   private async drain(): Promise<void> {
     await this.persistenceChain;
     if (this.drainPromise) return this.drainPromise;
-    this.drainPromise = this.performDrain().finally(() => {
-      this.drainPromise = undefined;
-    });
+    this.drainPromise = this.performDrain().finally(() => { this.drainPromise = undefined; });
     return this.drainPromise;
   }
 
@@ -613,7 +557,6 @@ export class EditorCollaborationController {
     while (!this.deleted) {
       const record = this.pending[0];
       if (!record) return;
-      const appliedRevision = this.revision;
       let commit: EditorCollaborationCommit;
       try {
         commit = await this.options.requestJSON<EditorCollaborationCommit>(this.path, {
@@ -622,7 +565,7 @@ export class EditorCollaborationController {
             operation_id: record.operation_id,
             client_id: record.client_id,
             base_revision: record.base_revision,
-            delta: record.delta,
+            patch: record.patch,
           }),
         });
       } catch (cause) {
@@ -634,31 +577,96 @@ export class EditorCollaborationController {
         continue;
       }
       snapshotRetryCount.delete(record.operation_id);
-      await deletePending([record]);
-      this.pending = this.pending.filter((item) => item.operation_id !== record.operation_id);
-      let submitted = asStructured(record.delta);
-      for (const operation of commit.concurrent_operations ?? []) {
-        if (operation.revision <= appliedRevision || operation.revision >= commit.revision) continue;
-        let remote = asStructured(operation.delta);
-        const originalSubmitted = submitted;
-        submitted = transformStructuredEditorOperation(remote, originalSubmitted, true);
-        remote = transformStructuredEditorOperation(originalSubmitted, remote, false);
-        for (const pending of this.pending) {
-          const original = asStructured(pending.delta);
-          pending.delta = asRealtime(transformStructuredEditorOperation(remote, original, true));
-          remote = transformStructuredEditorOperation(original, remote, false);
-        }
-      }
-      this.revision = commit.snapshot.revision;
-      this.confirmed = commit.snapshot.state;
-      if (this.pending.length > 0) {
-        for (const pending of this.pending) pending.base_revision = this.revision;
-        await putPending(this.pending);
-      }
-      this.rebuild();
-      this.renderOptimistic("remote");
-      this.options.onPendingChange?.(this.pending.length);
+      await this.enqueueState(() => this.processCommit(commit));
     }
+  }
+
+  private enqueueState(work: () => Promise<void>): Promise<void> {
+    const next = this.stateChain.then(work);
+    this.stateChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async processCommit(commit: EditorCollaborationCommit): Promise<void> {
+    const concurrent = [...(commit.concurrent_operations ?? [])].sort((left, right) => left.revision - right.revision);
+    for (const operation of concurrent) {
+      if (operation.revision <= this.revision) {
+        if (this.pending.some((item) => item.base_revision < operation.revision)) {
+          await this.rebasePendingAcrossCommittedPatch(operation.patch, operation.revision);
+        }
+        continue;
+      }
+      await this.applyCommittedCore({
+        revision: operation.revision,
+        operationID: operation.operation_id,
+        clientID: operation.client_id,
+        patch: operation.patch,
+      }, !this.recovery);
+    }
+    const local = this.pending.find((item) => item.operation_id === commit.operation_id);
+    if (commit.revision <= this.revision) {
+      if (local && commit.deduplicated) {
+        await deletePending([local]);
+        this.pending = this.pending.filter((item) => item !== local);
+        this.rebuildOptimistic();
+        this.options.onPendingChange?.(this.pending.length);
+      }
+      return;
+    }
+    await this.applyCommittedCore({
+      revision: commit.revision,
+      operationID: commit.operation_id,
+      clientID: local?.client_id ?? "acknowledgement",
+      patch: commit.patch,
+    }, !this.recovery);
+  }
+
+  private async rebasePendingAcrossCommittedPatch(patch: RealtimeEditorHTMLPatch, revision: number): Promise<void> {
+    let remote = patch;
+    for (const pending of this.pending) {
+      const original = pending.patch;
+      pending.patch = transformEditorHTMLPatch(remote, original, true);
+      remote = transformEditorHTMLPatch(original, remote, false);
+      pending.base_revision = Math.max(pending.base_revision, revision);
+    }
+    await putPending(this.pending);
+    this.rebuildOptimistic();
+  }
+
+  private async applyCommittedCore(operation: CommittedEditorPatch, render: boolean): Promise<void> {
+    if (operation.revision <= this.revision) return;
+    if (operation.revision !== this.revision + 1) throw new Error("collaboration_revision_gap");
+    const nextConfirmed = applyEditorHTMLPatch(this.confirmedHTML, operation.patch);
+    const localIndex = this.pending.findIndex((item) => item.operation_id === operation.operationID);
+    if (localIndex >= 0) {
+      if (localIndex !== 0 || !patchesEqual(this.pending[localIndex].patch, operation.patch)) {
+        throw new Error("collaboration_local_patch_rebase_mismatch");
+      }
+      const local = this.pending[localIndex];
+      await deletePending([local]);
+      this.pending.splice(localIndex, 1);
+      this.confirmedHTML = nextConfirmed;
+      this.revision = operation.revision;
+      for (const pending of this.pending) pending.base_revision = this.revision;
+      await putPending(this.pending);
+      if (this.recovery) this.rebuildOptimistic();
+      this.options.onPendingChange?.(this.pending.length);
+      return;
+    }
+    let remoteForOptimistic = operation.patch;
+    for (const pending of this.pending) {
+      const original = pending.patch;
+      const before = remoteForOptimistic;
+      pending.patch = transformEditorHTMLPatch(before, original, true);
+      remoteForOptimistic = transformEditorHTMLPatch(original, before, false);
+      pending.base_revision = operation.revision;
+    }
+    this.confirmedHTML = nextConfirmed;
+    this.revision = operation.revision;
+    this.optimisticHTML = applyEditorHTMLPatch(this.optimisticHTML, remoteForOptimistic);
+    await putPending(this.pending);
+    if (render) this.renderOptimistic("remote");
+    this.options.onPendingChange?.(this.pending.length);
   }
 
   private async reconcileSnapshotForPendingRetry(): Promise<void> {
@@ -674,14 +682,10 @@ export class EditorCollaborationController {
     }
     const targetHTML = this.renderedHTML;
     const previous = this.pending;
-    const replacementDeltas = splitEditorCollaborationDelta(
-      editorCollaborationDeltaForHTML(snapshot.state, targetHTML),
-    );
+    const patches = splitEditorHTMLPatch(editorHTMLPatchForChange(snapshot.html, targetHTML));
     const template = previous[0];
-    if (!template && replacementDeltas.length > 0) {
-      throw new Error("editor_collaboration_pending_reconciliation_failed");
-    }
-    const replacement = replacementDeltas.map((delta, index): PendingEditorOperation => {
+    if (!template && patches.length > 0) throw new Error("editor_collaboration_pending_reconciliation_failed");
+    const replacement = patches.map((patch, index): PendingEditorOperation => {
       const existing = previous[index];
       const operationID = existing?.operation_id ?? stableID();
       return {
@@ -694,70 +698,44 @@ export class EditorCollaborationController {
         client_id: template.client_id,
         operation_id: operationID,
         base_revision: snapshot.revision,
-        delta,
+        patch,
         created_at: existing?.created_at ?? Date.now() + index,
       };
     });
     await replacePending(previous, replacement);
     this.pending = replacement;
     this.revision = snapshot.revision;
-    this.confirmed = snapshot.state;
-    this.rebuild();
-    this.renderOptimistic("recovery", true);
+    this.confirmedHTML = snapshot.html;
+    this.rebuildOptimistic();
+    if (this.optimisticHTML !== targetHTML) this.renderOptimistic("recovery", true);
     this.options.onPendingChange?.(this.pending.length);
   }
 
-  private rebuild(): void {
-    this.optimistic = { ops: this.confirmed.ops.map((operation) => structuredClone(operation)) };
-    for (const record of this.pending) {
-      this.optimistic = applyEditorCollaborationDelta(this.optimistic, record.delta);
-    }
+  private rebuildOptimistic(): void {
+    this.optimisticHTML = this.confirmedHTML;
+    for (const record of this.pending) this.optimisticHTML = applyEditorHTMLPatch(this.optimisticHTML, record.patch);
   }
 
   private renderOptimistic(source: "remote" | "recovery", force = false): void {
-    const html = materializeEditorCollaborationState(this.optimistic);
-    if (!force && html === this.renderedHTML) return;
-    this.renderedHTML = html;
-    this.options.onHTML(html, source);
+    if (!force && this.optimisticHTML === this.renderedHTML) return;
+    this.renderedHTML = this.optimisticHTML;
+    this.options.onHTML(this.optimisticHTML, source);
   }
 
-  private enqueueCommitted(message: RealtimeEditorDeltaCommittedMessage): void {
+  private enqueueCommitted(message: RealtimeEditorPatchCommittedMessage): void {
     if (this.recovery) {
       this.buffered.push(message);
       return;
     }
-    this.eventChain = this.eventChain
-      .then(() => this.applyCommitted(message))
-      .catch((cause) => {
-        this.options.onError?.(cause);
-        return this.recover();
-      });
-  }
-
-  private async applyCommitted(message: RealtimeEditorDeltaCommittedMessage): Promise<void> {
-    if (message.resource_revision <= this.revision) return;
-    if (message.resource_revision !== this.revision + 1) {
-      throw new Error("collaboration_revision_gap");
-    }
-    this.confirmed = applyEditorCollaborationDelta(this.confirmed, message.delta);
-    this.revision = message.resource_revision;
-    const local = this.pending.find((item) => item.operation_id === message.operation_id);
-    if (local) {
-      await deletePending([local]);
-      this.pending = this.pending.filter((item) => item !== local);
-    } else if (this.pending.length > 0) {
-      let remote = asStructured(message.delta);
-      for (const pending of this.pending) {
-        const original = asStructured(pending.delta);
-        pending.delta = asRealtime(transformStructuredEditorOperation(remote, original, true));
-        remote = transformStructuredEditorOperation(original, remote, false);
-      }
-    }
-    for (const pending of this.pending) pending.base_revision = this.revision;
-    await putPending(this.pending);
-    this.rebuild();
-    if (!local) this.renderOptimistic("remote");
-    this.options.onPendingChange?.(this.pending.length);
+    void this.enqueueState(() => this.applyCommittedCore({
+      revision: message.resource_revision,
+      operationID: message.operation_id,
+      clientID: message.client_id,
+      patch: message.patch,
+    }, true)).catch((cause) => {
+      this.options.onError?.(cause);
+      void this.recover().catch((recoveryCause) => this.options.onError?.(recoveryCause));
+    });
   }
 
   private handleSnapshotRequired(message: RealtimeEditorSnapshotRequiredMessage): void {

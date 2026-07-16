@@ -7,9 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.0
 	github.com/aws/smithy-go v1.24.0
-	github.com/fmpwizard/go-quilljs-delta v0.0.6
 	github.com/jackc/pgx/v5 v5.7.6
-	golang.org/x/net v0.39.0
 	golang.org/x/sync v0.13.0
 )
 

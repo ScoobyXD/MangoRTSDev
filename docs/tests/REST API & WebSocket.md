@@ -5,7 +5,7 @@ Last updated: 2026-07-15
 Coverage Status:
 - RW51-RW54 and RW57 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `backend/internal/http/realtime_websocket_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. Backend realtime, collaboration HTTP/store, and disposable-PostgreSQL tests cover exact admission/publication authorization, revocation, retryable cursor behavior, atomic outbox rollback/retry/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend tests cover one shared socket, exact refcount, ticket bootstrap while health is degraded, heartbeat recovery, mutation gating, structured Quill Delta OT, IndexedDB recovery, and legacy cleanup. `scripts/run_realtime_production_path_tests.mjs` adds real Chrome DOM coverage through two API instances, PostgreSQL, authenticated HTTP, WebSocket/outbox delivery, multiple users/tabs, delivery reordering, lost acknowledgement, reconnect/gaps, rich paste, isolation, and revocation. Unrelated retained-family and mounted React races retain their stated partial coverage.
+- Business Logic Covered By Automated Tests: Partial overall. Backend realtime, collaboration HTTP/store, and disposable-PostgreSQL tests cover exact admission/publication authorization, revocation, retryable cursor behavior, atomic outbox rollback/retry/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend tests cover one shared socket, exact refcount, ticket bootstrap while health is degraded, heartbeat recovery, mutation gating, bounded rich-HTML patches, IndexedDB recovery, and legacy cleanup. `scripts/run_realtime_production_path_tests.mjs` adds real Chrome DOM coverage through two API instances, PostgreSQL, authenticated HTTP, WebSocket/outbox delivery, multiple users/tabs, delivery reordering, lost acknowledgement, reconnect/gaps, rich paste, image hydration, isolation, and revocation. Unrelated retained-family and mounted React races retain their stated partial coverage.
 
 ## Business Logic
 
@@ -15,7 +15,7 @@ RW3 - A browser reports an editor operation Saved only after the backend atomica
 RW4 - The whole-document checkpoint/revision-conflict endpoint, per-tab full-body drafts, restored-draft blocker, and end-user version-choice UI are deleted from migrated editors. Their routes reject migrated `Text box` writes/deletes rather than acting as a fallback.
 RW5 - A timeout or lost acknowledgement leaves the stable operation durable and retryable. Retrying the same operation ID deduplicates against a prior commit; it does not create duplicate content or imply failure before reconciliation.
 RW6 - Editor state distinguishes local pending, Saving, Saved, Reconnecting with changes stored locally, recovery/syncing, globally blocked reconnect attempts, and manual-refresh disconnected state without exposing merge-conflict engineering language.
-RW7 - Unacknowledged structured operations are retained durably under authenticated user, company, exact document, browser client, and operation ID and survive unmount, refresh, disconnect, and reconnect.
+RW7 - Unacknowledged HTML patches are retained durably under authenticated user, company, exact document, browser client, and operation ID and survive unmount, refresh, disconnect, and reconnect.
 RW8 - Timeout investigations must identify the exact HTTP method, route, request duration, and backend log line for the affected request.
 RW9 - Backend request logs must make it possible to distinguish slow durable writes from slow background reads or refetches.
 RW10 - Notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, the exact active mailbox, and exact collaborative editor documents all publish through the one durable outbox/shared-backplane/local-registry realtime spine. Payload/recovery rules differ, but no feature owns a second livestream system.
@@ -84,7 +84,7 @@ Given:
 - The frontend has access to the normal HTTP API.
 
 Expected:
-- Local editor mutations render immediately, become durable stable structured operations, and micro-batch through the exact collaboration HTTP route.
+- Local editor mutations render immediately, become durable stable HTML patches, and micro-batch through the exact collaboration HTTP route.
 - The backend authorizes the exact company/resource/document and atomically commits collaboration integration, next revision, canonical state, and outbox event before acknowledging Saved.
 - Every healthy exact subscriber applies the committed operation once through the shared cross-instance spine; unrelated scopes receive nothing and remote apply creates no echo save.
 - Reconnect/gap recovery restores the exact subscription, full snapshot/ETag, buffered order, and durable pending operations before green health.

@@ -2,6 +2,8 @@ import {
   EditorCollaborationController,
   type EditorCollaborationRequest,
 } from "../modules/editor/editorCollaboration.js";
+import { deserializeEditorDocumentHTML, EDITOR_RICH_TEXT_PREFIX, serializeEditorDocumentHTML } from "../modules/editor/richTextEditing.js";
+import { hydrateEditorAttachmentImageFrames } from "../modules/editor/editorImages.js";
 import {
   MangoRealtimeClient,
   type RealtimeSubscriptionHandlers,
@@ -44,6 +46,15 @@ let shouldDropNextBroadcast = false;
 let shouldDuplicateNextBroadcast = false;
 let nextBroadcastDelayMs = 0;
 let maxAckConcurrentOperations = 0;
+let attachmentHydrationCleanup: (() => void) | null = null;
+
+function renderStoredHTML(html: string): void {
+  attachmentHydrationCleanup?.();
+  editor.innerHTML = deserializeEditorDocumentHTML(html);
+  attachmentHydrationCleanup = hydrateEditorAttachmentImageFrames(editor, async () => URL.createObjectURL(new Blob([
+    '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#f59e0b"/></svg>',
+  ], { type: "image/svg+xml" })), { eager: true });
+}
 
 async function authenticatedFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
@@ -102,7 +113,7 @@ const controller = new EditorCollaborationController({
   requestJSON,
   onHTML: (html) => {
     applyingRemote = true;
-    editor.innerHTML = html;
+    renderStoredHTML(html);
     applyingRemote = false;
   },
   onPendingChange: (count) => {
@@ -120,16 +131,16 @@ const controller = new EditorCollaborationController({
   microBatchMs: 25,
   subscribe: (_api, _company, scope, handlers: RealtimeSubscriptionHandlers) => realtime.subscribe(scope, {
     ...handlers,
-    onEditorDeltaCommitted: (message) => {
+    onEditorPatchCommitted: (message) => {
       if (shouldDropNextBroadcast) {
         shouldDropNextBroadcast = false;
         return;
       }
       const deliver = () => {
-        handlers.onEditorDeltaCommitted?.(message);
+        handlers.onEditorPatchCommitted?.(message);
         if (shouldDuplicateNextBroadcast) {
           shouldDuplicateNextBroadcast = false;
-          handlers.onEditorDeltaCommitted?.(message);
+          handlers.onEditorPatchCommitted?.(message);
         }
       };
       if (nextBroadcastDelayMs > 0) {
@@ -154,24 +165,25 @@ const controller = new EditorCollaborationController({
 });
 
 editor.addEventListener("input", () => {
-  if (!applyingRemote) controller.schedule(editor.innerHTML);
+  if (!applyingRemote) controller.schedule(serializeEditorDocumentHTML(editor));
 });
 
 controller.start();
 window.__mangoE2E = {
   flush: () => controller.flush(),
   setHTML: (html, immediate = false) => {
-    editor.innerHTML = html;
-    controller.schedule(html, immediate);
+    const stored = html.startsWith(EDITOR_RICH_TEXT_PREFIX) ? html : EDITOR_RICH_TEXT_PREFIX + html;
+    renderStoredHTML(stored);
+    controller.schedule(serializeEditorDocumentHTML(editor), immediate);
   },
   getState: () => ({
-    html: editor.innerHTML,
+    html: serializeEditorDocumentHTML(editor),
     status: status.textContent ?? "",
     health: health.dataset.health ?? "",
     errors: [...errors],
     maxAckConcurrentOperations,
   }),
-  stop: () => { controller.stop(); },
+  stop: () => { attachmentHydrationCleanup?.(); attachmentHydrationCleanup = null; controller.stop(); },
   reconnect: () => {
     realtime.close();
     realtime.ensureOpen();

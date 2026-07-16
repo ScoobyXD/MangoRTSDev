@@ -53,7 +53,7 @@ N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, 
 N25 - Clicking Save flushes and acknowledges every pending structured collaboration operation, materializes the canonical collaboration head, then creates one manual saved editor version in `node_information`.
 N26 - Node automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active nodes, must only save nodes whose editor projection has changed, and must never scan or save every node in the system.
 N27 - Restoring a node saved version requires confirmation and overwrites the current node editor projection rows from that saved version without creating another saved-version row.
-N28 - Node text-box typing is converted to ordered 160 ms micro-batched structured operations. One acknowledged operation is in flight per exact document/client queue; later edits remain durable pending operations and never trigger overlapping whole-document projection writes.
+N28 - Node text-box typing is converted to ordered 160 ms micro-batched HTML patches. One acknowledged operation is in flight per exact document/client queue; later edits remain durable pending operations and never trigger overlapping whole-document projection writes.
 N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
 N30 - Node editor forced projection flushes must save only blocks that have changed and must not `Promise.all` every text block in the node. The flush must preserve all user characters by waiting for in-progress saves and then saving the latest content if newer edits arrived.
 N31 - Deleting a node text box uses an exact collaboration tombstone after any intended local flush. A late operation cannot recreate a terminal document, and attachment/email resources retain their separate node-owned lifecycle.
@@ -320,7 +320,7 @@ Expected:
 - Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
 - Saved-version history is requested only after Save Settings activation; initial open uses the exact collaboration snapshot/ETag.
 - Manual Save flushes and acknowledges pending operations, materializes the canonical collaboration head, then writes one saved-version batch.
-- Ordinary typing renders locally, becomes a durable structured operation, micro-batches briefly, and marks Saved only after commit acknowledgement.
+- Ordinary typing renders locally, becomes a durable HTML patch, micro-batches briefly, and marks Saved only after commit acknowledgement.
 - Two tabs/users editing the same exact text box both converge automatically through server-ordered revisions; neither receives a whole-document conflict or blocks behind a local-draft modal.
 - Another Node text box and unrelated Node/company scopes receive no event. Duplicate mounted local consumers share one network subscription, and last unmount unsubscribes.
 - Disconnect/reconnect retrieves a full snapshot, applies buffered above-snapshot events, reapplies stable pending operations, and returns green only after acknowledgements.

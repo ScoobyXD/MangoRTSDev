@@ -236,14 +236,14 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		}
 	})
 
-	t.Run("structured editor and canonical limit", func(t *testing.T) {
+	t.Run("rich HTML editor and canonical limit", func(t *testing.T) {
 		documentID := "00000000-0000-4000-8000-000000000121"
 		ref := EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: documentID}
 		forceRealtimeOutboxEvent(t, db, EditorCollaborationEventType, true)
 		if _, err := repo.CommitEditorCollaborationOperation(EditorCollaborationOperationInput{
 			Document: ref, OperationID: "pg-editor-outbox-failure", ClientID: "pg-editor-client",
 			ActorUserID: user.UserID, BaseRevision: 0,
-			Delta: EditorCollaborationDelta{Ops: []EditorCollaborationOp{{Insert: "hello"}}},
+			Patch: EditorHTMLPatch{Insert: "hello"},
 		}); err == nil {
 			t.Fatal("editor commit succeeded with forced outbox failure")
 		}
@@ -264,7 +264,7 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		if _, err := repo.CommitEditorCollaborationOperation(EditorCollaborationOperationInput{
 			Document: limitRef, OperationID: "pg-editor-too-large", ClientID: "pg-editor-client",
 			ActorUserID: user.UserID, BaseRevision: 0,
-			Delta: EditorCollaborationDelta{Ops: []EditorCollaborationOp{{Retain: len(text)}, {Insert: "y"}}},
+			Patch: EditorHTMLPatch{StartUTF8: EditorCollaborationDocumentMaxBytes, Insert: "y"},
 		}); !errors.Is(err, ErrEditorDocumentTooLarge) {
 			t.Fatalf("oversized editor commit error = %v", err)
 		}
