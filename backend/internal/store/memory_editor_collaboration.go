@@ -2,7 +2,6 @@ package store
 
 import (
 	"encoding/json"
-	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -28,6 +27,19 @@ type memoryEditorCollaborationOperation struct {
 
 func editorDocumentMemoryKey(ref EditorDocumentRef) string {
 	return ref.CompanyID + ":" + ref.ResourceType + ":" + ref.ResourceID + ":" + ref.DocumentID
+}
+
+func memoryConcurrentEditorOperations(operations []memoryEditorCollaborationOperation, baseRevision, beforeRevision int64) []EditorCollaborationRevisionOperation {
+	result := make([]EditorCollaborationRevisionOperation, 0)
+	for _, operation := range operations {
+		if operation.Revision <= baseRevision || operation.Revision >= beforeRevision || operation.Input.Delta.Ops == nil {
+			continue
+		}
+		result = append(result, EditorCollaborationRevisionOperation{
+			Revision: operation.Revision, Delta: operation.Input.Delta,
+		})
+	}
+	return result
 }
 
 func (r *MemoryRepo) GetEditorCollaborationSnapshot(ref EditorDocumentRef) (EditorCollaborationSnapshot, error) {
@@ -96,9 +108,11 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 			continue
 		}
 		snapshot, snapshotErr := r.editorCollaborationSnapshotLocked(input.Document)
+		concurrent := memoryConcurrentEditorOperations(r.editorCollaborationOperations[key], operation.Input.BaseRevision, operation.Revision)
 		return EditorCollaborationCommit{
 			OperationID: input.OperationID, EventID: operation.EventID, Revision: operation.Revision,
-			CommittedAt: operation.CommittedAt, Deduplicated: true, Snapshot: snapshot,
+			CommittedAt: operation.CommittedAt, Deduplicated: true, Delta: operation.Input.Delta,
+			ConcurrentOperations: concurrent, Snapshot: snapshot,
 		}, snapshotErr
 	}
 
@@ -112,23 +126,42 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	if document.Deleted {
 		return EditorCollaborationCommit{}, ErrNotFound
 	}
+	if input.BaseRevision > document.Revision {
+		return EditorCollaborationCommit{}, ErrVersionConflict
+	}
+	transformed := input.Delta
+	concurrent := make([]EditorCollaborationRevisionOperation, 0)
 	state := CloneEditorCollaborationState(document.SnapshotState)
 	for _, operation := range r.editorCollaborationOperations[key] {
-		if operation.Revision <= document.SnapshotRevision {
-			continue
+		if operation.Revision > document.SnapshotRevision {
+			state, err = ApplyEditorCollaborationDelta(state, operation.Input.Delta)
+			if err != nil {
+				return EditorCollaborationCommit{}, err
+			}
 		}
-		state, err = ApplyEditorCollaborationDelta(state, operation.Input.Delta)
-		if err != nil {
-			return EditorCollaborationCommit{}, err
+		if operation.Revision > input.BaseRevision {
+			concurrent = append(concurrent, EditorCollaborationRevisionOperation{Revision: operation.Revision, Delta: operation.Input.Delta})
+			transformed, err = TransformStructuredEditorOperation(operation.Input.Delta, transformed, true)
+			if err != nil {
+				return EditorCollaborationCommit{}, err
+			}
 		}
 	}
-	state, err = ApplyEditorCollaborationDelta(state, input.Delta)
+	input.Delta = transformed
+	deltaBytes, err = json.Marshal(input.Delta)
+	if err != nil || len(deltaBytes) > EditorCollaborationOperationMaxBytes {
+		return EditorCollaborationCommit{}, ErrInvalid
+	}
+	state, err = ApplyEditorCollaborationDelta(state, transformed)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
 	}
 	html, err := MaterializeEditorCollaborationState(state)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
+	}
+	if len([]byte(html)) > EditorCollaborationDocumentMaxBytes {
+		return EditorCollaborationCommit{}, ErrEditorDocumentTooLarge
 	}
 
 	now := time.Now().UTC()
@@ -171,7 +204,8 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	}
 	snapshot, err := r.editorCollaborationSnapshotLocked(input.Document)
 	return EditorCollaborationCommit{
-		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Snapshot: snapshot,
+		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Delta: input.Delta,
+		ConcurrentOperations: concurrent, Snapshot: snapshot,
 	}, err
 }
 
@@ -182,32 +216,20 @@ func (r *MemoryRepo) replaceEditorCollaborationSnapshotLocked(ref EditorDocument
 	}
 	key := editorDocumentMemoryKey(ref)
 	document, exists := r.editorCollaborationDocuments[key]
-	current := NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))
-	if exists {
-		snapshot, err := r.editorCollaborationSnapshotLocked(ref)
-		if err != nil {
-			return err
-		}
-		current = snapshot.State
-	} else {
-		document = memoryEditorCollaborationDocument{Ref: ref, SnapshotState: CloneEditorCollaborationState(current)}
+	if !exists {
+		document = memoryEditorCollaborationDocument{Ref: ref, SnapshotState: NewEditorCollaborationState(r.initialEditorDocumentHTMLLocked(ref))}
 	}
 	eventID := newUUIDv7String()
-	replacementState := EditorCollaborationState{}
-	for _, atom := range current.Atoms {
-		if !atom.Deleted {
-			atom.Deleted = true
-			replacementState.Atoms = append(replacementState.Atoms, atom)
-		}
+	replacementState, err := EditorCollaborationStateFromHTML(html)
+	if err != nil {
+		return err
 	}
-	afterID := ""
-	for index, value := range []rune(html) {
-		id := fmt.Sprintf("restore:%s:%08x", eventID, index)
-		replacementState.Atoms = append(replacementState.Atoms, EditorCollaborationAtom{ID: id, AfterID: afterID, Value: string(value)})
-		afterID = id
+	html, err = MaterializeEditorCollaborationState(replacementState)
+	if err != nil {
+		return err
 	}
-	if materialized, err := MaterializeEditorCollaborationState(replacementState); err != nil || materialized != html {
-		return ErrInvalid
+	if len([]byte(html)) > EditorCollaborationDocumentMaxBytes {
+		return ErrEditorDocumentTooLarge
 	}
 	revision := document.Revision + 1
 	scope := EditorRealtimeScope(ref)

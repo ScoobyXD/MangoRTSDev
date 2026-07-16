@@ -125,7 +125,21 @@ func (r *PostgresRepo) MarkRealtimeOutboxPublished(eventID, claimToken string) e
 		set published_timestamp = now(), claim_token = null, claim_expires_at = null,
 			last_error_category = null
 		where event_id = $1::uuid and claim_token = $2::uuid and published_timestamp is null`, eventID, claimToken)
-	return realtimeOutboxMutationResult(result, err)
+	if err := realtimeOutboxMutationResult(result, err); !errors.Is(err, ErrVersionConflict) {
+		return err
+	}
+	var alreadyPublished bool
+	if err := r.db.QueryRowContext(context.Background(), `
+		select exists(
+			select 1 from realtime_outbox
+			where event_id=$1::uuid and published_timestamp is not null
+		)`, eventID).Scan(&alreadyPublished); err != nil {
+		return err
+	}
+	if alreadyPublished {
+		return nil
+	}
+	return ErrVersionConflict
 }
 
 func (r *PostgresRepo) MarkRealtimeOutboxFailed(eventID, claimToken, category string) error {

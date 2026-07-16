@@ -2,8 +2,6 @@ package store
 
 import (
 	"errors"
-	"os"
-	"strings"
 	"testing"
 )
 
@@ -156,19 +154,5 @@ func TestMemoryBatchedWorkspaceEventsAndOutboxAreAtomic(t *testing.T) {
 	}
 	if len(events) != 2 || len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 1 {
 		t.Fatalf("committed batch events=%d stored=%d outbox=%d, want 2/2/1", len(events), len(repo.domainEvents), len(repo.realtimeOutbox))
-	}
-}
-
-func TestPostgresBatchedDomainEventsEnqueueRealtimeBeforeReturn(t *testing.T) {
-	sourceBytes, err := os.ReadFile("postgres_domain_events.go")
-	if err != nil {
-		t.Fatalf("read postgres_domain_events.go: %v", err)
-	}
-	body := extractFunctionSourceForTest(t, string(sourceBytes), "func (r *PostgresRepo) appendDomainEventsTx")
-	batchIndex := strings.LastIndex(body, "appendDomainEventBatchTx")
-	enqueueIndex := strings.LastIndex(body, "enqueueKanbanRealtimeForDomainEventsTx")
-	returnIndex := strings.LastIndex(body, "return events, nil")
-	if batchIndex < 0 || enqueueIndex <= batchIndex || returnIndex <= enqueueIndex {
-		t.Fatalf("optimized domain-event batch must enqueue realtime in the same tx before return")
 	}
 }

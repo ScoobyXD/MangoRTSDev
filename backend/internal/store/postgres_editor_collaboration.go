@@ -143,18 +143,35 @@ func (r *PostgresRepo) CommitEditorCollaborationOperation(input EditorCollaborat
 		if snapshotErr != nil {
 			return EditorCollaborationCommit{}, snapshotErr
 		}
+		concurrent, err := loadPostgresConcurrentEditorOperationsTx(ctx, tx, input.Document, existing.BaseRevision, existing.Revision-1)
+		if err != nil {
+			return EditorCollaborationCommit{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return EditorCollaborationCommit{}, err
 		}
 		return EditorCollaborationCommit{
 			OperationID: existing.OperationID, EventID: existing.EventID, Revision: existing.Revision,
-			CommittedAt: existing.CommittedAt, Deduplicated: true, Snapshot: snapshot,
+			CommittedAt: existing.CommittedAt, Deduplicated: true, Delta: existing.Delta,
+			ConcurrentOperations: concurrent, Snapshot: snapshot,
 		}, nil
 	}
 
+	if input.BaseRevision > document.Revision {
+		return EditorCollaborationCommit{}, ErrVersionConflict
+	}
 	state, _, err := reconstructPostgresEditorStateTx(ctx, tx, document)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
+	}
+	var concurrent []EditorCollaborationRevisionOperation
+	input.Delta, concurrent, err = transformPostgresEditorOperationTx(ctx, tx, document, input.BaseRevision, input.Delta)
+	if err != nil {
+		return EditorCollaborationCommit{}, err
+	}
+	deltaBytes, err = json.Marshal(input.Delta)
+	if err != nil || len(deltaBytes) > EditorCollaborationOperationMaxBytes {
+		return EditorCollaborationCommit{}, ErrInvalid
 	}
 	state, err = ApplyEditorCollaborationDelta(state, input.Delta)
 	if err != nil {
@@ -163,6 +180,9 @@ func (r *PostgresRepo) CommitEditorCollaborationOperation(input EditorCollaborat
 	html, err := MaterializeEditorCollaborationState(state)
 	if err != nil {
 		return EditorCollaborationCommit{}, err
+	}
+	if len([]byte(html)) > EditorCollaborationDocumentMaxBytes {
+		return EditorCollaborationCommit{}, ErrEditorDocumentTooLarge
 	}
 	now := time.Now().UTC()
 	revision := document.Revision + 1
@@ -240,7 +260,8 @@ func (r *PostgresRepo) CommitEditorCollaborationOperation(input EditorCollaborat
 		return EditorCollaborationCommit{}, err
 	}
 	return EditorCollaborationCommit{
-		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Snapshot: snapshot,
+		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Delta: input.Delta,
+		ConcurrentOperations: concurrent, Snapshot: snapshot,
 	}, nil
 }
 
@@ -253,36 +274,24 @@ func replacePostgresEditorCollaborationSnapshotTx(ctx context.Context, tx *sql.T
 	if err != nil {
 		return err
 	}
-	current := NewEditorCollaborationState("")
-	if found {
-		current, _, err = reconstructPostgresEditorStateTx(ctx, tx, document)
-		if err != nil {
-			return err
-		}
-	} else {
+	if !found {
 		initial, err := postgresInitialEditorDocumentHTMLTx(ctx, tx, ref)
 		if err != nil {
 			return err
 		}
-		current = NewEditorCollaborationState(initial)
-		document = postgresEditorCollaborationDocument{Ref: ref, SnapshotState: current}
+		document = postgresEditorCollaborationDocument{Ref: ref, SnapshotState: NewEditorCollaborationState(initial)}
 	}
 	eventID := newUUIDv7String()
-	replacementState := EditorCollaborationState{}
-	for _, atom := range current.Atoms {
-		if !atom.Deleted {
-			atom.Deleted = true
-			replacementState.Atoms = append(replacementState.Atoms, atom)
-		}
+	replacementState, err := EditorCollaborationStateFromHTML(html)
+	if err != nil {
+		return err
 	}
-	afterID := ""
-	for index, value := range []rune(html) {
-		id := fmt.Sprintf("restore:%s:%08x", eventID, index)
-		replacementState.Atoms = append(replacementState.Atoms, EditorCollaborationAtom{ID: id, AfterID: afterID, Value: string(value)})
-		afterID = id
+	html, err = MaterializeEditorCollaborationState(replacementState)
+	if err != nil {
+		return err
 	}
-	if materialized, err := MaterializeEditorCollaborationState(replacementState); err != nil || materialized != html {
-		return ErrInvalid
+	if len([]byte(html)) > EditorCollaborationDocumentMaxBytes {
+		return ErrEditorDocumentTooLarge
 	}
 	encodedSnapshot, err := json.Marshal(replacementState)
 	if err != nil {
@@ -616,13 +625,14 @@ func loadPostgresEditorCollaborationDocumentTx(ctx context.Context, tx *sql.Tx, 
 func loadPostgresEditorOperationByIDTx(ctx context.Context, tx *sql.Tx, ref EditorDocumentRef, operationID string) (postgresEditorCollaborationOperation, bool, error) {
 	var item postgresEditorCollaborationOperation
 	var actor sql.NullString
+	var encoded []byte
 	err := tx.QueryRowContext(ctx, `
-		select operation_id, client_id, actor_user_id::text, base_revision, event_id::text,
+		select operation_id, client_id, actor_user_id::text, base_revision, delta, event_id::text,
 			revision, committed_timestamp, is_tombstone
 		from editor_collaboration_operations
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid and document_id=$4::uuid and operation_id=$5`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, operationID,
-	).Scan(&item.OperationID, &item.ClientID, &actor, &item.BaseRevision, &item.EventID, &item.Revision, &item.CommittedAt, &item.Tombstone)
+	).Scan(&item.OperationID, &item.ClientID, &actor, &item.BaseRevision, &encoded, &item.EventID, &item.Revision, &item.CommittedAt, &item.Tombstone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return postgresEditorCollaborationOperation{}, false, nil
 	}
@@ -633,6 +643,9 @@ func loadPostgresEditorOperationByIDTx(ctx context.Context, tx *sql.Tx, ref Edit
 		item.ActorUserID = actor.String
 	}
 	item.CommittedAt = item.CommittedAt.UTC()
+	if err := json.Unmarshal(encoded, &item.Delta); err != nil {
+		return postgresEditorCollaborationOperation{}, false, err
+	}
 	return item, true, nil
 }
 
@@ -666,6 +679,77 @@ func reconstructPostgresEditorStateTx(ctx context.Context, tx *sql.Tx, document 
 		replayCount++
 	}
 	return state, replayCount, rows.Err()
+}
+
+func loadPostgresConcurrentEditorOperationsTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	ref EditorDocumentRef,
+	baseRevision int64,
+	throughRevision int64,
+) ([]EditorCollaborationRevisionOperation, error) {
+	rows, err := tx.QueryContext(ctx, `
+		select revision, delta
+		from editor_collaboration_operations
+		where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid and document_id=$4::uuid
+		  and revision > $5 and revision <= $6 and is_tombstone=false
+		order by revision`, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, baseRevision, throughRevision)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	operations := make([]EditorCollaborationRevisionOperation, 0)
+	for rows.Next() {
+		var operation EditorCollaborationRevisionOperation
+		var encoded []byte
+		if err := rows.Scan(&operation.Revision, &encoded); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(encoded, &operation.Delta); err != nil {
+			return nil, err
+		}
+		operations = append(operations, operation)
+	}
+	return operations, rows.Err()
+}
+
+func transformPostgresEditorOperationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	document postgresEditorCollaborationDocument,
+	baseRevision int64,
+	input EditorCollaborationDelta,
+) (EditorCollaborationDelta, []EditorCollaborationRevisionOperation, error) {
+	rows, err := tx.QueryContext(ctx, `
+		select revision, delta
+		from editor_collaboration_operations
+		where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid and document_id=$4::uuid
+		  and revision > $5 and revision <= $6 and is_tombstone=false
+		order by revision`, document.Ref.CompanyID, document.Ref.ResourceType, document.Ref.ResourceID,
+		document.Ref.DocumentID, baseRevision, document.Revision)
+	if err != nil {
+		return EditorCollaborationDelta{}, nil, err
+	}
+	defer rows.Close()
+	transformed := input
+	concurrent := make([]EditorCollaborationRevisionOperation, 0)
+	for rows.Next() {
+		var revision int64
+		var encoded []byte
+		if err := rows.Scan(&revision, &encoded); err != nil {
+			return EditorCollaborationDelta{}, nil, err
+		}
+		var committed EditorCollaborationDelta
+		if err := json.Unmarshal(encoded, &committed); err != nil {
+			return EditorCollaborationDelta{}, nil, err
+		}
+		concurrent = append(concurrent, EditorCollaborationRevisionOperation{Revision: revision, Delta: committed})
+		transformed, err = TransformStructuredEditorOperation(committed, transformed, true)
+		if err != nil {
+			return EditorCollaborationDelta{}, nil, err
+		}
+	}
+	return transformed, concurrent, rows.Err()
 }
 
 func postgresEditorCollaborationSnapshotTx(ctx context.Context, tx *sql.Tx, document postgresEditorCollaborationDocument) (EditorCollaborationSnapshot, error) {

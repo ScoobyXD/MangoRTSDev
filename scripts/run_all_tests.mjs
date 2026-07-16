@@ -19,6 +19,7 @@ function run(step, command, cwd) {
 run("Frontend relationship semantics tests", "npm run test:node-relationships", resolve(repoRoot, "frontend"));
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Backend Go tests", "go test ./...", resolve(repoRoot, "backend"));
+run("Realtime production-path PostgreSQL and browser tests", "node scripts/run_realtime_production_path_tests.mjs", repoRoot);
 run("Infrastructure attachment contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");

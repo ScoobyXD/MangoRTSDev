@@ -85,15 +85,6 @@ func optionalStringPointer(value *string) *string {
 	return &trimmed
 }
 
-func (s *Server) publishLogicGateAssignmentWorkspaceEvents(companyID, eventType string, result store.LogicGateNodeAssignmentResult) {
-	s.publishWorkspaceEvent(companyID, eventType, map[string]any{
-		"board_id": result.Card.BoardID,
-		"card_id":  result.Card.CardID,
-		"card":     result.Card,
-	})
-	s.publishWorkspaceEvent(companyID, "node_updated", map[string]any{"node_id": result.Node.NodeID, "node": result.Node})
-}
-
 func (s *Server) handleWorkItemMyWorkMatrixSubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/work-items/my-work-matrix/"), "/")
 	parts := strings.Split(trimmed, "/")

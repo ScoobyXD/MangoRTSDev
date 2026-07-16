@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -160,6 +161,8 @@ func (s *Server) handleEditorCollaborationDelete(w http.ResponseWriter, r *http.
 
 func writeEditorCollaborationStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrEditorDocumentTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "editor_collaboration_document_too_large")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_editor_operation")
 	case errors.Is(err, store.ErrVersionConflict):
@@ -169,6 +172,7 @@ func writeEditorCollaborationStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "editor_document_not_found")
 	default:
+		log.Printf("editor collaboration store failure: %v", err)
 		writeError(w, http.StatusInternalServerError, "editor_collaboration_failed")
 	}
 }

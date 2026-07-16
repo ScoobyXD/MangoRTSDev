@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -102,6 +103,31 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeNodes := maps.Clone(r.nodes)
+	beforeNodeText := maps.Clone(r.nodeText)
+	beforeNodeInfo := maps.Clone(r.nodeInfo)
+	beforeFolders := maps.Clone(r.folders)
+	beforeFolderItems := maps.Clone(r.folderItems)
+	beforeExplorerEntities := maps.Clone(r.companyExplorerV2Entities)
+	beforeExplorerEdges := maps.Clone(r.companyExplorerV2Edges)
+	beforeDefaultFolderSeed := maps.Clone(r.defaultFolderSeed)
+	beforeCollaborations := maps.Clone(r.emailCollaborations)
+	beforeParticipants := maps.Clone(r.emailCollaborationParticipants)
+	beforePermissions := maps.Clone(r.entityPermissions)
+	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
+	beforePermissionRevisions := maps.Clone(r.resourcePermissionRevisions)
+	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
+	beforeResourcePolicySequence := r.resourcePolicySequence
+	restore := func() {
+		r.nodes, r.nodeText, r.nodeInfo = beforeNodes, beforeNodeText, beforeNodeInfo
+		r.folders, r.folderItems = beforeFolders, beforeFolderItems
+		r.companyExplorerV2Entities, r.companyExplorerV2Edges = beforeExplorerEntities, beforeExplorerEdges
+		r.defaultFolderSeed = beforeDefaultFolderSeed
+		r.emailCollaborations, r.emailCollaborationParticipants = beforeCollaborations, beforeParticipants
+		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
+		r.resourcePermissionRevisions, r.workspaceReadVersions = beforePermissionRevisions, beforeWorkspaceReadVersions
+		r.resourcePolicySequence = beforeResourcePolicySequence
+	}
 	if _, ok := r.companies[input.CompanyID]; !ok {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
 	}
@@ -128,6 +154,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
 	r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, node.NodeID, node.Title, now, now)
 	if !r.placeEmailCollaborationNodeInDefaultFolderLocked(input.CompanyID, node.NodeID) {
+		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrInvalid
 	}
 	item := domain.CommunicationsEmailCollaboration{
@@ -143,9 +170,16 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	participant := domain.CommunicationsEmailCollaborationParticipant{CompanyID: input.CompanyID, CollaborationID: item.CollaborationID, UserID: input.CreatedByUserID, AddedByUserID: input.CreatedByUserID, AddedViaType: CommunicationsEmailCollaborationParticipantCreator, CreatedTimestamp: now}
 	r.emailCollaborationParticipants[emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, participant.UserID)] = participant
 	if err := r.grantCollaborationNodeEditLocked(input.CompanyID, node.NodeID, input.CreatedByUserID, now); err != nil {
+		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	r.bumpNodeViewVersionLocked(input.CompanyID, node.NodeID)
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
+		"node_id": node.NodeID, "email_collaboration_id": item.CollaborationID,
+	})); err != nil {
+		restore()
+		return CommunicationsEmailCollaborationEnsureResult{}, err
+	}
 	return CommunicationsEmailCollaborationEnsureResult{Collaboration: r.withCollaborationParticipantsLocked(item), Created: true}, nil
 }
 
@@ -306,6 +340,14 @@ func (r *MemoryRepo) UpdateCommunicationsEmailCollaborationMessage(input Communi
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeCollaborations := maps.Clone(r.emailCollaborations)
+	beforeOutbox := maps.Clone(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
+	restore := func() {
+		r.emailCollaborations = beforeCollaborations
+		r.realtimeOutbox = beforeOutbox
+		r.realtimeOutboxSequence = beforeOutboxSequence
+	}
 	item, ok := r.findCollaborationLocked(companyID, scope, message.ID, message.ThreadID)
 	if !ok {
 		return []string{}, nil
@@ -323,6 +365,23 @@ func (r *MemoryRepo) UpdateCommunicationsEmailCollaborationMessage(input Communi
 	userIDs := make([]string, 0, len(participants))
 	for _, participant := range participants {
 		userIDs = append(userIDs, participant.UserID)
+		if scope.scopeType == CommunicationsEmailCollaborationScopePersonal && participant.UserID == scope.personalUserID {
+			continue
+		}
+		for _, connection := range r.emailConnections {
+			if connection.UserID != participant.UserID || strings.TrimSpace(connection.Status) != "connected" || strings.TrimSpace(connection.GrantID) == "" {
+				continue
+			}
+			outbox, err := communicationsEmailCollaborationMailboxOutboxInput(companyID, participant.UserID, connection.AccountEmail, message)
+			if err != nil {
+				restore()
+				return nil, err
+			}
+			if _, err := r.enqueueRealtimeOutboxLocked(outbox); err != nil {
+				restore()
+				return nil, err
+			}
+		}
 	}
 	return userIDs, nil
 }

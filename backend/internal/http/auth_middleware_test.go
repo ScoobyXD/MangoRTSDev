@@ -809,3 +809,48 @@ func TestDeleteCompanyUserInvalidatesCachedCompanyAccess(t *testing.T) {
 		t.Fatalf("post-delete target access status = %d, want %d, body=%s", afterRes.Code, http.StatusForbidden, strings.TrimSpace(afterRes.Body.String()))
 	}
 }
+
+func TestTestAuthHeaderIsExplicitAndMembershipScoped(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111191"
+	repo.EnsureCompany(companyID, "Test auth boundary")
+	subject := "browser-test-auth-subject"
+	if _, err := repo.UpsertAuthUser(subject, subject+"@mangorts.test", "Browser Test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+
+	disabled := NewServerWithOptions(repo, ServerOptions{
+		DisableRealtimeSpine: true, DisableAttachmentUploadCleanup: true,
+	})
+	defer disabled.Close()
+	disabledRequest := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	disabledRequest.Header.Set("X-Mango-Test-Subject", subject)
+	disabledResponse := httptest.NewRecorder()
+	disabled.Routes().ServeHTTP(disabledResponse, disabledRequest)
+	if disabledResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("disabled test header status = %d, want %d", disabledResponse.Code, http.StatusUnauthorized)
+	}
+
+	enabled := NewServerWithOptions(repo, ServerOptions{
+		TestAuthHeaderEnabled: true, DisableRealtimeSpine: true, DisableAttachmentUploadCleanup: true,
+	})
+	defer enabled.Close()
+	meRequest := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	meRequest.Header.Set("X-Mango-Test-Subject", subject)
+	meResponse := httptest.NewRecorder()
+	enabled.Routes().ServeHTTP(meResponse, meRequest)
+	if meResponse.Code != http.StatusOK {
+		t.Fatalf("enabled test header status = %d, want %d, body=%s", meResponse.Code, http.StatusOK, meResponse.Body.String())
+	}
+
+	deniedRequest := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+companyID, nil)
+	deniedRequest.Header.Set("X-Mango-Test-Subject", "browser-test-auth-no-membership")
+	deniedResponse := httptest.NewRecorder()
+	enabled.Routes().ServeHTTP(deniedResponse, deniedRequest)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("unscoped test subject status = %d, want %d, body=%s", deniedResponse.Code, http.StatusForbidden, deniedResponse.Body.String())
+	}
+}

@@ -5,10 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const (
@@ -16,9 +14,8 @@ const (
 	EditorCollaborationTombstoneEventType        = "editor.document.deleted"
 	EditorCollaborationSnapshotRequiredEventType = "editor.snapshot.required"
 	EditorCollaborationOperationMaxBytes         = 64 * 1024
-	EditorCollaborationOperationMaxAtomCount     = 10000
-	EditorCollaborationAtomMaxRunes              = 1024
-	EditorCollaborationSnapshotCharAtomMaxRunes  = 4096
+	EditorCollaborationOperationMaxOpCount       = 10000
+	EditorCollaborationDocumentMaxBytes          = 2 * 1024 * 1024
 	EditorCollaborationCompactOperationCount     = 128
 	EditorCollaborationCompactDeltaBytes         = 512 * 1024
 	editorCollaborationTextBlockPrefix           = "<!-- mango-node-text-block-v1 -->"
@@ -31,20 +28,19 @@ type EditorDocumentRef struct {
 	DocumentID   string `json:"document_id"`
 }
 
-type EditorCollaborationAtom struct {
-	ID      string `json:"id"`
-	AfterID string `json:"after_id,omitempty"`
-	Value   string `json:"value"`
-	Deleted bool   `json:"deleted,omitempty"`
+type EditorCollaborationOp struct {
+	Insert     any            `json:"insert,omitempty"`
+	Retain     int            `json:"retain,omitempty"`
+	Delete     int            `json:"delete,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 type EditorCollaborationState struct {
-	Atoms []EditorCollaborationAtom `json:"atoms"`
+	Ops []EditorCollaborationOp `json:"ops"`
 }
 
 type EditorCollaborationDelta struct {
-	Inserts   []EditorCollaborationAtom `json:"inserts,omitempty"`
-	DeleteIDs []string                  `json:"delete_ids,omitempty"`
+	Ops []EditorCollaborationOp `json:"ops"`
 }
 
 type EditorCollaborationSnapshot struct {
@@ -68,13 +64,20 @@ type EditorCollaborationOperationInput struct {
 	Delta        EditorCollaborationDelta `json:"delta"`
 }
 
+type EditorCollaborationRevisionOperation struct {
+	Revision int64                    `json:"revision"`
+	Delta    EditorCollaborationDelta `json:"delta"`
+}
+
 type EditorCollaborationCommit struct {
-	OperationID  string                      `json:"operation_id"`
-	EventID      string                      `json:"event_id"`
-	Revision     int64                       `json:"revision"`
-	CommittedAt  time.Time                   `json:"committed_at"`
-	Deduplicated bool                        `json:"deduplicated,omitempty"`
-	Snapshot     EditorCollaborationSnapshot `json:"snapshot"`
+	OperationID          string                                 `json:"operation_id"`
+	EventID              string                                 `json:"event_id"`
+	Revision             int64                                  `json:"revision"`
+	CommittedAt          time.Time                              `json:"committed_at"`
+	Deduplicated         bool                                   `json:"deduplicated,omitempty"`
+	Delta                EditorCollaborationDelta               `json:"delta"`
+	ConcurrentOperations []EditorCollaborationRevisionOperation `json:"concurrent_operations,omitempty"`
+	Snapshot             EditorCollaborationSnapshot            `json:"snapshot"`
 }
 
 type EditorCollaborationDeleteInput struct {
@@ -202,30 +205,11 @@ func NormalizeEditorCollaborationOperation(input EditorCollaborationOperationInp
 	if input.OperationID == "" || len(input.OperationID) > 160 || input.ClientID == "" || len(input.ClientID) > 160 || input.BaseRevision < 0 {
 		return EditorCollaborationOperationInput{}, nil, ErrInvalid
 	}
-	if len(input.Delta.Inserts) == 0 && len(input.Delta.DeleteIDs) == 0 {
-		return EditorCollaborationOperationInput{}, nil, ErrInvalid
-	}
-	if len(input.Delta.Inserts)+len(input.Delta.DeleteIDs) > EditorCollaborationOperationMaxAtomCount {
-		return EditorCollaborationOperationInput{}, nil, ErrInvalid
-	}
-	for index := range input.Delta.Inserts {
-		atom := &input.Delta.Inserts[index]
-		atom.ID = strings.TrimSpace(atom.ID)
-		atom.AfterID = strings.TrimSpace(atom.AfterID)
-		atom.Deleted = false
-		valueRunes := utf8.RuneCountInString(atom.Value)
-		if atom.ID == "" || len(atom.ID) > 200 || len(atom.AfterID) > 200 || !utf8.ValidString(atom.Value) || valueRunes < 1 || valueRunes > EditorCollaborationAtomMaxRunes {
-			return EditorCollaborationOperationInput{}, nil, ErrInvalid
-		}
-	}
-	for index := range input.Delta.DeleteIDs {
-		input.Delta.DeleteIDs[index] = strings.TrimSpace(input.Delta.DeleteIDs[index])
-		if input.Delta.DeleteIDs[index] == "" || len(input.Delta.DeleteIDs[index]) > 200 {
-			return EditorCollaborationOperationInput{}, nil, ErrInvalid
-		}
+	if err := ValidateEditorCollaborationDelta(input.Delta); err != nil {
+		return EditorCollaborationOperationInput{}, nil, err
 	}
 	payload, err := json.Marshal(input.Delta)
-	if err != nil || len(payload) > EditorCollaborationOperationMaxBytes || editorDeltaContainsSensitiveContent(input.Delta) {
+	if err != nil || len(payload) > EditorCollaborationOperationMaxBytes || editorBytesContainSensitiveContent(payload) {
 		return EditorCollaborationOperationInput{}, nil, ErrInvalid
 	}
 	return input, payload, nil
@@ -240,109 +224,27 @@ func EditorRealtimeScope(ref EditorDocumentRef) string {
 }
 
 func NewEditorCollaborationState(html string) EditorCollaborationState {
-	runes := []rune(html)
-	atomRunes := 1
-	if len(runes) > EditorCollaborationSnapshotCharAtomMaxRunes {
-		atomRunes = EditorCollaborationAtomMaxRunes
+	state, err := EditorCollaborationStateFromHTML(html)
+	if err != nil {
+		return EditorCollaborationState{Ops: []EditorCollaborationOp{}}
 	}
-	atoms := make([]EditorCollaborationAtom, 0, (len(runes)+atomRunes-1)/atomRunes)
-	afterID := ""
-	for start, index := 0, 0; start < len(runes); start, index = start+atomRunes, index+1 {
-		end := min(start+atomRunes, len(runes))
-		id := fmt.Sprintf("0:%08x", index)
-		atoms = append(atoms, EditorCollaborationAtom{ID: id, AfterID: afterID, Value: string(runes[start:end])})
-		afterID = id
-	}
-	return EditorCollaborationState{Atoms: atoms}
+	return state
 }
 
 func CloneEditorCollaborationState(state EditorCollaborationState) EditorCollaborationState {
-	return EditorCollaborationState{Atoms: append([]EditorCollaborationAtom(nil), state.Atoms...)}
+	next := EditorCollaborationState{Ops: make([]EditorCollaborationOp, len(state.Ops))}
+	for index, operation := range state.Ops {
+		next.Ops[index] = cloneEditorOp(operation)
+	}
+	return next
 }
 
 func ApplyEditorCollaborationDelta(state EditorCollaborationState, delta EditorCollaborationDelta) (EditorCollaborationState, error) {
-	next := CloneEditorCollaborationState(state)
-	indexByID := make(map[string]int, len(next.Atoms)+len(delta.Inserts))
-	for index, atom := range next.Atoms {
-		if atom.ID == "" {
-			return EditorCollaborationState{}, ErrInvalid
-		}
-		if _, duplicate := indexByID[atom.ID]; duplicate {
-			return EditorCollaborationState{}, ErrInvalid
-		}
-		indexByID[atom.ID] = index
-	}
-	for _, atom := range delta.Inserts {
-		if _, duplicate := indexByID[atom.ID]; duplicate {
-			return EditorCollaborationState{}, ErrInvalid
-		}
-		if atom.AfterID != "" {
-			if _, exists := indexByID[atom.AfterID]; !exists {
-				return EditorCollaborationState{}, ErrVersionConflict
-			}
-		}
-		indexByID[atom.ID] = len(next.Atoms)
-		next.Atoms = append(next.Atoms, atom)
-	}
-	for _, id := range delta.DeleteIDs {
-		index, exists := indexByID[id]
-		if !exists {
-			return EditorCollaborationState{}, ErrVersionConflict
-		}
-		next.Atoms[index].Deleted = true
-	}
-	return next, nil
+	return ApplyStructuredEditorOperation(state, delta)
 }
 
 func MaterializeEditorCollaborationState(state EditorCollaborationState) (string, error) {
-	children := make(map[string][]EditorCollaborationAtom, len(state.Atoms))
-	seen := make(map[string]struct{}, len(state.Atoms))
-	for _, atom := range state.Atoms {
-		if atom.ID == "" {
-			return "", ErrInvalid
-		}
-		if _, duplicate := seen[atom.ID]; duplicate {
-			return "", ErrInvalid
-		}
-		seen[atom.ID] = struct{}{}
-		children[atom.AfterID] = append(children[atom.AfterID], atom)
-	}
-	for afterID, atoms := range children {
-		if afterID != "" {
-			if _, exists := seen[afterID]; !exists {
-				return "", ErrInvalid
-			}
-		}
-		slices.SortFunc(atoms, func(left, right EditorCollaborationAtom) int {
-			return -strings.Compare(left.ID, right.ID)
-		})
-		children[afterID] = atoms
-	}
-	var builder strings.Builder
-	visited := make(map[string]bool, len(state.Atoms))
-	var visit func(string) error
-	visit = func(afterID string) error {
-		for _, atom := range children[afterID] {
-			if visited[atom.ID] {
-				return ErrInvalid
-			}
-			visited[atom.ID] = true
-			if !atom.Deleted {
-				builder.WriteString(atom.Value)
-			}
-			if err := visit(atom.ID); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := visit(""); err != nil {
-		return "", err
-	}
-	if len(visited) != len(state.Atoms) {
-		return "", ErrInvalid
-	}
-	return builder.String(), nil
+	return MaterializeStructuredEditorState(state)
 }
 
 func EditorCollaborationSnapshotETag(revision int64, state EditorCollaborationState) string {
@@ -352,17 +254,8 @@ func EditorCollaborationSnapshotETag(revision int64, state EditorCollaborationSt
 }
 
 func editorDeltaContainsSensitiveContent(delta EditorCollaborationDelta) bool {
-	var inserted strings.Builder
-	for _, atom := range delta.Inserts {
-		inserted.WriteString(atom.Value)
-	}
-	value := strings.ToLower(inserted.String())
-	for _, forbidden := range []string{"data:image/", ";base64,", "x-amz-credential", "x-amz-signature", "awsaccesskeyid", "presigned_url", "secret_access_key"} {
-		if strings.Contains(value, forbidden) {
-			return true
-		}
-	}
-	return false
+	encoded, _ := json.Marshal(delta)
+	return editorBytesContainSensitiveContent(encoded)
 }
 
 func editorDocumentHTMLFromProjectionInformation(information string) string {

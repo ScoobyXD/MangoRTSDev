@@ -45,6 +45,9 @@ type Server struct {
 	realtimeSpineDisabled                   bool
 	realtimeSpineMu                         sync.Mutex
 	realtimeSpineCursor                     int64
+	realtimeSpineRetrySequence              int64
+	realtimeSpineRetryAttempts              int
+	realtimeSpineRetryAt                    time.Time
 	notifications                           *notifications.Service
 	kanban                                  *kanban.Service
 	workspaceDerivedCatchupCancel           context.CancelFunc
@@ -70,6 +73,7 @@ type Server struct {
 	nylasGate                               *nylasRequestGate
 	nylasWebhooks                           *nylasWebhookReceiptCache
 	authValidator                           AuthTokenValidator
+	testAuthHeaderEnabled                   bool
 	authCache                               *authMembershipCache
 	cognitoAdmin                            CognitoAdminClient
 	emailSender                             AuthEmailSender
@@ -89,6 +93,7 @@ type Server struct {
 type ServerOptions struct {
 	DisableAttachmentUploadCleanup          bool
 	AuthValidator                           AuthTokenValidator
+	TestAuthHeaderEnabled                   bool
 	AuthMembershipCacheTTL                  time.Duration
 	AuthMembershipCacheMaxEntries           int
 	CognitoAdmin                            CognitoAdminClient
@@ -200,6 +205,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasGate:                               newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:                           newNylasWebhookReceiptCache(),
 		authValidator:                           options.AuthValidator,
+		testAuthHeaderEnabled:                   options.TestAuthHeaderEnabled,
 		authCache:                               newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
 		cognitoAdmin:                            options.CognitoAdmin,
 		emailSender:                             options.EmailSender,

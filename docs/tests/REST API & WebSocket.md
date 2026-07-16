@@ -1,11 +1,11 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 # REST API & WebSocket Tests
 
 Coverage Status:
 - RW51-RW54 and RW57 have focused coverage in `backend/internal/http/realtime_audience_hardening_test.go`, `backend/internal/http/realtime_websocket_test.go`, `communications_singleflight_cancellation_test.go`, `communications_handlers_test.go`, and `tests/frontend/pages/home/homeMailboxRealtime.test.ts`; mounted React race coverage remains partial.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Backend realtime, collaboration HTTP/store, and cross-instance delivery tests cover exact admission/publication authorization, revocation, bounded stalled-client isolation, shared outbox recovery/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend realtime/editor tests cover one shared socket, exact refcount, application heartbeat recovery states, mutation gating, structured deltas, legacy cleanup, and source inventory. Existing retained-family and mailbox suites remain; real multi-browser rich DOM coverage remains partial.
+- Business Logic Covered By Automated Tests: Partial overall. Backend realtime, collaboration HTTP/store, and disposable-PostgreSQL tests cover exact admission/publication authorization, revocation, retryable cursor behavior, atomic outbox rollback/retry/idempotency, Node/Logic Gate/Project document isolation, and backend-A to backend-B delivery. Frontend tests cover one shared socket, exact refcount, heartbeat recovery, mutation gating, structured Quill Delta OT, IndexedDB recovery, and legacy cleanup. `scripts/run_realtime_production_path_tests.mjs` adds real Chrome DOM coverage through two API instances, PostgreSQL, authenticated HTTP, WebSocket/outbox delivery, multiple users/tabs, delivery reordering, lost acknowledgement, reconnect/gaps, rich paste, isolation, and revocation. Unrelated retained-family and mounted React races retain their stated partial coverage.
 
 ## Business Logic
 

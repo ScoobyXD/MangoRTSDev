@@ -245,6 +245,10 @@ func logicGateCreatedWorkspaceEventInput(item domain.LogicGate, meta workItemAss
 	return input
 }
 
+func logicGateUpdatedWorkspaceEventInput(item domain.LogicGate) DomainEventInput {
+	return workspaceDomainEventInput(item.CompanyID, "logic_gate_updated", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
+}
+
 func folderItemAssignedWorkspaceEventInput(item domain.CompanyExplorerFolderItem, meta workItemAssignmentEventMetadata) DomainEventInput {
 	input := workspaceDomainEventInput(item.CompanyID, "company_explorer_folder_item_assigned", map[string]any{
 		"folder_id":   item.FolderID,

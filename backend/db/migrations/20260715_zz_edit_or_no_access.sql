@@ -1,5 +1,3 @@
-begin;
-
 update resource_permissions
 set access_level = 'edit',
     updated_timestamp = now()
@@ -53,5 +51,3 @@ returns integer as $$
 $$ language sql immutable;
 
 drop function if exists mangorts_user_can_view_entity(uuid, text, uuid, uuid);
-
-commit;

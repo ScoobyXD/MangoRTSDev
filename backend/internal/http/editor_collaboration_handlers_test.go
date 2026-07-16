@@ -54,7 +54,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 
 	requestBody := map[string]any{
 		"operation_id": "http-operation-1", "client_id": "http-client", "base_revision": 0,
-		"delta": map[string]any{"inserts": []map[string]any{{"id": "http-operation-1:0", "value": "A"}}},
+		"delta": map[string]any{"ops": []map[string]any{{"insert": "A"}}},
 	}
 	created := doJSON(http.MethodPost, allowedToken, requestBody, "")
 	if created.Code != http.StatusOK {
@@ -83,7 +83,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	// An older valid base is integrated instead of becoming an end-user whole-document conflict.
 	concurrent := doJSON(http.MethodPost, allowedToken, map[string]any{
 		"operation_id": "http-operation-2", "client_id": "other-client", "base_revision": 0,
-		"delta": map[string]any{"inserts": []map[string]any{{"id": "http-operation-2:0", "value": "B"}}},
+		"delta": map[string]any{"ops": []map[string]any{{"insert": "B"}}},
 	}, "")
 	if concurrent.Code != http.StatusOK {
 		t.Fatalf("concurrent old-base status=%d body=%s", concurrent.Code, concurrent.Body.String())
@@ -131,7 +131,7 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	// Causal gaps are machine recovery signals, not user merge workflows.
 	gap := doJSON(http.MethodPost, allowedToken, map[string]any{
 		"operation_id": "http-operation-gap", "client_id": "http-client", "base_revision": 2,
-		"delta": map[string]any{"inserts": []map[string]any{{"id": "gap:0", "after_id": "missing", "value": "!"}}},
+		"delta": map[string]any{"ops": []map[string]any{{"retain": 999}, {"insert": "!"}}},
 	}, "")
 	if gap.Code != http.StatusConflict || !bytes.Contains(gap.Body.Bytes(), []byte("collaboration_snapshot_required")) {
 		t.Fatalf("gap status=%d body=%s", gap.Code, gap.Body.String())

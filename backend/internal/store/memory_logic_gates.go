@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -1049,4 +1050,59 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 		Information:   info,
 		Relationships: relationships,
 	}, nil
+}
+func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	beforeGates := maps.Clone(r.logicGates)
+	beforeBoards := maps.Clone(r.kanbanBoards)
+	beforeColumns := maps.Clone(r.kanbanColumns)
+	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header, DefaultAccess: ResourceDefaultAccessEdit, CreatedTimestamp: time.Now().UTC()}
+	r.logicGates[key(companyID, item.LogicGateID)] = item
+	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
+	item = r.withLogicGateGVICLocked(item)
+	event, err := r.appendDomainEventLocked(logicGateCreatedWorkspaceEventInput(item, workItemAssignmentEventMetadata{}))
+	if err != nil {
+		r.logicGates = beforeGates
+		r.kanbanBoards = beforeBoards
+		r.kanbanColumns = beforeColumns
+		return domain.LogicGate{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	beforeGates := maps.Clone(r.logicGates)
+	beforeBoards := maps.Clone(r.kanbanBoards)
+	beforeGVICProjection := maps.Clone(r.GVICMatrixProjectionRows)
+	beforeTimelineItems := maps.Clone(r.projectTimelineItems)
+	beforeTimelineProjection := maps.Clone(r.projectTimelineProjection)
+	k := key(companyID, logicGateID)
+	item, ok := r.logicGates[k]
+	if !ok {
+		return domain.LogicGate{}, domain.DomainEvent{}, ErrNotFound
+	}
+	item.Header = header
+	r.logicGates[k] = item
+	boardKeyValue := boardKey(companyID, LogicGateKanbanBoardID(logicGateID))
+	if board, ok := r.kanbanBoards[boardKeyValue]; ok && board.LogicGateID != nil {
+		board.Title = normalizeKanbanBoardTitle(board.BoardID, header)
+		board.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanBoards[boardKeyValue] = board
+	}
+	r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
+	item = r.withLogicGateGVICLocked(item)
+	event, err := r.appendDomainEventLocked(logicGateUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		r.logicGates = beforeGates
+		r.kanbanBoards = beforeBoards
+		r.GVICMatrixProjectionRows = beforeGVICProjection
+		r.projectTimelineItems = beforeTimelineItems
+		r.projectTimelineProjection = beforeTimelineProjection
+		return domain.LogicGate{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
 }
