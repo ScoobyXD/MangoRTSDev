@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-16
 
-Status: diagnosis complete. This document records the current sustained-interaction performance audit and the prioritized remediation plan. No performance fix described here has been implemented yet.
+Status: Phase 1 editor-input batching is implemented and verified on worker branch `codex/investigate-large-node-interaction-slowness0000598`; it has not been merged to `main`. The highlight, chat-rerender, eager-DOM, and image-pressure work remains open.
 
 ## Executive verdict
 
@@ -18,7 +18,75 @@ The main problems are:
 
 The report is not explained by one slow request. Open-time request costs exist, but the sustained lag after a node is open is mainly browser main-thread CPU, React rerender fan-out, DOM/layout/paint cost, image memory pressure, and per-input collaboration bookkeeping.
 
-## Ranked root causes
+## 2026-07-16 Phase 1 implementation: batched editor input
+
+### What changed
+
+Ordinary native and shared scripted typing now uses a real DOM input batch in every unified rich-editor surface:
+
+- The first edit in a burst captures one exact rich-HTML undo-before snapshot.
+- Later keystrokes continue mutating the browser's live DOM without another full undo snapshot, post-edit snapshot, sanitizer pass, or persistence serialization.
+- The batch flushes after 160 ms without input and cannot remain open longer than 500 ms during continuous typing.
+- Flush captures one undo-after snapshot and performs one sanitized full-document serialization. The same serialized HTML is reused for persistence instead of serializing again for the save.
+- The existing collaboration layer computes one bounded HTML delta from that batch and persists/submits it immediately, bypassing its old second 160 ms debounce.
+- Undo/redo, input-kind changes, keyboard navigation, pointer selection, paste/drop/cut, formatting, structural commands, blur, and unmount close the batch before their own work. IME composition is treated as one batch.
+
+The shared scheduler lives in `frontend/src/modules/editor/editorInputBatch.ts`. The unified DOM event integration and one-pass batch commit live in `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts`.
+
+### Quantified code-path reduction
+
+For `K` ordinary character inputs inside one batch, the audited path performed approximately:
+
+- `K` full undo-before serializations.
+- `K` full undo-after serializations.
+- `K` additional full persistence serializations.
+- `K` collaboration full-string checks/diffs, IndexedDB operation creations, and eventual backend operations.
+
+That was roughly `3K` whole-document sanitize/serialize passes around a typing burst.
+
+The new path performs:
+
+- One full undo-before serialization at batch start.
+- One full undo-after/persistence serialization at batch flush.
+- One collaboration full-string diff and durable operation for the batch, unless an unusually large insertion must be split by the existing transport limit.
+
+That is two whole-document serialize passes per batch instead of three per character. A ten-character burst therefore drops this specific static operation count from about 30 full serializations to 2, a reduction of roughly 93%. This is a code-path count, not a browser timing claim; representative large-node performance traces are still required.
+
+### Why undo still uses full snapshots
+
+The implementation deliberately keeps exact rich-HTML before/after snapshots for one batch rather than introducing a second undo delta format in the same change. Mango undo must restore tables, lists, mentions, image references, formatting, and selection offsets exactly. Reducing snapshot frequency from every character to one pair per batch removes the dominant repeated work while preserving that proven restoration model. Incremental undo storage remains a possible later memory optimization after browser profiling.
+
+### Realtime and durability protection
+
+A naive DOM debounce could lose local characters if a remote collaboration patch arrived during the 160-500 ms staging window. The implementation closes that race explicitly:
+
+- `EditorContent` and every Node/Project text block expose their pending DOM batch to the collaboration controller.
+- Before applying a remote commit, recovery snapshot, or snapshot-retry reconciliation, the controller forces the staged local batch through serialization and into the durable ordered pending-operation queue.
+- It waits for that IndexedDB persistence before advancing remote state, so the existing patch transform/rebase path preserves both edits.
+
+This wiring spans `editorCollaboration.ts`, `useCollaborativeEditorDocument.ts`, `useEditorDocumentPersistence.ts`, `EditorContent.tsx`, `NodeWorkspaceSurfaceParts.tsx`, and `UnifiedRichEditorSurface.tsx`.
+
+### Proof added
+
+- `editorInputBatch.test.ts` proves one before snapshot per burst, idle flush, bounded 500 ms maximum latency, IME timer deferral until composition ends, edit-kind boundaries, and no persistence work for a before-input event with no DOM mutation.
+- `editorToolbarInteractions.test.tsx` mounts the real shared editor, types three separate characters, proves no save occurs before the batch boundary, proves exactly one save afterward, and proves one undo restores the complete burst.
+- `editorCollaboration.test.ts` stages a local batch while a disjoint remote commit arrives and proves the local/remote HTML converges without data loss.
+- `unifiedRichEditorContract.test.ts` now owns the shared IME/batch integration contract.
+- `docs/tests/editor.md` ED43 and ED74 define the durable batching and realtime-ordering behavior.
+
+Verification completed so far:
+
+- `npm.cmd run test:node-relationships` — pass.
+- `npm.cmd run build` — pass.
+- `node scripts/run_all_tests.mjs` — pass (`All test suites passed.`).
+
+### What this phase does not solve
+
+This phase directly addresses the highest-value node typing hot path and reduces backend operation frequency for typing. It does not yet fix highlight geometry rescanning, per-input selection/mention state work, broad chat-composer rerenders, eager mounting of blocks/messages/images, the image load-all watchdog, or CSS paint pressure. Those remain ranked below.
+
+## Ranked root causes (audit baseline)
+
+The evidence below was captured at starting HEAD `ae96f883329a7c81d6be1af8c4971ed53218e59a`, before this branch's Phase 1 edits. Its paths and function names identify the audited owners, but the line numbers and per-input wording in causes 1 and 5 are historical baseline evidence; the implementation record above describes their current behavior. Causes 2-4 and the remaining contributors were not changed in Phase 1.
 
 ### 1. Confirmed: each node-editor keystroke performs repeated whole-document work
 

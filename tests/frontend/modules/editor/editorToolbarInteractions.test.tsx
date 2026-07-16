@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
+import { EDITOR_NATIVE_INPUT_IDLE_BATCH_MS } from "../../../../frontend/src/modules/editor/editorInputBatch.js";
 
 type Restore = () => void;
 
@@ -207,7 +208,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       });
       return button;
     };
-    const typeText = async (text: string) => {
+    const dispatchTextInput = async (text: string) => {
       await act(async () => {
         const beforeInput = new dom.window.InputEvent("beforeinput", {
           bubbles: true,
@@ -246,6 +247,17 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       await flushAsyncWork();
     };
 
+    const waitForInputBatch = async () => {
+      await act(async () => {
+        await new Promise<void>((resolve) => dom.window.setTimeout(resolve, EDITOR_NATIVE_INPUT_IDLE_BATCH_MS + 20));
+      });
+      await flushAsyncWork();
+    };
+    const typeText = async (text: string) => {
+      await dispatchTextInput(text);
+      await waitForInputBatch();
+    };
+
     const boldButton = container.querySelector<HTMLButtonElement>('button[aria-label="Bold"]');
     assert.ok(boldButton);
     assert.equal(boldButton.style.background, "transparent");
@@ -257,6 +269,20 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
     await act(async () => editorRoot.focus());
     await setTextSelection("seed", 4);
+    const beforeBurstSaves = savedDocuments.length;
+    await dispatchTextInput("a");
+    await dispatchTextInput("b");
+    await dispatchTextInput("c");
+    assert.equal(savedDocuments.length, beforeBurstSaves);
+    await waitForInputBatch();
+    assert.equal(savedDocuments.length, beforeBurstSaves + 1);
+    assert.ok(savedDocuments.at(-1)?.includes("seedabc"));
+    await act(async () => {
+      editorRoot.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    assert.equal(editorRoot.textContent, "seed");
+    await setTextSelection("seed", 4);
+
     for (let index = 0; index < 6; index += 1) {
       const plus = await pressToolbarButton("Increase font size");
       if (index === 2) await act(async () => plus.focus());

@@ -645,6 +645,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
+  const flushPendingLocalInputRef = useRef<() => void>(() => undefined);
   const indentGuideFrameRef = useRef<number | null>(null);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
@@ -851,6 +852,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     saveInFlightRef,
     setDocumentInformationID,
     setError,
+    flushPendingLocalInput: () => flushPendingLocalInputRef.current(),
     requestJSON,
     invalidateDocumentTargetCaches,
   });
@@ -2546,9 +2548,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     mentionMenu: documentMentionMenu,
     insertTable: insertDocumentTable,
     restoreSelection: restoreDocumentSelection,
+    flushPendingInput: flushDocumentInputBatch,
     ...documentSurfaceEventHandlers
   } = documentSurfaceHandlers;
   restoreDocumentSelectionForHydrationRef.current = restoreDocumentSelection;
+  flushPendingLocalInputRef.current = () => { flushDocumentInputBatch(editorDocumentRef.current); };
+  const restoreDocumentFormattingSelection = useCallback((root: HTMLElement) => {
+    flushDocumentInputBatch(root);
+    return restoreDocumentSelection(root);
+  }, [flushDocumentInputBatch, restoreDocumentSelection]);
   const logicFormattingController = useEditorDocumentFormattingController({
     editorRef: editorDocumentRef,
     editable: editorWriteEnabled && linkedEntityKind !== "node",
@@ -2558,7 +2566,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     pendingEditorHighlightColorRef,
     pendingEditorInlineFormatRef,
     pendingEditorTypingCaretRef,
-    restoreSelection: restoreDocumentSelection,
+    restoreSelection: restoreDocumentFormattingSelection,
     insertTable: insertDocumentTable,
     scheduleDocumentSave: scheduleDocumentSave,
     scheduleIndentGuideUpdate,

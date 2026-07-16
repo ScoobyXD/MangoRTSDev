@@ -800,6 +800,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const loadedDocumentTargetKeyRef = useRef(documentTargetKey);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
+  const flushPendingLocalInputRef = useRef<() => void>(() => undefined);
   const pendingFontSizeRef = useRef<number | null>(null);
   const pendingHighlightColorRef = useRef<EditorHighlightColor | null | undefined>(undefined);
   const pendingInlineFormatRef = useRef<EditorSelectionInlineFormatState | null>(null);
@@ -986,6 +987,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     initialHTML: documentValue,
     requestJSON: collaborationRequestJSON,
     onHTML: applyCollaborativeDocument,
+    flushPendingLocalInput: () => flushPendingLocalInputRef.current(),
     onDeleted: () => applyCollaborativeDocument(""),
     onError: () => onDocumentConflict?.(),
   });
@@ -1053,7 +1055,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionMenuPosition: "absolute",
     editorImageAttachmentContext,
   });
-  const { mentionMenu: documentMentionMenu, insertTable, restoreSelection, ...documentSurfaceHandlers } = handlers;
+  const { mentionMenu: documentMentionMenu, insertTable, restoreSelection, flushPendingInput, ...documentSurfaceHandlers } = handlers;
+  flushPendingLocalInputRef.current = () => { flushPendingInput(editorRef.current); };
+  const restoreFormattingSelection = useCallback((root: HTMLElement) => {
+    flushPendingInput(root);
+    return restoreSelection(root);
+  }, [flushPendingInput, restoreSelection]);
   const applyExternalDocumentValue = useCallback((element: HTMLDivElement, value: string, preserveSelection: boolean) => {
     if (preserveSelection) restoreSelection(element);
     const selectionOffsets = preserveSelection ? getEditorSelectionOffsets(element) : null;
@@ -1111,7 +1118,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     pendingEditorHighlightColorRef: pendingHighlightColorRef,
     pendingEditorInlineFormatRef: pendingInlineFormatRef,
     pendingEditorTypingCaretRef: pendingTypingCaretRef,
-    restoreSelection,
+    restoreSelection: restoreFormattingSelection,
     insertTable,
     scheduleDocumentSave: scheduleNodeDocumentSave,
     scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
