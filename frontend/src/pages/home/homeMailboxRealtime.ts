@@ -23,9 +23,13 @@ export type HomeMailboxRealtimeSignal = {
 
 export type HomeMailboxRealtimeRefreshPlan = {
   folders: boolean;
-  messageList: boolean;
   selectedDetail: boolean;
 };
+
+export type HomeMailboxLocalMutationEchoRegistry = Map<string, {
+  count: number;
+  expiresAt: number;
+}>;
 
 export type HomeMailboxRequestOwner = Readonly<{
   requestKey: string;
@@ -49,6 +53,7 @@ type HomeMailboxRealtimeCoordinatorOptions = {
   getRequestKey: () => string;
   getSelection: () => HomeMailboxRealtimeSelection;
   isRequestCurrent: (requestKey: string) => boolean;
+  isLocalMutationEcho?: (signal: HomeMailboxRealtimeSignal) => boolean;
   invalidate: (signal?: HomeMailboxRealtimeSignal) => void;
   reconcile: (plan: HomeMailboxRealtimeRefreshPlan, requestKey: string) => void | Promise<void>;
   onError?: (cause: unknown) => void;
@@ -75,9 +80,10 @@ type HomeMailboxFolderLoadState = {
 
 const EMPTY_PLAN: HomeMailboxRealtimeRefreshPlan = {
   folders: false,
-  messageList: false,
   selectedDetail: false,
 };
+
+const LOCAL_MUTATION_ECHO_TTL_MS = 5 * 60_000;
 
 export function homeMailboxRequestOwnerIsCurrent(
   owner: HomeMailboxRequestOwner,
@@ -289,6 +295,69 @@ export function homeMailboxRealtimeTargetKey(target: HomeMailboxRealtimeTarget |
   return companyID && scope ? `${companyID.length}:${companyID}${scope}` : "";
 }
 
+function homeMailboxLocalMutationEchoKey(scope: string, trigger: string, messageID: string): string {
+  const cleanScope = scope.trim();
+  const cleanTrigger = trigger.trim().toLowerCase();
+  const cleanMessageID = messageID.trim();
+  if (!cleanScope || !cleanTrigger || !cleanMessageID) return "";
+  return `${cleanScope.length}:${cleanScope}${cleanTrigger.length}:${cleanTrigger}${cleanMessageID}`;
+}
+
+function pruneHomeMailboxLocalMutationEchoes(registry: HomeMailboxLocalMutationEchoRegistry, now: number): void {
+  for (const [key, entry] of registry) {
+    if (entry.expiresAt <= now || entry.count <= 0) registry.delete(key);
+  }
+}
+
+export function rememberHomeMailboxLocalMutationEchoes(
+  registry: HomeMailboxLocalMutationEchoRegistry,
+  scope: string,
+  trigger: string,
+  messageIDs: readonly string[],
+  now = Date.now(),
+): void {
+  pruneHomeMailboxLocalMutationEchoes(registry, now);
+  for (const messageID of new Set(messageIDs.map((id) => id.trim()).filter(Boolean))) {
+    const key = homeMailboxLocalMutationEchoKey(scope, trigger, messageID);
+    if (!key) continue;
+    const current = registry.get(key);
+    registry.set(key, {
+      count: (current?.count ?? 0) + 1,
+      expiresAt: Math.max(current?.expiresAt ?? 0, now + LOCAL_MUTATION_ECHO_TTL_MS),
+    });
+  }
+}
+
+export function forgetHomeMailboxLocalMutationEchoes(
+  registry: HomeMailboxLocalMutationEchoRegistry,
+  scope: string,
+  trigger: string,
+  messageIDs: readonly string[],
+): void {
+  for (const messageID of new Set(messageIDs.map((id) => id.trim()).filter(Boolean))) {
+    const key = homeMailboxLocalMutationEchoKey(scope, trigger, messageID);
+    if (!key) continue;
+    const current = registry.get(key);
+    if (!current || current.count <= 1) registry.delete(key);
+    else registry.set(key, { ...current, count: current.count - 1 });
+  }
+}
+
+export function consumeHomeMailboxLocalMutationEcho(
+  registry: HomeMailboxLocalMutationEchoRegistry,
+  signal: HomeMailboxRealtimeSignal,
+  now = Date.now(),
+): boolean {
+  pruneHomeMailboxLocalMutationEchoes(registry, now);
+  const key = homeMailboxLocalMutationEchoKey(signal.scope, signal.trigger, signal.message_id ?? "");
+  if (!key) return false;
+  const current = registry.get(key);
+  if (!current) return false;
+  if (current.count <= 1) registry.delete(key);
+  else registry.set(key, { ...current, count: current.count - 1 });
+  return true;
+}
+
 export function homeMailboxRealtimeRefreshPlan(
   signal: HomeMailboxRealtimeSignal,
   selection: HomeMailboxRealtimeSelection,
@@ -309,7 +378,6 @@ export function homeMailboxRealtimeRefreshPlan(
   );
   return {
     folders: isMessageChange || isFolderChange,
-    messageList: isMessageChange,
     selectedDetail,
   };
 }
@@ -348,7 +416,6 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
     const requestIsCurrent = options.isRequestCurrent(scheduled.requestKey);
     const plan = {
       folders: scheduled.plan.folders,
-      messageList: scheduled.plan.messageList && requestIsCurrent,
       selectedDetail: scheduled.plan.selectedDetail
         && requestIsCurrent
         && selectionMatches(scheduled.detailOwner, options.getSelection()),
@@ -393,10 +460,10 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
     accepted() {
       if (disposed) return;
       options.invalidate();
-      schedule({ folders: true, messageList: true, selectedDetail: false });
     },
     changed(signal: HomeMailboxRealtimeSignal) {
       if (disposed || signal.scope.trim() !== options.target.scope) return;
+      if (options.isLocalMutationEcho?.(signal)) return;
       const selection = options.getSelection();
       const plan = homeMailboxRealtimeRefreshPlan(signal, selection);
       if (!hasRefreshWork(plan)) return;
@@ -430,11 +497,10 @@ function mergePlans(
 ): HomeMailboxRealtimeRefreshPlan {
   return {
     folders: left.folders || right.folders,
-    messageList: left.messageList || right.messageList,
     selectedDetail: left.selectedDetail || right.selectedDetail,
   };
 }
 
 function hasRefreshWork(plan: HomeMailboxRealtimeRefreshPlan): boolean {
-  return plan.folders || plan.messageList || plan.selectedDetail;
+  return plan.folders || plan.selectedDetail;
 }

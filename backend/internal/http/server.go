@@ -69,7 +69,6 @@ type Server struct {
 	communicationsFolderFlights             singleflight.Group
 	communicationsMessageFlights            singleflight.Group
 	communicationsMessagePageFlights        singleflight.Group
-	commArchiveMutations                    *communicationsArchiveMutationTracker
 	nylasGate                               *nylasRequestGate
 	nylasWebhooks                           *nylasWebhookReceiptCache
 	authValidator                           AuthTokenValidator
@@ -201,7 +200,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		communicationsArchiveWorkerDisabled:     options.DisableCommunicationsArchiveWorker,
 		metrics:                                 metrics,
 		commCache:                               newCommunicationsCache(),
-		commArchiveMutations:                    newCommunicationsArchiveMutationTracker(),
 		nylasGate:                               newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:                           newNylasWebhookReceiptCache(),
 		authValidator:                           options.AuthValidator,

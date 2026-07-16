@@ -137,6 +137,18 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homeParts, /onLoadMessageBody/);
 });
 
+test("mailbox realtime and non-primary tabs keep bounded request budgets", () => {
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
+  const realtime = source("frontend/src/pages/home/homeMailboxRealtime.ts");
+
+  assert.doesNotMatch(homePage, /EVENT_NOTIFICATIONS_UPDATED/);
+  assert.doesNotMatch(homePage, /SELF_SEND_DELIVERY_REFRESH_DELAY_MS/);
+  assert.doesNotMatch(homePage, /plan\.messageList/);
+  assert.doesNotMatch(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 120/);
+  assert.match(homePage, /isLocalMutationEcho: \(signal\) => consumeHomeMailboxLocalMutationEcho/);
+  assert.match(realtime, /accepted\(\) \{[\s\S]{0,100}options\.invalidate\(\);[\s\S]{0,100}\}/);
+});
+
 test("personal and shared mail rows expose unread, selected, thread, and keyboard semantics", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");

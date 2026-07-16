@@ -418,7 +418,6 @@ func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEma
 		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 	}
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
-	s.rememberRecentCommunicationsArchiveMutation(cacheScope, result.ArchivedIDs, now)
 }
 
 func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {
@@ -705,7 +704,6 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "primary", now)
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, archived, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
-	s.rememberRecentCommunicationsArchiveMutation(cacheScope, []string{messageID}, now)
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
 }
 
