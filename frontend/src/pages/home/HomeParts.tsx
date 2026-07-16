@@ -6345,8 +6345,8 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   React.useLayoutEffect(() => {
     setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
     const newestMessage = canonicalConversationMessages[canonicalConversationMessages.length - 1];
-    if (newestMessage && !emailMessageBodyIsLoaded(newestMessage)) void loadConversationMessageBody(newestMessage);
-  }, [loadConversationMessageBody, newestMessageID]);
+    if (!loading && newestMessage && !emailMessageBodyIsLoaded(newestMessage)) void loadConversationMessageBody(newestMessage);
+  }, [loadConversationMessageBody, loading, newestMessageID]);
   React.useLayoutEffect(() => {
     if (singleMessage || conversationOrder !== "oldest") return undefined;
     const scrollIdentity = `${conversationIdentity}:${conversationMessages.length}`;

@@ -163,6 +163,12 @@ export function emailMessageRowKey(message: Pick<EmailMessage, "id" | "client_so
   return JSON.stringify([message.client_source_scope_key?.trim() || "mailbox", message.id.trim()]);
 }
 
+export function nextEmailMessageAfterRemoval(messages: EmailMessage[], selectedRowKey: string): EmailMessage | null {
+  const selectedIndex = messages.findIndex((message) => emailMessageRowKey(message) === selectedRowKey);
+  if (selectedIndex < 0) return null;
+  return messages[selectedIndex + 1] ?? messages[selectedIndex - 1] ?? null;
+}
+
 export function emailThreadKey(message: Pick<EmailMessage, "id" | "thread_id" | "client_source_scope_key">): string {
   const sourceScopeKey = message.client_source_scope_key?.trim() || "mailbox";
   const threadID = (message.thread_id ?? "").trim();
@@ -178,6 +184,14 @@ export function emailThreadMessageCount(message: Pick<EmailMessage, "thread_mess
 
 export function emailMessageHasMultipleThreadMessages(message: Pick<EmailMessage, "thread_message_count">): boolean {
   return emailThreadMessageCount(message) > 1;
+}
+
+export function emailConversationShouldShowLoadingShell(
+  message: Pick<EmailMessage, "thread_message_count">,
+  threadMessages: EmailMessage[],
+  loading: boolean,
+): boolean {
+  return loading && emailMessageHasMultipleThreadMessages(message) && threadMessages.length <= 1;
 }
 
 export function emailMessageRowAriaLabel(
@@ -211,6 +225,14 @@ export type EmailConversationOrder = "newest" | "oldest";
 export function orderEmailConversationMessages(messages: EmailMessage[], order: EmailConversationOrder): EmailMessage[] {
   const newestFirst = sortEmailConversationMessagesNewestFirst(messages);
   return order === "oldest" ? newestFirst.reverse() : newestFirst;
+}
+
+export function emailMessagesForOrderedPage(
+  messages: EmailMessage[],
+  order: EmailConversationOrder,
+  limit: number,
+): EmailMessage[] {
+  return orderEmailConversationMessages(messages, order).slice(0, Math.max(0, Math.floor(limit)));
 }
 
 export function condenseEmailThreadMessages(messages: EmailMessage[]): EmailMessage[] {
@@ -1068,8 +1090,9 @@ export function messageListFilterKey(
   query: string,
   unreadOnly: boolean,
   mailboxScopeKey = "",
+  order: EmailConversationOrder = "newest",
 ): string {
-  return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly, mailboxScopeKey.trim()]);
+  return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly, mailboxScopeKey.trim(), order]);
 }
 
 export function emailMailboxScopeKey(

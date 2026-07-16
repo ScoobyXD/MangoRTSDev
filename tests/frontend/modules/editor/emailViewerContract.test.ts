@@ -233,7 +233,7 @@ test("permissions, node chat links, drafts, and shared image selection use expli
   assert.match(drafts, /supersededHomeMailDraftIDs/);
 });
 
-test("My and Shared Triage share compact search, unread, and accessible list-order controls", () => {
+test("My and Shared Triage share compact controls and full-tab list ordering", () => {
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
@@ -260,7 +260,8 @@ test("My and Shared Triage share compact search, unread, and accessible list-ord
   const filterKeyStart = homePage.indexOf("const activeMessageListKey = messageListFilterKey(");
   const visibleListStart = homePage.indexOf("const visibleMessages = useMemo", filterKeyStart);
   assert.ok(filterKeyStart >= 0 && visibleListStart > filterKeyStart);
-  assert.doesNotMatch(homePage.slice(filterKeyStart, visibleListStart), /messageListOrder/);
+  assert.match(homePage.slice(filterKeyStart, visibleListStart), /messageListOrder/);
+  assert.match(homePage, /order: messageListOrder === "oldest" \? "oldest" : undefined/);
   assert.equal((homePage.match(/<HomeMailWorkspace/g) ?? []).length, 1);
   assert.match(homePage, /activeViewID=\{activeViewID\}/);
 });

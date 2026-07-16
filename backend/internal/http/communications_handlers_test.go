@@ -30,6 +30,8 @@ type fakeNylasClient struct {
 	folders                     []NylasFolder
 	messages                    []NylasMessage
 	messagesByGrantID           map[string][]NylasMessage
+	messagePagesByToken         map[string]NylasMessagePage
+	messageQueries              []NylasMessageQuery
 	messagesByID                map[string]NylasMessage
 	thread                      NylasThread
 	message                     NylasMessage
@@ -315,6 +317,7 @@ func (f *fakeNylasClient) ListMessages(_ context.Context, grantID string, query 
 	defer f.mu.Unlock()
 	f.messageCalls++
 	f.lastQuery = query
+	f.messageQueries = append(f.messageQueries, query)
 	f.lastMessageGrantID = grantID
 	if f.listErr != nil {
 		return NylasMessagePage{}, f.listErr
@@ -323,6 +326,9 @@ func (f *fakeNylasClient) ListMessages(_ context.Context, grantID string, query 
 		if messages, ok := f.messagesByGrantID[grantID]; ok {
 			return NylasMessagePage{Messages: messages, NextPageToken: "next-token"}, nil
 		}
+	}
+	if f.messagePagesByToken != nil {
+		return f.messagePagesByToken[query.PageToken], nil
 	}
 	return NylasMessagePage{Messages: f.messages, NextPageToken: "next-token"}, nil
 }
@@ -3183,6 +3189,89 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 	assertJSONStatus(t, handler, http.MethodGet, sharedPath, "", token, http.StatusOK)
 	if nylas.messageCalls != 2 {
 		t.Fatalf("message calls after shared cache read = %d, want cached shared page", nylas.messageCalls)
+	}
+}
+
+func TestCommunicationsMessagesOldestOrderLoadsCompleteFilteredSnapshot(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	actor, err := repo.UpsertAuthUser("oldest-order-actor", "oldest@example.com", "Oldest Order Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       actor.UserID,
+		Provider:     "google",
+		AccountEmail: actor.Email,
+		GrantID:      "grant-oldest",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		messagePagesByToken: map[string]NylasMessagePage{
+			"": {
+				Messages: []NylasMessage{
+					{ID: "newest", Date: 300},
+					{ID: "middle", Date: 200},
+				},
+				NextPageToken: "page-2",
+			},
+			"page-2": {
+				Messages: []NylasMessage{
+					{ID: "middle", Date: 200},
+					{ID: "oldest", Date: 100},
+				},
+			},
+		},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?mailbox=all&limit=12&order=oldest", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("oldest order status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var page NylasMessagePage
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	gotIDs := make([]string, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		gotIDs = append(gotIDs, message.ID)
+	}
+	if got, want := strings.Join(gotIDs, ","), "oldest,middle,newest"; got != want {
+		t.Fatalf("oldest order ids = %q, want %q", got, want)
+	}
+	if page.NextPageToken != "" {
+		t.Fatalf("oldest order next page token = %q, want complete snapshot", page.NextPageToken)
+	}
+	if len(nylas.messageQueries) != 2 {
+		t.Fatalf("oldest order provider reads = %d, want 2", len(nylas.messageQueries))
+	}
+	for index, query := range nylas.messageQueries {
+		if query.Limit != communicationsNylasOrderSnapshotLimit {
+			t.Fatalf("oldest order query %d limit = %d, want %d", index, query.Limit, communicationsNylasOrderSnapshotLimit)
+		}
+		if query.Order != "" {
+			t.Fatalf("oldest order query %d leaked internal order = %q", index, query.Order)
+		}
+		if query.SearchQueryNative != "in:anywhere" {
+			t.Fatalf("oldest order query %d search = %q, want in:anywhere", index, query.SearchQueryNative)
+		}
+	}
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=all&order=newest", "", token, http.StatusBadRequest)
+	if nylas.messageCalls != 2 {
+		t.Fatalf("invalid order made provider reads: %d", nylas.messageCalls)
 	}
 }
 

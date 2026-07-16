@@ -2,7 +2,7 @@ import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { emailMessageRowKey } from "./homeUtils";
@@ -408,6 +408,9 @@ export function HomeMailWorkspace({
   const triageAdvanceVisible = triageAdvanceEnabled || (isArchivableListView && mailbox === "sent");
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
+  const selectedConversationLoading = selectedMessage
+    ? emailConversationShouldShowLoadingShell(selectedMessage, selectedThreadMessages, loadingDetail)
+    : false;
 
   if (unassignedSharedInbox) {
     return (
@@ -819,32 +822,36 @@ export function HomeMailWorkspace({
               overflow: "hidden",
             }}
           >
-            <MessageDetail
-              message={selectedMessage}
-              threadMessages={selectedThreadMessages}
-              companyID={companyID}
-              sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
-              accountEmail={selectedMessage.collaboration_account_email || accountEmail}
-              loading={loadingDetail}
-              archiveAvailable={archiveAvailable}
-              archiveLabel={archiveLabel}
-              busy={!!busy}
-              chatAvailable={emailChatAvailable}
-              chatOpen={emailChatVisible}
-              onToggleChat={toggleEmailChat}
-              onLoadMessageBody={onLoadMessageBody}
-              onReply={onOpenReply}
-              onReplyAll={onOpenReplyAll}
-              onCreateSharedDraft={onCreateSharedDraft}
-              onForward={onOpenForward}
-              onArchive={onArchiveSelected}
-              onDelete={onDeleteSelected}
-              deleteAvailable={archiveAvailable}
-              onToggleRead={onToggleRead}
-              onToggleStar={onToggleStar}
-              onEmailSelection={setEmailSelection}
-              selectionNavigation={emailNavigation}
-            />
+            {selectedConversationLoading ? (
+              <div data-email-conversation-loading="true" style={emptyStateStyle}>Loading conversation</div>
+            ) : (
+              <MessageDetail
+                message={selectedMessage}
+                threadMessages={selectedThreadMessages}
+                companyID={companyID}
+                sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
+                accountEmail={selectedMessage.collaboration_account_email || accountEmail}
+                loading={loadingDetail}
+                archiveAvailable={archiveAvailable}
+                archiveLabel={archiveLabel}
+                busy={!!busy}
+                chatAvailable={emailChatAvailable}
+                chatOpen={emailChatVisible}
+                onToggleChat={toggleEmailChat}
+                onLoadMessageBody={onLoadMessageBody}
+                onReply={onOpenReply}
+                onReplyAll={onOpenReplyAll}
+                onCreateSharedDraft={onCreateSharedDraft}
+                onForward={onOpenForward}
+                onArchive={onArchiveSelected}
+                onDelete={onDeleteSelected}
+                deleteAvailable={archiveAvailable}
+                onToggleRead={onToggleRead}
+                onToggleStar={onToggleStar}
+                onEmailSelection={setEmailSelection}
+                selectionNavigation={emailNavigation}
+              />
+            )}
             {emailChatMounted && (
               <EmailCollaborationChatSurface
                 active={emailChatVisible}

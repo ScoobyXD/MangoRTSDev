@@ -558,6 +558,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
 test("mail thread detail supports exact-message replies, saved editor sizing, and one scroll surface", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const homeMailWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
 
   assert.match(homeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
@@ -578,6 +579,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeStyles, /gridTemplateRows: fill \? "auto minmax\(0, 1fr\)" : "auto"/);
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
+  assert.match(homeParts, /if \(!loading && newestMessage && !emailMessageBodyIsLoaded\(newestMessage\)\)/);
+  assert.match(homeMailWorkspace, /emailConversationShouldShowLoadingShell\(selectedMessage, selectedThreadMessages, loadingDetail\)/);
+  assert.match(homeMailWorkspace, /data-email-conversation-loading="true"[\s\S]*Loading conversation/);
   assert.match(homeParts, /splitEmailQuotedHistory\(body\)/);
   assert.match(homeParts, /data-email-timeline-item="true"/);
   assert.match(homeParts, /data-email-message-id=\{message\.id\}/);

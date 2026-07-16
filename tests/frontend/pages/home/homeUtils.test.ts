@@ -12,6 +12,7 @@ import {
   buildGVICRoleInboxGroupsByCell,
   buildSharedInboxRows,
   condenseEmailThreadMessages,
+  emailConversationShouldShowLoadingShell,
   emailAttachmentIsReferencedInline,
   emailAttachmentHasResolvableContent,
   emailAttachmentIsInlineContent,
@@ -20,6 +21,7 @@ import {
   emailMessageRowKey,
   emailMailboxMessageKey,
   emailMailboxScopeKey,
+  emailMessagesForOrderedPage,
   emailThreadMessageCount,
   emailThreadKey,
   fitHomeColumnWidthsToAvailableWidth,
@@ -37,6 +39,7 @@ import {
   mailboxCountsFromFolders,
   mailboxForHomeView,
   missingEmailThreadMessageIDs,
+  nextEmailMessageAfterRemoval,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
   orderEmailConversationMessages,
@@ -333,6 +336,15 @@ test("collaboration shared drafts are immediate-only and stay out of the browser
   assert.match(homeParts, /!compose\.sharedDraft && \(\s*<input\s+type="datetime-local"\s+aria-label="Schedule send"/s);
 });
 
+test("mailbox archive advance, non-scrollable fill, and provider-wide oldest ordering stay wired", () => {
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+
+  assert.match(homePage, /nextEmailMessageAfterRemoval\(visibleMessages, selectedMessageRowKey\)/);
+  assert.match(homePage, /archiveMessages\(\[selectedMessage\.id\], \[selectedMessage\], nextMessage\)/);
+  assert.match(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 1\)[\s\S]{0,120}loadMoreMessages\(\)/);
+  assert.match(homePage, /order: messageListOrder === "oldest" \? "oldest" : undefined/);
+});
+
 test("mail row thread indicators and accessible activation use explicit message counts", () => {
   assert.equal(emailThreadMessageCount({}), 0);
   assert.equal(emailThreadMessageCount({ thread_message_count: Number.NaN }), 0);
@@ -353,6 +365,28 @@ test("mail row thread indicators and accessible activation use explicit message 
   assert.equal(isMailRowActivationKey(" "), true);
   assert.equal(isMailRowActivationKey("Spacebar"), false);
   assert.equal(isMailRowActivationKey("Escape"), false);
+});
+
+test("known multi-message selections keep a loading shell until the conversation is ready", () => {
+  const selected = emailMessage("newest", "thread-1", 300, { thread_message_count: 3 });
+  const older = emailMessage("older", "thread-1", 100);
+
+  assert.equal(emailConversationShouldShowLoadingShell(selected, [selected], true), true);
+  assert.equal(emailConversationShouldShowLoadingShell(selected, [older, selected], true), false);
+  assert.equal(emailConversationShouldShowLoadingShell(selected, [selected], false), false);
+  assert.equal(emailConversationShouldShowLoadingShell({ thread_message_count: 1 }, [selected], true), false);
+});
+
+test("archive advance selects the visible row below and falls back to the previous row at the end", () => {
+  const first = emailMessage("first", "thread-1", 300);
+  const second = emailMessage("second", "thread-2", 200);
+  const third = emailMessage("third", "thread-3", 100);
+  const messages = [first, second, third];
+
+  assert.equal(nextEmailMessageAfterRemoval(messages, emailMessageRowKey(first))?.id, "second");
+  assert.equal(nextEmailMessageAfterRemoval(messages, emailMessageRowKey(second))?.id, "third");
+  assert.equal(nextEmailMessageAfterRemoval(messages, emailMessageRowKey(third))?.id, "second");
+  assert.equal(nextEmailMessageAfterRemoval(messages, "missing"), null);
 });
 
 test("local read mutation keys isolate identical provider ids by user and mailbox scope", () => {
@@ -513,7 +547,22 @@ test("conversation ordering can be switched to oldest first without changing the
   assert.deepEqual(orderEmailConversationMessages(messages, "oldest").map((message) => message.id), ["oldest", "middle", "newest"]);
 });
 
-test("mailbox ordering composes with search and unread filtering without mutating the filtered page", () => {
+test("mailbox ordering selects page membership from the complete filtered tab", () => {
+  const snapshot = Array.from({ length: 20 }, (_, index) => (
+    emailMessage(`message-${index + 1}`, `thread-${index + 1}`, index + 1)
+  ));
+
+  assert.deepEqual(
+    emailMessagesForOrderedPage(snapshot, "newest", 3).map((message) => message.id),
+    ["message-20", "message-19", "message-18"],
+  );
+  assert.deepEqual(
+    emailMessagesForOrderedPage(snapshot, "oldest", 3).map((message) => message.id),
+    ["message-1", "message-2", "message-3"],
+  );
+});
+
+test("mailbox ordering composes with search and unread filtering without mutating the complete filtered tab", () => {
   const page = [
     emailMessage("old-match", "thread-1", 100, { unread: true, subject: "Quarterly plan" }),
     emailMessage("read-match", "thread-2", 200, { unread: false, subject: "Quarterly plan" }),

@@ -125,6 +125,7 @@ export type EmailThread = {
 export type ListMessagesParams = {
   limit?: number;
   pageToken?: string;
+  order?: "oldest";
   mailbox?: EmailMailbox;
   folderID?: string;
   threadID?: string;
@@ -2254,6 +2255,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   const query = new URLSearchParams();
   if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
   if (params.pageToken) query.set("page_token", params.pageToken);
+  if (params.order) query.set("order", params.order);
   if (params.mailbox) query.set("mailbox", params.mailbox);
   if (params.folderID) query.set("folder_id", params.folderID);
   if (params.threadID?.trim()) query.set("thread_id", params.threadID.trim());
@@ -2780,6 +2782,7 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
   return {
     limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
     pageToken: query.get("page_token") ?? undefined,
+    order: query.get("order") === "oldest" ? "oldest" : undefined,
     mailbox: normalizeMailbox(query.get("mailbox") ?? undefined),
     folderID: query.get("folder_id") ?? undefined,
     threadID: query.get("thread_id") ?? undefined,

@@ -282,6 +282,7 @@ type NylasThread struct {
 type NylasMessageQuery struct {
 	Limit             int
 	PageToken         string
+	Order             string
 	FolderID          string
 	ThreadID          string
 	Query             string
