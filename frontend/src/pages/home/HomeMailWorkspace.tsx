@@ -40,6 +40,8 @@ import {
   mailPanelControlsStyle,
   mailPanelStyle,
   mailViewerPanelStyle,
+  mailVibrantActionButtonStyle,
+  mailVibrantAdvanceButtonStyle,
   messageContextMenuStyle,
   messageListStyle,
   messageReadStatusStyle,
@@ -53,7 +55,6 @@ import {
   selectedCountStyle,
   snippetStyle,
   triageDateStyle,
-  triageAdvanceButtonStyle,
   triageMailListHeaderStyle,
   triageMessageContentStyle,
   triageMessageActionRowStyle,
@@ -151,7 +152,7 @@ const mailboxDropdownMenuStyle: React.CSSProperties = {
   right: 0,
   minWidth: 132,
   display: "grid",
-  gap: 4,
+  gap: 0,
   padding: 6,
   border: "1px solid rgba(148, 163, 184, 0.32)",
   borderRadius: 8,
@@ -521,13 +522,14 @@ export function HomeMailWorkspace({
               <button
                 className="mango-elevated-action"
                 type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "drafts")}
-                title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
+                style={mailArchiveActionButtonStyle(mailbox === "sent")}
+                aria-pressed={mailbox === "sent"}
                 onClick={() => {
-                  if (mailbox !== "drafts") onOpenDraftsMailbox();
+                  if (mailbox !== "sent") onOpenSentMailbox();
                 }}
               >
-                <MailboxActionContent label="My Drafts" count={draftCount} />
+                <span style={mailArchiveActionLabelStyle}>Sent</span>
+                <SendPointerIcon />
               </button>
               <div style={mailboxDropdownWrapStyle} onMouseLeave={() => setAllMailboxMenuOpen(false)}>
                 <button
@@ -544,8 +546,10 @@ export function HomeMailWorkspace({
                 {allMailboxMenuOpen && (
                   <div role="menu" style={mailboxDropdownMenuStyle}>
                     <button
+                      className="mango-mailbox-dropdown-item"
                       type="button"
                       role="menuitem"
+                      aria-current={mailbox === "all" ? "page" : undefined}
                       style={mailboxDropdownItemStyle(mailbox === "all")}
                       onClick={() => {
                         setAllMailboxMenuOpen(false);
@@ -556,8 +560,10 @@ export function HomeMailWorkspace({
                       <span>All</span>
                     </button>
                     <button
+                      className="mango-mailbox-dropdown-item"
                       type="button"
                       role="menuitem"
+                      aria-current={mailbox === "spam" ? "page" : undefined}
                       style={mailboxDropdownItemStyle(mailbox === "spam")}
                       onClick={() => {
                         setAllMailboxMenuOpen(false);
@@ -574,27 +580,37 @@ export function HomeMailWorkspace({
           )}
           {isArchivableListView && (
             <div style={triageAdvanceVisible ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>
-              <button className="mango-elevated-action" style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
               <button
-                className="mango-elevated-action"
+                className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-compose"
                 type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "sent")}
+                style={mailVibrantActionButtonStyle}
+                aria-pressed={compose.open}
+                onClick={onOpenNewCompose}
+              >
+                Compose
+              </button>
+              <button
+                className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-drafts"
+                type="button"
+                style={mailVibrantActionButtonStyle}
+                aria-pressed={mailbox === "drafts"}
+                title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
                 onClick={() => {
-                  if (mailbox !== "sent") onOpenSentMailbox();
+                  if (mailbox !== "drafts") onOpenDraftsMailbox();
                 }}
               >
-                <span style={mailArchiveActionLabelStyle}>Sent</span>
-                <SendPointerIcon />
+                <MailboxActionContent label="My Drafts" count={draftCount} />
               </button>
               {triageAdvanceVisible && (
                 <button
-                  className="mango-elevated-action"
+                  className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-advance"
                   type="button"
-                  style={triageAdvanceButtonStyle}
+                  style={mailVibrantAdvanceButtonStyle}
                   disabled={!triageAdvanceEnabled || advanceDisabled}
+                  title={hasNextMessagePage ? "Archive this page and go to the next page" : "Archive this page"}
                   onClick={onAdvanceTriagePage}
                 >
-                  {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and go next ->" : "Archive page ->"}
+                  {busy === "advance-archive" ? "Archiving..." : hasNextMessagePage ? "Archive & next →" : "Archive page →"}
                 </button>
               )}
             </div>
