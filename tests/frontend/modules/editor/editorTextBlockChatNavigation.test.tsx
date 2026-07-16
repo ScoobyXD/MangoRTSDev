@@ -54,7 +54,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
   const browserGlobals = [
     "window", "document", "navigator", "self", "localStorage",
     "Node", "NodeFilter", "Element", "HTMLElement", "HTMLDivElement", "HTMLSpanElement",
-    "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement", "HTMLUListElement",
+    "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement", "HTMLUListElement", "HTMLOListElement",
     "HTMLAnchorElement", "HTMLBRElement", "HTMLButtonElement", "HTMLInputElement",
     "HTMLTextAreaElement", "HTMLTableElement", "HTMLTableRowElement", "HTMLTableCellElement",
     "DocumentFragment", "DOMParser", "DOMException", "DOMRect", "Event", "EventTarget",
@@ -417,6 +417,41 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     ));
     await flushFrames();
     assert.equal(dom.window.document.activeElement, focusedComment, "an ordinary rerender must not hand focus back to the composer");
+
+    const mentionUsers = [{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }];
+    const mentionedPrincipals: string[] = [];
+    const MentionComposerHarness: React.FC<{ initialDraft: string }> = ({ initialDraft }) => {
+      const [mentionDraft, setMentionDraft] = React.useState(initialDraft);
+      return (
+        <ChatPane
+          {...chatProps}
+          messages={[]}
+          companyUsers={mentionUsers}
+          draft={mentionDraft}
+          onDraftChange={setMentionDraft}
+          onMentionPrincipal={(user) => mentionedPrincipals.push(user.user_id)}
+          messageFocusRequest={null}
+        />
+      );
+    };
+    const acceptComposerMention = async (initialDraft: string, expectedKind: "mention" | "urgent") => {
+      await act(async () => root.render(<MentionComposerHarness key={expectedKind} initialDraft={initialDraft} />));
+      const composer = container.querySelector<HTMLTextAreaElement>("textarea");
+      assert.ok(composer);
+      composer.focus();
+      composer.setSelectionRange(initialDraft.length, initialDraft.length);
+      await act(async () => composer.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "d", bubbles: true })));
+      assert.ok(container.querySelector('[role="listbox"][aria-label="Mention users"]'));
+      const tab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+      await act(async () => composer.dispatchEvent(tab));
+      assert.equal(tab.defaultPrevented, true);
+      assert.equal(composer.value, `${initialDraft[0]}Ada Lovelace `);
+      const chip = container.querySelector<HTMLElement>(`[data-mango-chat-composer-mention="true"][data-mango-mention-kind="${expectedKind}"]`);
+      assert.ok(chip, `${expectedKind} autocomplete is visibly rendered as an entity in the composer`);
+    };
+    await acceptComposerMention("@Ad", "mention");
+    await acceptComposerMention("!Ad", "urgent");
+    assert.deepEqual(mentionedPrincipals, ["ada", "ada"], "accepted composer entities keep the existing mentioned-principal model");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     if (scrollIntoViewDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", scrollIntoViewDescriptor);

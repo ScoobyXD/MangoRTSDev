@@ -30,7 +30,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
   const browserGlobals = [
     "window", "document", "navigator", "self", "localStorage",
     "Node", "NodeFilter", "Element", "HTMLElement", "HTMLDivElement", "HTMLSpanElement",
-    "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement", "HTMLUListElement",
+    "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement", "HTMLUListElement", "HTMLOListElement",
     "HTMLAnchorElement", "HTMLBRElement", "HTMLButtonElement", "HTMLInputElement",
     "HTMLTableElement", "HTMLTableRowElement", "HTMLTableCellElement", "DocumentFragment",
     "DOMParser", "DOMException", "Event", "EventTarget", "InputEvent", "MouseEvent",
@@ -143,7 +143,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         apiBase=""
         companyID="company-1"
         currentUserID="user-1"
-        companyUsers={[]}
+        companyUsers={[{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }]}
         documentValue="<!-- mango-editor-html-v1 -->seed"
         contentChanges={[]}
         chatMessages={[]}
@@ -254,6 +254,31 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.match(boldButton.style.boxShadow, /34,\s*211,\s*238/);
     await act(async () => Simulate.mouseLeave(boldButton));
     assert.equal(boldButton.style.background, "transparent");
+    const fontSizeInput = container.querySelector<HTMLInputElement>('input[aria-label="Font size value"]');
+    assert.ok(fontSizeInput);
+    assert.equal(fontSizeInput.style.fontSize, "8px", "the literal font-size number stays visually compact");
+
+    editorRoot.textContent = "@Ad";
+    await act(async () => editorRoot.focus());
+    await setTextSelection("@Ad", 3);
+    await act(async () => editorRoot.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "d", bubbles: true })));
+    await flushAsyncWork();
+    assert.ok(container.querySelector('[role="listbox"][aria-label="Mention users"]'), "typing a mention opens the people picker");
+    const acceptMention = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(acceptMention));
+    assert.equal(acceptMention.defaultPrevented, true);
+    const mentionEntity = editorRoot.querySelector<HTMLElement>('[data-mango-mention-user-id="ada"]');
+    assert.ok(mentionEntity, "Tab accepts the recommended user as an atomic mention entity");
+    assert.equal(mentionEntity.textContent, "@Ada Lovelace");
+
+    editorRoot.textContent = "selected";
+    await act(async () => editorRoot.focus());
+    await setTextSelection("selected", 0, "selected".length);
+    await pressToolbarButton("Increase font size");
+    await pressToolbarButton("Increase font size");
+    assert.match(editorRoot.innerHTML, /font-size:\s*16px/i, "repeated plus clicks keep formatting the same selected text");
+
+    editorRoot.textContent = "seed";
 
     await act(async () => editorRoot.focus());
     await setTextSelection("seed", 4);
@@ -477,6 +502,29 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(alphanumericRoot.lastElementChild?.textContent, "after");
     assert.ok(alphanumericRoot.firstElementChild?.querySelector("ul")?.contains(newRow));
     assert.ok(newRow.contains(dom.window.document.getSelection()?.anchorNode ?? null), "the caret remains in the indented row");
+
+    editorRoot.innerHTML = '<ol data-mango-editor-ordered-list="true" type="1"><li>row A</li></ol>';
+    const orderedRoot = editorRoot.querySelector<HTMLOListElement>('ol[data-mango-editor-ordered-list="true"]');
+    const orderedFirstText = orderedRoot?.firstElementChild?.firstChild;
+    assert.ok(orderedRoot);
+    assert.ok(orderedFirstText);
+    const orderedEnd = dom.window.document.createRange();
+    orderedEnd.setStart(orderedFirstText, orderedFirstText.textContent?.length ?? 0);
+    orderedEnd.collapse(true);
+    editorRoot.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(orderedEnd);
+    const orderedEnter = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(orderedEnter));
+    assert.equal(orderedRoot.children.length, 2, "Enter creates the next pasted ordered-list row");
+    const orderedNewRow = orderedRoot.children[1] as HTMLLIElement;
+    assert.ok(orderedNewRow.contains(dom.window.document.getSelection()?.anchorNode ?? null), "Enter leaves the caret in the new ordered row");
+    const orderedTab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => editorRoot.dispatchEvent(orderedTab));
+    const nestedOrdered = orderedRoot.firstElementChild?.querySelector<HTMLOListElement>('ol[data-mango-editor-ordered-list="true"]');
+    assert.equal(orderedRoot.children.length, 1, "Tab indents the new ordered row, not its original parent");
+    assert.ok(nestedOrdered?.contains(orderedNewRow));
+    assert.ok(orderedNewRow.contains(dom.window.document.getSelection()?.anchorNode ?? null), "ordered-list indentation preserves the new-row caret");
 
     editorRoot.innerHTML = '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">first</li><li data-mango-editor-list-item="bullet">second</li><li data-mango-editor-list-item="bullet">third</li></ul>';
     const secondItem = editorRoot.querySelectorAll<HTMLLIElement>("li")[1];

@@ -251,7 +251,9 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(richTextEditing, /element\.getAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE\)/);
   assert.match(richTextEditing, /span\.setAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind\)/);
   assert.match(editorSurfaceHandlers, /if \(event\.key !== "Tab"\) return;[\s\S]*event\.preventDefault\(\)/);
-  assert.doesNotMatch(editorSurfaceHandlers, /event\.key === "Enter" \|\| event\.key === "Tab"/);
+  assert.match(editorSurfaceHandlers, /event\.key === "Enter" \|\| \(event\.key === "Tab" && !event\.shiftKey\)/);
+  assert.match(nodeWorkspaceParts, /data-mango-chat-composer-mention="true"/);
+  assert.match(nodeWorkspaceParts, /EDITOR_URGENT_MENTION_BACKGROUND/);
   assert.doesNotMatch(editorSurfaceHandlers, /moveEditorTableSelection/);
 });
 
@@ -514,6 +516,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
   assert.match(bodyToolbar, /onSetSelectionHighlightColor=\{setBodySelectionHighlightColor\}/);
   assert.match(bodySurface, /onSelectionFontSizeChange=\{setBodySelectionFontSize\}/);
   assert.match(bodySurface, /onSelectionHighlightColorChange=\{setBodyHighlightColor\}/);
+  assert.match(bodySurface, /mentionUsers=\{companyUsers\}/);
   assert.match(bodyFontHandlers, /bodyEditorControllerRef\.current\?\.adjustFontSize\(delta\)/);
   assert.match(bodyFontHandlers, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.doesNotMatch(homeParts, /selectNumberedMode/);
@@ -523,6 +526,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
   assert.match(signatureSurface, /surfaceID="email-signature"/);
   assert.match(signatureSurface, /onSelectionFontSizeChange=\{setSignatureSelectionFontSize\}/);
   assert.match(signatureSurface, /onSelectionHighlightColorChange=\{setSignatureHighlightColor\}/);
+  assert.match(signatureSurface, /mentionUsers=\{companyUsers\}/);
   assert.match(signatureFontHandlers, /signatureEditorControllerRef\.current\?\.adjustFontSize\(delta\)/);
   assert.match(signatureFontHandlers, /signatureEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.doesNotMatch(signaturePanel, /<textarea\b/);
@@ -538,6 +542,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
   assert.match(replyToolbar, /onSetSelectionHighlightColor=\{setReplySelectionHighlightColor\}/);
   assert.match(replySurface, /onSelectionFontSizeChange=\{setReplySelectionFontSize\}/);
   assert.match(replySurface, /onSelectionHighlightColorChange=\{setReplyHighlightColor\}/);
+  assert.match(replySurface, /mentionUsers=\{companyUsers\}/);
   assert.match(replyFontHandlers, /replyEditorControllerRef\.current\?\.adjustFontSize\(delta\)/);
   assert.match(replyFontHandlers, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.match(nodeWorkspaceParts, /padding: "7px 8px 24px"/);
@@ -546,6 +551,7 @@ test("mail compose, attached-email reply, and mailbox signature mount unified ri
 
   assert.match(unifiedRichEditorSurface, /useEditorDocumentFormattingController\s*\(/);
   assert.match(unifiedRichEditorSurface, /onSelectionHighlightColorChange/);
+  assert.match(unifiedRichEditorSurface, /mentionUsers = \[\][\s\S]*mentionUsers,[\s\S]*mentionAccent: accent/);
   assert.match(editorSurfaceHandlers, /restoreSelection: restoreEditorSelectionRange/);
   assert.match(editorSurfaceHandlers, /useEditorDocumentFormattingController/);
   assert.match(editorSurfaceHandlers, /applyEditorHighlightColorToRoot/);

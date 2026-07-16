@@ -26,6 +26,7 @@ import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
+import type { MentionableCompanyUser } from "./editorMentions";
 
 export type UnifiedRichEditorFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -45,6 +46,7 @@ type UnifiedRichEditorSurfaceProps = {
   accent: string;
   indentGuideColor: string;
   scrollbarTrack?: string;
+  mentionUsers?: MentionableCompanyUser[];
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
   eagerEditorImageHydration?: boolean;
@@ -72,6 +74,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   accent,
   indentGuideColor,
   scrollbarTrack = "transparent",
+  mentionUsers = [],
   formattingControllerRef,
   editorImageAttachmentContext,
   eagerEditorImageHydration = false,
@@ -232,6 +235,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     onSelectionInlineFormatChange,
     onSelectionHighlightColorChange,
     onSelectionTextAlignmentChange,
+    mentionUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,

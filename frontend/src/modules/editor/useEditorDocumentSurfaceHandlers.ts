@@ -28,6 +28,7 @@ import {
   EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
   EDITOR_LIST_ATTRIBUTE,
   EDITOR_LIST_ITEM_ATTRIBUTE,
+  EDITOR_ORDERED_LIST_ATTRIBUTE,
   EDITOR_LINK_COLOR,
   EDITOR_TABLE_ATTRIBUTE,
   EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE,
@@ -1570,7 +1571,7 @@ function wrapEditorSelectedTextRuns(
 }
 
 function appendEditorCloneWhenNotEmpty(clone: HTMLElement, output: Node[]) {
-  if (clone.childNodes.length > 0) output.push(clone);
+  if ((clone.textContent ?? "").length > 0 || clone.querySelector("*")) output.push(clone);
 }
 
 function splitEditorInlineWrapperAroundPivot(wrapper: HTMLElement, pivot: HTMLElement): HTMLElement {
@@ -1740,7 +1741,24 @@ function documentHasEditorImages(root: HTMLElement): boolean {
   return root.querySelector(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`) !== null;
 }
 
-const EDITOR_LIST_ITEM_SELECTOR = `li[${EDITOR_LIST_ITEM_ATTRIBUTE}]`;
+const EDITOR_LIST_ITEM_SELECTOR = [
+  `li[${EDITOR_LIST_ITEM_ATTRIBUTE}]`,
+  `ol[${EDITOR_ORDERED_LIST_ATTRIBUTE}="true"] > li`,
+].join(",");
+type EditorListElement = HTMLUListElement | HTMLOListElement;
+
+function isEditorListElement(element: Element | null): element is EditorListElement {
+  if (element instanceof HTMLUListElement) return readEditorListKind(element.getAttribute(EDITOR_LIST_ATTRIBUTE)) !== null;
+  return element instanceof HTMLOListElement && element.getAttribute(EDITOR_ORDERED_LIST_ATTRIBUTE) === "true";
+}
+
+function editorListsMatch(left: EditorListElement, right: EditorListElement): boolean {
+  if (left instanceof HTMLOListElement || right instanceof HTMLOListElement) {
+    return left instanceof HTMLOListElement && right instanceof HTMLOListElement;
+  }
+  return readEditorListKind(left.getAttribute(EDITOR_LIST_ATTRIBUTE))
+    === readEditorListKind(right.getAttribute(EDITOR_LIST_ATTRIBUTE));
+}
 
 function editorListKindForOutlineStyle(outlineStyle: EditorOutlineStyleID): EditorListKind | null {
   if (outlineStyle === "bullet-list") return "bullet";
@@ -1752,9 +1770,9 @@ function getEditorListKindForList(list: Element | null): EditorListKind | null {
   return list instanceof HTMLUListElement ? readEditorListKind(list.getAttribute(EDITOR_LIST_ATTRIBUTE)) : null;
 }
 
-function getEditorListForItem(item: HTMLLIElement): HTMLUListElement | null {
+function getEditorListForItem(item: HTMLLIElement): EditorListElement | null {
   const list = item.parentElement;
-  return getEditorListKindForList(list) ? list as HTMLUListElement : null;
+  return isEditorListElement(list) ? list : null;
 }
 
 function getEditorListKindForItem(item: HTMLLIElement): EditorListKind | null {
@@ -1783,7 +1801,7 @@ function editorListItemOwnTextNodes(item: HTMLLIElement): Text[] {
     acceptNode(node) {
       let current: Node | null = node.parentNode;
       while (current && current !== item) {
-        if (current instanceof HTMLUListElement && readEditorListKind(current.getAttribute(EDITOR_LIST_ATTRIBUTE))) {
+        if (current instanceof Element && isEditorListElement(current)) {
           return NodeFilter.FILTER_REJECT;
         }
         current = current.parentNode;
@@ -1810,13 +1828,12 @@ function editorListItemContentIsEmpty(item: HTMLLIElement): boolean {
     "table",
     "img",
     `ul[${EDITOR_LIST_ATTRIBUTE}]`,
+    `ol[${EDITOR_ORDERED_LIST_ATTRIBUTE}="true"]`,
   ].join(","));
 }
 
-function directNestedEditorList(item: HTMLLIElement): HTMLUListElement | null {
-  return Array.from(item.children).find((child): child is HTMLUListElement => (
-    child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE)) !== null
-  )) ?? null;
+function directNestedEditorList(item: HTMLLIElement): EditorListElement | null {
+  return Array.from(item.children).find(isEditorListElement) ?? null;
 }
 
 function removeEditorListItemPlaceholders(item: HTMLLIElement) {
@@ -1828,7 +1845,7 @@ function removeEditorListItemPlaceholders(item: HTMLLIElement) {
 
 function editorListItemHasOwnEditableContent(item: HTMLLIElement): boolean {
   return Array.from(item.childNodes).some((child) => {
-    if (child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE))) return false;
+    if (child instanceof Element && isEditorListElement(child)) return false;
     if (child instanceof HTMLBRElement) return false;
     if (child.nodeType === Node.TEXT_NODE) return (child.textContent ?? "").length > 0;
     return true;
@@ -1854,6 +1871,35 @@ function createEditorList(ownerDocument: Document, kind: EditorListKind, text = 
   list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
   list.appendChild(createEditorListItem(ownerDocument, kind, text));
   return list;
+}
+
+function createEditorListItemForList(ownerDocument: Document, list: EditorListElement): HTMLLIElement {
+  if (list instanceof HTMLUListElement) {
+    const kind = readEditorListKind(list.getAttribute(EDITOR_LIST_ATTRIBUTE));
+    if (kind) return createEditorListItem(ownerDocument, kind);
+  }
+  const item = ownerDocument.createElement("li");
+  item.appendChild(ownerDocument.createElement("br"));
+  return item;
+}
+
+function nextOrderedListMarkerType(list: HTMLOListElement): "1" | "a" | "A" | "i" | "I" {
+  const current = list.getAttribute("type");
+  if (current === "A") return "I";
+  if (current === "I") return "1";
+  if (current === "a") return "i";
+  if (current === "i") return "1";
+  return "a";
+}
+
+function createNestedEditorList(list: EditorListElement): EditorListElement {
+  const nested = list.cloneNode(false) as EditorListElement;
+  if (nested instanceof HTMLOListElement) {
+    nested.removeAttribute("start");
+    nested.removeAttribute("reversed");
+    nested.setAttribute("type", nextOrderedListMarkerType(list as HTMLOListElement));
+  }
+  return nested;
 }
 
 function selectEditorListItem(root: HTMLElement, item: HTMLLIElement, edge: "start" | "end" = "end") {
@@ -2077,9 +2123,9 @@ function insertEditorListFromEnter(root: HTMLElement, kind: EditorListKind, curr
 }
 
 function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): boolean {
-  const kind = getEditorListKindForItem(item);
-  if (!kind) return false;
-  const nextItem = createEditorListItem(root.ownerDocument, kind);
+  const list = getEditorListForItem(item);
+  if (!list) return false;
+  const nextItem = createEditorListItemForList(root.ownerDocument, list);
   const range = getEditorSelectionRange(root);
   if (range && (item === range.startContainer || item.contains(range.startContainer))) {
     const splitRange = root.ownerDocument.createRange();
@@ -2202,7 +2248,7 @@ function exitEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
     return true;
   }
 
-  const trailingList = item.nextSibling ? list.cloneNode(false) as HTMLUListElement : null;
+  const trailingList = item.nextSibling ? list.cloneNode(false) as EditorListElement : null;
   while (trailingList && item.nextSibling) trailingList.appendChild(item.nextSibling);
   const lineBreak = root.ownerDocument.createTextNode("\n");
   item.remove();
@@ -2222,16 +2268,15 @@ function exitEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
 }
 
 function indentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
-  const kind = getEditorListKindForItem(item);
-  if (!kind) return false;
+  const list = getEditorListForItem(item);
+  if (!list) return false;
   const previousItem = item.previousElementSibling;
   if (!(previousItem instanceof HTMLLIElement)) return false;
-  let nestedList = Array.from(previousItem.children).find((child): child is HTMLUListElement => (
-    child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE)) === kind
+  let nestedList = Array.from(previousItem.children).find((child): child is EditorListElement => (
+    isEditorListElement(child) && editorListsMatch(child, list)
   )) ?? null;
   if (!nestedList) {
-    nestedList = root.ownerDocument.createElement("ul");
-    nestedList.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+    nestedList = createNestedEditorList(list);
     previousItem.appendChild(nestedList);
   }
   const caretOffset = editorListItemCaretOffset(root, item);
@@ -2254,7 +2299,7 @@ function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean 
     return true;
   }
 
-  const trailingList = item.nextSibling ? list.cloneNode(false) as HTMLUListElement : null;
+  const trailingList = item.nextSibling ? list.cloneNode(false) as EditorListElement : null;
   while (trailingList && item.nextSibling) trailingList.appendChild(item.nextSibling);
   const plainBlock = root.ownerDocument.createElement("div");
   while (item.firstChild) plainBlock.appendChild(item.firstChild);
@@ -3089,7 +3134,8 @@ export function readEditorSelectionFormatState(root: HTMLElement, fallbackFontSi
   if (!range) return null;
   const view = root.ownerDocument.defaultView;
   if (!view) return null;
-  const element = getRangeFontSizeElement(root, range);
+  const selectedTextRun = range.collapsed ? null : editorSelectedTextRuns(root, range)[0] ?? null;
+  const element = selectedTextRun?.node.parentElement ?? getRangeFontSizeElement(root, range);
   const parsed = Number.parseFloat(view.getComputedStyle(element).fontSize);
   const boldCommandState = readDocumentCommandState(root, "bold");
   const underlineCommandState = readDocumentCommandState(root, "underline");
@@ -5022,7 +5068,7 @@ export function useEditorDocumentSurfaceHandlers({
           setActiveMentionIndex((current) => (current - 1 + mentionOptions.length) % mentionOptions.length);
           return;
         }
-        if (event.key === "Enter") {
+        if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
           event.preventDefault();
           insertMention(root, activeMentionDraft, mentionOptions[activeMentionIndex] ?? mentionOptions[0]);
           return;

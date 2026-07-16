@@ -69,6 +69,7 @@ import {
   buildMentionOptions,
   EDITOR_MENTION_BACKGROUND,
   EDITOR_MENTION_COLOR,
+  EDITOR_URGENT_MENTION_BACKGROUND,
   mentionUserDisplayName,
   mentionUserOptionLabel,
   mentionUserProfileColor,
@@ -1727,6 +1728,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerMentionOverlayRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const handledMessageFocusRequestRef = useRef("");
   const messageFocusRequestPendingRef = useRef(false);
@@ -1746,6 +1748,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     return buildMentionOptions(companyUsers, activeMentionDraft.query, 8);
   }, [activeMentionDraft, companyUsers]);
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
+  const composerMentionSegments = useMemo(() => splitTextByMentions(draft, companyUsers), [companyUsers, draft]);
+  const composerHasMentionEntities = composerMentionSegments.some((segment) => segment.mention);
   const hasEmailPane = Boolean(emailPane);
   const showingEmail = hasEmailPane && activeTab === "email";
   const messageFocusRequestKey = messageFocusRequest?.messageID.trim()
@@ -1793,6 +1797,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     if (showingEmail) return;
     resizeComposer();
   }, [draft, resizeComposer, showingEmail]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    const overlay = composerMentionOverlayRef.current;
+    if (!textarea || !overlay) return;
+    overlay.scrollTop = textarea.scrollTop;
+    overlay.scrollLeft = textarea.scrollLeft;
+  }, [composerSizing.height, draft]);
 
   useLayoutEffect(() => {
     if (showingEmail) return undefined;
@@ -2183,6 +2195,57 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             >
               <PlusIcon color={accent} />
             </button>
+            {composerHasMentionEntities && (
+              <div
+                ref={composerMentionOverlayRef}
+                aria-hidden="true"
+                data-mango-chat-composer-mention-overlay="true"
+                style={{
+                  position: "absolute",
+                  left: 38,
+                  right: 38,
+                  bottom: 0,
+                  height: composerSizing.height,
+                  minHeight: CHAT_COMPOSER_MIN_HEIGHT,
+                  maxHeight: composerMaxHeight,
+                  overflow: "hidden",
+                  boxSizing: "border-box",
+                  borderRadius: 10,
+                  padding: "8px 9px",
+                  color: surfaceText,
+                  background: EDITOR_NEU_ACTIVE_SURFACE,
+                  fontSize: 12,
+                  lineHeight: 1.35,
+                  letterSpacing: 0,
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  pointerEvents: "none",
+                  zIndex: 0,
+                }}
+              >
+                {composerMentionSegments.map((segment, index) => segment.mention ? (
+                  <span
+                    key={`${segment.text}:${index}`}
+                    data-mango-chat-composer-mention="true"
+                    data-mango-mention-kind={segment.text.startsWith("!") ? "urgent" : "mention"}
+                    style={{
+                      background: segment.text.startsWith("!") ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND,
+                      color: EDITOR_MENTION_COLOR,
+                      border: segment.text.startsWith("!") ? "1px solid rgba(239,68,68,0.34)" : "1px solid rgba(183,124,255,0.34)",
+                      borderRadius: 6,
+                      padding: "0 4px",
+                      fontWeight: 850,
+                      boxDecorationBreak: "clone",
+                      boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
+                    }}
+                  >
+                    {segment.text}
+                  </span>
+                ) : (
+                  <React.Fragment key={`${segment.text}:${index}`}>{segment.text}</React.Fragment>
+                ))}
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={draft}
@@ -2228,6 +2291,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 onDraftChange(nextDraft);
                 setActiveMentionDraft(readActiveMentionDraft(nextDraft, event.currentTarget.selectionStart));
               }}
+              onScroll={(event) => {
+                const overlay = composerMentionOverlayRef.current;
+                if (!overlay) return;
+                overlay.scrollTop = event.currentTarget.scrollTop;
+                overlay.scrollLeft = event.currentTarget.scrollLeft;
+              }}
               onKeyDown={(event) => {
                 if (!editable) {
                   event.preventDefault();
@@ -2244,7 +2313,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     setActiveMentionIndex((current) => (current - 1 + mentionOptions.length) % mentionOptions.length);
                     return;
                   }
-                  if (event.key === "Enter" || event.key === "Tab") {
+                  if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
                     event.preventDefault();
                     replaceMentionDraft(activeMentionDraft, mentionOptions[activeMentionIndex] ?? mentionOptions[0]);
                     return;
@@ -2265,7 +2334,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
@@ -2345,7 +2414,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
         <span
           key={`${segment.text}:${index}`}
           title={segment.user ? mentionUserOptionLabel(segment.user) : segment.text}
-          style={{ background: EDITOR_MENTION_BACKGROUND, color: EDITOR_MENTION_COLOR, border: "1px solid rgba(183,124,255,0.34)", borderRadius: 6, padding: "0 4px", fontWeight: 850, boxDecorationBreak: "clone", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)" }}
+          style={{ background: segment.text.startsWith("!") ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND, color: EDITOR_MENTION_COLOR, border: segment.text.startsWith("!") ? "1px solid rgba(239,68,68,0.34)" : "1px solid rgba(183,124,255,0.34)", borderRadius: 6, padding: "0 4px", fontWeight: 850, boxDecorationBreak: "clone", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)" }}
         >
           {segment.text}
         </span>
@@ -3655,6 +3724,7 @@ type AttachedEmailOrganizerPaneProps = {
   nodeID?: string;
   apiBase?: string;
   companyID: string;
+  companyUsers?: MentionableCompanyUser[];
   attachmentRequestJSON?: AttachmentRequestJSON;
   attachmentResourceType?: MangoAttachmentResourceType;
   attachmentResourceID?: string;
@@ -3868,7 +3938,8 @@ const AttachedEmailThreadCard: React.FC<{
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
-}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+  companyUsers?: MentionableCompanyUser[];
+}> = ({ email, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -4039,6 +4110,7 @@ const AttachedEmailThreadCard: React.FC<{
               nodeID={nodeID}
               apiBase={apiBase}
               companyID={companyID}
+              companyUsers={companyUsers}
               sharedInboxID={email.sharedInboxID}
               accountEmail={email.accountEmail}
               attachmentRequestJSON={attachmentRequestJSON}
@@ -4124,7 +4196,7 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -4370,6 +4442,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       nodeID={nodeID}
       apiBase={apiBase}
       companyID={companyID}
+      companyUsers={companyUsers}
       attachmentRequestJSON={attachmentRequestJSON}
       attachmentResourceType={attachmentResourceType}
       attachmentResourceID={attachmentResourceID}
@@ -4686,6 +4759,7 @@ type EmailConversationPaneProps = {
   nodeID?: string;
   apiBase?: string;
   companyID: string;
+  companyUsers?: MentionableCompanyUser[];
   sharedInboxID?: string;
   accountEmail?: string;
   attachmentRequestJSON?: AttachmentRequestJSON;
@@ -5456,6 +5530,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   nodeID = "",
   apiBase = "",
   companyID,
+  companyUsers = [],
   sharedInboxID,
   accountEmail = "",
   attachmentRequestJSON,
@@ -6525,6 +6600,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 surfaceText={surfaceText}
                 accent={accent}
                 indentGuideColor={strokeColor}
+                mentionUsers={companyUsers}
                 formattingControllerRef={replyEditorControllerRef}
                 style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: replyEditingEnabled ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px 24px", scrollPaddingBottom: 24, color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: replyEditingEnabled ? surfaceText : "transparent", cursor: replyEditingEnabled ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
