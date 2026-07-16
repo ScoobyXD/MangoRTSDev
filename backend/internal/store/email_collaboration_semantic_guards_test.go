@@ -6,13 +6,11 @@ import (
 	"testing"
 )
 
-func TestPostgresEmailCollaborationSemanticMutationWritePathsRemainGuarded(t *testing.T) {
-	tests := []struct {
+func TestPostgresEmailNodeWorkPathsAreOpenWhileCanonicalEmailRemainsProtected(t *testing.T) {
+	allowed := []struct {
 		file      string
 		signature string
 	}{
-		{file: "postgres_nodes.go", signature: "func (r *PostgresRepo) addNodeInformation"},
-		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) UpsertNodeProjectionWithActor"},
 		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) createEditorSaveVersion"},
 		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) restoreEditorSaveVersion"},
 		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) assignNodeToLogicGateStatusTx"},
@@ -21,22 +19,35 @@ func TestPostgresEmailCollaborationSemanticMutationWritePathsRemainGuarded(t *te
 		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue"},
 		{file: "postgres_gvic.go", signature: "func (r *PostgresRepo) applyResourceGVICAssignmentCommand"},
 		{file: "accounts.go", signature: "func (r *PostgresRepo) SetNodeAccountAssignments"},
+		{file: "postgres_projects.go", signature: "func (r *PostgresRepo) UpsertProjectRelationship"},
+	}
+	for _, test := range allowed {
+		raw, err := os.ReadFile(test.file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", test.file, err)
+		}
+		body := emailCollaborationPostgresFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), test.signature)
+		if strings.Contains(body, "postgresRejectEmailCollaborationNodeMutation") {
+			t.Errorf("%s in %s still rejects normal email-node work semantics", test.signature, test.file)
+		}
 	}
 
-	sources := map[string]string{}
-	for _, test := range tests {
-		source, ok := sources[test.file]
-		if !ok {
-			raw, err := os.ReadFile(test.file)
-			if err != nil {
-				t.Fatalf("ReadFile %s: %v", test.file, err)
-			}
-			source = strings.ReplaceAll(string(raw), "\r\n", "\n")
-			sources[test.file] = source
+	canonical := []struct {
+		file      string
+		signature string
+	}{
+		{file: "postgres_nodes.go", signature: "func (r *PostgresRepo) addNodeInformation"},
+		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) UpsertNodeProjectionWithActor"},
+		{file: "postgres_nodes.go", signature: "func (r *PostgresRepo) deleteNodeProjection"},
+	}
+	for _, test := range canonical {
+		raw, err := os.ReadFile(test.file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", test.file, err)
 		}
-		body := emailCollaborationPostgresFunctionBodyForTest(t, source, test.signature)
-		if !strings.Contains(body, "postgresRejectEmailCollaborationNodeMutation") {
-			t.Errorf("%s in %s lacks the collaboration-Node mutation guard", test.signature, test.file)
+		body := emailCollaborationPostgresFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), test.signature)
+		if !strings.Contains(body, "AttachedEmailInformationID") || !strings.Contains(body, "ErrProtectedEmailCollaborationResource") {
+			t.Errorf("%s in %s does not protect only the canonical attached-email projection", test.signature, test.file)
 		}
 	}
 }

@@ -15,6 +15,7 @@ type communicationsEmailCollaborationRequest struct {
 	CompanyID     string                      `json:"company_id"`
 	SharedInboxID string                      `json:"shared_inbox_id"`
 	AccountEmail  string                      `json:"account_email"`
+	Priority      *int                        `json:"priority"`
 	Message       domain.EmailMessageSnapshot `json:"message"`
 }
 
@@ -67,8 +68,12 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			return
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		if req.CompanyID == "" || strings.TrimSpace(req.Message.ID) == "" {
-			writeError(w, http.StatusBadRequest, "company_id_and_message_required")
+		if req.CompanyID == "" || strings.TrimSpace(req.Message.ID) == "" || req.Priority == nil {
+			writeError(w, http.StatusBadRequest, "company_id_message_and_priority_required")
+			return
+		}
+		if *req.Priority < 1 || *req.Priority > 5 {
+			writeError(w, http.StatusBadRequest, "invalid_email_node_priority")
 			return
 		}
 		scope, ok := s.resolveCommunicationsEmailScope(w, actor, req.CompanyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
@@ -106,7 +111,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		result, err := s.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
-			AccountEmail: scope.accountEmail, CreatedByUserID: actor.User.UserID, Message: providerSnapshot,
+			AccountEmail: scope.accountEmail, CreatedByUserID: actor.User.UserID, Priority: req.Priority, Message: providerSnapshot,
 		})
 		if err != nil {
 			scopeType := "personal"

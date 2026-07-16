@@ -35,7 +35,7 @@ import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../m
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
-import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
+import { ChatIcon, MailIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
@@ -99,6 +99,7 @@ const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/
     forcedEntityID?: string;
     forcedLabel?: string;
     focusInformationID?: string;
+    focusEmailMessageID?: string;
     focusRequestID?: number;
   }>,
 })));
@@ -768,10 +769,11 @@ const nodeEditorPopupFullscreenStyle: React.CSSProperties = {
   borderRadius: 14,
 };
 
-export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
+export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusEmailMessageID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
+  focusEmailMessageID?: string;
   focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
@@ -948,6 +950,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             forcedEntityID={nodeID}
             forcedLabel={nodeTitle}
             focusInformationID={focusInformationID}
+            focusEmailMessageID={focusEmailMessageID}
             focusRequestID={focusRequestID}
           />
         </React.Suspense>
@@ -6081,7 +6084,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6102,6 +6105,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   onCreateSharedDraft: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
+  onCommentOnMessage?: (message: EmailMessage) => void;
+  onOpenCollaborationNode?: (message: EmailMessage) => void;
 }) {
   const allAttachments = React.useMemo(
     () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || emailAttachmentHasResolvableContent(attachment)),
@@ -6186,6 +6191,17 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               )}
             </span>
           </button>
+          {message.collaboration_node_id?.trim() && onOpenCollaborationNode && (
+            <button
+              type="button"
+              title="Open existing email node"
+              aria-label={`Open node for this reply from ${formatAddressList(message.from) || "Unknown sender"}`}
+              onClick={() => onOpenCollaborationNode(message)}
+              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px", color: "#7c3aed", borderColor: "rgba(124,58,237,0.28)", background: "rgba(245,243,255,0.86)" }}
+            >
+              <MailIcon color="#7c3aed" />
+            </button>
+          )}
           <details data-email-message-actions="true" style={{ position: "relative", flex: "0 0 auto" }}>
             <summary
               aria-label={`Actions for message from ${formatAddressList(message.from) || "Unknown sender"}`}
@@ -6195,6 +6211,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               •••
             </summary>
             <div aria-label="Message actions" style={{ position: "absolute", zIndex: 5, top: "calc(100% + 5px)", right: 0, minWidth: 172, display: "grid", gap: 5, padding: 7, border: "1px solid rgba(148,163,184,0.24)", borderRadius: 10, background: "rgba(248,250,252,0.98)", boxShadow: "7px 7px 18px rgba(148,163,184,0.25), -4px -4px 12px rgba(255,255,255,0.9)" }}>
+              {onCommentOnMessage && <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCommentOnMessage(message)}>Comment</button>}
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
@@ -6269,7 +6286,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6294,6 +6311,8 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onToggleRead: () => void;
   onToggleStar: () => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
+  onCommentOnMessage?: (message: EmailMessage) => void;
+  onOpenCollaborationNode?: (message: EmailMessage) => void;
 }) {
   const canonicalConversationMessages = conversationMessagesForDetail(message, threadMessages);
   const singleMessage = canonicalConversationMessages.length <= 1;
@@ -6486,6 +6505,8 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             onCreateSharedDraft={(replyMessage) => runMessageAction(replyMessage, onCreateSharedDraft)}
             onForward={(forwardMessage) => runMessageAction(forwardMessage, onForward)}
             onEmailSelection={onEmailSelection}
+            onCommentOnMessage={onCommentOnMessage}
+            onOpenCollaborationNode={onOpenCollaborationNode}
           />
         ))}
       </div>

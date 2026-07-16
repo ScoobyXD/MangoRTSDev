@@ -138,12 +138,14 @@ test("email collaboration resolve is read-only while ensure sends the complete s
       messageID: "message-1",
       threadID: "thread-1",
       accountEmail: "ME@Example.test",
+      priority: 4,
       message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
     });
     assert.equal(calls[0]?.method, "GET");
     assert.equal(calls[0]?.path, "/v1/communications/email-collaborations?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
     assert.equal(calls[1]?.method, "POST");
     assert.equal(calls[1]?.path, "/v1/communications/email-collaborations");
+    assert.equal(calls[1]?.body?.priority, 4);
     assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
   } finally {
     globalThis.fetch = originalFetch;

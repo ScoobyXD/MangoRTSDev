@@ -1,4 +1,4 @@
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 # Permissions Tests
 
@@ -71,7 +71,7 @@ P59 - Company role, group membership, and group hierarchy changes that can alter
 P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
 P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
-P63 - A newly created email-collaboration Node has default access `no_access` and one system-managed direct edit binding for its creator. It never inherits the Unfiled/Nodes folder policy, source shared-inbox policy, Logic Gate policy, project policy, GVIC assignments, or broad company-member edit access.
+P63 - A newly created email Node has default access `no_access`, one system-managed direct edit binding for its creator, and creator direct Generated GVIC. It never inherits the Unfiled/Nodes folder or source shared-inbox permission policy. Later explicit Logic Gate/Project work may apply those normal resource policies, while generic permission replacement still cannot widen or remove collaboration participant grants.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.

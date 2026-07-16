@@ -1,4 +1,4 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
 # Updates Tests
 
@@ -483,3 +483,5 @@ Expected:
 - The real hint performs one coalesced background canonical feed reconciliation without blanking visible rows, selection, preview, or expansion state; failure leaves the prior feed visible.
 - Row changes do not reopen a group the user collapsed.
 - Built-in Updates uses Date -> GVIC -> Priority -> Logic Gate exactly, while custom and empty stacks reload unchanged.
+
+U83 - Email-node chat continues to use the existing node comment/mention event path. Committed normal or urgent mentions create the established Updates event only after the atomic chat-and-participant transaction succeeds; metadata may navigate to the exact authorized node/chat/email reply but must not imply provider recipient or mailbox participation.

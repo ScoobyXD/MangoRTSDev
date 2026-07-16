@@ -1,4 +1,4 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
 # Kanban Board Tests
 
@@ -549,3 +549,5 @@ Expected:
 - The authorized mounted viewer receives one compact `resource_deleted` hint and closes/reconciles the board.
 - The unauthorized connection receives nothing.
 - Publication does not re-query the deleted resource, and ordinary non-tombstone board events continue to reauthorize at send time.
+
+KB129 - Every primary-email-origin Node, including a Triage-comment email Node, preserves `created_from_email=true` when later assigned/moved through Logic Gate or Kanban APIs. Immediate mutation responses and canonical reads must both render the established email icon; merely attaching an email to a normal-origin Node still does not opt it in.

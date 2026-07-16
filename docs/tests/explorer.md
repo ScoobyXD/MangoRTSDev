@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-16
 
 # Explorer Tests
 
@@ -64,10 +64,10 @@ E53 - Permissions opened from Company Explorer for folders, projects, or Logic G
 E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later reads, replies, attachments, drafts, and invitation responses use that source scope.
 E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted GVIC-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
 E56 - Every company receives one deterministic Nodes folder beneath Unfiled. Re-running default-folder repair is idempotent, preserves the same IDs/order/protection, and must not duplicate the folder or any collaboration Node item.
-E57 - Email-collaboration Node placement does not copy the Nodes folder permission policy. The Node keeps the private participant policy in EMAIL54, so folder permissions cannot expose it to nonparticipants or revoke permanent participants.
+E57 - A Triage-comment email Node keeps default `no_access` plus direct creator/participant grants and does not copy Nodes-folder permission policy. Folder visibility cannot leak its source thread or revoke participants.
 E58 - A collaboration Node row is a protected projection of collaboration ownership, not a general placement edge. Explorer item create/update/move/delete endpoints reject direct mutation of that row; lifecycle changes must use the collaboration/Node domain action so no orphaned chat, participant, draft, or source-thread record remains. Move/delete protection is determined by an exact same-company `communications_email_collaborations.node_id` row, never by `target_type='node'` alone, so an ordinary legacy Node edge remains movable and detachable.
 E59 - One collaboration identity has at most one Nodes-folder item. Concurrent create retries, future provider messages, or reopening from another surface reuse that row, and Company Explorer must not render the same Node under project/Logic Gate relationship branches.
-E60 - Existing email-to-Logic-Gate conversion behavior in E47 through E54 is not the collaboration exception: it still creates a Pending Kanban/work Node with no Company Explorer item. Starting chat on an unconverted triage email creates the private Unfiled/Nodes collaboration Node instead and applies no conversion defaults.
+E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established path. Starting chat on an unconverted triage email instead creates one priority-bearing creator-Generated-GVIC Node in Unfiled/Nodes with no initial Logic Gate; the Node can be assigned to normal work later.
 
 
 ## Bug History
@@ -342,3 +342,5 @@ Expected:
 - Ordinary Node placement remains rejected.
 - A pre-existing ordinary Node edge remains movable and detachable because it has no collaboration ownership row.
 - Email-to-Logic-Gate drop remains the separate Pending Kanban conversion in E47 through E54 and creates no Explorer Node item.
+
+E61 - The protected Unfiled/Nodes edge remains the single collaboration-owned Explorer placement. Normal node content/work/Project/Logic Gate behavior does not authorize moving or deleting that source placement independently of the collaboration lifecycle.

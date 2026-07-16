@@ -486,6 +486,7 @@ export type ResolveCommunicationsEmailCollaborationInput = {
 
 export type EnsureCommunicationsEmailCollaborationInput = ResolveCommunicationsEmailCollaborationInput & {
   message: EmailMessage;
+  priority: number;
 };
 
 export type CommunicationsEmailCollaborationThread = {
@@ -1027,6 +1028,7 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
         thread_id: input.threadID?.trim() || input.message.thread_id?.trim() || undefined,
         shared_inbox_id: input.sharedInboxID?.trim() || undefined,
         account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim().toLowerCase() || undefined,
+        priority: input.priority,
         message: input.message,
       }),
     },

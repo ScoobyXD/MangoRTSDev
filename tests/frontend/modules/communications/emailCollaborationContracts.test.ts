@@ -45,6 +45,7 @@ test("collaboration API preserves exact shared-inbox source identity", async () 
       threadID: " source-thread-1 ",
       sharedInboxID: " shared-inbox-1 ",
       accountEmail: " should-be-ignored@example.test ",
+      priority: 2,
       message: {
         id: " source-message-1 ",
         thread_id: "message-thread-fallback",
@@ -63,6 +64,7 @@ test("collaboration API preserves exact shared-inbox source identity", async () 
       message_id: "source-message-1",
       thread_id: "source-thread-1",
       shared_inbox_id: "shared-inbox-1",
+      priority: 2,
       message: {
         id: " source-message-1 ",
         thread_id: "message-thread-fallback",

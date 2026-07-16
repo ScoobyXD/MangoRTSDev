@@ -60,7 +60,9 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 	if !exists {
 		return domain.NodeProjection{}, ErrNotFound
 	}
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, nodeID); err != nil {
+	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
+		return domain.NodeProjection{}, ErrProtectedEmailCollaborationResource
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return domain.NodeProjection{}, err
 	}
 
@@ -260,11 +262,7 @@ func (r *PostgresRepo) createEditorSaveVersion(input EditorSaveVersionInput, res
 	if companyID == "" || resourceID == "" {
 		return domain.EditorSaveVersion{}, ErrInvalid
 	}
-	if resourceType == EntityTypeNode {
-		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, resourceID); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
-	}
+
 	if err := materializePostgresEditorCollaborationDocumentsForSaveTx(ctx, tx, companyID, resourceType, resourceID, time.Now().UTC()); err != nil {
 		return domain.EditorSaveVersion{}, err
 	}
@@ -468,11 +466,6 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 	actorUserID := cleanUUIDText(input.ActorUserID)
 	if companyID == "" || resourceID == "" || saveID == "" {
 		return domain.EditorSaveVersion{}, ErrInvalid
-	}
-	if resourceType == EntityTypeNode {
-		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, resourceID); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
 	}
 
 	version, err := selectEditorSaveVersionTx(ctx, tx, companyID, resourceType, resourceID, saveID)

@@ -62,11 +62,6 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
 	defer tx.Rollback()
-	if keyValue.resourceType == EntityTypeNode {
-		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, keyValue.companyID, keyValue.resourceID); err != nil {
-			return ResourceGVICAssignmentMutationResult{}, err
-		}
-	}
 
 	if exists, err := postgresGVICResourceExists(ctx, tx, keyValue); err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err

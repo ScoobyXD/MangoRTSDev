@@ -22,7 +22,7 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeProjection{}, ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
+	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
 		return domain.NodeProjection{}, ErrProtectedEmailCollaborationResource
 	}
 	k := key(companyID, nodeID)
@@ -180,9 +180,7 @@ func (r *MemoryRepo) CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
-		return domain.EditorSaveVersion{}, ErrProtectedEmailCollaborationResource
-	}
+
 	if err := r.materializeEditorCollaborationDocumentsForSaveLocked(companyID, EntityTypeNode, nodeID, time.Now().UTC()); err != nil {
 		return domain.EditorSaveVersion{}, err
 	}
@@ -302,9 +300,7 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
-		return domain.EditorSaveVersion{}, ErrProtectedEmailCollaborationResource
-	}
+
 	version, ok := memoryFindNodeSaveVersion(companyID, nodeID, saveID, r.nodeInfo[key(companyID, nodeID)])
 	if !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound

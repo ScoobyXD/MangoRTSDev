@@ -36,6 +36,7 @@ import { EmailCollaborationParticipantRoster } from "./EmailCollaborationPartici
 import {
   formatEmailCollaborationChatError,
 } from "./emailCollaborationChat";
+import { INBOX_PRIORITIES } from "./homeConstants";
 
 export type EmailCollaborationSelection = {
   messageID: string;
@@ -146,6 +147,9 @@ export function EmailCollaborationChatSurface({
   const [replyTargetID, setReplyTargetID] = React.useState("");
   const [activeMessageID, setActiveMessageID] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [priorityMenuOpen, setPriorityMenuOpen] = React.useState(false);
+  const [selectedPriority, setSelectedPriority] = React.useState<number | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
   const collaborationRef = React.useRef<CommunicationsEmailCollaboration | null>(null);
   const sourceLoadKeyRef = React.useRef("");
@@ -234,6 +238,9 @@ export function EmailCollaborationChatSurface({
       setDraft("");
       setDraftAttachments([]);
       setSelectedMentionPrincipals([]);
+      setPriorityMenuOpen(false);
+      setSelectedPriority(null);
+      setSubmitting(false);
       if (previousSourceKey) onClearSelection();
     }
     if (!active) {
@@ -333,8 +340,10 @@ export function EmailCollaborationChatSurface({
     };
   }, [active, apiBase, collaborationID, companyID, nodeID, onError, refreshCollaborationByID]);
 
-  const ensureCollaboration = React.useCallback(async (): Promise<CommunicationsEmailCollaboration> => {
+  const ensureCollaboration = React.useCallback(async (priorityOverride?: number): Promise<CommunicationsEmailCollaboration> => {
     if (collaboration) return collaboration;
+    const priority = priorityOverride ?? selectedPriority;
+    if (!priority || priority < 1 || priority > 5) throw new Error("email_node_priority_required");
     const created = await ensureEmailCollaboration({
       companyID,
       message,
@@ -342,10 +351,12 @@ export function EmailCollaborationChatSurface({
       threadID: message.thread_id,
       sharedInboxID,
       accountEmail,
+      priority,
     });
     acceptCollaboration(created);
+    setSelectedPriority(priority);
     return created;
-  }, [acceptCollaboration, accountEmail, collaboration, companyID, message, sharedInboxID]);
+  }, [acceptCollaboration, accountEmail, collaboration, companyID, message, selectedPriority, sharedInboxID]);
 
   const changeDraft = React.useCallback((nextDraft: string) => {
     setDraft(nextDraft);
@@ -360,19 +371,22 @@ export function EmailCollaborationChatSurface({
       : [...current, principal]);
   }, []);
 
-  const submit = React.useCallback(async () => {
+  const submit = React.useCallback(async (priorityOverride?: number) => {
     const cleanDraft = draft.trim();
-    if (!cleanDraft && draftAttachments.length === 0) return;
-    let collaborationForRefresh = collaboration;
-    let optimisticInformationID = "";
+    if ((!cleanDraft && draftAttachments.length === 0) || submitting) return;
+    const priority = priorityOverride ?? selectedPriority;
+    if (!collaboration && (!priority || priority < 1 || priority > 5)) {
+      setPriorityMenuOpen(true);
+      return;
+    }
+    setPriorityMenuOpen(false);
+    setSubmitting(true);
     try {
-      const activeCollaboration = await ensureCollaboration();
-      collaborationForRefresh = activeCollaboration;
+      const activeCollaboration = await ensureCollaboration(priority ?? undefined);
       const activeNodeID = activeCollaboration.node_id.trim();
       const activeBlockID = activeCollaboration.attached_email_information_id.trim();
       if (!activeNodeID || !activeBlockID) throw new Error("email_collaboration_node_missing");
       const informationID = generateStableInformationID();
-      optimisticInformationID = informationID;
       const createdTimestamp = new Date().toISOString();
       const mentions = mentionedPrincipalIDs(cleanDraft, principals);
       for (const principal of selectedMentionPrincipals) {
@@ -388,8 +402,8 @@ export function EmailCollaborationChatSurface({
         id: informationID,
         blockID: activeBlockID,
         parentID: replyTargetID || undefined,
-        selectionSource: !replyTargetID && selection ? "email" : undefined,
-        selectionMessageID: !replyTargetID ? selection?.messageID : undefined,
+        selectionSource: !replyTargetID ? "email" : undefined,
+        selectionMessageID: !replyTargetID ? (selection?.messageID ?? message.id) : undefined,
         selectionQuote: !replyTargetID ? selection?.quote : undefined,
         selectionStart: !replyTargetID ? selection?.startOffset : undefined,
         selectionEnd: !replyTargetID ? selection?.endOffset : undefined,
@@ -401,7 +415,6 @@ export function EmailCollaborationChatSurface({
         mentionedUserIDs: mentions.mentionedUserIDs,
         mentionedGroupIDs: mentions.mentionedGroupIDs,
       };
-      setMessages((current) => [...current, nextMessage]);
       await requestJSON("/v1/nodes/" + encodeURIComponent(activeNodeID) + "/information", {
         method: "POST",
         json: {
@@ -411,8 +424,8 @@ export function EmailCollaborationChatSurface({
           information: buildEditorTextBlockChatPayload({
             blockID: activeBlockID,
             parentID: replyTargetID,
-            selectionSource: !replyTargetID && selection ? "email" : undefined,
-            selectionMessageID: !replyTargetID ? selection?.messageID : undefined,
+            selectionSource: !replyTargetID ? "email" : undefined,
+            selectionMessageID: !replyTargetID ? (selection?.messageID ?? message.id) : undefined,
             selectionQuote: !replyTargetID ? selection?.quote : undefined,
             selectionStart: !replyTargetID ? selection?.startOffset : undefined,
             selectionEnd: !replyTargetID ? selection?.endOffset : undefined,
@@ -426,6 +439,7 @@ export function EmailCollaborationChatSurface({
           }),
         },
       });
+      setMessages((current) => current.some((item) => item.id === informationID) ? current : [...current, nextMessage]);
       onSuccess();
       setDraft("");
       setDraftAttachments([]);
@@ -439,14 +453,18 @@ export function EmailCollaborationChatSurface({
       });
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to save email chat. Your message is still here."));
-      if (optimisticInformationID) setMessages((current) => current.filter((item) => item.id !== optimisticInformationID));
-      if (collaborationForRefresh) void loadProjection(collaborationForRefresh).catch(() => undefined);
+    } finally {
+      setSubmitting(false);
     }
-  }, [author.name, author.userID, collaboration, companyID, draft, draftAttachments, ensureCollaboration, loadProjection, onClearSelection, onError, onSuccess, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selection]);
-
+  }, [author.name, author.userID, collaboration, companyID, draft, draftAttachments, ensureCollaboration, onClearSelection, onError, onSuccess, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selectedPriority, selection, submitting]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
+    if (!collaboration && !selectedPriority) {
+      setPriorityMenuOpen(true);
+      onError("Choose the email node priority, then attach the files again.");
+      return;
+    }
     try {
       const activeCollaboration = await ensureCollaboration();
       const uploaded = await Promise.all(candidates.map((file) => uploadEditorAttachment(file, {
@@ -464,7 +482,7 @@ export function EmailCollaborationChatSurface({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_upload_chat_attachment");
     }
-  }, [companyID, ensureCollaboration, onError, onSuccess, requestJSON]);
+  }, [collaboration, companyID, ensureCollaboration, onError, onSuccess, requestJSON, selectedPriority]);
 
   const deleteMessage = React.useCallback(async (messageID: string) => {
     const target = messages.find((item) => item.id === messageID);
@@ -494,7 +512,7 @@ export function EmailCollaborationChatSurface({
     const quote = target?.selectionQuote?.trim() ?? "";
     const startOffset = Math.max(0, target?.selectionStart ?? 0);
     const endOffset = Math.max(startOffset, target?.selectionEnd ?? 0);
-    if (target?.selectionSource === "email" && messageID && quote && endOffset > startOffset) {
+    if (target?.selectionSource === "email" && messageID) {
       onNavigateToEmailSelection({ messageID, quote, startOffset, endOffset });
     }
   }, [messages, onNavigateToEmailSelection]);
@@ -517,6 +535,26 @@ export function EmailCollaborationChatSurface({
       {snapshot?.subject && snapshot.subject !== message.subject && (
         <div style={{ color: "rgba(100,116,139,0.72)", fontSize: 10, padding: "0 8px" }}>Thread: {snapshot.subject}</div>
       )}
+      {priorityMenuOpen && !collaboration && (
+        <div role="dialog" aria-label="Choose email node priority" style={{ margin: "0 8px", display: "grid", gap: 5, border: "1px solid rgba(249,115,22,0.36)", borderRadius: 10, background: "rgba(255,247,237,0.96)", padding: 8, boxShadow: "0 8px 20px rgba(15,23,42,0.10)" }}>
+          <strong style={{ color: "#9a3412", fontSize: 11 }}>Choose a priority to create this email node</strong>
+          {INBOX_PRIORITIES.map((priority) => (
+            <button
+              key={priority.value}
+              type="button"
+              disabled={submitting}
+              onClick={() => {
+                setSelectedPriority(priority.value);
+                void submit(priority.value);
+              }}
+              style={{ minHeight: 28, border: "1px solid rgba(249,115,22,0.28)", borderRadius: 8, background: "#ffffff", color: "#7c2d12", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}
+            >
+              {priority.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {submitting && <div role="status" style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800, padding: "0 8px" }}>Saving comment and email node</div>}
       <ChatPane
         blockID={blockID || "email-collaboration"}
         editable
@@ -549,7 +587,7 @@ export function EmailCollaborationChatSurface({
         onClearSelectionAnchor={onClearSelection}
         onAttachFiles={(files) => { void attachFiles(files); }}
         onRemoveDraftAttachment={(attachmentID) => setDraftAttachments((current) => current.filter((item) => item.id !== attachmentID))}
-        onSubmit={() => { void submit(); }}
+        onSubmit={() => { if (!submitting) void submit(); }}
       />
     </aside>
   );

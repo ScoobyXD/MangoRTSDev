@@ -3731,12 +3731,14 @@ type AttachedEmailOrganizerPaneProps = {
   attachmentInformationID?: string;
   attachmentEditorSurface?: string;
   storageKey: string;
+  tabbed?: boolean;
   editable: boolean;
   accent: string;
   surfaceText: string;
   strokeColor: string;
   ruleColor: string;
   selectedMessageID?: string;
+  focusMessageID?: string;
   activeEmailSelection?: EmailActiveSelection | null;
   emailHighlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onSelectMessage?: (messageID: string) => void;
@@ -3925,6 +3927,7 @@ const AttachedEmailThreadCard: React.FC<{
   replyTargetMessageID?: string;
   replyAll?: boolean;
   activeSelection?: EmailActiveSelection | null;
+  initialFocusMessageID?: string;
   highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onToggleCollapsed: () => void;
   onSelect: () => void;
@@ -3932,14 +3935,14 @@ const AttachedEmailThreadCard: React.FC<{
   onReplyComplete: () => void;
   onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
-  onContextMenu: (event: React.MouseEvent<HTMLDivElement>, email: EditorAttachedEmail) => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>, email: EditorAttachedEmail) => void;
   onDragStart: React.DragEventHandler<HTMLDivElement>;
   onDragEnd: React.DragEventHandler<HTMLDivElement>;
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
   companyUsers?: MentionableCompanyUser[];
-}> = ({ email, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, initialFocusMessageID, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3989,7 +3992,7 @@ const AttachedEmailThreadCard: React.FC<{
     <div
       onDragEnd={onDragEnd}
       onContextMenu={(event) => {
-        if (!editable) return;
+        if (!editable || !onContextMenu) return;
         event.preventDefault();
         event.stopPropagation();
         onContextMenu(event, email);
@@ -4124,6 +4127,7 @@ const AttachedEmailThreadCard: React.FC<{
               strokeColor={strokeColor}
               ruleColor={ruleColor}
               activeSelection={activeSelection}
+              initialFocusMessageID={initialFocusMessageID}
               highlightRemovalRequest={highlightRemovalRequest}
               initialReplyTargetMessageID={replyTargetMessageID}
               initialReplyAll={replyAll}
@@ -4196,10 +4200,11 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
+  const [activeTabbedMessageID, setActiveTabbedMessageID] = useState("");
   const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string; replyAll: boolean } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
   const [emailMenu, setEmailMenu] = useState<{ messageID: string; x: number; y: number } | null>(null);
@@ -4249,6 +4254,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   useEffect(() => {
     if (localSelectedMessageID && !emailByID.has(localSelectedMessageID)) setLocalSelectedMessageID("");
   }, [emailByID, localSelectedMessageID]);
+  useEffect(() => {
+    if (activeTabbedMessageID && emailByID.has(activeTabbedMessageID)) return;
+    setActiveTabbedMessageID(orderedEmails[0]?.messageID ?? "");
+  }, [activeTabbedMessageID, emailByID, orderedEmails]);
 
   useEffect(() => {
     writeStoredAttachedEmailPaneLayout(storageKey, normalizedLayout);
@@ -4435,7 +4444,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     selectMessage(cleanMessageID);
   }, [activeSelectedMessageID, clearSelectedMessage, selectMessage]);
 
-  const renderEmailCards = (folderID: string) => (emailsByFolderID.get(folderID) ?? []).map((email) => (
+  const renderEmailCard = (email: EditorAttachedEmail, folderID: string) => (
     <AttachedEmailThreadCard
       key={email.messageID}
       email={email}
@@ -4453,12 +4462,13 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       surfaceText={surfaceText}
       strokeColor={strokeColor}
       ruleColor={ruleColor}
-      selected={activeSelectedMessageID === email.messageID}
+      selected={tabbed || activeSelectedMessageID === email.messageID}
       collapsed={collapsedThreadIDs.has(email.messageID)}
-      draggable={editable}
+      draggable={editable && !tabbed}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
       replyAll={replyComposer?.rootMessageID === email.messageID ? replyComposer.replyAll : false}
       activeSelection={activeEmailSelection}
+      initialFocusMessageID={focusMessageID}
       highlightRemovalRequest={emailHighlightRemovalRequest?.messageID === email.messageID ? emailHighlightRemovalRequest : null}
       onToggleCollapsed={() => toggleThread(email.messageID)}
       onSelect={() => toggleSelectedMessage(email.messageID)}
@@ -4471,9 +4481,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       }}
       onReplyEditorFocus={onReplyEditorFocus}
       onError={onError}
-      onContextMenu={(event, targetEmail) => setEmailMenu({ messageID: targetEmail.messageID, x: event.clientX, y: event.clientY })}
+      onContextMenu={tabbed ? undefined : (event, targetEmail) => setEmailMenu({ messageID: targetEmail.messageID, x: event.clientX, y: event.clientY })}
       onDragStart={(event) => {
-        if (!editable) return;
+        if (!editable || tabbed) return;
         setDraggingMessageID(email.messageID);
         writeAttachedEmailDragData(event.dataTransfer, email);
       }}
@@ -4491,8 +4501,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       onSelectionChatRequest={onEmailSelectionChatRequest}
       onSelectionNodeRequest={onEmailSelectionNodeRequest}
     />
-  ));
+  );
 
+  const renderEmailCards = (folderID: string) => (emailsByFolderID.get(folderID) ?? []).map((email) => renderEmailCard(email, folderID));
   const renderFolder = (folder: AttachedEmailFolderLayout, depth = 0): React.ReactNode => {
     const childFolders = childFoldersByParentID.get(folder.id) ?? [];
     const directEmails = emailsByFolderID.get(folder.id) ?? [];
@@ -4635,6 +4646,39 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     );
   };
 
+  if (tabbed) {
+    const activeEmail = emailByID.get(activeTabbedMessageID) ?? orderedEmails[0] ?? null;
+    const activeFolderID = activeEmail ? normalizedLayout.emailFolderByID[activeEmail.messageID] ?? "" : "";
+    return (
+      <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", color: surfaceText, overflow: "hidden" }}>
+        <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 900, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
+          <MailIcon color={accent} />
+          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Email thread{orderedEmails.length === 1 ? "" : "s"}</span>
+          <span style={{ opacity: 0.62 }}>{orderedEmails.length}</span>
+        </div>
+        <div role="tablist" aria-label="Attached email threads" style={{ minWidth: 0, display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 0", background: "rgba(248,250,252,0.86)" }}>
+          {orderedEmails.map((email) => {
+            const active = email.messageID === activeEmail?.messageID;
+            return (
+              <div key={email.messageID} style={{ minWidth: 0, maxWidth: 220, display: "flex", alignItems: "center", border: `1px solid ${active ? accent : EDITOR_NEU_SOFT_BORDER}`, borderBottomColor: active ? EDITOR_NEU_PANEL_BACKGROUND : EDITOR_NEU_SOFT_BORDER, borderRadius: "9px 9px 0 0", background: active ? EDITOR_NEU_PANEL_BACKGROUND : EDITOR_NEU_SURFACE, marginBottom: -1, boxShadow: active ? "inset 0 1px 0 rgba(255,255,255,0.9)" : "none" }}>
+                <button type="button" role="tab" aria-selected={active} title={email.subject} onClick={() => { setActiveTabbedMessageID(email.messageID); selectMessage(email.messageID); }} style={{ minWidth: 0, flex: "1 1 auto", height: 30, border: 0, background: "transparent", color: surfaceText, cursor: "pointer", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", fontSize: 10.5, fontWeight: active ? 950 : 800 }}>
+                  {email.subject || "(no subject)"}
+                </button>
+                {editable && onRemoveEmail && (
+                  <button type="button" title="Remove email from node" onClick={() => removeEmailFromNode(email.messageID)} style={{ width: 24, height: 24, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", padding: 7, background: EDITOR_NEU_PANEL_BACKGROUND }}>
+          {activeEmail ? renderEmailCard(activeEmail, activeFolderID) : (
+            <div style={{ height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontSize: 11 }}>No attached email</div>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", color: surfaceText, overflow: "hidden" }}>
       <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 900, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
@@ -4775,6 +4819,7 @@ type EmailConversationPaneProps = {
   activeSelection?: EmailActiveSelection | null;
   highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   initialReplyTargetMessageID?: string;
+  initialFocusMessageID?: string;
   initialReplyAll?: boolean;
   inlineExpansion?: boolean;
   onReplyComplete?: () => void;
@@ -5546,6 +5591,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   activeSelection,
   highlightRemovalRequest,
   initialReplyTargetMessageID,
+  initialFocusMessageID,
   initialReplyAll = false,
   inlineExpansion = false,
   onReplyComplete,
@@ -5561,6 +5607,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const mailboxSignatureScopeKey = useMemo(() => (
     [companyID.trim(), mailboxScope.sharedInboxID ?? "", mailboxScope.accountEmail ?? ""].join("\u0000")
   ), [companyID, mailboxScope]);
+  const conversationRootRef = useRef<HTMLDivElement | null>(null);
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
@@ -5793,6 +5840,17 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       return "";
     });
   }, [displayThreadMessages]);
+  useEffect(() => {
+    const targetMessageID = initialFocusMessageID?.trim() ?? "";
+    if (!targetMessageID || !displayThreadMessages.some((threadMessage) => threadMessage.id === targetMessageID)) return undefined;
+    setExpandedThreadMessageID(targetMessageID);
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(conversationRootRef.current?.querySelectorAll<HTMLElement>("[data-email-message-id]") ?? [])
+        .find((element) => element.dataset.emailMessageId === targetMessageID);
+      target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [displayThreadMessages, initialFocusMessageID]);
   useEffect(() => {
     setEmailHighlightsByMessageID((current) => {
       let changed = false;
@@ -6181,7 +6239,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   return (
     <>
-      <div style={{ position: "relative", height: "100%", minHeight: 0, display: "grid", gridTemplateRows: conversationGridRows, gap: inlineExpansion ? 0 : 8, padding: inlineExpansion ? (replyDockVisible ? 0 : "0 0 8px") : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+      <div ref={conversationRootRef} style={{ position: "relative", height: "100%", minHeight: 0, display: "grid", gridTemplateRows: conversationGridRows, gap: inlineExpansion ? 0 : 8, padding: inlineExpansion ? (replyDockVisible ? 0 : "0 0 8px") : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
         {showConversationHeader && (
           <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
             {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}

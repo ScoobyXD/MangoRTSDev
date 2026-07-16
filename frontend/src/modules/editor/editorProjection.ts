@@ -33,6 +33,7 @@ export type EditorTextBlockChatMessage = {
   blockID: string;
   parentID?: string;
   selectionSource?: "text" | "email";
+  selectionBlockID?: string;
   selectionMessageID?: string;
   selectionQuote?: string;
   selectionStart?: number;
@@ -60,6 +61,7 @@ export type EditorAttachedEmail = {
   threadID?: string;
   sharedInboxID?: string;
   accountEmail?: string;
+  createdFromEmail?: boolean;
   subject: string;
   snippet?: string;
   from?: string;
@@ -127,6 +129,7 @@ export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
   parentID?: string;
   selectionSource?: "text" | "email";
+  selectionBlockID?: string;
   selectionMessageID?: string;
   selectionQuote?: string;
   selectionStart?: number;
@@ -143,6 +146,7 @@ export function buildEditorTextBlockChatPayload(input: {
     block_id: input.blockID,
     parent_id: input.parentID ?? "",
     selection_source: input.selectionSource ?? "text",
+    selection_block_id: input.selectionBlockID?.trim() ?? "",
     selection_message_id: input.selectionMessageID?.trim() ?? "",
     selection_quote: input.selectionQuote?.trim() ?? "",
     selection_start: Number.isFinite(input.selectionStart) ? input.selectionStart : null,
@@ -164,6 +168,7 @@ export function buildEditorAttachedEmailPayload(input: {
   threadID?: string;
   sharedInboxID?: string;
   accountEmail?: string;
+  createdFromEmail?: boolean;
   subject: string;
   snippet?: string;
   from?: string;
@@ -177,6 +182,7 @@ export function buildEditorAttachedEmailPayload(input: {
     thread_id: input.threadID ?? "",
     shared_inbox_id: input.sharedInboxID?.trim() ?? "",
     account_email: input.accountEmail?.trim() ?? "",
+    created_from_email: input.createdFromEmail === true,
     subject: input.subject,
     snippet: input.snippet ?? "",
     from: input.from ?? "",
@@ -319,6 +325,7 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     blockID,
     parentID: parentID || undefined,
     selectionSource: stringValue(record, "selection_source") === "email" ? "email" : "text",
+    selectionBlockID: stringValue(record, "selection_block_id") || undefined,
     selectionMessageID: stringValue(record, "selection_message_id") || undefined,
     selectionQuote: stringValue(record, "selection_quote") || undefined,
     selectionStart: integerValue(record, "selection_start"),
@@ -354,6 +361,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
     threadID: threadID || undefined,
     sharedInboxID: sharedInboxID || undefined,
     accountEmail: accountEmail || undefined,
+    createdFromEmail: record.created_from_email === true,
     subject: stringValue(record, "subject") || "(no subject)",
     snippet: snippet || undefined,
     from: from || undefined,

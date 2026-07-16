@@ -112,6 +112,7 @@ export type NodeEditorOverlayState = {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
+  focusEmailMessageID?: string;
   focusRequestID?: number;
 };
 
