@@ -183,7 +183,7 @@ MT155 - My Triage All and other non-primary tabs must remain scrollable whenever
 MT156 - Oldest order requests the complete filtered personal-mailbox tab with internal provider pages of at most 200 messages, rejects repeated cursors instead of returning a partial result, deduplicates provider message IDs, and preserves the exact personal account scope.
 MT153 - Mailbox subscription acceptance/reconnect and global notification-summary events start zero mail list, folder, collaboration, page, or detail GETs. They may only mark reusable cache state stale for the next explicit read.
 MT154 - Automated realtime regression tests must assert request budgets, not merely final rows: 12 archive echoes plus local send/star/read/delete echoes produce zero invalidations, zero timers, and zero provider reads; acceptance/reconnect produces zero reads; external bursts cannot request a message-list replacement.
-MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next in equal lower positions when the page action is available. The three lower workflow controls use the shared vibrant elevated gradients, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
+MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next always occupying three equal lower positions. Inactive lower controls use shared light gradient tints; only the selected Compose or My Drafts destination becomes fully saturated. Archive page/next remains in the third slot and is disabled instead of removed outside Inbox, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
 MT158 - Once a My Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens the existing Node rather than creating another one and carries the clicked provider message ID so the left email pane expands and scrolls to that exact reply.
 
@@ -845,5 +845,5 @@ Given:
 - My Triage is open on a connected mailbox and the All/Spam menu is expanded.
 
 Expected:
-- Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row.
-- The lower actions use the shared modern gradients and both dropdown rows visibly highlight on pointer hover and keyboard focus.
+- Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row in every mailbox tab.
+- The lower actions use light shared gradients until selected, only one destination is fully saturated, and Archive/next remains visible but disabled outside Inbox. Both dropdown rows visibly highlight on pointer hover and keyboard focus.

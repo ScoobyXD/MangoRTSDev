@@ -484,26 +484,51 @@ button, input, textarea, select {
 }
 
 .mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-compose {
-  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 48%, #7c3aed 100%) !important;
-  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(79, 70, 229, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+  border-color: rgba(99, 102, 241, 0.22) !important;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.92), rgba(224, 231, 255, 0.94) 50%, rgba(237, 233, 254, 0.92)) !important;
+  color: #3730a3 !important;
 }
 
 .mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts {
-  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #ec4899 100%) !important;
-  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(168, 85, 247, 0.27), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+  border-color: rgba(168, 85, 247, 0.22) !important;
+  background: linear-gradient(135deg, rgba(237, 233, 254, 0.93), rgba(250, 232, 255, 0.94) 52%, rgba(252, 231, 243, 0.92)) !important;
+  color: #86198f !important;
 }
 
 .mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-advance {
-  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 48%, #14b8a6 100%) !important;
-  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(6, 182, 212, 0.26), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+  border-color: rgba(6, 182, 212, 0.24) !important;
+  background: linear-gradient(135deg, rgba(207, 250, 254, 0.92), rgba(204, 251, 241, 0.94)) !important;
+  color: #0e7490 !important;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-compose[aria-pressed="true"] {
+  border-color: rgba(255, 255, 255, 0.52) !important;
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 48%, #7c3aed 100%) !important;
+  color: #ffffff !important;
+  text-shadow: 0 1px 1px rgba(15, 23, 42, 0.22);
+  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(79, 70, 229, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts[aria-pressed="true"] {
+  border-color: rgba(255, 255, 255, 0.52) !important;
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #ec4899 100%) !important;
+  color: #ffffff !important;
+  text-shadow: 0 1px 1px rgba(15, 23, 42, 0.22);
+  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(168, 85, 247, 0.27), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
 }
 
 .mango-elevated-action.mango-mail-vibrant-action:not(:disabled):hover {
   border-color: rgba(255, 255, 255, 0.66) !important;
-  color: #ffffff !important;
   filter: saturate(1.12) brightness(1.05);
   box-shadow: 8px 8px 18px rgba(174, 174, 192, 0.30), -7px -7px 16px rgba(255, 255, 255, 0.94), 0 12px 26px rgba(99, 102, 241, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.42) !important;
   transform: translateY(-1px);
+}
+
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-advance:not(:disabled):hover,
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-advance:not(:disabled):focus-visible {
+  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 48%, #14b8a6 100%) !important;
+  color: #ffffff !important;
+  text-shadow: 0 1px 1px rgba(15, 23, 42, 0.2);
 }
 
 .mango-elevated-action.mango-mail-vibrant-action:not(:disabled):active {
@@ -519,8 +544,8 @@ button, input, textarea, select {
 
 .mango-elevated-action.mango-mail-vibrant-action:disabled {
   cursor: not-allowed;
-  filter: saturate(0.72);
-  opacity: 0.48;
+  filter: saturate(0.42);
+  opacity: 0.52;
 }
 
 .mango-mailbox-dropdown-item {
