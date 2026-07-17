@@ -160,9 +160,11 @@ test("Updates exposes all-group controls and a split three-cell live counter sur
   assert.match(appSidebar, /gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
   assert.match(appSidebar, /!large \|\| normalizeSidebarNotificationCount\(badge\.count\) > 0/);
   assert.match(appSidebar, /if \(!highlighted\) return/);
-  assert.match(appSidebar, /rgba\(254, 226, 226, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
-  assert.match(appSidebar, /rgba\(204, 251, 241, 0\.98\)[\s\S]*rgba\(125, 211, 252, 0\.72\)/);
-  assert.match(appSidebar, /rgba\(254, 249, 195, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
+  assert.match(appSidebar, /gridTemplateRows: "16px 12px"[\s\S]*rowGap: 3/);
+  assert.match(appSidebar, /appSidebarNotificationBadgeCountStyle\(large\)/);
+  assert.match(appSidebar, /rgba\(255, 247, 237, 0\.98\) 0%[\s\S]*rgba\(234, 88, 12, 0\.88\) 100%/);
+  assert.match(appSidebar, /rgba\(236, 254, 255, 0\.98\) 0%[\s\S]*rgba\(14, 165, 233, 0\.86\) 100%/);
+  assert.match(appSidebar, /rgba\(255, 251, 235, 0\.98\) 0%[\s\S]*rgba\(249, 115, 22, 0\.88\) 100%/);
 });
 
 test("Updates rows keep their width while node titles consume the available title-line space", () => {
