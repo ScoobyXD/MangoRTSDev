@@ -210,7 +210,7 @@ ST181 - A known Shared Triage thread never first renders as a standalone selecte
 ST182 - Shared Triage All and other non-primary tabs must remain scrollable whenever more provider pages exist; thread condensation cannot strand the user on a short first page.
 ST183 - Oldest order requests the complete filtered shared-mailbox tab with internal provider pages of at most 200 messages, rejects repeated cursors instead of returning a partial result, deduplicates provider message IDs, and preserves the exact `shared_inbox_id`.
 ST180 - Automated realtime regression tests must assert request budgets for Shared Triage as well as personal mail: local mutation echo bursts and acceptance/reconnect produce zero reads, while external bursts cannot request a message-list replacement.
-ST184 - Shared Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next in equal lower positions when the page action is available. The three lower workflow controls use the shared vibrant elevated gradients, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
+ST184 - Shared Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next always occupying three equal lower positions. Inactive lower controls use shared light gradient tints; only the selected Compose or My Drafts destination becomes fully saturated. Archive page/next remains in the third slot and is disabled instead of removed outside Inbox, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
 ## Scenarios
 
@@ -1001,5 +1001,5 @@ Given:
 - An authorized Shared Triage mailbox is open and the All/Spam menu is expanded.
 
 Expected:
-- Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row.
-- The lower actions use the shared modern gradients and both dropdown rows visibly highlight on pointer hover and keyboard focus.
+- Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row in every mailbox tab.
+- The lower actions use light shared gradients until selected, only one destination is fully saturated, and Archive/next remains visible but disabled outside Inbox. Both dropdown rows visibly highlight on pointer hover and keyboard focus.

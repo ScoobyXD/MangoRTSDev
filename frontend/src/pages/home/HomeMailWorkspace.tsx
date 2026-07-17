@@ -23,7 +23,6 @@ import {
   mailArchiveActionCountStyle,
   mailArchiveActionLabelStyle,
   mailArchiveActionsStyle,
-  mailComposeSentActionsStyle,
   mailComposeSentTriageActionsStyle,
   mailListTitleStackStyle,
   mailListToolbarStyle,
@@ -406,7 +405,6 @@ export function HomeMailWorkspace({
     setEmailCollaborationError("");
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
-  const triageAdvanceVisible = triageAdvanceEnabled || (isArchivableListView && mailbox === "sent");
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
   const selectedConversationLoading = selectedMessage
@@ -579,7 +577,7 @@ export function HomeMailWorkspace({
             </div>
           )}
           {isArchivableListView && (
-            <div style={triageAdvanceVisible ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>
+            <div style={mailComposeSentTriageActionsStyle}>
               <button
                 className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-compose"
                 type="button"
@@ -593,7 +591,7 @@ export function HomeMailWorkspace({
                 className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-drafts"
                 type="button"
                 style={mailVibrantActionButtonStyle}
-                aria-pressed={mailbox === "drafts"}
+                aria-pressed={!compose.open && mailbox === "drafts"}
                 title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
                 onClick={() => {
                   if (mailbox !== "drafts") onOpenDraftsMailbox();
@@ -601,18 +599,18 @@ export function HomeMailWorkspace({
               >
                 <MailboxActionContent label="My Drafts" count={draftCount} />
               </button>
-              {triageAdvanceVisible && (
-                <button
-                  className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-advance"
-                  type="button"
-                  style={mailVibrantAdvanceButtonStyle}
-                  disabled={!triageAdvanceEnabled || advanceDisabled}
-                  title={hasNextMessagePage ? "Archive this page and go to the next page" : "Archive this page"}
-                  onClick={onAdvanceTriagePage}
-                >
-                  {busy === "advance-archive" ? "Archiving..." : hasNextMessagePage ? "Archive & next →" : "Archive page →"}
-                </button>
-              )}
+              <button
+                className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-advance"
+                type="button"
+                style={mailVibrantAdvanceButtonStyle}
+                disabled={!triageAdvanceEnabled || advanceDisabled}
+                title={!triageAdvanceEnabled
+                  ? "Archive page is available from Inbox"
+                  : hasNextMessagePage ? "Archive this page and go to the next page" : "Archive this page"}
+                onClick={onAdvanceTriagePage}
+              >
+                {busy === "advance-archive" ? "Archiving..." : hasNextMessagePage ? "Archive & next →" : "Archive page →"}
+              </button>
             </div>
           )}
           {!isArchivableListView && (

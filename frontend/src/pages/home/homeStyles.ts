@@ -1772,16 +1772,11 @@ export const mailArchiveActionsStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-export const mailComposeSentActionsStyle: React.CSSProperties = {
+export const mailComposeSentTriageActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 6,
   alignItems: "center",
-};
-
-export const mailComposeSentTriageActionsStyle: React.CSSProperties = {
-  ...mailComposeSentActionsStyle,
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
 };
 
 export const mailUnreadFilterRowStyle: React.CSSProperties = {
@@ -1817,13 +1812,13 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
 export const mailVibrantActionButtonStyle: React.CSSProperties = {
   ...mailArchiveActionButtonStyle(false),
   minHeight: 36,
-  border: "1px solid rgba(255, 255, 255, 0.48)",
-  color: "#ffffff",
+  border: "1px solid rgba(148, 163, 184, 0.28)",
+  color: "#334155",
   fontSize: 11,
   fontWeight: 800,
   letterSpacing: "0.01em",
-  textShadow: "0 1px 1px rgba(15, 23, 42, 0.22)",
-  boxShadow: "7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), inset 1px 1px 0 rgba(255, 255, 255, 0.32)",
+  textShadow: "none",
+  boxShadow: "6px 6px 14px rgba(174, 174, 192, 0.24), -5px -5px 13px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.68)",
 };
 
 export const mailVibrantAdvanceButtonStyle: React.CSSProperties = {

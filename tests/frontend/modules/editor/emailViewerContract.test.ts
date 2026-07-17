@@ -96,13 +96,13 @@ test("triage thread controls and reply resize pointer lifecycle are explicit", (
   assert.match(homePage, /requiredReplyAllRecipients/);
   assert.match(homePage, /mergeEmailAddressDrafts\(\[existingDraft\.cc, requiredReplyAllRecipients\.cc\], \[to\]\)/);
 });
-test("sent triage preserves the three-button header and new-message compose fills the available detail height", () => {
+test("mail workspace preserves the fixed three-button lower row and new-message compose fills the available detail height", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
 
-  assert.match(homeWorkspace, /const triageAdvanceVisible = triageAdvanceEnabled \|\| \(isArchivableListView && mailbox === "sent"\)/);
-  assert.match(homeWorkspace, /style=\{triageAdvanceVisible \? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle\}/);
-  assert.match(homeWorkspace, /\{triageAdvanceVisible && \(/);
+  assert.match(homeWorkspace, /const triageAdvanceEnabled = isArchivableListView && mailbox === "primary"/);
+  assert.match(homeWorkspace, /<div style=\{mailComposeSentTriageActionsStyle\}>/);
+  assert.match(homeWorkspace, /className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-advance"/);
   assert.match(homeWorkspace, /disabled=\{!triageAdvanceEnabled \|\| advanceDisabled\}/);
 
   assert.match(homeParts, /height: "100%"/);
@@ -114,12 +114,12 @@ test("sent triage preserves the three-button header and new-message compose fill
   assert.match(homeParts, /emailAttachmentHasResolvableContent\(attachment\)/);
 });
 
-test("mail list actions use the requested order, symmetric lower row, vibrant surfaces, and visible All-menu hover", () => {
+test("mail list actions keep fixed positions, light inactive surfaces, clear selected states, and visible All-menu hover", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
   const indexCSS = source("frontend/src/index.css");
   const topStart = homeWorkspace.indexOf("<div style={mailArchiveActionsStyle}>");
-  const lowerStart = homeWorkspace.indexOf("<div style={triageAdvanceVisible ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>");
+  const lowerStart = homeWorkspace.indexOf("<div style={mailComposeSentTriageActionsStyle}>");
   const lowerEnd = homeWorkspace.indexOf("{!isArchivableListView && (", lowerStart);
   const topActions = homeWorkspace.slice(topStart, lowerStart);
   const lowerActions = homeWorkspace.slice(lowerStart, lowerEnd);
@@ -131,17 +131,23 @@ test("mail list actions use the requested order, symmetric lower row, vibrant su
   assert.match(topActions, /onOpenSentMailbox/);
   assert.doesNotMatch(topActions, /onOpenDraftsMailbox/);
   assert.match(lowerActions, /mango-mail-vibrant-compose/);
+  assert.match(lowerActions, /aria-pressed=\{compose\.open\}/);
   assert.match(lowerActions, /mango-mail-vibrant-drafts/);
+  assert.match(lowerActions, /aria-pressed=\{!compose\.open && mailbox === "drafts"\}/);
   assert.match(lowerActions, /onOpenDraftsMailbox/);
   assert.doesNotMatch(lowerActions, /onOpenSentMailbox/);
   assert.match(lowerActions, /mango-mail-vibrant-advance/);
   assert.match(lowerActions, /Archive & next →/);
+  assert.match(lowerActions, /disabled=\{!triageAdvanceEnabled \|\| advanceDisabled\}/);
+  assert.doesNotMatch(homeWorkspace, /triageAdvanceVisible/);
   assert.match(homeStyles, /mailComposeSentTriageActionsStyle[\s\S]{0,180}gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
   assert.match(homeWorkspace, /className="mango-mailbox-dropdown-item"/);
   assert.match(indexCSS, /\.mango-mailbox-dropdown-item:hover/);
-  assert.match(indexCSS, /#2563eb[\s\S]{0,240}#7c3aed/);
-  assert.match(indexCSS, /#7c3aed[\s\S]{0,240}#ec4899/);
-  assert.match(indexCSS, /#0891b2[\s\S]{0,240}#14b8a6/);
+  assert.match(indexCSS, /mango-mail-vibrant-compose \{[\s\S]{0,260}rgba\(219, 234, 254/);
+  assert.match(indexCSS, /mango-mail-vibrant-drafts \{[\s\S]{0,260}rgba\(237, 233, 254/);
+  assert.match(indexCSS, /mango-mail-vibrant-advance \{[\s\S]{0,260}rgba\(207, 250, 254/);
+  assert.match(indexCSS, /mango-mail-vibrant-compose\[aria-pressed="true"\][\s\S]{0,320}#2563eb[\s\S]{0,120}#7c3aed/);
+  assert.match(indexCSS, /mango-mail-vibrant-drafts\[aria-pressed="true"\][\s\S]{0,320}#7c3aed[\s\S]{0,120}#ec4899/);
 });
 
 
