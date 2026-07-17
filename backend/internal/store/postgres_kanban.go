@@ -362,9 +362,6 @@ func (r *PostgresRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignment
 func (r *PostgresRepo) assignNodeToLogicGateStatusTx(ctx context.Context, tx *sql.Tx, input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error) {
 	defer observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.total")()
 	boardID := LogicGateKanbanBoardID(input.LogicGateID)
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 
 	stop := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.logic_gate_read")
 	logicGate, err := scanLogicGateKanbanSource(tx.QueryRowContext(ctx, `
@@ -567,9 +564,6 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	defer tx.Rollback()
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 
 	sourceLogicGateID := input.LogicGateID
 	if input.FromLogicGateID != "" {
@@ -710,9 +704,6 @@ func (r *PostgresRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignme
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	defer tx.Rollback()
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentRemoveResult{}, err
-	}
 
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {
@@ -773,9 +764,6 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	defer tx.Rollback()
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {

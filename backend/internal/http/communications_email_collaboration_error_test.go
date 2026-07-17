@@ -41,8 +41,9 @@ func TestEmailCollaborationCreationReportsStorageNotReadyWithoutLeakingPostgresD
 	}
 	server := newEmailCollaborationThreadTestServer(failingEmailCollaborationEnsureRepo{Repository: repo, err: pgErr}, newEmailCollaborationCreationTestClient(providerMessage, nil))
 	defer server.Close()
+	priority := 3
 	body, err := json.Marshal(communicationsEmailCollaborationRequest{
-		CompanyID: emailCollaborationThreadTestCompanyID, AccountEmail: owner.Email,
+		CompanyID: emailCollaborationThreadTestCompanyID, AccountEmail: owner.Email, Priority: &priority,
 		Message: domain.EmailMessageSnapshot{ID: providerMessage.ID, ThreadID: providerMessage.ThreadID},
 	})
 	if err != nil {

@@ -1,4 +1,4 @@
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 # Logic Gates Tests
 
@@ -311,3 +311,5 @@ Expected:
 - The same-Node reconciliation does not restore the half-view ratio or clear fullscreen.
 - Fullscreen persists until the user explicitly exits or closes the popup.
 - Closing or opening a different Node restores the normal saved half-view behavior.
+
+LG51 - Email-derived Nodes are not attached to a Logic Gate at chat creation. A later ordinary assignment is allowed, preserves selected Node priority/status behavior, and returns `created_from_email=true` immediately so the established email icon appears on the Logic Gate row/card without waiting for a refresh.

@@ -53,13 +53,21 @@ projection.projection_updated_timestamp as projection_updated_timestamp,
 projection.assignment_created_timestamp as assignment_created_timestamp,
 projection.projection_updated_timestamp as card_updated_timestamp,
 projection.accounts::text as accounts_json,
-exists (
-  select 1
-  from communications_email_nodes email_node
-  where email_node.company_id = projection.company_id
-    and email_node.node_id = projection.node_id
-    and email_node.board_id = projection.compatibility_board_id
-    and email_node.card_id = projection.compatibility_card_id
+(
+  exists (
+    select 1
+    from communications_email_nodes email_node
+    where email_node.company_id = projection.company_id
+      and email_node.node_id = projection.node_id
+      and email_node.board_id = projection.compatibility_board_id
+      and email_node.card_id = projection.compatibility_card_id
+  )
+  or exists (
+    select 1
+    from communications_email_collaborations collaboration
+    where collaboration.company_id = projection.company_id
+      and collaboration.node_id = projection.node_id
+  )
 ) as created_from_email`
 
 func syncKanbanBoardProjectionForNodeTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, nodeID string) error {
@@ -313,13 +321,21 @@ projection.assignment_created_timestamp,
 projection.assignment_updated_timestamp,
 projection.projection_updated_timestamp,
 projection.accounts::text as accounts_json,
-exists (
-  select 1
-  from communications_email_nodes email_node
-  where email_node.company_id = projection.company_id
-    and email_node.node_id = projection.node_id
-    and email_node.board_id = projection.compatibility_board_id
-    and email_node.card_id = projection.compatibility_card_id
+(
+  exists (
+    select 1
+    from communications_email_nodes email_node
+    where email_node.company_id = projection.company_id
+      and email_node.node_id = projection.node_id
+      and email_node.board_id = projection.compatibility_board_id
+      and email_node.card_id = projection.compatibility_card_id
+  )
+  or exists (
+    select 1
+    from communications_email_collaborations collaboration
+    where collaboration.company_id = projection.company_id
+      and collaboration.node_id = projection.node_id
+  )
 ) as created_from_email`
 
 func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (KanbanBoardProjectionRow, error) {

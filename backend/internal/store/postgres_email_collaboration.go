@@ -221,8 +221,8 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	}
 	nodeID, informationID, collaborationID := newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
 	if _, err := tx.ExecContext(ctx, `
-insert into nodes (company_id, node_id, name, default_access, created_timestamp)
-values ($1::uuid, $2::uuid, $3, 'no_access', now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message)); err != nil {
+insert into nodes (company_id, node_id, name, priority, default_access, created_timestamp)
+values ($1::uuid, $2::uuid, $3, $4, 'no_access', now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_node", err)
 	}
 	information := communicationsEmailAttachedProjectionPayload(informationID, collaborationID, input)
@@ -267,8 +267,28 @@ values ($1::uuid, $2::uuid, $3::uuid, $3::uuid, 'creator', null, now())`, input.
 	if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: input.CreatedByUserID, AccessLevel: EntityPermissionEdit}); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("grant_creator_access", err)
 	}
-	// Standalone collaboration Nodes intentionally begin without Logic Gate,
-	// project, status, priority, GVIC, Kanban, or timeline dependencies.
+	if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id, resource_type, resource_id, role, principal_type, principal_id, created_timestamp, updated_timestamp
+) values ($1::uuid, 'node', $2::uuid, $3, 'user', $4::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`,
+		input.CompanyID, nodeID, domain.GVICRoleGenerated, input.CreatedByUserID); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("assign_creator_gvic", err)
+	}
+	policySequence, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
+	if err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("allocate_creator_gvic_policy", err)
+	}
+	if err := setPostgresResourceGVICPolicyRevisionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, policySequence); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("set_creator_gvic_policy", err)
+	}
+	gvicKey := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}
+	if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{gvicKey}); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("sync_creator_gvic", err)
+	}
+	if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("sync_creator_gvic_projection", err)
+	}
 	item, err := postgresEmailCollaborationByID(ctx, tx, input.CompanyID, collaborationID, input.CreatedByUserID)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("load_created", err)

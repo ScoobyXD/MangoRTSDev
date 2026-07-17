@@ -62,6 +62,7 @@ test("parses node text block chat projection payloads", () => {
     authorName: "Ada",
     message: "Check this section",
     createdTimestamp: "2026-05-04T01:00:00.000Z",
+    selectionBlockID: "text-block-2",
     selectionQuote: "selected text",
     selectionStart: 12,
     selectionEnd: 25,
@@ -80,6 +81,7 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].blockID, "block-1");
   assert.equal(messages[0].parentID, "chat-parent");
+  assert.equal(messages[0].selectionBlockID, "text-block-2");
   assert.equal(messages[0].selectionQuote, "selected text");
   assert.equal(messages[0].selectionStart, 12);
   assert.equal(messages[0].selectionEnd, 25);
@@ -183,6 +185,7 @@ test("parses attached email projection payloads", () => {
     threadID: "thread-1",
     sharedInboxID: "shared-1",
     accountEmail: "shared@example.test",
+    createdFromEmail: true,
     subject: "Contract terms",
     from: "Lee <lee@example.test>",
     attachedTimestamp: "2026-05-04T03:00:00.000Z",
@@ -196,6 +199,7 @@ test("parses attached email projection payloads", () => {
   assert.equal(emails[0].collaborationID, "collaboration-1");
   assert.equal(emails[0].sharedInboxID, "shared-1");
   assert.equal(emails[0].accountEmail, "shared@example.test");
+  assert.equal(emails[0].createdFromEmail, true);
   assert.equal(emails[0].subject, "Contract terms");
 });
 

@@ -115,6 +115,10 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeParticipants := maps.Clone(r.emailCollaborationParticipants)
 	beforePermissions := maps.Clone(r.entityPermissions)
 	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
+	beforeGVICAssignments := maps.Clone(r.gvicAssignments)
+	beforeGVICEffectiveAssignments := maps.Clone(r.gvicEffectiveAssignments)
+	beforeGVICMatrixProjectionRows := maps.Clone(r.GVICMatrixProjectionRows)
+	beforeGVICPolicyRevisions := maps.Clone(r.gvicPolicyRevisions)
 	beforePermissionRevisions := maps.Clone(r.resourcePermissionRevisions)
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
 	beforeResourcePolicySequence := r.resourcePolicySequence
@@ -125,6 +129,8 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		r.defaultFolderSeed = beforeDefaultFolderSeed
 		r.emailCollaborations, r.emailCollaborationParticipants = beforeCollaborations, beforeParticipants
 		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
+		r.gvicAssignments, r.gvicEffectiveAssignments = beforeGVICAssignments, beforeGVICEffectiveAssignments
+		r.GVICMatrixProjectionRows, r.gvicPolicyRevisions = beforeGVICMatrixProjectionRows, beforeGVICPolicyRevisions
 		r.resourcePermissionRevisions, r.workspaceReadVersions = beforePermissionRevisions, beforeWorkspaceReadVersions
 		r.resourcePolicySequence = beforeResourcePolicySequence
 	}
@@ -145,6 +151,10 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	node.DefaultAccess = ResourceDefaultAccessNoAccess
+	if input.Priority != nil {
+		priority := *input.Priority
+		node.Priority = &priority
+	}
 	r.nodes[key(input.CompanyID, node.NodeID)] = node
 	informationID, collaborationID := newUUIDv7String(), newUUIDv7String()
 	information := communicationsEmailAttachedProjectionPayload(informationID, collaborationID, input)
@@ -173,6 +183,13 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
+	gvicKey := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: node.NodeID}
+	gvicAssignment := r.resourceGVICAssignmentForPrincipalLocked(gvicKey, normalizedGVICAssignmentInput{
+		role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: input.CreatedByUserID,
+	}, now)
+	r.gvicAssignments[gvicSourceAssignmentKey(gvicAssignment.CompanyID, gvicAssignment.ResourceType, gvicAssignment.ResourceID, gvicAssignment.Role, gvicAssignment.PrincipalType, gvicAssignment.PrincipalID)] = gvicAssignment
+	r.setDirectGVICPolicySequenceLocked(input.CompanyID, EntityTypeNode, node.NodeID, r.nextResourcePolicySequenceLocked())
+	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{gvicKey})
 	r.bumpNodeViewVersionLocked(input.CompanyID, node.NodeID)
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
 		"node_id": node.NodeID, "email_collaboration_id": item.CollaborationID,

@@ -154,9 +154,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); protected {
-		return domain.Node{}, ErrProtectedEmailCollaborationResource
-	}
+
 	if input.TitleSet {
 		node.Title = input.Title
 		for boardKey, cards := range r.kanbanCards {
@@ -521,7 +519,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeInformation{}, ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
+	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
 		return domain.NodeInformation{}, ErrProtectedEmailCollaborationResource
 	}
 	now := time.Now().UTC()

@@ -31,6 +31,7 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	SharedInboxID        string
 	AccountEmail         string
 	CreatedByUserID      string
+	Priority             *int
 	Message              domain.EmailMessageSnapshot
 }
 
@@ -152,6 +153,9 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	if creatorID == "" || message.ID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
+	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
+		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
 	input.CompanyID = companyID
 	input.PersonalUserID = scope.personalUserID
 	input.PersonalAccountEmail = scope.personalAccountEmail
@@ -251,6 +255,7 @@ func communicationsEmailAttachedProjectionPayload(informationID, collaborationID
 	payload := map[string]any{
 		"block_id":           informationID,
 		"collaboration_id":   collaborationID,
+		"created_from_email": true,
 		"message_id":         input.Message.ID,
 		"thread_id":          input.Message.ThreadID,
 		"shared_inbox_id":    input.SharedInboxID,

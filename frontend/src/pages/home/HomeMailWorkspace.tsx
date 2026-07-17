@@ -100,6 +100,14 @@ function StarIcon({ filled }: { filled: boolean }) {
   );
 }
 
+function EmailNodeIndicatorIcon() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+      <rect x="3" y="2.5" width="10" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.35" />
+      <path d="M5.3 5.6h5.4M5.3 8h5.4M5.3 10.4h3.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
 function SendPointerIcon() {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
@@ -292,6 +300,7 @@ export function HomeMailWorkspace({
   onToggleStar,
   onToggleUnreadOnly,
   onEmailCollaborationChange,
+  onOpenCollaborationNode,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -373,6 +382,7 @@ export function HomeMailWorkspace({
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
+  onOpenCollaborationNode: (message: EmailMessage) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
@@ -398,6 +408,11 @@ export function HomeMailWorkspace({
   const toggleEmailChat = React.useCallback(() => {
     if (!emailChatKey) return;
     setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
+  }, [emailChatKey]);
+  const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
+    if (!emailChatKey) return;
+    setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
+    setEmailChatSession({ key: emailChatKey, visible: true });
   }, [emailChatKey]);
   React.useEffect(() => {
     setEmailSelection(null);
@@ -742,6 +757,20 @@ export function HomeMailWorkspace({
                       </span>
                       <span style={triageMessageMetaStyle}>
                         <span style={{ ...messageTimestampStatusRowStyle, ...triageMessageTimestampStyle }}>
+                          {message.collaboration_node_id?.trim() && (
+                            <button
+                              type="button"
+                              title="Open existing email node"
+                              aria-label={`Open node for ${message.subject || "email"}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenCollaborationNode(message);
+                              }}
+                              style={{ width: 24, height: 22, border: "1px solid rgba(124,58,237,0.22)", borderRadius: 7, background: "rgba(245,243,255,0.86)", color: "#7c3aed", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                            >
+                              <EmailNodeIndicatorIcon />
+                            </button>
+                          )}
                           <MessageAttachmentCount message={message} />
                           <MessageThreadCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
@@ -778,6 +807,20 @@ export function HomeMailWorkspace({
                       <span style={messageRowTopStyle}>
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span style={messageTimestampStatusRowStyle}>
+                          {message.collaboration_node_id?.trim() && (
+                            <button
+                              type="button"
+                              title="Open existing email node"
+                              aria-label={`Open node for ${message.subject || "email"}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenCollaborationNode(message);
+                              }}
+                              style={{ width: 24, height: 22, border: "1px solid rgba(124,58,237,0.22)", borderRadius: 7, background: "rgba(245,243,255,0.86)", color: "#7c3aed", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                            >
+                              <EmailNodeIndicatorIcon />
+                            </button>
+                          )}
                           <MessageAttachmentCount message={message} />
                           <MessageThreadCount message={message} />
                           <span>{formatMessageDate(message.date)}</span>
@@ -865,7 +908,9 @@ export function HomeMailWorkspace({
                 onToggleRead={onToggleRead}
                 onToggleStar={onToggleStar}
                 onEmailSelection={setEmailSelection}
+                onCommentOnMessage={commentOnEmailReply}
                 selectionNavigation={emailNavigation}
+                onOpenCollaborationNode={onOpenCollaborationNode}
               />
             )}
             {emailChatMounted && (

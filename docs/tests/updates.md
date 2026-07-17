@@ -177,6 +177,8 @@ Entity icons in Updates must also be shared tokens. Individual row copy may use 
 | Shared triage or shared inbox permission changed | Purple | `{User} changed {Subject}'s access on <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox permission revoked | Dark mellow red | `{User} removed {Subject}'s access from <folder icon> {Shared Surface}` |
 
+U88 - Email-node chat continues to use the existing node comment/mention event path. Committed normal or urgent mentions create the established Updates event only after the atomic chat-and-participant transaction succeeds; metadata may navigate to the exact authorized node/chat/email reply but must not imply provider recipient or mailbox participation.
+
 ## Scenarios
 
 ### Scenario U-S1: Grouped Unread Feed

@@ -117,6 +117,11 @@ func TestPostgresEmailCollaborationCreationSkipsBroadProjectionSync(t *testing.T
 		"insert_collaboration",
 		"insert_creator_participant",
 		"grant_creator_access",
+		"assign_creator_gvic",
+		"allocate_creator_gvic_policy",
+		"set_creator_gvic_policy",
+		"sync_creator_gvic",
+		"sync_creator_gvic_projection",
 		"load_created",
 		"commit_created",
 	} {

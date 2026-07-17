@@ -1318,3 +1318,5 @@ Given:
 Expected:
 - Controlled rerenders retain the same image DOM node and object URL, issue no replacement fetch, and never show a one-frame blank or broken thumbnail.
 - Real unmount/context replacement still aborts pending work, restores the durable source, and revokes the owned object URL without weakening sanitization or original-image authorization.
+
+ED75 - A primary-email-origin Node keeps the canonical Triage/email conversation in the primary right pane beside its per-text-box documents. A primary-editor selection written there persists `selection_block_id`; additional text-box rows retain their established per-block chat context. Email selections persist exact provider message/quote/offsets, and navigation focuses the referenced source without copying the Triage conversation.

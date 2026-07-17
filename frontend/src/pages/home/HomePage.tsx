@@ -3406,6 +3406,7 @@ export function HomePage({
           threadID,
           sharedInboxID: sourceSharedInboxID,
           accountEmail: sourceAccountEmail,
+          priority: 3,
         });
       }
       applyEmailCollaborationChange(collaboration);
@@ -4642,18 +4643,32 @@ export function HomePage({
       .filter((id) => nodeByID.has(id));
     return selectedNodeIDs.length > 0 ? selectedNodeIDs : [cleanNodeID];
   }, [nodeByID, selectedNodeRowIDs]);
-  const openNodeEditorOverlay = useCallback((node: NodeRecord, informationID?: string) => {
+  const openNodeEditorOverlay = useCallback((node: NodeRecord, informationID?: string, emailMessageID?: string) => {
     const nodeID = node.node_id.trim();
     if (!nodeID) return;
     const cleanInformationID = informationID?.trim() ?? "";
+    const cleanEmailMessageID = emailMessageID?.trim() ?? "";
     setNodeEditorOverlay({
       nodeID,
       nodeTitle: nodeTitle(node),
       focusInformationID: cleanInformationID || undefined,
+      focusEmailMessageID: cleanEmailMessageID || undefined,
       focusRequestID: cleanInformationID ? Date.now() : undefined,
     });
     onNodeOverlayOpen?.(nodeID);
   }, [onNodeOverlayOpen]);
+
+  const openEmailCollaborationNode = useCallback((message: EmailMessage) => {
+    const nodeID = message.collaboration_node_id?.trim() ?? "";
+    if (!nodeID) return;
+    const node = nodeByID.get(nodeID) ?? {
+      company_id: companyID,
+      node_id: nodeID,
+      name: message.subject?.trim() || "Email conversation",
+      created_timestamp: "",
+    };
+    openNodeEditorOverlay(node, message.collaboration_information_id, message.id);
+  }, [companyID, nodeByID, openNodeEditorOverlay]);
 
   useEffect(() => {
     if (deepLinkNodeID === undefined) return;
@@ -6007,6 +6022,7 @@ export function HomePage({
               setNextPageToken("");
             }}
             onEmailCollaborationChange={applyEmailCollaborationChange}
+            onOpenCollaborationNode={openEmailCollaborationNode}
           />
           {showLocalEntityRail && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
           {showLocalEntityRail && (
@@ -6150,6 +6166,7 @@ export function HomePage({
           nodeID={nodeEditorOverlay.nodeID}
           nodeTitle={nodeEditorOverlay.nodeTitle}
           focusInformationID={nodeEditorOverlay.focusInformationID}
+          focusEmailMessageID={nodeEditorOverlay.focusEmailMessageID}
           focusRequestID={nodeEditorOverlay.focusRequestID}
           onClose={closeNodeEditorOverlay}
           onDeleteNode={deleteNodeEditorOverlayNode}

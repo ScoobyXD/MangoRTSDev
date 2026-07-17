@@ -131,6 +131,26 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /loadProjection\(collaboration, rollbackSequence\)\.catch/);
   assert.match(workspace, /visibleError = emailCollaborationError \|\| error/);
   assert.match(surface, /if \(!active \|\| !companyID \|\| !collaborationID \|\| !nodeID\) return undefined;/);
-  assert.match(surface, /await requestJSON\([\s\S]*setDraft\(""\);[\s\S]*void refreshCollaborationByID/);
-  assert.match(surface, /if \(optimisticInformationID\) setMessages\(\(current\) => current\.filter/);
+  assert.match(surface, /if \(!collaboration && \(!priority \|\| priority < 1 \|\| priority > 5\)\) \{[\s\S]*setPriorityMenuOpen\(true\)/);
+  assert.match(surface, /priority,[\s\S]*await requestJSON\([\s\S]*setMessages\([\s\S]*setDraft\(""\)/);
+  assert.doesNotMatch(surface, /optimisticInformationID/);
+});
+
+test("email-node UI reuses the canonical chat, exact reply marker, three-column origin layout, and source tabs", () => {
+  const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
+  const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const projection = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorProjection.ts"), "utf8");
+
+  assert.match(workspace, /message\.collaboration_node_id\?\.trim\(\)[\s\S]*onOpenCollaborationNode\(message\)/);
+  assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
+  assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
+  assert.match(nodeSurface, /emailOriginPrimaryRow[\s\S]*minmax\(280px, 0\.9fr\) minmax\(320px, 1\.15fr\) minmax\(280px, 0\.9fr\)/);
+  assert.match(nodeSurface, /blockID=\{chatBlockID\}[\s\S]*headerTrailing=\{emailOriginPrimaryRow/);
+  assert.match(nodeSurface, /tabbed=\{emailOriginPrimaryRow\}/);
+  assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
+  assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
+  assert.match(projection, /selection_block_id: input\.selectionBlockID/);
+  assert.match(projection, /created_from_email: input\.createdFromEmail === true/);
 });

@@ -135,6 +135,7 @@ type EditorContentProps = {
   forcedLabel?: string;
   forcedEmptyMessage?: string;
   focusInformationID?: string;
+  focusEmailMessageID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
   compactLinkedDocumentHeader?: boolean;
@@ -575,7 +576,7 @@ const EditorSaveSettingsSurface: React.FC<{
 };
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -2850,6 +2851,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             editorSequence={0}
             hidden={documentIsolation.visibility === "hidden"}
             focusInformationID={focusInformationID}
+            focusEmailMessageID={focusEmailMessageID}
             focusRequestID={focusRequestID}
             focusInformationMode={focusInformationMode}
             topPx={documentTopPx}

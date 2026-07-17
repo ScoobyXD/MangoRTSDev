@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-16
 
 # GVIC Tests
 
@@ -62,7 +62,7 @@ GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic G
 GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
 GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
 GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_edit`.
-GVIC55 - Email-collaboration Nodes are a system-managed exception to ordinary standalone-node GVIC editing: generic GVIC add, set/update, and remove commands reject them. Permanent collaboration participation grants are not GVIC assignments and must not create source or effective GVIC rows.
+GVIC55 - Email-derived Nodes use normal editable Node GVIC semantics. First-comment creation atomically assigns the creator as direct Generated GVIC; accepted mention participation remains a separate collaboration access grant and does not itself add a GVIC role. Later authorized GVIC add/set/remove follows the ordinary Node contract.
 GVIC56 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
 
 ## Scenarios
@@ -278,7 +278,7 @@ Expected:
 - The stale response cannot overwrite the newer request owner.
 - Request-owner metadata does not grant any resource permission flag.
 
-### Scenario GVIC-S9: Email-Collaboration Node GVIC Guard
+### Scenario GVIC-S9: Email Node Creator Ownership And Normal GVIC
 
 Business logic covered:
 - GVIC29
@@ -287,12 +287,12 @@ Business logic covered:
 Given:
 - An ordinary standalone Node and an email-collaboration Node both exist.
 - A participant joins the email collaboration through a direct or group mention.
-- A caller attempts generic GVIC add, set/update, and remove commands for both Nodes.
+- The creator submits the first priority-bearing email comment, a participant later joins through a direct or group mention, and an authorized caller edits GVIC on both Nodes.
 
 Expected:
 - The ordinary standalone Node retains editable Node GVIC source assignments.
-- Every generic GVIC mutation rejects the email-collaboration Node because its standalone Node is system-managed collaboration infrastructure.
-- Mention participation remains a permanent collaboration grant and creates no source or effective GVIC assignment.
+- Email Node creation gives the creator direct Generated GVIC, and later generic GVIC mutations follow the same authorized Node rules as the ordinary Node.
+- Mention participation remains a permanent collaboration access grant but creates no GVIC assignment unless a separate GVIC command assigns one.
 ### Scenario GVIC-S10: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
 
 Business logic covered:

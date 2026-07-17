@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -13,18 +12,19 @@ import (
 	"testing"
 )
 
-func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
+func TestEmailNodeHTTPWorkSemanticsMentionParticipationAndCanonicalSafety(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000101"
-	repo.EnsureCompany(companyID, "Email collaboration HTTP guard company")
-	creator := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "http-guard-creator", "creator@example.com", domain.RoleCompanyUser)
-	target := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "http-guard-target", "target@example.com", domain.RoleCompanyUser)
-	admin := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "http-guard-admin", "admin@example.com", domain.RoleCompanyAdmin)
+	repo.EnsureCompany(companyID, "Email node HTTP company")
+	creator := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-creator", "creator@example.com", domain.RoleCompanyUser)
+	target := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-target", "target@example.com", domain.RoleCompanyUser)
+	admin := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-admin", "admin@example.com", domain.RoleCompanyAdmin)
+	priority := 3
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, CreatedByUserID: creator.UserID, Priority: &priority,
 		Message: domain.EmailMessageSnapshot{
-			ID: "http-guard-message", ThreadID: "http-guard-thread", Subject: "Guarded thread",
+			ID: "email-node-http-message", ThreadID: "email-node-http-thread", Subject: "Email node thread",
 			From: []domain.EmailAddressSnapshot{{Name: "Sender", Email: "sender@example.com"}},
 			To:   []domain.EmailAddressSnapshot{{Email: creator.Email}},
 		},
@@ -33,12 +33,9 @@ func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
 	collaboration := created.Collaboration
-	server := NewServerWithOptions(repo, ServerOptions{})
-	handler := server.Routes()
+	handler := NewServerWithOptions(repo, ServerOptions{}).Routes()
 
-	grantBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "mentioned_user_ids": []string{target.UserID},
-	})
+	grantBody, _ := json.Marshal(map[string]any{"company_id": companyID, "mentioned_user_ids": []string{target.UserID}})
 	grantReq := httptest.NewRequest(http.MethodPost, "/v1/communications/email-collaborations/"+collaboration.CollaborationID+"/participants", bytes.NewReader(grantBody))
 	grantReq = attachmentRequestWithActor(grantReq, creator, companyID, domain.RoleCompanyUser)
 	grantRec := httptest.NewRecorder()
@@ -46,89 +43,54 @@ func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
 	if grantRec.Code != http.StatusNotFound {
 		t.Fatalf("standalone participant grant status = %d body=%s, want 404", grantRec.Code, grantRec.Body.String())
 	}
-	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, target.UserID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("target after standalone grant error = %v, want ErrNotFound", err)
-	}
 
-	mentionInformation := emailCollaborationMentionInformation(t, target.UserID)
-	rejectedBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "type": "Text block chat", "information": mentionInformation,
+	beforeCanonical := httpEmailCollaborationProjectionInformation(t, repo, companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID)
+	canonicalBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID, "type": "Attached email", "information": `{"subject":"overwritten"}`,
 		"information_id": collaboration.AttachedEmailInformationID,
 	})
-	rejectedReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/projection", bytes.NewReader(rejectedBody))
-	rejectedReq = attachmentRequestWithActor(rejectedReq, creator, companyID, domain.RoleCompanyUser)
-	rejectedRec := httptest.NewRecorder()
-	handler.ServeHTTP(rejectedRec, rejectedReq)
-	if rejectedRec.Code != http.StatusConflict {
-		t.Fatalf("canonical projection overwrite status = %d body=%s, want 409", rejectedRec.Code, rejectedRec.Body.String())
+	canonicalReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/projection", bytes.NewReader(canonicalBody))
+	canonicalReq = attachmentRequestWithActor(canonicalReq, creator, companyID, domain.RoleCompanyUser)
+	canonicalRec := httptest.NewRecorder()
+	handler.ServeHTTP(canonicalRec, canonicalReq)
+	if canonicalRec.Code != http.StatusConflict {
+		t.Fatalf("canonical projection overwrite status = %d body=%s, want 409", canonicalRec.Code, canonicalRec.Body.String())
 	}
-	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, target.UserID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("target after rejected mention error = %v, want ErrNotFound", err)
+	if got := httpEmailCollaborationProjectionInformation(t, repo, companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID); got != beforeCanonical {
+		t.Fatalf("canonical projection changed from %q to %q", beforeCanonical, got)
 	}
 
-	genericProjectionID := store.NewUUIDv7String()
-	genericProjectionBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "type": "Text box", "information": `{"content":"forbidden"}`, "information_id": genericProjectionID,
+	textID := store.NewUUIDv7String()
+	textBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID, "type": "Text box", "information": `{"title":"Notes","document":"work"}`, "information_id": textID,
 	})
-	genericProjectionReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/projection", bytes.NewReader(genericProjectionBody))
-	genericProjectionReq = attachmentRequestWithActor(genericProjectionReq, creator, companyID, domain.RoleCompanyUser)
-	genericProjectionRec := httptest.NewRecorder()
-	handler.ServeHTTP(genericProjectionRec, genericProjectionReq)
-	if genericProjectionRec.Code != http.StatusConflict {
-		t.Fatalf("generic collaboration projection status = %d body=%s, want 409", genericProjectionRec.Code, genericProjectionRec.Body.String())
+	textReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/information", bytes.NewReader(textBody))
+	textReq = attachmentRequestWithActor(textReq, creator, companyID, domain.RoleCompanyUser)
+	textRec := httptest.NewRecorder()
+	handler.ServeHTTP(textRec, textReq)
+	if textRec.Code != http.StatusCreated || !httpEmailCollaborationHasProjection(t, repo, companyID, collaboration.NodeID, textID) {
+		t.Fatalf("email node Text box status = %d body=%s", textRec.Code, textRec.Body.String())
 	}
 
 	chatID := store.NewUUIDv7String()
-	acceptedBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "type": "Text block chat", "information": mentionInformation, "information_id": chatID,
+	mentionInformation, _ := json.Marshal(map[string]any{
+		"block_id":           collaboration.AttachedEmailInformationID,
+		"message":            "@Target please review",
+		"mentioned_user_ids": []string{target.UserID},
 	})
-	acceptedReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/projection", bytes.NewReader(acceptedBody))
-	acceptedReq = attachmentRequestWithActor(acceptedReq, creator, companyID, domain.RoleCompanyUser)
-	acceptedRec := httptest.NewRecorder()
-	handler.ServeHTTP(acceptedRec, acceptedReq)
-	if acceptedRec.Code != http.StatusOK {
-		t.Fatalf("accepted chat mention status = %d body=%s", acceptedRec.Code, acceptedRec.Body.String())
+	chatBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID, "type": store.CommunicationsEmailCollaborationChatInformationType,
+		"information": string(mentionInformation), "information_id": chatID,
+	})
+	chatReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/information", bytes.NewReader(chatBody))
+	chatReq = attachmentRequestWithActor(chatReq, creator, companyID, domain.RoleCompanyUser)
+	chatRec := httptest.NewRecorder()
+	handler.ServeHTTP(chatRec, chatReq)
+	if chatRec.Code != http.StatusCreated {
+		t.Fatalf("email node chat mention status = %d body=%s", chatRec.Code, chatRec.Body.String())
 	}
 	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, target.UserID); err != nil {
-		t.Fatalf("target did not become permanent participant: %v", err)
-	}
-
-	beforeInformation, err := repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil {
-		t.Fatalf("GetNodeDetails before generic information attempts: %v", err)
-	}
-	beforeCanonical := httpEmailCollaborationProjectionInformation(t, repo, companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID)
-	for _, test := range []struct {
-		name          string
-		informationID string
-		infoType      string
-		information   string
-	}{
-		{name: "canonical Attached email overwrite", informationID: collaboration.AttachedEmailInformationID, infoType: "Attached email", information: `{"subject":"overwritten"}`},
-		{name: "arbitrary Text box", informationID: store.NewUUIDv7String(), infoType: "Text box", information: `{"content":"forbidden"}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			body, _ := json.Marshal(map[string]any{
-				"company_id": companyID, "type": test.infoType, "information": test.information, "information_id": test.informationID,
-			})
-			req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/information", bytes.NewReader(body))
-			req = attachmentRequestWithActor(req, creator, companyID, domain.RoleCompanyUser)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusConflict {
-				t.Fatalf("status = %d body=%s, want 409", rec.Code, rec.Body.String())
-			}
-		})
-	}
-	afterInformation, err := repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil || afterInformation.InformationCount != beforeInformation.InformationCount {
-		t.Fatalf("guarded HTTP information writes changed history: before=%d after=%d err=%v", beforeInformation.InformationCount, afterInformation.InformationCount, err)
-	}
-	if got := httpEmailCollaborationProjectionInformation(t, repo, companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID); got != beforeCanonical {
-		t.Fatalf("guarded HTTP information write changed canonical projection from %q to %q", beforeCanonical, got)
-	}
-	if httpEmailCollaborationHasProjection(t, repo, companyID, collaboration.NodeID, genericProjectionID) {
-		t.Fatal("generic HTTP projection write persisted on collaboration Node")
+		t.Fatalf("mentioned user did not become a safe node-chat participant: %v", err)
 	}
 
 	saveBody, _ := json.Marshal(map[string]any{"company_id": companyID, "save_kind": "manual"})
@@ -136,58 +98,32 @@ func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
 	saveReq = attachmentRequestWithActor(saveReq, creator, companyID, domain.RoleCompanyUser)
 	saveRec := httptest.NewRecorder()
 	handler.ServeHTTP(saveRec, saveReq)
-	if saveRec.Code != http.StatusConflict {
-		t.Fatalf("collaboration save-version create status = %d body=%s, want 409", saveRec.Code, saveRec.Body.String())
-	}
-	restoreBody, _ := json.Marshal(map[string]any{"company_id": companyID})
-	restoreReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/save-versions/"+store.NewUUIDv7String()+"/restore", bytes.NewReader(restoreBody))
-	restoreReq = attachmentRequestWithActor(restoreReq, creator, companyID, domain.RoleCompanyUser)
-	restoreRec := httptest.NewRecorder()
-	handler.ServeHTTP(restoreRec, restoreReq)
-	if restoreRec.Code != http.StatusConflict {
-		t.Fatalf("collaboration save-version restore status = %d body=%s, want 409", restoreRec.Code, restoreRec.Body.String())
+	if saveRec.Code != http.StatusCreated {
+		t.Fatalf("email node save-version create status = %d body=%s", saveRec.Code, saveRec.Body.String())
 	}
 
-	accountBody, _ := json.Marshal(map[string]any{"company_id": companyID, "account_ids": []string{}})
-	accountReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+collaboration.NodeID+"/accounts", bytes.NewReader(accountBody))
-	accountReq = attachmentRequestWithActor(accountReq, creator, companyID, domain.RoleCompanyUser)
-	accountRec := httptest.NewRecorder()
-	handler.ServeHTTP(accountRec, accountReq)
-	if accountRec.Code != http.StatusConflict {
-		t.Fatalf("collaboration account assignment status = %d body=%s, want 409", accountRec.Code, accountRec.Body.String())
-	}
-
-	gvicBody, _ := json.Marshal(map[string]any{"company_id": companyID, "gvic_assignments": []any{}})
-	gvicReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+collaboration.NodeID+"/gvic", bytes.NewReader(gvicBody))
-	gvicReq = attachmentRequestWithActor(gvicReq, creator, companyID, domain.RoleCompanyUser)
-	gvicRec := httptest.NewRecorder()
-	handler.ServeHTTP(gvicRec, gvicReq)
-	if gvicRec.Code != http.StatusConflict {
-		t.Fatalf("collaboration GVIC assignment status = %d body=%s, want 409", gvicRec.Code, gvicRec.Body.String())
-	}
-
-	logicGate, err := repo.CreateLogicGate(companyID, "Collaboration guard gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "Email node gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
 	logicGateBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "node_id": collaboration.NodeID, "priority": 3, "status": store.LogicGateWorkStatusPending,
+		"company_id": companyID, "node_id": collaboration.NodeID, "priority": priority, "status": store.LogicGateWorkStatusPending,
 	})
 	logicGateReq := httptest.NewRequest(http.MethodPost, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes", bytes.NewReader(logicGateBody))
 	logicGateReq = attachmentRequestWithActor(logicGateReq, creator, companyID, domain.RoleCompanyUser)
 	logicGateRec := httptest.NewRecorder()
 	handler.ServeHTTP(logicGateRec, logicGateReq)
-	if logicGateRec.Code != http.StatusConflict {
-		t.Fatalf("collaboration Logic Gate assignment status = %d body=%s, want 409", logicGateRec.Code, logicGateRec.Body.String())
+	if logicGateRec.Code != http.StatusCreated || !bytes.Contains(logicGateRec.Body.Bytes(), []byte(`"created_from_email":true`)) {
+		t.Fatalf("email node Logic Gate assignment status = %d body=%s", logicGateRec.Code, logicGateRec.Body.String())
 	}
 
-	updateBody, _ := json.Marshal(map[string]any{"company_id": companyID, "name": "renamed"})
+	updateBody, _ := json.Marshal(map[string]any{"company_id": companyID, "name": "Renamed email node"})
 	updateReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+collaboration.NodeID, bytes.NewReader(updateBody))
 	updateReq = attachmentRequestWithActor(updateReq, creator, companyID, domain.RoleCompanyUser)
 	updateRec := httptest.NewRecorder()
 	handler.ServeHTTP(updateRec, updateReq)
-	if updateRec.Code != http.StatusConflict {
-		t.Fatalf("generic collaboration node update status = %d body=%s, want 409", updateRec.Code, updateRec.Body.String())
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("email node update status = %d body=%s", updateRec.Code, updateRec.Body.String())
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+collaboration.NodeID+"?company_id="+companyID, nil)
@@ -196,7 +132,7 @@ func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusConflict {
-		t.Fatalf("generic collaboration node delete status = %d body=%s, want 409", deleteRec.Code, deleteRec.Body.String())
+		t.Fatalf("canonical email node delete status = %d body=%s, want 409", deleteRec.Code, deleteRec.Body.String())
 	}
 
 	projectionDeleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+collaboration.NodeID+"/projection/"+collaboration.AttachedEmailInformationID+"?company_id="+companyID, nil)
@@ -213,34 +149,7 @@ func TestEmailCollaborationHTTPGuardsAndMentionOnlyParticipation(t *testing.T) {
 	permissionRec := httptest.NewRecorder()
 	handler.ServeHTTP(permissionRec, permissionReq)
 	if permissionRec.Code != http.StatusConflict {
-		t.Fatalf("generic collaboration permission replace status = %d body=%s, want 409", permissionRec.Code, permissionRec.Body.String())
-	}
-
-	folders := emailCollaborationDefaultFolderIDsForHTTPTest(t, repo, companyID)
-	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: folders.nodesID})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows Nodes: %v", err)
-	}
-	edgeID := ""
-	for _, row := range children.Rows {
-		if row.EntityType == store.CompanyExplorerV2EntityNode && row.ResourceID == collaboration.NodeID {
-			edgeID = row.EdgeID
-		}
-	}
-	if edgeID == "" {
-		t.Fatal("collaboration Node Explorer edge not found")
-	}
-	targetFolder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{CompanyID: companyID, ParentEntityID: companyID, Name: "Move target"})
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
-	}
-	moveBody, _ := json.Marshal(map[string]any{"company_id": companyID, "parent_entity_id": targetFolder.EntityID})
-	moveReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/items/"+edgeID, bytes.NewReader(moveBody))
-	moveReq = attachmentRequestWithActor(moveReq, creator, companyID, domain.RoleCompanyUser)
-	moveRec := httptest.NewRecorder()
-	handler.ServeHTTP(moveRec, moveReq)
-	if moveRec.Code != http.StatusConflict {
-		t.Fatalf("generic collaboration Explorer move status = %d body=%s, want 409", moveRec.Code, moveRec.Body.String())
+		t.Fatalf("email node permission replace status = %d body=%s, want 409", permissionRec.Code, permissionRec.Body.String())
 	}
 
 	assertEmailCollaborationAttachmentAdminPrivacy(t, repo, companyID, collaboration, creator, target, admin)

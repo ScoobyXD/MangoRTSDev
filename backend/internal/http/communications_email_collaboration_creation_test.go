@@ -194,8 +194,49 @@ func TestEmailCollaborationCreationUsesAuthorizedSharedSource(t *testing.T) {
 	}
 }
 
+func TestEmailCollaborationCreationRequiresValidPriorityBeforeProviderRead(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	client := newEmailCollaborationCreationTestClient(NylasMessage{ID: "priority-message", ThreadID: "priority-thread"}, nil)
+	server := newEmailCollaborationThreadTestServer(repo, client)
+	defer server.Close()
+	invalidPriority := 6
+	for _, test := range []struct {
+		name     string
+		priority *int
+		code     string
+	}{
+		{name: "missing", code: "company_id_message_and_priority_required"},
+		{name: "outside range", priority: &invalidPriority, code: "invalid_email_node_priority"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload, err := json.Marshal(communicationsEmailCollaborationRequest{
+				CompanyID: emailCollaborationThreadTestCompanyID, AccountEmail: owner.Email, Priority: test.priority,
+				Message: domain.EmailMessageSnapshot{ID: "priority-message", ThreadID: "priority-thread"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := emailCollaborationThreadTestRequestWithActor(
+				httptest.NewRequest(http.MethodPost, "/v1/communications/email-collaborations", bytes.NewReader(payload)), owner, domain.RoleCompanyUser,
+			)
+			rec := httptest.NewRecorder()
+			server.Routes().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), test.code) {
+				t.Fatalf("status=%d body=%s, want 400 %s", rec.Code, rec.Body.String(), test.code)
+			}
+		})
+	}
+	grants, messageIDs := client.calls()
+	if len(grants) != 0 || len(messageIDs) != 0 {
+		t.Fatalf("provider calls before valid priority: grants=%v messages=%v", grants, messageIDs)
+	}
+}
 func performEmailCollaborationCreationTestRequest(t *testing.T, repo store.Repository, client NylasClient, actor domain.User, role string, body communicationsEmailCollaborationRequest) *httptest.ResponseRecorder {
 	t.Helper()
+	if body.Priority == nil {
+		priority := 3
+		body.Priority = &priority
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)

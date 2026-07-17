@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-16
 
 # Project Management Tests
 
@@ -64,7 +64,7 @@ PM53 - An attached-email reply opened from Project Management keeps project atta
 PM54 - Node-open project-relationship reads use a company/resource-scoped shared singleflight/cache. Creating, updating, or deleting a project relationship invalidates that exact cache before any local refresh signal, so React StrictMode and multiple node windows do not duplicate the same canonical relationship request or restore a stale result.
 PM55 - A successful same-window Node or Logic Gate rename patches matching Project Management timeline `display_title`, workspace Node/Logic Gate labels, Project detail relationship/critical-path `display_title`, and active selected/context entity labels from the concrete committed-title event. It does not create a Project Management realtime scope or canonical reload and must not replace generic multi-resource delete-confirmation labels.
 PM56 - The Project editor header uses the shared primary order Editor, Permissions, formatting toolbar, and Outline Styles/Automatic Numbering. Assignments and available open/minimize commands remain in one accessible **More editor actions** menu. Project assignment/permission dialogs, previews, and embedded node panels use the shared body-level overlay layer above Key Views, Explorer, and Search Explorer; blocking modes trap/restore focus, while the anchored embedded panel remains modeless until fullscreen.
-PM57 - Generic project-relationship attach/upsert rejects a Node backed by an email collaboration with `protected email collaboration resource`, before persisting or moving any relationship. Ordinary Nodes and Logic Gates retain normal relationship behavior. Deleting an already-stored relationship remains allowed for every resource type so legacy or erroneous collaboration links can be cleaned up.
+PM57 - A Node backed by an email collaboration uses normal project-relationship attach/upsert/delete behavior. Project projections preserve its `created_from_email` origin so the established email icon renders. Collaboration participant authorization and canonical source-email protection remain unchanged by project membership.
 
 ## Scenarios
 
@@ -211,7 +211,7 @@ Expected:
 - Confirming project-only assignment creates or updates the node/project relationship and does not require node priority.
 - Confirming a Logic Gate creates or updates the node/project relationship and assigns or moves the node to the selected Logic Gate.
 - Go to Project opens the related project directly and does not mutate project relationships.
-- Confirming assignment for an email-collaboration Node is rejected before any relationship is created or moved; ordinary Node and Logic Gate assignment is unchanged, and an existing erroneous collaboration relationship can still be deleted.
+- Confirming assignment for an email Node uses the same project-only or project-plus-Logic-Gate flow as an ordinary Node, preserves `created_from_email` for its icon, and does not change collaboration participants or provider recipients.
 
 ### Scenario PM-S6: Project Relationship Node Openers
 
