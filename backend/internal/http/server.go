@@ -82,6 +82,7 @@ type Server struct {
 	nylasConfig                             NylasConfig
 	attachmentStorage                       AttachmentObjectStorage
 	attachmentVariantEnsurer                AttachmentImageVariantEnsurer
+	attachmentRemoteImageDownloader         attachmentRemoteImageDownloader
 	attachmentDirectUpload                  attachmentDirectUploadConfig
 	attachmentUploadCleanupCancel           context.CancelFunc
 	attachmentUploadCleanupDisabled         bool
@@ -213,6 +214,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasConfig:                             options.NylasConfig,
 		attachmentStorage:                       options.AttachmentStorage,
 		attachmentVariantEnsurer:                options.AttachmentVariantEnsurer,
+		attachmentRemoteImageDownloader:         newSafeAttachmentRemoteImageDownloader(),
 		attachmentDirectUpload:                  attachmentDirectUploadConfigFromEnv(),
 		attachmentUploadCleanupDisabled:         options.DisableAttachmentUploadCleanup,
 		maxBodyBytes:                            options.MaxRequestBodyBytes,

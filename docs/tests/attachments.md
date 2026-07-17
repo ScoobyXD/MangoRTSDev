@@ -1,4 +1,4 @@
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
 # Attachments Tests
 
@@ -92,6 +92,7 @@ ATT57 - A saved personal/shared signature image is sendable only from a coherent
 ATT58 - Every non-canceled outbound attachment failure emits one sanitized communications-send log containing request correlation, POST route, company/user/scope, safe attachment ID/index/count, failure class, and public code. Object-not-found returns attachment_content_not_found, configured storage unavailability or timeout returns attachment_storage_unavailable, and reported/short/long size failures return attachment_content_length_mismatch; opaque open/read/checksum failures retain attachment_storage_failed. Logs never contain filenames, storage keys/buckets, signed URLs, credentials, raw bodies, or bytes, and a canceled request exits silently.
 ATT59 - Starting a personal/shared Forward copies every ordinary source attachment and each inline asset actually referenced by the retained body into the exact live Mango forward-draft resource before send. The copied reference keeps the provider attachment ID only as source provenance and uses its new Mango attachment ID for authorization; retained `cid:` URLs are rewritten to those copied durable IDs. Unreferenced inline-only assets are not promoted, aggregate size is checked against ATT42 before copying, and partial download/upload failure stays visible and retryable without falsely claiming the complete forward is ready.
 ATT60 - A visible or near-visible durable editor image must not depend forever on an `IntersectionObserver` callback or an unbounded content request. Hydration schedules already-visible frames immediately, uses a bounded observer watchdog, applies a per-attempt deadline, retries the authenticated original variant after display failure/timeout through the shared bounded queue/backoff, revokes any late object URL, and reaches ready or explicit error while preserving the durable attachment ID. Realtime state never contains attachment bytes, object URLs, signed URLs, credentials, or secrets.
+ATT61 - External rich-document image import authorizes edit access to the exact destination resource before any outbound request. The server accepts only credential-free HTTP(S) URLs on default ports, revalidates each redirect with a five-hop limit, resolves only public global-unicast addresses, rejects localhost/private/link-local/multicast destinations, streams at most 24,000,000 bytes, and accepts only detected PNG, JPEG, GIF, or WebP bodies. It computes the hash server-side, writes the original to private attachment storage, creates the destination inline-image link, and never stores or returns the source URL, credentials, signed URL, or image bytes in editor state.
 
 ## Scenarios
 
@@ -124,9 +125,11 @@ Business logic covered:
 - ATT17
 - ATT32
 - ATT34
+- ATT61
 
 Given:
 - A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, attached-email reply body, or personal/shared email signature.
+- A user pastes a mixed ClickUp, Linear, or similar SOP document containing formatted text and multiple inline images into one of those editors.
 - A user copies an existing attachment-backed image into a different unified editor resource, or changes editor targets while an image upload/link is pending.
 - The user double-clicks an inline image, closes the preview, deletes the hydrated image, and invokes editor undo/redo without refreshing the page.
 
@@ -139,6 +142,8 @@ Expected:
 - Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant directly in the stable dark overlay, with no transient panel/outline or geometry jump and with a bright-red top-right accessible close X.
 - In editable content, image selection establishes a usable caret immediately before the image, and the same drag and resize behavior works in node, Logic Gate, project, compose, and reply editors.
 - Copying an attachment-backed image creates the destination resource link before the reference is inserted; a stale asynchronous completion does not mutate a different or unmounted editor target.
+- Mixed rich paste resolves all images through the shared durable path with a maximum of three unique image imports in flight, preserves document/image order, and commits once after all resolutions settle.
+- A protected remote import checks destination edit permission before fetching, rejects unsafe or oversized/non-raster sources and redirects, stores no source URL, and lets one failed image degrade to safe fallback text without losing the rest of the pasted document.
 - Backend guards reject attempts to persist durable inline image bytes, including communications draft and signature bodies.
 
 ### Scenario ATT-S3: Node, Logic Gate, And Project Attachments

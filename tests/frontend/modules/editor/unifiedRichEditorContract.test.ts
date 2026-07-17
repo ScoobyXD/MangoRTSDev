@@ -451,31 +451,45 @@ test("external hydration preserves logical selection and node teardown retains f
 
 test("shared editor clipboard routing keeps mixed content and copies images before cut deletion", () => {
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+  const editorRichClipboard = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorRichClipboard.ts"), "utf8");
   const editorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorDocumentSurface.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
-  const attachmentBackedPaste = sourceSliceBetween(
+  const attachmentBackedPreparation = sourceSliceBetween(
     editorSurfaceHandlers,
-    "if (clipboardData.attachmentID) {",
-    "const imageData = await createEditorImageDataFromSource",
-    "attachment-backed editor image paste",
+    "async function prepareEditorClipboardImageData",
+    "async function insertEditorClipboardImageData",
+    "attachment-backed editor image preparation",
+  );
+  const attachmentBackedInsertion = sourceSliceBetween(
+    editorSurfaceHandlers,
+    "async function insertEditorClipboardImageData",
+    "function editorRichClipboardImageSize",
+    "attachment-backed editor image insertion",
   );
 
   assert.match(editorImages, /createEditorImageFrame\(ownerDocument, \{ \.\.\.data, id: undefined \}, \{ durable: true \}\)/);
   assert.match(editorSurfaceHandlers, /editorImageTransferHTMLKind\(root\.ownerDocument, html\)/);
   assert.match(editorSurfaceHandlers, /shouldUseEditorImageFileTransferShortcut\(true, htmlKind, text\)/);
   assert.match(editorSurfaceHandlers, /onCut\(event\)[\s\S]*copySelectedEditorImage\(root, event\.clipboardData, editorImageAttachmentContext\)[\s\S]*removeSelectedEditorImage\(root\)/);
-  assert.match(attachmentBackedPaste, /await withPreparedEditorAttachmentResource\(editorImageAttachmentContext\.prepareResource, \(\) => linkMangoResourceAttachment\(editorImageAttachmentContext\.requestJSON, \{/);
-  assert.match(attachmentBackedPaste, /resourceType: editorImageAttachmentContext\.resourceType/);
-  assert.match(attachmentBackedPaste, /resourceID: editorImageAttachmentContext\.resourceID/);
-  assert.match(attachmentBackedPaste, /attachmentID: clipboardData\.attachmentID/);
-  assert.match(attachmentBackedPaste, /relationshipKind: "inline_image"/);
+  assert.match(attachmentBackedPreparation, /if \(clipboardData\.attachmentID\) \{/);
+  assert.match(attachmentBackedPreparation, /await withPreparedEditorAttachmentResource\(editorImageAttachmentContext\.prepareResource, \(\) => linkMangoResourceAttachment\(editorImageAttachmentContext\.requestJSON, \{/);
+  assert.match(attachmentBackedPreparation, /resourceType: editorImageAttachmentContext\.resourceType/);
+  assert.match(attachmentBackedPreparation, /resourceID: editorImageAttachmentContext\.resourceID/);
+  assert.match(attachmentBackedPreparation, /attachmentID: clipboardData\.attachmentID/);
+  assert.match(attachmentBackedPreparation, /relationshipKind: "inline_image"/);
+  assert.match(attachmentBackedInsertion, /const uploadedImageData = await prepareEditorClipboardImageData/);
   assert.ok(
-    attachmentBackedPaste.indexOf("await withPreparedEditorAttachmentResource") < attachmentBackedPaste.indexOf("insertPreparedEditorImage"),
+    attachmentBackedInsertion.indexOf("await prepareEditorClipboardImageData") < attachmentBackedInsertion.indexOf("insertPreparedEditorImage"),
     "resource preparation and linking must finish before the attachment-backed image is inserted",
   );
+  assert.match(editorSurfaceHandlers, /htmlKind === "other" && startEditorRichClipboardImport\(root, html, imageFiles, undoBefore/);
+  assert.match(editorSurfaceHandlers, /importRemoteMangoImageAttachment\(editorImageAttachmentContext\.requestJSON/);
+  assert.match(editorRichClipboard, /EDITOR_RICH_CLIPBOARD_IMAGE_CONCURRENCY = 3/);
+  assert.match(editorRichClipboard, /createEditorImageFrame\(ownerDocument,[\s\S]*\{ durable: true \}/);
+  assert.match(editorRichClipboard, /sanitizeEditorDocumentHTML\(template\.innerHTML\)/);
   assert.match(editorSurface, /onCut=/);
   assert.match(nodeWorkspaceParts, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceHandlers\}/);
   assert.match(unifiedRichEditorSurface, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceHandlers\}/);

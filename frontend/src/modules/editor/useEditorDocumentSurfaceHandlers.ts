@@ -5,6 +5,7 @@ import {
   downloadMangoAttachment,
   fetchMangoAttachmentBlob,
   fileFromDataURL,
+  importRemoteMangoImageAttachment,
   linkMangoResourceAttachment,
   loadMangoAttachmentObjectURL,
   uploadMangoAttachment,
@@ -104,6 +105,8 @@ import {
   createEditorImageClipboardHTML,
   createEditorImageDataFromFile,
   createEditorImageDataFromSource,
+  editorAttachmentImageSource,
+  editorAttachmentIDFromImageSource,
   createEditorImageFrame,
   editorClipboardHTMLContainsOnlyOneImage,
   estimateEditorDocumentBytes,
@@ -128,6 +131,11 @@ import {
   type EditorImageClipboardData,
   type EditorImageData,
 } from "./editorImages";
+import {
+  countEditorRichClipboardImages,
+  prepareEditorRichClipboardHTML,
+  type EditorRichClipboardImageRequest,
+} from "./editorRichClipboard";
 
 export type { EditorTextAlignment } from "./richTextEditing";
 
@@ -1084,18 +1092,21 @@ function deleteSelectedEditorTableDimension(
   return applied;
 }
 
-function getImageFileFromDataTransfer(dataTransfer: DataTransfer): File | null {
+function getImageFilesFromDataTransfer(dataTransfer: DataTransfer): File[] {
+  const itemFiles: File[] = [];
   for (let index = 0; index < dataTransfer.items.length; index += 1) {
     const item = dataTransfer.items[index];
     if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
     const file = item.getAsFile();
-    if (file) return file;
+    if (file) itemFiles.push(file);
   }
+  if (itemFiles.length > 0) return itemFiles;
+  const files: File[] = [];
   for (let index = 0; index < dataTransfer.files.length; index += 1) {
     const file = dataTransfer.files[index];
-    if (file.type.startsWith("image/")) return file;
+    if (file.type.startsWith("image/")) files.push(file);
   }
-  return null;
+  return files;
 }
 
 function getEditorImageStorageBudget(root: HTMLElement): number {
@@ -1168,6 +1179,7 @@ async function attachUploadedEditorImageData(
   imageData: EditorImageData,
   file: File,
   context: EditorImageAttachmentContext | undefined,
+  options: { loadDisplay?: boolean } = {},
 ): Promise<EditorImageData> {
   if (!editorImageAttachmentContextReady(context)) throw new Error("editor_image_attachment_context_unavailable");
   const uploaded = await withPreparedEditorAttachmentResource(context.prepareResource, () => uploadMangoAttachment(context.requestJSON, {
@@ -1181,6 +1193,17 @@ async function attachUploadedEditorImageData(
     editorSurface: context.editorSurface,
   }), context.mutationLifecycle);
   const attachment = uploaded.attachment;
+  if (options.loadDisplay === false) {
+    revokeTemporaryEditorImageSource(imageData.src);
+    return {
+      ...imageData,
+      src: editorAttachmentImageSource(attachment.attachment_id),
+      attachmentID: attachment.attachment_id,
+      filename: attachment.original_filename || file.name || "image",
+      mimeType: attachment.mime_type || file.type || "image/png",
+      byteSize: attachment.byte_size || file.size,
+    };
+  }
   let displaySrc = imageData.src;
   try {
     displaySrc = await loadMangoAttachmentObjectURL(context.apiBase, context.companyID, attachment.attachment_id, "display");
@@ -1232,16 +1255,12 @@ function revokeTemporaryEditorImageSource(src: string): void {
   URL.revokeObjectURL(src);
 }
 
-async function insertEditorClipboardImageData(
+async function prepareEditorClipboardImageData(
   root: HTMLElement,
   clipboardData: EditorImageClipboardData,
-  savedRange: Range | null,
-  documentUndoHistory: EditorDocumentUndoHistory,
-  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
-  scheduleIndentGuideUpdate: (text: string) => void,
   editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
-  canCommit: () => boolean,
-) {
+  options: { loadDisplay?: boolean } = {},
+): Promise<EditorImageData> {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
   if (clipboardData.attachmentID) {
     const attachmentID = clipboardData.attachmentID;
@@ -1257,22 +1276,21 @@ async function insertEditorClipboardImageData(
       informationID: editorImageAttachmentContext.informationID,
       editorSurface: editorImageAttachmentContext.editorSurface,
     }), editorImageAttachmentContext.mutationLifecycle);
-    let displaySrc = clipboardData.src;
-    try {
-      displaySrc = await loadMangoAttachmentObjectURL(
-        editorImageAttachmentContext.apiBase,
-        editorImageAttachmentContext.companyID,
-        clipboardData.attachmentID,
-        "display",
-      );
-    } catch {
+    let displaySrc = editorAttachmentImageSource(clipboardData.attachmentID);
+    if (options.loadDisplay !== false) {
       displaySrc = clipboardData.src;
+      try {
+        displaySrc = await loadMangoAttachmentObjectURL(
+          editorImageAttachmentContext.apiBase,
+          editorImageAttachmentContext.companyID,
+          clipboardData.attachmentID,
+          "display",
+        );
+      } catch {
+        displaySrc = clipboardData.src;
+      }
     }
-    if (!canCommit()) {
-      revokeTemporaryEditorImageSource(displaySrc);
-      return;
-    }
-    insertPreparedEditorImage(root, {
+    return {
       src: displaySrc,
       attachmentID: clipboardData.attachmentID,
       filename: clipboardData.filename,
@@ -1283,8 +1301,7 @@ async function insertEditorClipboardImageData(
       marginLeft: clipboardData.marginLeft,
       marginTop: clipboardData.marginTop,
       floatSide: clipboardData.floatSide,
-    }, savedRange, snapshotEditorDocumentRoot(root), documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
-    return;
+    };
   }
   const imageData = await createEditorImageDataFromSource(clipboardData.src, maxDisplayWidth, {
     maxStoredBytes: getEditorImageStorageBudget(root),
@@ -1296,12 +1313,119 @@ async function insertEditorClipboardImageData(
   });
   const file = fileFromDataURL(clipboardData.src, editorAttachmentFilenameForMimeType(clipboardData.mimeType ?? "image/png"));
   if (!file) throw new Error("failed_to_prepare_attachment");
-  const uploadedImageData = await attachUploadedEditorImageData(imageData, file, editorImageAttachmentContext);
+  return attachUploadedEditorImageData(imageData, file, editorImageAttachmentContext, options);
+}
+
+async function insertEditorClipboardImageData(
+  root: HTMLElement,
+  clipboardData: EditorImageClipboardData,
+  savedRange: Range | null,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+  editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
+  canCommit: () => boolean,
+) {
+  const uploadedImageData = await prepareEditorClipboardImageData(root, clipboardData, editorImageAttachmentContext);
   if (!canCommit()) {
     revokeTemporaryEditorImageSource(uploadedImageData.src);
     return;
   }
   insertPreparedEditorImage(root, uploadedImageData, savedRange, snapshotEditorDocumentRoot(root), documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+function editorRichClipboardImageSize(
+  root: HTMLElement,
+  request: EditorRichClipboardImageRequest,
+): { width: number; height: number } {
+  const maxWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
+  const requestedWidth = request.width ?? maxWidth;
+  const width = Math.max(48, Math.min(maxWidth, Math.round(requestedWidth)));
+  const ratio = request.width && request.height ? request.height / request.width : 0.625;
+  const height = Math.max(36, Math.min(1_600, Math.round(width * ratio)));
+  return { width, height };
+}
+
+async function resolveEditorRichClipboardImage(
+  root: HTMLElement,
+  request: EditorRichClipboardImageRequest,
+  matchingFile: File | undefined,
+  editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
+): Promise<EditorImageData> {
+  const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
+  if (matchingFile) {
+    const localImageData = await createEditorImageDataFromFile(matchingFile, maxDisplayWidth, getEditorImageStorageBudget(root));
+    try {
+      return await attachUploadedEditorImageData(localImageData, matchingFile, editorImageAttachmentContext, { loadDisplay: false });
+    } catch (cause) {
+      revokeTemporaryEditorImageSource(localImageData.src);
+      throw cause;
+    }
+  }
+  if (request.sourceKind === "attachment") {
+    const attachmentID = request.attachmentData?.attachmentID?.trim()
+      || editorAttachmentIDFromImageSource(request.source);
+    if (!attachmentID) throw new Error("failed_to_prepare_attachment");
+    return prepareEditorClipboardImageData(root, {
+      ...request.attachmentData,
+      src: request.attachmentData?.src || request.source,
+      attachmentID,
+      alt: request.attachmentData?.alt ?? request.alt,
+      filename: request.attachmentData?.filename ?? request.filename,
+      width: request.attachmentData?.width ?? request.width,
+      height: request.attachmentData?.height ?? request.height,
+    }, editorImageAttachmentContext, { loadDisplay: false });
+  }
+  if (request.sourceKind === "data") {
+    return prepareEditorClipboardImageData(root, {
+      src: request.source,
+      alt: request.alt,
+      filename: request.filename,
+      width: request.width,
+      height: request.height,
+    }, editorImageAttachmentContext, { loadDisplay: false });
+  }
+  if (request.sourceKind === "blob") {
+    const response = await fetch(request.source);
+    if (!response.ok) throw new Error("failed_to_read_pasted_image");
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) throw new Error("remote_image_type_unsupported");
+    const file = new File([blob], request.filename || editorAttachmentFilenameForMimeType(blob.type), { type: blob.type });
+    const localImageData = await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root));
+    try {
+      return await attachUploadedEditorImageData(localImageData, file, editorImageAttachmentContext, { loadDisplay: false });
+    } catch (cause) {
+      revokeTemporaryEditorImageSource(localImageData.src);
+      throw cause;
+    }
+  }
+  if (request.sourceKind !== "remote" || !editorImageAttachmentContextReady(editorImageAttachmentContext)) {
+    throw new Error("editor_image_attachment_context_unavailable");
+  }
+  const imported = await withPreparedEditorAttachmentResource(
+    editorImageAttachmentContext.prepareResource,
+    () => importRemoteMangoImageAttachment(editorImageAttachmentContext.requestJSON, {
+      companyID: editorImageAttachmentContext.companyID,
+      resourceType: editorImageAttachmentContext.resourceType,
+      resourceID: editorImageAttachmentContext.resourceID,
+      sourceURL: request.source,
+      originalFilename: request.filename,
+      informationID: editorImageAttachmentContext.informationID,
+      editorSurface: editorImageAttachmentContext.editorSurface,
+    }),
+    editorImageAttachmentContext.mutationLifecycle,
+  );
+  const attachment = imported.attachment;
+  const size = editorRichClipboardImageSize(root, request);
+  return {
+    src: editorAttachmentImageSource(attachment.attachment_id),
+    attachmentID: attachment.attachment_id,
+    filename: attachment.original_filename,
+    mimeType: attachment.mime_type,
+    byteSize: attachment.byte_size,
+    alt: request.alt,
+    ...size,
+  };
 }
 
 function insertPreparedEditorImage(
@@ -4523,6 +4647,68 @@ export function useEditorDocumentSurfaceHandlers({
     )
     : null;
 
+  const startEditorRichClipboardImport = useCallback((
+    root: HTMLElement,
+    html: string,
+    imageFiles: File[],
+    undoBefore: EditorDocumentUndoSnapshot | null,
+    focusRoot: boolean,
+  ): boolean => {
+    const imageCount = countEditorRichClipboardImages(root.ownerDocument, html);
+    if (imageCount === 0) return false;
+    clearPendingTypingStyle();
+    clearEditorImageSelection(root);
+    if (focusRoot) root.focus({ preventScroll: true });
+    const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
+    const asyncGuard = createAsyncImageCommitGuard(root, savedRange);
+    const documentAtStart = serializeEditorDocumentHTML(root);
+    const canCommit = () => asyncGuard() && serializeEditorDocumentHTML(root) === documentAtStart;
+    const matchingFiles = imageFiles.length === imageCount ? imageFiles : [];
+    root.setAttribute("data-mango-rich-paste-importing", "true");
+    void prepareEditorRichClipboardHTML(
+      root.ownerDocument,
+      html,
+      (request) => resolveEditorRichClipboardImage(
+        root,
+        request,
+        matchingFiles[request.index],
+        editorImageAttachmentContext,
+      ),
+    ).then((result) => {
+      if (!canCommit()) return;
+      if (savedRange && !setEditorSelectionRange(root, savedRange)) return;
+      const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore ?? undefined);
+      if (mentionUndoBefore) {
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+      }
+      if (result.html.trim() && replaceSelectionWithHTML(root, result.html)) {
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
+        commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        setActiveTableContextMenu(null);
+        clearEditorTableCellSelections(root);
+      }
+      if (result.failedImageCount > 0) {
+        const noun = result.failedImageCount === 1 ? "image" : "images";
+        const message = `${result.failedImageCount} pasted ${noun} could not be imported. The text and ${result.importedImageCount} imported images were kept.`;
+        (editorImageAttachmentContext?.onError ?? onEditorImageAttachmentError)?.(message);
+      }
+    }).catch((cause) => {
+      reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause);
+    }).finally(() => {
+      root.removeAttribute("data-mango-rich-paste-importing");
+    });
+    return true;
+  }, [
+    clearPendingTypingStyle,
+    createAsyncImageCommitGuard,
+    documentUndoHistoryRef,
+    editorImageAttachmentContext,
+    onEditorImageAttachmentError,
+    scheduleDocumentSave,
+    scheduleIndentGuideUpdate,
+  ]);
+
   const handlers = useMemo<EditorDocumentSurfaceHandlers>(() => ({
     onBeforeInput(event) {
       const root = event.currentTarget;
@@ -4704,7 +4890,8 @@ export function useEditorDocumentSurfaceHandlers({
       const html = event.clipboardData.getData("text/html");
       const text = event.clipboardData.getData("text/plain");
       const htmlKind = editorImageTransferHTMLKind(root.ownerDocument, html);
-      const imageFile = getImageFileFromDataTransfer(event.clipboardData);
+      const imageFiles = getImageFilesFromDataTransfer(event.clipboardData);
+      const imageFile = imageFiles[0] ?? null;
       if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
         clearPendingTypingStyle();
@@ -4723,6 +4910,11 @@ export function useEditorDocumentSurfaceHandlers({
         const canCommit = createAsyncImageCommitGuard(root, savedRange);
         void insertEditorClipboardImageData(root, clipboardImageData, savedRange, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext, canCommit)
           .catch((cause) => reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause));
+        return;
+      }
+
+      if (htmlKind === "other" && startEditorRichClipboardImport(root, html, imageFiles, undoBefore, false)) {
+        event.preventDefault();
         return;
       }
 
@@ -4783,7 +4975,8 @@ export function useEditorDocumentSurfaceHandlers({
       const html = event.dataTransfer.getData("text/html");
       const text = event.dataTransfer.getData("text/plain");
       const htmlKind = editorImageTransferHTMLKind(root.ownerDocument, html);
-      const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
+      const imageFiles = getImageFilesFromDataTransfer(event.dataTransfer);
+      const imageFile = imageFiles[0] ?? null;
       if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
         clearPendingTypingStyle();
@@ -4808,6 +5001,11 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       const sanitizedHTML = sanitizeEditorDocumentHTML(html);
+      if (htmlKind === "other" && startEditorRichClipboardImport(root, html, imageFiles, undoBefore, true)) {
+        event.preventDefault();
+        return;
+      }
+
       if (sanitizedHTML.trim()) {
         event.preventDefault();
         clearPendingTypingStyle();
@@ -5476,6 +5674,7 @@ export function useEditorDocumentSurfaceHandlers({
     scheduleIndentGuideUpdate,
     scrollMemoryRef,
     setDocumentScrollTop,
+    startEditorRichClipboardImport,
     syncActiveSelectionFormat,
   ]);
   const insertTable = useCallback((root?: HTMLElement | null) => {

@@ -96,6 +96,7 @@ ED71 - Personal/shared Forward reuses the same `ComposePanel` and `UnifiedRichEd
 ED72 - A collaboration snapshot is canonical rich HTML. Node and Logic Gate load that HTML as formatted DOM, never literal tags. Acknowledgement, broadcast, refresh, reconnect, and revision-gap recovery preserve paragraphs, rows, lists, formatting, tables, mentions, and durable attachment references; Saved is reached only after backend commit/deduplication proof.
 ED73 - Structured inline style attributes must be canonical: CSS represented by bold/italic/underline/strike/highlight/font-size OT attributes is not retained a second time in `span_style`. Materialization must not duplicate a property across round trips, while unrelated safe span style survives.
 ED74 - Every unified rich editor adapter receives the active company people inventory. Typing @ or ! plus a partial name opens the shared people picker; Enter or plain Tab inserts the recommended user as the existing noneditable mention entity, including urgent-kind metadata and styling, rather than ordinary text.
+ED75 - Pasting a mixed rich document from an external app into any ED2 unified editor preserves the supported semantic order of headings, paragraphs, bold/italic/underline/strikethrough, highlights, font sizes, links, tables, alignment, indentation, ordered/bullet/checklists, and inline images. The shared path resolves every image to an authorized durable Mango attachment before one document commit: matching clipboard files upload directly, existing Mango references link to the destination, and external HTTP(S) sources use the protected server importer. Repeated sources import once and render at every occurrence, at most three unique images resolve concurrently, and one failed image preserves the rest of the document with safe fallback text instead of retaining an external, blob, data, or base64 source. Completion may commit only while the original editor root, target, resource context, saved range, and starting document remain current.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1283,6 +1284,26 @@ Expected:
 - Rich editors insert the existing atomic mention/urgent-mention span, every unified adapter can open the people picker, and chat keeps its existing mentioned-principal model while visibly painting the accepted token as a normal or urgent entity chip.
 - Every font-size click increases the same selected text again, without stale boundary reads or empty nested font wrappers, and the numeric readout remains compact.
 - Enter leaves the caret in the new pasted ordered-list row; Tab indents that new row under its previous sibling and keeps the caret there instead of moving back to or indenting the original row.
+
+### Scenario ED-S14C: Import An External Rich Document With Inline Images
+
+Business logic covered:
+- ED2
+- ED4
+- ED6
+- ED12
+- ED26
+- ED75
+
+Given:
+- A user selects an entire ClickUp, Linear, or similar SOP page containing rich text, nested lists or checklists, a table, and multiple inline images, then copies and pastes it into any unified editor.
+- The clipboard may provide image files, data/blob image sources, existing Mango attachment references, or retrievable external HTTP(S) image URLs, and one image may fail to import.
+
+Expected:
+- Mango keeps the supported rich structure and image ordering, normalizes it through the shared sanitizer, and commits the pasted document once after all durable image resolutions settle.
+- Repeated image sources create one imported attachment and multiple frames, no more than three unique images resolve concurrently, and every successful frame stores a durable Mango attachment reference.
+- An image failure leaves the text, formatting, lists, and successful images intact, inserts a safe image fallback label, reports the partial failure, and persists no third-party URL, blob URL, data URL, base64 bytes, credentials, or signed URL.
+- Switching targets, unmounting, losing the saved range, or editing the starting document before import completes prevents stale insertion into the current document.
 
 ### Scenario ED-S15: Inline Images Stay Stable While Typing
 
