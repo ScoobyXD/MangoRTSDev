@@ -447,6 +447,17 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await flushFrames();
     const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse replies"]');
     assert.ok(collapse);
+    await act(async () => collapse.focus());
+    assert.equal(dom.window.document.activeElement, collapse);
+    await act(async () => root.render(
+      <ChatPane {...chatProps} messageFocusRequest={null} composerFocusRequestID={1} />,
+    ));
+    await flushFrames();
+    assert.equal(
+      dom.window.document.activeElement,
+      container.querySelector("textarea"),
+      "an explicit image-chat request moves the caret into an already-open composer",
+    );
     await act(async () => collapse.click());
     assert.equal(container.querySelector('[data-node-chat-message-id="exact-child"]'), null);
 

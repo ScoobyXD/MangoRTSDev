@@ -285,6 +285,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [chatNavigationRequests, setChatNavigationRequests] = useState<Record<string, { anchorMessageID: string; requestID: number }>>({});
   const [chatMessageFocusRequests, setChatMessageFocusRequests] = useState<Record<string, { messageID: string; requestID: number }>>({});
+  const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -445,6 +446,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 
   useEffect(() => {
     setLoading(true);
+    setChatComposerFocusRequestIDs({});
     void loadProject({ showLoading: true });
   }, [loadProject]);
 
@@ -906,6 +908,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     setOpenChatBlockIDs((current) => new Set(current).add(image.blockID));
     setActivePaneTabs((current) => ({ ...current, [image.blockID]: "chat" }));
+    setChatComposerFocusRequestIDs((current) => ({
+      ...current,
+      [image.blockID]: (current[image.blockID] ?? 0) + 1,
+    }));
+    setChatMessageFocusRequests((current) => omitRecordKey(current, image.blockID));
+    setActiveChatMessageIDs((current) => omitRecordKey(current, image.blockID));
     try {
       await transferTextBlockImageToChatDraft({
         image,
@@ -1993,6 +2001,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         currentUserID={currentUserID || "local-user"}
                         activeMessageID={activeChatMessageIDs[block.id] ?? ""}
                         messageFocusRequest={chatMessageFocusRequests[block.id] ?? null}
+                        composerFocusRequestID={chatComposerFocusRequestIDs[block.id] ?? 0}
                         accent={accent}
                         surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
                         panelBackground={EDITOR_NEU_PANEL_BACKGROUND}

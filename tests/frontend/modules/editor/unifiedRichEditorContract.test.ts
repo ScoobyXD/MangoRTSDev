@@ -1424,8 +1424,12 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
 
   assert.ok(nodeSurface.includes("setActiveChatBlockID(image.blockID)"));
+  assert.ok(nodeSurface.includes("setChatComposerFocusRequestIDs"));
+  assert.ok(nodeSurface.includes("composerFocusRequestID={chatComposerFocusRequestIDs[chatBlockID] ?? 0}"));
   assert.ok(nodeSurface.includes("await transferTextBlockImageToChatDraft"));
   assert.ok(projectSummary.includes("setActivePaneTabs"));
+  assert.ok(projectSummary.includes("setChatComposerFocusRequestIDs"));
+  assert.ok(projectSummary.includes("composerFocusRequestID={chatComposerFocusRequestIDs[block.id] ?? 0}"));
   assert.ok(projectSummary.includes("await transferTextBlockImageToChatDraft"));
   assert.ok(attachmentTransfer.includes("options.onStage(staged);"));
   assert.ok(attachmentTransfer.includes('relationshipKind: "chat_attachment"'));
@@ -1440,6 +1444,7 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(nodeParts.includes("onDownload={() =>"));
   assert.ok(nodeParts.includes("useAppOverlayPortalTarget"));
   assert.ok(nodeParts.includes("createPortal("));
+  assert.ok(nodeParts.includes("if (!editable || showingEmail || !composerFocusRequestID) return;"));
   assert.ok(!nodeParts.includes("<AppModalPortal trapFocus={false}>"));
   assert.ok(nodeParts.includes('position: "fixed"'));
   assert.ok(nodeParts.includes('addEventListener("scroll", refreshFloatingImageActions, true)'));
