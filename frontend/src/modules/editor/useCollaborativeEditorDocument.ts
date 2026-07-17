@@ -17,6 +17,7 @@ type UseCollaborativeEditorDocumentInput = {
   requestJSON: EditorCollaborationRequest;
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
+  flushPendingLocalInput?: () => void;
   onDeleted?: () => void;
   onError?: (cause: unknown) => void;
 };
@@ -45,6 +46,7 @@ export function useCollaborativeEditorDocument(input: UseCollaborativeEditorDocu
       requestJSON: current.requestJSON,
       onHTML: (html, source) => callbacksRef.current.onHTML(html, source),
       onPendingChange: (count) => callbacksRef.current.onPendingChange?.(count),
+      flushPendingLocalInput: () => callbacksRef.current.flushPendingLocalInput?.(),
       onDeleted: () => callbacksRef.current.onDeleted?.(),
       onError: (cause) => callbacksRef.current.onError?.(cause),
     });

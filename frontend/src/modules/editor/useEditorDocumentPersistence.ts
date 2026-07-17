@@ -33,6 +33,7 @@ type UseEditorDocumentPersistenceInput = {
   saveInFlightRef: React.MutableRefObject<boolean>;
   setDocumentInformationID: React.Dispatch<React.SetStateAction<string>>;
   setError: React.Dispatch<React.SetStateAction<string>>;
+  flushPendingLocalInput?: () => void;
   requestJSON: <T>(path: string, init?: RequestInit) => Promise<T>;
   invalidateDocumentTargetCaches: (target: DocumentSaveTarget) => void;
 };
@@ -61,7 +62,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     editorDocumentRef, attachmentHydrationCleanupRef, documentDraftRef, persistedDocumentRef, documentInformationIDRef,
     documentRevisionRef, currentDocumentTargetKeyRef, persistedDocumentTargetKeyRef,
     pendingSaveRef, queuedSaveRef, saveInFlightRef, setDocumentInformationID, setError,
-    requestJSON, invalidateDocumentTargetCaches,
+    flushPendingLocalInput, requestJSON, invalidateDocumentTargetCaches,
   } = input;
 
   const ensureDocumentInformationID = useCallback(() => {
@@ -110,6 +111,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     initialHTML: persistedDocumentRef.current,
     requestJSON,
     onHTML: applyCommittedHTML,
+    flushPendingLocalInput,
     onPendingChange: (count) => {
       saveInFlightRef.current = count > 0;
       if (count === 0) queuedSaveRef.current = null;

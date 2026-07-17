@@ -243,16 +243,17 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     editorImageAttachmentContext,
     onEditorImageAttachmentError,
   });
-  const { mentionMenu, insertTable, restoreSelection, ...documentSurfaceHandlers } = handlers;
+  const { mentionMenu, insertTable, restoreSelection, flushPendingInput, ...documentSurfaceHandlers } = handlers;
   restoreSelectionForHydrationRef.current = restoreSelection;
 
   const restoreFormattingSelection = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return null;
+    flushPendingInput(editor);
     restoreSelection(editor);
     editor.focus({ preventScroll: true });
     return editor;
-  }, [restoreSelection]);
+  }, [flushPendingInput, restoreSelection]);
 
   const sharedFormattingController = useEditorDocumentFormattingController({
     editorRef,

@@ -40,6 +40,7 @@ export type EditorCollaborationControllerOptions = {
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
   onDeleted?: () => void;
+  flushPendingLocalInput?: () => void;
   onError?: (cause: unknown) => void;
   microBatchMs?: number;
   subscribe?: typeof subscribeRealtimeScope;
@@ -464,6 +465,11 @@ export class EditorCollaborationController {
     this.options.onError?.(new Error(code));
   }
 
+  private async persistStagedLocalInput(): Promise<void> {
+    this.options.flushPendingLocalInput?.();
+    await this.persistenceChain;
+  }
+
   private armDrain(immediate: boolean): void {
     if (this.batchTimer !== undefined) window.clearTimeout(this.batchTimer);
     if (immediate) {
@@ -501,7 +507,7 @@ export class EditorCollaborationController {
   }
 
   private async performRecovery(): Promise<void> {
-    await this.persistenceChain;
+    await this.persistStagedLocalInput();
     const mirrored = await readPending(this.pendingPrefix);
     const snapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
     this.deleted = Boolean(snapshot.deleted);
@@ -588,6 +594,7 @@ export class EditorCollaborationController {
   }
 
   private async processCommit(commit: EditorCollaborationCommit): Promise<void> {
+    await this.persistStagedLocalInput();
     const concurrent = [...(commit.concurrent_operations ?? [])].sort((left, right) => left.revision - right.revision);
     for (const operation of concurrent) {
       if (operation.revision <= this.revision) {
@@ -634,6 +641,7 @@ export class EditorCollaborationController {
   }
 
   private async applyCommittedCore(operation: CommittedEditorPatch, render: boolean): Promise<void> {
+    await this.persistStagedLocalInput();
     if (operation.revision <= this.revision) return;
     if (operation.revision !== this.revision + 1) throw new Error("collaboration_revision_gap");
     const nextConfirmed = applyEditorHTMLPatch(this.confirmedHTML, operation.patch);
@@ -670,6 +678,7 @@ export class EditorCollaborationController {
   }
 
   private async reconcileSnapshotForPendingRetry(): Promise<void> {
+    await this.persistStagedLocalInput();
     const snapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
     if (snapshot.deleted) {
       this.deleted = true;

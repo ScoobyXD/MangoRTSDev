@@ -480,3 +480,51 @@ test("storage failure, unsafe content, and oversize edits roll the visible DOM b
     dom.restore();
   }
 });
+
+test("staged local input is persisted before a remote commit is applied", async () => {
+  const initial = "abcd";
+  const localHTML = "aLbcd";
+  const remoteHTML = "abcRd";
+  const expected = "aLbcRd";
+  const dom = installEditorDOM(initial);
+  try {
+    const server = new HTMLPatchTestServer(initial);
+    const bus = new RealtimeBus();
+    const scope = "editor:node:node-1:staged-local-input";
+    let visible = initial;
+    let staged = false;
+    let stagedFlushes = 0;
+    let controller!: EditorCollaborationController;
+    controller = new EditorCollaborationController(controllerOptions(server, "staged-local-input", {
+      subscribe: bus.subscribe,
+      onHTML: (html) => { visible = html; },
+      flushPendingLocalInput: () => {
+        if (!staged) return;
+        staged = false;
+        stagedFlushes += 1;
+        controller.schedule(localHTML, true);
+      },
+    }));
+    controller.start();
+    await controller.recover();
+
+    staged = true;
+    const remoteCommit = server.commit({
+      operation_id: "remote-operation",
+      client_id: "remote-client",
+      base_revision: 0,
+      patch: editorHTMLPatchForChange(initial, remoteHTML),
+    });
+    bus.publish(scope, remoteCommit);
+
+    await controller.flush();
+    await eventually(() => server.html === expected, "staged local and remote HTML convergence");
+    assert.equal(stagedFlushes, 1);
+    assert.equal(server.html, expected);
+    assert.equal(visible, expected);
+    assert.equal(server.operations.length, 2);
+    controller.stop();
+  } finally {
+    dom.restore();
+  }
+});

@@ -702,8 +702,8 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(fontSizeCommand, /normalizeEditorFontSizeSpans\(root, spans\)/);
   assert.doesNotMatch(fontSizeCommand, /span\.appendChild\(fragment\);\s*range\.insertNode\(span\)/);
   assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*const pendingFontSize = pendingEditorFontSizeRef\.current[\s\S]*const pendingHighlightColor = pendingEditorHighlightColorRef\.current[\s\S]*const pendingInlineFormat = pendingEditorInlineFormatRef\.current[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)/);
-  assert.match(editorSurfaceHandlers, /onCompositionStart\(event\) \{[\s\S]*pendingCompositionUndoSnapshotRef\.current[\s\S]*snapshotEditorDocumentRoot\(event\.currentTarget\)/);
-  assert.match(editorSurfaceHandlers, /const mutationUndoBefore = undoBefore \?\? snapshotEditorDocumentRoot\(root\)/);
+  assert.match(editorSurfaceHandlers, /onCompositionStart\(event\) \{[\s\S]*editorInputBatcher\.flush\(root\)[\s\S]*editorInputBatcher\.begin\(root, "typing", \(\) => snapshotEditorDocumentRoot\(root\)\)/);
+  assert.match(editorSurfaceHandlers, /function commitEditorNativeInputBatch\([\s\S]*const after = snapshotEditorDocumentRoot\(root, html, plainText\.length\)[\s\S]*recordEditorDocumentUndoChange\(history, before, after, kind\)/);
   assert.match(editorSurfaceHandlers, /setEditorSelectionByOffsets\(root, endOffset, endOffset\)/);
 });
 
@@ -789,7 +789,7 @@ test("collapsed-caret font size, highlight, italic, and strikethrough retain pen
   assert.match(editorSurfaceHandlers, /if \(style\.inlineFormat\) \{\s*const range = selectInsertedText\(\)/);
   assert.doesNotMatch(editorSurfaceHandlers, /style\.inlineFormat && \(style\.inlineFormat\.bold \|\| style\.inlineFormat\.underline \|\| style\.inlineFormat\.italic \|\| style\.inlineFormat\.strikethrough\)/);
   assert.match(beforeInput, /const anchor = getCollapsedAnchorAtSelectionEnd\(root\)[\s\S]*applyScriptedTypingStyle\(\)/);
-  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)[\s\S]*recordEditorDocumentMutation\([^\n]*"typing"\)/);
+  assert.match(editorSurfaceHandlers, /onCompositionEnd\(event\) \{[\s\S]*applyEditorTypingStyleToRecentlyInsertedText\(root, composedText, pendingStyle\)[\s\S]*editorInputBatcher\.markChanged\(root\)/);
   assert.match(editorSurfaceHandlers, /onKeyUp\(event\) \{\s*rememberEditorSelectionRange\(event\.currentTarget\);\s*refreshMentionDraft\(event\.currentTarget\)/);
   assert.match(editorSurfaceHandlers, /const alreadyStyled = editorSelectedTextRuns\(root, range\)\.every\(\(run\) => readEditorTextNodeEffectiveFontSize\(root, run\.node\) === nextFontSize\);\s*if \(!alreadyStyled\)/);
   assert.match(editorSurfaceHandlers, /readSelectionHighlightColor\(root, run\.node\.parentElement \?\? root\) === color\);\s*if \(!alreadyStyled\)/);
