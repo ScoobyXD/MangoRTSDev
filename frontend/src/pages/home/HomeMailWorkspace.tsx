@@ -68,16 +68,17 @@ import {
   unreadCountInlineStyle,
 } from "./homeStyles";
 
-type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred">;
+type TriageMailboxCountKey = Extract<EmailMailbox, "primary">;
 type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
 
-function formatMailboxCount(count: number | undefined): string {
+function formatMailboxCount(count: number | undefined, isMinimum = false): string {
   if (typeof count !== "number" || !Number.isFinite(count)) return "";
-  return Math.max(0, Math.floor(count)).toLocaleString();
+  const formattedCount = Math.max(0, Math.floor(count)).toLocaleString();
+  return isMinimum ? `${formattedCount}+` : formattedCount;
 }
 
-function MailboxActionContent({ label, count }: { label: string; count?: number }) {
-  const formattedCount = formatMailboxCount(count);
+function MailboxActionContent({ label, count, countIsMinimum = false }: { label: string; count?: number; countIsMinimum?: boolean }) {
+  const formattedCount = formatMailboxCount(count, countIsMinimum);
   return (
     <>
       <span style={mailArchiveActionLabelStyle}>{label}</span>
@@ -240,6 +241,7 @@ export function HomeMailWorkspace({
   mailFilterStatus,
   mailbox,
   mailboxCounts,
+  inboxCountIsMinimum,
   messageListRef,
   messages,
   messageListOrder,
@@ -323,6 +325,7 @@ export function HomeMailWorkspace({
   mailFilterStatus: string;
   mailbox: EmailMailbox;
   mailboxCounts: TriageMailboxCounts;
+  inboxCountIsMinimum: boolean;
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
   companyUsers: CompanyUser[];
@@ -514,23 +517,23 @@ export function HomeMailWorkspace({
                 className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "primary")}
-                title={mailboxCounts.primary === undefined ? "Inbox" : `Inbox (${formatMailboxCount(mailboxCounts.primary)})`}
+                title={mailboxCounts.primary === undefined ? "Inbox" : `Inbox (${formatMailboxCount(mailboxCounts.primary, inboxCountIsMinimum)})`}
                 onClick={() => {
                   if (mailbox !== "primary") onOpenPendingMailbox();
                 }}
               >
-                <MailboxActionContent label="Inbox" count={mailboxCounts.primary} />
+                <MailboxActionContent label="Inbox" count={mailboxCounts.primary} countIsMinimum={inboxCountIsMinimum} />
               </button>
               <button
                 className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "starred")}
-                title={mailboxCounts.starred === undefined ? "Starred" : `Starred (${formatMailboxCount(mailboxCounts.starred)})`}
+                title="Starred"
                 onClick={() => {
                   if (mailbox !== "starred") onOpenStarredMailbox();
                 }}
               >
-                <MailboxActionContent label="Starred" count={mailboxCounts.starred} />
+                <span style={mailArchiveActionLabelStyle}>Starred</span>
               </button>
               <button
                 className="mango-elevated-action"
