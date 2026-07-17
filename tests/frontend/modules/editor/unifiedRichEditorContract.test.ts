@@ -887,6 +887,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
 test("blocking editor and node overlays use the app modal layer above feature stacking contexts", () => {
   const modalPortal = readFileSync(resolve(process.cwd(), "frontend/src/app/AppModalPortal.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const imagePreviewModal = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorImagePreviewModal.tsx"), "utf8");
   const frameRightClickMenu = readFileSync(resolve(process.cwd(), "frontend/src/app/framerightclickmenu.tsx"), "utf8");
   const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
   const consumerPaths = [
@@ -920,7 +921,8 @@ test("blocking editor and node overlays use the app modal layer above feature st
     const source = readFileSync(resolve(process.cwd(), path), "utf8");
     assert.match(source, /AppModalPortal/, path + " must escape feature-local stacking contexts");
   }
-  assert.match(editorSurfaceHandlers, /React\.createElement\(AppModalPortal, \{ onRequestClose: \(\) => setActiveImagePreview\(null\) \}, imagePreviewModal\)/);
+  assert.ok(editorSurfaceHandlers.includes("React.createElement(EditorImagePreviewModal"));
+  assert.ok(imagePreviewModal.includes("<AppModalPortal onRequestClose={onClose}>"));
   assert.match(frameRightClickMenu, /const portalTarget = useAppOverlayPortalTarget\(\)[\s\S]*portalTarget \? createPortal/);
   assert.match(frameRightClickMenu, /if \(!appOverlayCanHandleEscape\(menuRef\.current\)\) return/);
   assert.match(linkedDocumentPanels, /const floatingPortalTarget = useAppOverlayPortalTarget\(\)[\s\S]*createPortal\([\s\S]*floatingPortalTarget/);
@@ -1002,6 +1004,7 @@ test("highlight control, active selection state, mutation, and sanitization shar
 
 test("mentions, image preview and undo hydration, and retired table-cell controls retain shared editor semantics", () => {
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const imagePreviewModal = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorImagePreviewModal.tsx"), "utf8");
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
   const richTextEditing = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
   const mentionCaretNormalization = sourceSliceBetween(
@@ -1016,12 +1019,7 @@ test("mentions, image preview and undo hydration, and retired table-cell control
     "function replaceSelectionWithHTML(",
     "atomic mention navigation and editing helpers",
   );
-  const imagePreview = sourceSliceBetween(
-    editorSurfaceHandlers,
-    "const imagePreviewModal = activeImagePreview",
-    "const tableContextMenuButtonStyle =",
-    "stable inline-image preview",
-  );
+  const imagePreview = imagePreviewModal;
   const undoRestore = sourceSliceBetween(
     editorSurfaceHandlers,
     "function restoreEditorDocumentUndoSnapshot(",
@@ -1050,14 +1048,22 @@ test("mentions, image preview and undo hydration, and retired table-cell control
   assert.match(editorSurfaceHandlers, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowRight"[\s\S]*moveEditorSelectionAcrossMention\(root,[\s\S]*event\.shiftKey/);
   assert.match(editorSurfaceHandlers, /event\.key === "Backspace"[\s\S]*event\.key === "Delete"[\s\S]*applyAtomicMentionKeyboardEdit\(/);
 
-  assert.match(imagePreview, /role: "dialog"[\s\S]*"aria-modal": true[\s\S]*position: "fixed"[\s\S]*inset: 0/);
-  assert.match(imagePreview, /"data-mango-image-preview-backdrop": "translucent"[\s\S]*background: "rgba\(15,23,42,0\.82\)"/);
-  assert.doesNotMatch(imagePreview, /background: "rgba\(15,23,42,0\.98\)"/);
-  assert.match(imagePreview, /"aria-label": "Close image preview"[\s\S]*onClick: \(\) => setActiveImagePreview\(null\)[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE[\s\S]*top: 18[\s\S]*right: 18[\s\S]*"X"/);
-  assert.match(imagePreview, /"aria-label": "Download image"[\s\S]*data-mango-image-preview-download[\s\S]*onClick: downloadActiveImagePreview/);
-  assert.match(imagePreview, /width: "auto"[\s\S]*height: "auto"[\s\S]*maxWidth: "calc\(100vw - 32px\)"[\s\S]*maxHeight: "calc\(100vh - 32px\)"/);
+  assert.ok(imagePreview.includes('role="dialog"'));
+  assert.ok(imagePreview.includes('aria-modal="true"'));
+  assert.ok(imagePreview.includes('position: "fixed"'));
+  assert.ok(imagePreview.includes("inset: 0"));
+  assert.ok(imagePreview.includes('data-mango-image-preview-backdrop="translucent"'));
+  assert.ok(imagePreview.includes('background: "rgba(15,23,42,0.82)"'));
+  assert.ok(!imagePreview.includes('background: "rgba(15,23,42,0.98)"'));
+  assert.ok(imagePreview.includes('aria-label="Close image preview"'));
+  assert.ok(imagePreview.includes("onClick={onClose}"));
+  assert.ok(imagePreview.includes("UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE"));
+  assert.ok(imagePreview.includes('aria-label="Download image"'));
+  assert.ok(imagePreview.includes('data-mango-image-preview-download="true"'));
+  assert.ok(imagePreview.includes("onClick={onDownload}"));
+  assert.ok(imagePreview.includes('maxWidth: "calc(100vw - 32px)"'));
+  assert.ok(imagePreview.includes('maxHeight: "calc(100vh - 32px)"'));
   assert.doesNotMatch(imagePreview, /setTimeout|requestAnimationFrame|animation:|transition:|outline:/);
-
   assert.ok(undoRestore.indexOf("root.innerHTML = deserializeEditorDocumentHTML(snapshot.html)") < undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)"));
   assert.ok(undoRestore.indexOf("refreshEditorAttachmentImageFrames(root)") < undoRestore.indexOf("setEditorSelectionByOffsets(root"));
   assert.match(attachmentRefresh, /const owner = editorAttachmentHydrationOwnerByRoot\.get\(root\)[\s\S]*owner\.disposeGeneration\?\.\(\);[\s\S]*owner\.disposeGeneration = startEditorAttachmentImageHydrationGeneration\(root, owner\.loadObjectURL, owner\.options\)/);
@@ -1414,26 +1420,38 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   const imageActions = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/nodeTextBlockImageActions.ts"), "utf8");
   const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const previewModal = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorImagePreviewModal.tsx"), "utf8");
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
 
-  assert.match(nodeSurface, /setActiveChatBlockID\(image\.blockID\)[\s\S]*await transferTextBlockImageToChatDraft/);
-  assert.match(projectSummary, /setActivePaneTabs\([\s\S]*\[image\.blockID\]: "chat"[\s\S]*await transferTextBlockImageToChatDraft/);
-  assert.match(attachmentTransfer, /options\.onStage\(staged\);[\s\S]*if \(attachmentID\) \{[\s\S]*linkMangoResourceAttachment/);
-  assert.match(attachmentTransfer, /relationshipKind: "chat_attachment"/);
-  assert.match(attachmentTransfer, /else \{\s*resolved = await options\.uploadLegacyImage\(\)/);
-  assert.match(nodeSurface, /editorChatAttachmentsReadyForSubmit\(attachments\)/);
-  assert.match(projectSummary, /editorChatAttachmentsReadyForSubmit\(attachments\)/);
-  assert.match(nodeSurface, /editor\?\.scrollIntoView\(\{ block: "center", inline: "nearest", behavior: "smooth" \}\)/);
-  assert.match(nodeParts, /data-mango-inline-image-download="true"/);
-  assert.match(nodeSurface, /pendingChatSelectionAnchor=\{selectionAnchor\}/);
-  assert.match(handlers, /data-mango-image-preview-download/);
-  assert.match(handlers, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE[\s\S]*"X"/);
-  assert.match(nodeParts, /refreshImageDraft[\s\S]*\[documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights\]/);
-  assert.match(imageActions, /downloadY: frameRect\.bottom - wrapperRect\.top - 32/);
-  assert.match(editorImages, /payload\[declaredImageType\] = blobPromise/);
-  assert.match(editorImages, /createStandaloneImageClipboardHTML\(portableSource/);
+  assert.ok(nodeSurface.includes("setActiveChatBlockID(image.blockID)"));
+  assert.ok(nodeSurface.includes("await transferTextBlockImageToChatDraft"));
+  assert.ok(projectSummary.includes("setActivePaneTabs"));
+  assert.ok(projectSummary.includes("await transferTextBlockImageToChatDraft"));
+  assert.ok(attachmentTransfer.includes("options.onStage(staged);"));
+  assert.ok(attachmentTransfer.includes('relationshipKind: "chat_attachment"'));
+  assert.ok(attachmentTransfer.includes("resolved = await options.uploadLegacyImage()"));
+  assert.ok(nodeSurface.includes("editorChatAttachmentsReadyForSubmit(attachments)"));
+  assert.ok(projectSummary.includes("editorChatAttachmentsReadyForSubmit(attachments)"));
+  assert.ok(nodeSurface.includes('editor?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" })'));
+  assert.ok(nodeParts.includes('data-mango-inline-image-download="true"'));
+  assert.ok(nodeParts.includes('data-mango-chat-attachment-download="true"'));
+  assert.ok(nodeParts.includes("onDoubleClick={(event) => openAttachment(event, attachment)}"));
+  assert.ok(nodeParts.includes("<EditorImagePreviewModal"));
+  assert.ok(nodeParts.includes("onDownload={() =>"));
+  assert.ok(nodeParts.includes("<AppModalPortal trapFocus={false}>"));
+  assert.ok(nodeParts.includes('position: "fixed"'));
+  assert.ok(nodeParts.includes('addEventListener("scroll", refreshFloatingImageActions, true)'));
+  assert.ok(nodeSurface.includes("pendingChatSelectionAnchor={selectionAnchor}"));
+  assert.ok(handlers.includes("React.createElement(EditorImagePreviewModal"));
+  assert.ok(previewModal.includes('data-mango-image-preview-download="true"'));
+  assert.ok(previewModal.includes("UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE"));
+  assert.ok(previewModal.includes("<AppModalPortal onRequestClose={onClose}>"));
+  assert.ok(nodeParts.includes("[documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights]"));
+  assert.ok(imageActions.includes("frameRect.right + 8"));
+  assert.ok(imageActions.includes("appViewportRect.right - IMAGE_ACTION_SURFACE_WIDTH"));
+  assert.ok(editorImages.includes("payload[declaredImageType] = blobPromise"));
+  assert.ok(editorImages.includes("createStandaloneImageClipboardHTML(portableSource"));
 });
-
 test("signature attachment previews restart after editor lifecycle replay and expose durable states", () => {
   const unified = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");

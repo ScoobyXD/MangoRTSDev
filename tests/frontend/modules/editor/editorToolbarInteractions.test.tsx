@@ -268,7 +268,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(boldButton.style.background, "transparent");
     const fontSizeInput = container.querySelector<HTMLInputElement>('input[aria-label="Font size value"]');
     assert.ok(fontSizeInput);
-    assert.equal(fontSizeInput.style.fontSize, "8px", "the literal font-size number stays visually compact");
+    assert.equal(fontSizeInput.style.fontSize, "9px", "the literal font-size number is slightly larger while staying compact");
 
     editorRoot.textContent = "@Ad";
     await act(async () => editorRoot.focus());

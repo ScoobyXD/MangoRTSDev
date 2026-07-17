@@ -18,6 +18,7 @@ import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from 
 import { createEditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
+import { EditorImagePreviewModal } from "./EditorImagePreviewModal.js";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
@@ -689,6 +690,7 @@ async function downloadChatAttachment(attachment: EditorChatAttachment, apiBase?
     companyID,
     attachmentID,
     filename: attachment.name,
+    variant: "original",
   });
   return true;
 }
@@ -732,10 +734,17 @@ function readImageDraftFromFrame(
 ): TextBlockImageDraft | null {
   const imageData = readEditorImageData(frame);
   if (!imageData?.src) return null;
+  const editorViewportRect = viewport.getBoundingClientRect();
+  const appWindow = wrapper.ownerDocument.defaultView;
   const layout = resolveTextBlockImageActionLayout(
     frame.getBoundingClientRect(),
-    wrapper.getBoundingClientRect(),
-    viewport.getBoundingClientRect(),
+    editorViewportRect,
+    {
+      left: 0,
+      top: 0,
+      right: Math.max(1, appWindow?.innerWidth ?? editorViewportRect.right),
+      bottom: Math.max(1, appWindow?.innerHeight ?? editorViewportRect.bottom),
+    },
   );
   if (!layout) return null;
   return {
@@ -837,6 +846,17 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     }
     setImageDraft(readImageDraftFromFrame(blockID, frame, wrapper, editor));
   }, [blockID]);
+  useEffect(() => {
+    const view = wrapperRef.current?.ownerDocument.defaultView;
+    if (!view) return undefined;
+    const refreshFloatingImageActions = () => refreshImageDraft();
+    view.addEventListener("scroll", refreshFloatingImageActions, true);
+    view.addEventListener("resize", refreshFloatingImageActions);
+    return () => {
+      view.removeEventListener("scroll", refreshFloatingImageActions, true);
+      view.removeEventListener("resize", refreshFloatingImageActions);
+    };
+  }, [refreshImageDraft]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
@@ -1557,6 +1577,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         </button>
       )}
       {imageDraft && (
+        <AppModalPortal trapFocus={false}>
         <button
           type="button"
           title="Download image"
@@ -1571,7 +1592,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             void downloadTextBlockImage(imageDraft, apiBase, companyID).catch(() => undefined);
           }}
           style={{
-            position: "absolute",
+            position: "fixed",
             left: imageDraft.downloadX,
             top: imageDraft.downloadY,
             zIndex: 6,
@@ -1590,8 +1611,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         >
           <DownloadIcon color="#ffffff" />
         </button>
-      )}
-      {editable && imageDraft && (
+      {editable && (
         <div
           role="toolbar"
           aria-label="Image actions"
@@ -1600,7 +1620,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             event.stopPropagation();
           }}
           style={{
-            position: "absolute",
+            position: "fixed",
             left: imageDraft.x,
             top: imageDraft.y,
             zIndex: 5,
@@ -1643,6 +1663,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             <PlusIcon color={accent} />
           </button>
         </div>
+      )}
+        </AppModalPortal>
       )}
     </div>
   );
@@ -1694,6 +1716,13 @@ type ChatPaneProps = {
 
 const CHAT_COMPOSER_MIN_HEIGHT = 34;
 const CHAT_COMPOSER_PANE_HEIGHT_RESERVE = 116;
+const CHAT_COMPOSER_TEXT_METRICS: React.CSSProperties = {
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 400,
+  lineHeight: 1.35,
+  letterSpacing: 0,
+};
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
@@ -2221,9 +2250,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   padding: "8px 9px",
                   color: surfaceText,
                   background: EDITOR_NEU_ACTIVE_SURFACE,
-                  fontSize: 12,
-                  lineHeight: 1.35,
-                  letterSpacing: 0,
+                  ...CHAT_COMPOSER_TEXT_METRICS,
                   whiteSpace: "pre-wrap",
                   overflowWrap: "anywhere",
                   pointerEvents: "none",
@@ -2238,12 +2265,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     style={{
                       background: segment.text.startsWith("!") ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND,
                       color: EDITOR_MENTION_COLOR,
-                      border: segment.text.startsWith("!") ? "1px solid rgba(239,68,68,0.34)" : "1px solid rgba(183,124,255,0.34)",
+                      border: 0,
                       borderRadius: 6,
-                      padding: "0 4px",
-                      fontWeight: 850,
+                      padding: 0,
+                      fontWeight: "inherit",
                       boxDecorationBreak: "clone",
-                      boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
+                      // The transparent textarea owns the native caret. Keep the
+                      // painted chip's inline advance and glyph metrics identical
+                      // so accepted mentions cannot visually outrun that caret.
+                      boxShadow: segment.text.startsWith("!")
+                        ? "0 0 0 1px rgba(254,226,226,0.92), 0 0 0 2px rgba(239,68,68,0.34), inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)"
+                        : "0 0 0 1px rgba(247,239,255,0.92), 0 0 0 2px rgba(183,124,255,0.34), inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
                     }}
                   >
                     {segment.text}
@@ -2341,7 +2373,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
@@ -2382,8 +2414,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           attachment={previewAttachment}
           apiBase={apiBase}
           companyID={companyID}
-          surfaceText={surfaceText}
-          strokeColor={strokeColor}
           onClose={() => setPreviewAttachment(null)}
         />
       )}
@@ -2637,56 +2667,98 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, ap
     <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
       {attachments.map((attachment) => {
         const selected = selectedAttachmentID === attachment.id;
-        const style: React.CSSProperties = {
-          maxWidth: "100%",
-          minHeight: 30,
-          display: "inline-grid",
-          gridTemplateColumns: "24px minmax(0, 1fr) auto",
-          alignItems: "center",
-          gap: 6,
-          border: selected ? "1px solid transparent" : `1px solid ${strokeColor}`,
-          borderRadius: 6,
-          background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
-          color: surfaceText,
-          padding: "3px 6px",
-          fontSize: 10,
-          fontWeight: 800,
-          letterSpacing: 0,
-          textDecoration: "none",
-          cursor: "pointer",
-          boxShadow: selected ? "0 7px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(92,238,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : "none",
-        };
+        const downloadable = Boolean(attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID));
         return (
-          <button
+          <div
             key={attachment.id}
-            type="button"
-            data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
-            aria-pressed={selected}
-            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID) ? "Double-click to download" : attachment.name}
-            onCopy={(event) => {
-              if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
-              event.preventDefault();
-              event.stopPropagation();
+            style={{
+              maxWidth: "100%",
+              minWidth: 0,
+              minHeight: 30,
+              display: "inline-grid",
+              gridTemplateColumns: "minmax(0, 1fr) 28px",
+              alignItems: "stretch",
+              border: selected ? "1px solid transparent" : "1px solid " + strokeColor,
+              borderRadius: 6,
+              background: selected ? EDITOR_NEU_ACTIVE_SURFACE + " padding-box, " + EDITOR_NEU_EDGE_FRAME + " border-box" : "#ffffff",
+              color: surfaceText,
+              boxShadow: selected ? "0 7px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(92,238,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : "none",
+              overflow: "hidden",
             }}
-            onKeyDown={(event) => {
-              if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => selectAttachment(event, attachment.id)}
-            onDoubleClick={(event) => openAttachment(event, attachment)}
-            style={style}
           >
-            <AttachmentThumb attachment={attachment} apiBase={apiBase} companyID={companyID} />
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
-            <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
-          </button>
+            <button
+              type="button"
+              data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
+              aria-pressed={selected}
+              title={isImageAttachment(attachment) ? "Double-click to preview" : downloadable ? "Double-click to download" : attachment.name}
+              onCopy={(event) => {
+                if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onKeyDown={(event) => {
+                if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => selectAttachment(event, attachment.id)}
+              onDoubleClick={(event) => openAttachment(event, attachment)}
+              style={{
+                minWidth: 0,
+                minHeight: 28,
+                display: "grid",
+                gridTemplateColumns: "24px minmax(0, 1fr) auto",
+                alignItems: "center",
+                gap: 6,
+                border: 0,
+                background: "transparent",
+                color: surfaceText,
+                padding: "3px 4px 3px 6px",
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              <AttachmentThumb attachment={attachment} apiBase={apiBase} companyID={companyID} />
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+              <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
+            </button>
+            <button
+              type="button"
+              data-mango-chat-attachment-download="true"
+              aria-label={"Download " + attachment.name}
+              title={"Download " + attachment.name}
+              disabled={!downloadable}
+              onClick={(event) => {
+                event.stopPropagation();
+                void downloadChatAttachment(attachment, apiBase, companyID).catch(() => undefined);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              style={{
+                width: 28,
+                minHeight: 28,
+                border: 0,
+                borderLeft: "1px solid " + strokeColor,
+                background: "rgba(248,250,252,0.88)",
+                color: surfaceText,
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: downloadable ? "pointer" : "default",
+                opacity: downloadable ? 0.82 : 0.34,
+              }}
+            >
+              <DownloadIcon color={surfaceText} />
+            </button>
+          </div>
         );
       })}
     </div>
   );
 };
-
 type DraftAttachmentListProps = {
   attachments: EditorChatAttachment[];
   apiBase?: string;
@@ -2825,12 +2897,10 @@ type ImageAttachmentPreviewModalProps = {
   attachment: EditorChatAttachment;
   apiBase?: string;
   companyID?: string;
-  surfaceText: string;
-  strokeColor: string;
   onClose: () => void;
 };
 
-const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, apiBase, companyID, surfaceText, strokeColor, onClose }) => {
+const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, apiBase, companyID, onClose }) => {
   const src = useAttachmentObjectURL(attachment, apiBase, companyID, "original");
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2854,39 +2924,18 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
   }, [attachment]);
 
   return (
-    <AppModalPortal onRequestClose={onClose}>
-      <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={attachment.name}
-      data-mango-copyable-image="true"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <EditorImagePreviewModal
+      label={attachment.name}
+      src={src}
+      emptyLabel={canLoadAttachmentContent(attachment, apiBase, companyID) ? "Loading image" : "Preview unavailable"}
+      copyable
+      onClose={onClose}
+      onDownload={() => {
+        void downloadChatAttachment(attachment, apiBase, companyID).catch(() => undefined);
       }}
-      style={{ position: "fixed", inset: 0, zIndex: 1, background: "rgba(17,24,39,0.46)", display: "grid", placeItems: "center", padding: 18 }}
-    >
-      <div style={{ width: "min(920px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.26)", overflow: "hidden" }}>
-        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: `1px solid ${strokeColor}` }}>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{attachment.name}</span>
-          <button type="button" aria-label="Close image preview" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
-            x
-          </button>
-        </div>
-        <div style={{ minHeight: 0, overflow: "auto", display: "grid", placeItems: "center", background: "#111827", padding: 10 }}>
-          {src ? (
-            <img alt={attachment.name} src={src} style={{ maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", display: "block" }} />
-          ) : (
-            <div style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#ffffff", fontSize: 12, fontWeight: 800 }}>
-              Preview unavailable
-            </div>
-          )}
-        </div>
-      </div>
-      </div>
-    </AppModalPortal>
+    />
   );
 };
-
 type EmailCountDropdownProps = {
   emails: EditorAttachedEmail[];
   accent: string;
@@ -6710,8 +6759,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     {previewAttachment && (
       <ImageAttachmentPreviewModal
         attachment={previewAttachment}
-        surfaceText={surfaceText}
-        strokeColor={strokeColor}
+        apiBase={apiBase}
+        companyID={companyID}
         onClose={() => setPreviewAttachment(null)}
       />
     )}

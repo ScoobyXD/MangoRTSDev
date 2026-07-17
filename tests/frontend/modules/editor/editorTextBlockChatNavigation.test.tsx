@@ -418,6 +418,41 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await flushFrames();
     assert.equal(dom.window.document.activeElement, focusedComment, "an ordinary rerender must not hand focus back to the composer");
 
+    const imageMessage = message({
+      id: "image-comment",
+      message: "Image reference",
+      attachments: [{
+        id: "image-1",
+        name: "diagram.png",
+        type: "image/png",
+        size: 4,
+        dataURL: "data:image/png;base64,AA==",
+      }],
+    });
+    await act(async () => root.render(
+      <ChatPane
+        {...chatProps}
+        messages={[imageMessage]}
+        activeMessageID=""
+        messageFocusRequest={null}
+      />,
+    ));
+    const chatDownload = container.querySelector<HTMLButtonElement>('[data-mango-chat-attachment-download="true"]');
+    assert.ok(chatDownload, "a posted chat image exposes its own row download button");
+    assert.equal(chatDownload.getAttribute("aria-label"), "Download diagram.png");
+    const previewTrigger = container.querySelector<HTMLButtonElement>('button[title="Double-click to preview"]');
+    assert.ok(previewTrigger);
+    await act(async () => previewTrigger.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true })));
+    await flushFrames();
+    const previewBackdrop = dom.window.document.querySelector<HTMLElement>('[data-mango-image-preview-backdrop="translucent"]');
+    assert.ok(previewBackdrop, "double-clicking the chat image opens the shared fullscreen image preview");
+    assert.ok(dom.window.document.querySelector('[data-mango-image-preview-download="true"]'));
+    const previewClose = dom.window.document.querySelector<HTMLButtonElement>('[data-mango-image-preview-close="true"]');
+    assert.ok(previewClose);
+    assert.equal(previewClose.textContent?.trim(), "X");
+    await act(async () => previewClose.click());
+    assert.equal(dom.window.document.querySelector('[data-mango-image-preview-backdrop="translucent"]'), null);
+
     const mentionUsers = [{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }];
     const mentionedPrincipals: string[] = [];
     const MentionComposerHarness: React.FC<{ initialDraft: string }> = ({ initialDraft }) => {
@@ -444,10 +479,24 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       assert.ok(container.querySelector('[role="listbox"][aria-label="Mention users"]'));
       const tab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
       await act(async () => composer.dispatchEvent(tab));
+      await flushFrames();
       assert.equal(tab.defaultPrevented, true);
+      assert.equal(composer.selectionStart, composer.value.length, "autocomplete leaves the native caret after the accepted mention");
+      assert.equal(composer.selectionEnd, composer.value.length, "autocomplete keeps the accepted mention caret collapsed");
+      const overlay = container.querySelector<HTMLElement>('[data-mango-chat-composer-mention-overlay="true"]');
+      assert.ok(overlay);
+      assert.equal(overlay.style.fontFamily, composer.style.fontFamily);
+      assert.equal(overlay.style.fontSize, composer.style.fontSize);
+      assert.equal(overlay.style.fontWeight, composer.style.fontWeight);
+      assert.equal(overlay.style.lineHeight, composer.style.lineHeight);
+      assert.equal(overlay.style.letterSpacing, composer.style.letterSpacing);
       assert.equal(composer.value, `${initialDraft[0]}Ada Lovelace `);
       const chip = container.querySelector<HTMLElement>(`[data-mango-chat-composer-mention="true"][data-mango-mention-kind="${expectedKind}"]`);
       assert.ok(chip, `${expectedKind} autocomplete is visibly rendered as an entity in the composer`);
+      assert.equal(chip.style.padding, "0px", "the painted chip cannot add inline width ahead of the native caret");
+      assert.equal(chip.style.borderWidth, "0px", "the painted chip border cannot add inline width ahead of the native caret");
+      assert.equal(chip.style.fontWeight, "inherit", "the painted chip uses the textarea glyph metrics");
+      assert.match(chip.style.boxShadow, /0 0 0 2px/, "the mention stays visibly outlined without changing text flow");
     };
     await acceptComposerMention("@Ad", "mention");
     await acceptComposerMention("!Ad", "urgent");
