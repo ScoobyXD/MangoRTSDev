@@ -303,8 +303,8 @@ test("attached-email reply focus clears the outer node or project formatting tar
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus\?: \(\) => void/);
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspaceParts, /onFocus=\{onReplyEditorFocus\}/);
-  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
-  assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setFocusedTextBlockID\(block\.id\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
+  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setEmailReplyBlockID\(block\.id\);\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
+  assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setEmailReplyBlockID\(block\.id\);\s*setFocusedTextBlockID\(block\.id\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
 });
 
 test("format availability never disables editor navigation tabs", () => {
@@ -401,7 +401,7 @@ test("the active node or project text block keeps its formatting controller curr
   const workspaceTextBlock = jsxOpeningTagContaining(
     nodeWorkspaceSurface,
     "NodeTextBlockEditor",
-    "Keep the last focused editor active while toolbar inputs own browser focus.",
+    "documentScrollMemoryRef={documentScrollMemoryRef}",
     "node workspace text-block editor",
   );
 
@@ -416,15 +416,15 @@ test("the active node or project text block keeps its formatting controller curr
   assert.match(workspaceAvailability, /const formattingControllerAvailable = editorTextCanEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
   assert.match(workspaceAvailability, /onFormattingControllerAvailabilityChange\?\.\(formattingControllerAvailable\)/);
   assert.match(nodeWorkspaceSurface, /const \[focusedTextBlockID, setFocusedTextBlockID\] = useState<string \| null>\(null\)/);
-  assert.match(nodeWorkspaceSurface, /setFocusedTextBlockID\(\(current\) => \{\s*if \(nodeChanged \|\| current === null\) return textBlocks\[0\]\?\.id \?\? "";\s*return blockIDs\.has\(current\) \? current : "";\s*\}\)/);
+  assert.match(nodeWorkspaceSurface, /setFocusedTextBlockID\(\(current\) => \{\s*if \(nodeChanged \|\| current === null\) return "";\s*return blockIDs\.has\(current\) \? current : "";\s*\}\)/);
   assert.match(editorContent, /const \[nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable\] = useState\(false\)/);
   assert.match(editorContent, /onFormattingControllerAvailabilityChange=\{setNodeFormattingControllerAvailable\}/);
   assert.match(editorContent, /formattingDisabled=\{documentIsolation\.pointerEvents !== "auto" \|\| !linkedEntityCanEdit \|\| \(linkedEntityKind === "node" && !nodeFormattingControllerAvailable\)\}/);
   assert.match(nodeWorkspaceParts, /formattingControllerActive\?: boolean/);
   assert.match(nodeWorkspaceParts, /if \(!formattingControllerActive\) return;\s*activateFormattingController\(\)/);
   assert.match(workspaceTextBlock, /formattingControllerActive=\{textBlockIsFocused\}/);
-  assert.match(workspaceTextBlock, /onFocus=\{\(\) => \{\s*setFocusedTextBlockID\(block\.id\)/);
-  assert.match(workspaceTextBlock, /onBlur=\{\(\) => \{\s*\/\/ Keep the last focused editor active while toolbar inputs own browser focus\./);
+  assert.match(workspaceTextBlock, /onFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setFocusedTextBlockID\(block\.id\);\s*\}\}/);
+  assert.match(workspaceTextBlock, /onBlur=\{\(\) => undefined\}/);
   assert.doesNotMatch(workspaceTextBlock, /onBlur=[\s\S]*setFocusedTextBlockID\(""\)/);
 });
 
@@ -446,7 +446,8 @@ test("external hydration preserves logical selection and node teardown retains f
   assert.match(nodeWorkspace, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\),\s*\[companyID, nodeID\]/);
   assert.match(nodeWorkspace, /textBlockProjectionSaveController\.flushChangedBlocks\(\)\.catch\(\(\) => undefined\)/);
   assert.doesNotMatch(nodeWorkspace, /flushChangedBlocks\(\)[\s\S]{0,120}textBlockProjectionSaveController\.clear\(\)/);
-  assert.match(nodeWorkspaceParts, /nextHeight < TEXT_BLOCK_MIN_HEIGHT/);
+  assert.match(nodeWorkspaceParts, /height: TEXT_BLOCK_MIN_HEIGHT,[\s\S]*resize: "none"/);
+  assert.doesNotMatch(nodeWorkspaceParts, /readStoredTextBlockHeight|storeTextBlockHeight/);
 });
 
 test("shared editor clipboard routing keeps mixed content and copies images before cut deletion", () => {
@@ -1430,7 +1431,7 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(nodeSurface.includes("setChatComposerFocusRequestIDs"));
   assert.ok(nodeSurface.includes("composerFocusRequestID={chatComposerFocusRequestIDs[chatBlockID] ?? 0}"));
   assert.ok(nodeSurface.includes("await transferTextBlockImageToChatDraft"));
-  assert.ok(projectSummary.includes("setActivePaneTabs"));
+  assert.ok(projectSummary.includes("setOpenChatBlockIDs"));
   assert.ok(projectSummary.includes("setChatComposerFocusRequestIDs"));
   assert.ok(projectSummary.includes("composerFocusRequestID={chatComposerFocusRequestIDs[block.id] ?? 0}"));
   assert.ok(projectSummary.includes("await transferTextBlockImageToChatDraft"));
@@ -1456,7 +1457,7 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(previewModal.includes('data-mango-image-preview-download="true"'));
   assert.ok(previewModal.includes("UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE"));
   assert.ok(previewModal.includes("<AppModalPortal onRequestClose={onClose}>"));
-  assert.ok(nodeParts.includes("[documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights]"));
+  assert.ok(nodeParts.includes("[documentValue, documentScrollTop, refreshImageDraft, refreshTextHighlights]"));
   assert.ok(imageActions.includes("frameRect.right + 8"));
   assert.ok(imageActions.includes("appViewportRect.right - IMAGE_ACTION_SURFACE_WIDTH"));
   assert.ok(editorImages.includes("payload[declaredImageType] = blobPromise"));

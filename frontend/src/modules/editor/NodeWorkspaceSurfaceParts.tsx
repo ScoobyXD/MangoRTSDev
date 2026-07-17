@@ -16,7 +16,7 @@ import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type Edi
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
-import { createEditorScrollMemory } from "./editorScroll";
+import { createEditorScrollMemory, type EditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorImagePreviewModal } from "./EditorImagePreviewModal.js";
@@ -117,12 +117,12 @@ import {
   TEXT_BLOCK_BOTTOM_BUFFER_ROWS,
   TEXT_BLOCK_FONT_SIZE,
   TEXT_BLOCK_LINE_HEIGHT,
-  TEXT_BLOCK_MAX_HEIGHT,
   TEXT_BLOCK_MIN_HEIGHT,
   TEXT_BLOCK_PADDING_BOTTOM,
   TEXT_BLOCK_PADDING_LEFT,
   TEXT_BLOCK_PADDING_RIGHT,
   TEXT_BLOCK_PADDING_TOP,
+  TEXT_BLOCK_ROW_HEIGHT,
   type MentionableCompanyUser,
   type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
@@ -136,7 +136,7 @@ type TimelineCellProps = {
 };
 
 export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast }) => (
-  <div style={{ position: "relative", alignSelf: "stretch", minHeight: TEXT_BLOCK_MIN_HEIGHT, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
+  <div style={{ position: "relative", alignSelf: "stretch", minHeight: TEXT_BLOCK_ROW_HEIGHT, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
     <div
       aria-hidden="true"
       style={{
@@ -288,6 +288,7 @@ type NodeTextBlockEditorProps = {
   companyUsers: MentionableCompanyUser[];
   documentValue: string;
   contentChanges: NodeContentChange[];
+  focusContentChangeID?: string;
   chatMessages: EditorTextBlockChatMessage[];
   pendingChatSelectionAnchor?: TextBlockSelectionAnchor;
   activeChatAnchorMessageID: string;
@@ -313,18 +314,8 @@ type NodeTextBlockEditorProps = {
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
   onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
+  documentScrollMemoryRef?: React.MutableRefObject<EditorScrollMemory>;
 };
-
-function readStoredTextBlockHeight(storageKey: string): number {
-  if (typeof localStorage === "undefined") return TEXT_BLOCK_MIN_HEIGHT;
-  const parsed = Number.parseInt(localStorage.getItem(storageKey) ?? "", 10);
-  return Number.isFinite(parsed) ? Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(parsed, TEXT_BLOCK_MAX_HEIGHT)) : TEXT_BLOCK_MIN_HEIGHT;
-}
-
-function storeTextBlockHeight(storageKey: string, height: number) {
-  if (typeof localStorage === "undefined" || !Number.isFinite(height)) return;
-  localStorage.setItem(storageKey, String(Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(Math.round(height), TEXT_BLOCK_MAX_HEIGHT))));
-}
 
 type TextHighlightRect = {
   key: string;
@@ -776,6 +767,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   companyUsers,
   documentValue,
   contentChanges,
+  focusContentChangeID,
   chatMessages,
   pendingChatSelectionAnchor,
   activeChatAnchorMessageID,
@@ -801,6 +793,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
   onSelectionTextAlignmentChange,
+  documentScrollMemoryRef,
 }) => {
   // Reuse an enclosing editor modal layer; a new sibling layer would render underneath it.
   const floatingImageActionTarget = useAppOverlayPortalTarget();
@@ -811,7 +804,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const documentTargetKey = `node-text-block:${nodeID}:${blockID}`;
   const targetKeyRef = useRef(documentTargetKey);
   const loadedDocumentTargetKeyRef = useRef(documentTargetKey);
-  const scrollMemoryRef = useRef(createEditorScrollMemory());
+  const localScrollMemoryRef = useRef(createEditorScrollMemory());
+  const scrollMemoryRef = documentScrollMemoryRef ?? localScrollMemoryRef;
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const flushPendingLocalInputRef = useRef<() => void>(() => undefined);
   const pendingFontSizeRef = useRef<number | null>(null);
@@ -827,9 +821,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const userEditedDocumentRef = useRef(false);
   const deferredExternalDocumentRef = useRef<{ targetKey: string; value: string } | null>(null);
   const suppressNextDocumentFlushRef = useRef(false);
-  const lastStoredHeightRef = useRef(0);
-  const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
-  const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
@@ -886,6 +877,26 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     targetKeyRef.current = documentTargetKey;
   }, [documentTargetKey]);
 
+  useLayoutEffect(() => {
+    const element = editorRef.current;
+    if (!element) return undefined;
+    const rememberedScrollTop = scrollMemoryRef.current.read(documentTargetKey);
+    let frame: number | null = null;
+    if (rememberedScrollTop !== undefined) {
+      restoringScrollRef.current = true;
+      element.scrollTop = rememberedScrollTop;
+      setDocumentScrollTop(rememberedScrollTop);
+      frame = window.requestAnimationFrame(() => {
+        restoringScrollRef.current = false;
+      });
+    }
+    return () => {
+      scrollMemoryRef.current.remember(documentTargetKey, element.scrollTop);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      restoringScrollRef.current = false;
+    };
+  }, [documentTargetKey, scrollMemoryRef]);
+
   useEffect(() => {
     if (!activeContentChangeID) return;
     if (!contentChanges.some((change) => change.change_id === activeContentChangeID)) {
@@ -894,25 +905,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [activeContentChangeID, contentChanges]);
 
   useEffect(() => {
-    const nextHeight = readStoredTextBlockHeight(heightStorageKey);
-    lastStoredHeightRef.current = nextHeight;
-    setHeight(nextHeight);
-  }, [heightStorageKey]);
-
-  useEffect(() => {
-    const element = editorRef.current;
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      const nextHeight = Math.round(element.getBoundingClientRect().height);
-      refreshTextHighlights();
-      if (!Number.isFinite(nextHeight) || nextHeight < TEXT_BLOCK_MIN_HEIGHT || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
-      lastStoredHeightRef.current = nextHeight;
-      setHeight(nextHeight);
-      storeTextBlockHeight(heightStorageKey, nextHeight);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [heightStorageKey, refreshTextHighlights]);
+    const changeID = focusContentChangeID?.trim() ?? "";
+    if (changeID && contentChanges.some((change) => change.change_id === changeID)) setActiveContentChangeID(changeID);
+  }, [contentChanges, focusContentChangeID]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -920,7 +915,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       refreshImageDraft();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [documentValue, documentScrollTop, height, refreshImageDraft, refreshTextHighlights]);
+  }, [documentValue, documentScrollTop, refreshImageDraft, refreshTextHighlights]);
 
   useEffect(() => {
     if (!chatNavigationRequest?.anchorMessageID) return;
@@ -1425,10 +1420,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onBlur={handleBlur}
         style={{
           zIndex: 2,
-          height,
+          height: TEXT_BLOCK_MIN_HEIGHT,
           minHeight: TEXT_BLOCK_MIN_HEIGHT,
-          maxHeight: TEXT_BLOCK_MAX_HEIGHT,
-          resize: editable ? "vertical" : "none",
+          maxHeight: TEXT_BLOCK_MIN_HEIGHT,
+          resize: "none",
           background: "transparent",
         }}
       />
@@ -1694,6 +1689,7 @@ type ChatPaneProps = {
   draftAttachments: EditorChatAttachment[];
   replyTargetID: string;
   heightStorageKey: string;
+  fixedHeight?: number;
   active: boolean;
   currentUserID: string;
   activeMessageID: string;
@@ -1744,6 +1740,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   draftAttachments,
   replyTargetID,
   heightStorageKey,
+  fixedHeight,
   active,
   currentUserID,
   activeMessageID,
@@ -1778,7 +1775,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
-  const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
+  const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
+  const height = fixedHeight ?? storedHeight;
   const composerMaxHeight = Math.max(CHAT_COMPOSER_MIN_HEIGHT, height - CHAT_COMPOSER_PANE_HEIGHT_RESERVE);
   const [composerSizing, setComposerSizing] = useState({ height: CHAT_COMPOSER_MIN_HEIGHT, scrolls: false });
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
@@ -1820,8 +1818,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [composerMaxHeight]);
 
   useEffect(() => {
-    setHeight(readStoredChatPaneHeight(heightStorageKey));
-  }, [heightStorageKey]);
+    if (fixedHeight === undefined) setStoredHeight(readStoredChatPaneHeight(heightStorageKey));
+  }, [fixedHeight, heightStorageKey]);
 
   useEffect(() => () => {
     if (mentionCloseTimerRef.current !== null) window.clearTimeout(mentionCloseTimerRef.current);
@@ -1995,7 +1993,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!editable) return;
+    if (!editable || fixedHeight !== undefined) return;
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
@@ -2003,7 +2001,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     let nextHeight = startHeight;
     const onPointerMove = (pointerEvent: PointerEvent) => {
       nextHeight = clampChatPaneHeight(startHeight + pointerEvent.clientY - startY);
-      setHeight(nextHeight);
+      setStoredHeight(nextHeight);
     };
     const onPointerUp = () => {
       storeChatPaneHeight(heightStorageKey, nextHeight);
@@ -2026,7 +2024,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           height,
           marginTop: 0,
           display: "grid",
-          gridTemplateRows: showingEmail ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr) auto 7px",
+          gridTemplateRows: showingEmail
+            ? (fixedHeight === undefined ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr)")
+            : (fixedHeight === undefined ? "auto minmax(0, 1fr) auto 7px" : "auto minmax(0, 1fr) auto"),
           border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
           borderRadius: 14,
           background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
@@ -2414,13 +2414,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             </div>
           </>
         )}
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          title="Resize chat"
-          onPointerDown={beginResize}
-          style={{ cursor: editable ? "ns-resize" : "default", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
-        />
+        {fixedHeight === undefined && (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            title="Resize chat"
+            onPointerDown={beginResize}
+            style={{ cursor: editable ? "ns-resize" : "default", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
+          />
+        )}
       </div>
       {previewAttachment && (
         <ImageAttachmentPreviewModal

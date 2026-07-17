@@ -132,6 +132,8 @@ export const TEXT_BLOCK_PADDING_LEFT = 13;
 export const TEXT_BLOCK_BOTTOM_BUFFER_ROWS = 10;
 export const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
 export const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
+export const TEXT_BLOCK_ROW_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT + 2;
+export const TEXT_BLOCK_ROW_GAP = 12;
 export const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
 export const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 export const EDITOR_NEU_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";
@@ -373,6 +375,13 @@ export const MailIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
     <path d="M2.8 5.1h12.4v8H2.8z" fill="none" stroke={color} strokeWidth="1.45" />
     <path d="m3.4 5.7 5.6 4.1 5.6-4.1" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const TextEditorIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
+    <rect x="3.2" y="2.6" width="11.6" height="12.8" rx="1.8" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="M5.8 6.2h6.4M5.8 9h6.4M5.8 11.8h4.1" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" />
   </svg>
 );
 

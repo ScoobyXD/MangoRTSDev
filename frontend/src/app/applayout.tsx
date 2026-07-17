@@ -112,6 +112,7 @@ type LogicGateArenaTarget = {
 };
 type ProjectManagementTarget = {
   projectID: string;
+  informationID?: string;
   requestID: number;
 };
 
@@ -1649,7 +1650,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         routeManagedExplorerNodePopupRef.current = false;
         setExplorerNodePopup(null);
         setActiveDockTabID(null);
-        setProjectManagementTarget({ projectID: id, requestID: Date.now() });
+        setProjectManagementTarget({
+          projectID: id,
+          informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          requestID: Date.now(),
+        });
         const ensured = activatePrimaryPage("project-management");
         if (onNavigate && detail.suppressNavigation !== true) {
           saveViews(ensured.tabs, ensured.tab.id);
@@ -1921,6 +1926,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onProjectOpen={openProjectManagementProject}
               onProjectCollapseToTab={collapseProjectManagementProjectToTab}
               targetProjectID={projectManagementTarget?.projectID}
+              targetProjectInformationID={projectManagementTarget?.informationID}
               targetProjectRequestID={projectManagementTarget?.requestID}
             />
           </React.Suspense>
