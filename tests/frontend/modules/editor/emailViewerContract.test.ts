@@ -114,6 +114,36 @@ test("sent triage preserves the three-button header and new-message compose fill
   assert.match(homeParts, /emailAttachmentHasResolvableContent\(attachment\)/);
 });
 
+test("mail list actions use the requested order, symmetric lower row, vibrant surfaces, and visible All-menu hover", () => {
+  const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
+  const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
+  const indexCSS = source("frontend/src/index.css");
+  const topStart = homeWorkspace.indexOf("<div style={mailArchiveActionsStyle}>");
+  const lowerStart = homeWorkspace.indexOf("<div style={triageAdvanceVisible ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>");
+  const lowerEnd = homeWorkspace.indexOf("{!isArchivableListView && (", lowerStart);
+  const topActions = homeWorkspace.slice(topStart, lowerStart);
+  const lowerActions = homeWorkspace.slice(lowerStart, lowerEnd);
+
+  assert.ok(topStart >= 0 && lowerStart > topStart && lowerEnd > lowerStart);
+  assert.ok(topActions.indexOf('label="Inbox"') < topActions.indexOf('label="Starred"'));
+  assert.ok(topActions.indexOf('label="Starred"') < topActions.indexOf('mailbox === "sent"'));
+  assert.ok(topActions.indexOf('mailbox === "sent"') < topActions.indexOf("allDropdownActive"));
+  assert.match(topActions, /onOpenSentMailbox/);
+  assert.doesNotMatch(topActions, /onOpenDraftsMailbox/);
+  assert.match(lowerActions, /mango-mail-vibrant-compose/);
+  assert.match(lowerActions, /mango-mail-vibrant-drafts/);
+  assert.match(lowerActions, /onOpenDraftsMailbox/);
+  assert.doesNotMatch(lowerActions, /onOpenSentMailbox/);
+  assert.match(lowerActions, /mango-mail-vibrant-advance/);
+  assert.match(lowerActions, /Archive & next →/);
+  assert.match(homeStyles, /mailComposeSentTriageActionsStyle[\s\S]{0,180}gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
+  assert.match(homeWorkspace, /className="mango-mailbox-dropdown-item"/);
+  assert.match(indexCSS, /\.mango-mailbox-dropdown-item:hover/);
+  assert.match(indexCSS, /#2563eb[\s\S]{0,240}#7c3aed/);
+  assert.match(indexCSS, /#7c3aed[\s\S]{0,240}#ec4899/);
+  assert.match(indexCSS, /#0891b2[\s\S]{0,240}#14b8a6/);
+});
+
 
 test("triage email selection, history, and archive prefetch preserve the foreground detail path", () => {
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");

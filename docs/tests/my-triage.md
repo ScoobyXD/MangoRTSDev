@@ -183,6 +183,7 @@ MT155 - My Triage All and other non-primary tabs must remain scrollable whenever
 MT156 - Oldest order requests the complete filtered personal-mailbox tab with internal provider pages of at most 200 messages, rejects repeated cursors instead of returning a partial result, deduplicates provider message IDs, and preserves the exact personal account scope.
 MT153 - Mailbox subscription acceptance/reconnect and global notification-summary events start zero mail list, folder, collaboration, page, or detail GETs. They may only mark reusable cache state stale for the next explicit read.
 MT154 - Automated realtime regression tests must assert request budgets, not merely final rows: 12 archive echoes plus local send/star/read/delete echoes produce zero invalidations, zero timers, and zero provider reads; acceptance/reconnect produces zero reads; external bursts cannot request a message-list replacement.
+MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next in equal lower positions when the page action is available. The three lower workflow controls use the shared vibrant elevated gradients, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
 ## Scenarios
 
@@ -832,3 +833,15 @@ Expected:
 - Acceptance, reconnect, and notification-summary updates issue no mail GETs. The external hint may perform one coalesced folder read and an exact selected-detail read, but never a message-list read or replacement.
 - A short non-primary list appends enough pages to create a scroll range or reaches provider exhaustion; once scrollable, further pages require near-bottom intent.
 - The known thread shows one loading shell before the full timeline, with no competing child body request. Normal Archive opens the row below, while Archive page/go-next keeps its separate fixed-page path.
+
+### Scenario MT-S22: Symmetric Mailbox Actions
+
+Business logic covered:
+- MT157
+
+Given:
+- My Triage is open on a connected mailbox and the All/Spam menu is expanded.
+
+Expected:
+- Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row.
+- The lower actions use the shared modern gradients and both dropdown rows visibly highlight on pointer hover and keyboard focus.

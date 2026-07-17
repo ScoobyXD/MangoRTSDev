@@ -483,6 +483,60 @@ button, input, textarea, select {
   transform: translateY(-1px);
 }
 
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-compose {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 48%, #7c3aed 100%) !important;
+  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(79, 70, 229, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #ec4899 100%) !important;
+  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(168, 85, 247, 0.27), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-advance {
+  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 48%, #14b8a6 100%) !important;
+  box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(6, 182, 212, 0.26), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action:not(:disabled):hover {
+  border-color: rgba(255, 255, 255, 0.66) !important;
+  color: #ffffff !important;
+  filter: saturate(1.12) brightness(1.05);
+  box-shadow: 8px 8px 18px rgba(174, 174, 192, 0.30), -7px -7px 16px rgba(255, 255, 255, 0.94), 0 12px 26px rgba(99, 102, 241, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.42) !important;
+  transform: translateY(-1px);
+}
+
+.mango-elevated-action.mango-mail-vibrant-action:not(:disabled):active {
+  filter: saturate(1.04) brightness(0.98);
+  box-shadow: 3px 3px 9px rgba(174, 174, 192, 0.24), -3px -3px 8px rgba(255, 255, 255, 0.76), inset 2px 2px 5px rgba(15, 23, 42, 0.18) !important;
+  transform: translateY(0);
+}
+
+.mango-elevated-action.mango-mail-vibrant-action:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.46);
+  outline-offset: 2px;
+}
+
+.mango-elevated-action.mango-mail-vibrant-action:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.72);
+  opacity: 0.48;
+}
+
+.mango-mailbox-dropdown-item {
+  transition: background 130ms ease, border-color 130ms ease, box-shadow 150ms ease, color 130ms ease, transform 150ms ease;
+}
+
+.mango-mailbox-dropdown-item:hover,
+.mango-mailbox-dropdown-item:focus-visible {
+  border-color: rgba(99, 102, 241, 0.48) !important;
+  background: linear-gradient(135deg, rgba(224, 242, 254, 0.92), rgba(237, 233, 254, 0.94) 55%, rgba(252, 231, 243, 0.86)) !important;
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.13), inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  color: #312e81 !important;
+  outline: none;
+  transform: translateX(1px);
+}
+
 .mango-settings-input,
 .mango-settings-action,
 .mango-settings-select-button,
