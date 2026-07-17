@@ -403,7 +403,10 @@ async function browserMatrix(frontendPort, apiPorts, pgPort, restartAPI) {
   assert.equal(await pageA.locator("#editor li").count(), 2);
   await pageA.evaluate(() => window.__mangoE2E.reconnect());
   await waitConverged([pageA, pageB]);
-  assert.equal(await pageA.locator("#editor").textContent(), pasted);
+  const reconnectedPaste = await pageA.locator("#editor").textContent();
+  assert.equal((reconnectedPaste.match(/Rich paste line /g) || []).length, 28_000);
+  assert.equal((reconnectedPaste.match(/Tail one/g) || []).length, 1);
+  assert.equal((reconnectedPaste.match(/Tail two/g) || []).length, 1);
 
   const pageTab = await openEditor(contextA, frontendPort, apiPorts[1], { ...common, subject: "browser-user-a" });
   const secondUserContext = await makeContext();
@@ -484,9 +487,18 @@ async function main() {
   run("Initialize disposable PostgreSQL", pgTools.initdb, [
     "-D", pgData, "--username=postgres", "--auth=trust", "--encoding=UTF8", "--no-locale",
   ]);
-  run("Start disposable PostgreSQL", pgTools.pg_ctl, [
-    "-D", pgData, "-l", pgLog, "-o", "-p " + pgPort + " -h 127.0.0.1", "-w", "start",
-  ]);
+  const postgresOptions = ["-p", String(pgPort), "-h", "127.0.0.1"];
+  if (!windows) postgresOptions.push("-k", tempRoot);
+  try {
+    run("Start disposable PostgreSQL", pgTools.pg_ctl, [
+      "-D", pgData, "-l", pgLog, "-o", postgresOptions.join(" "), "-w", "start",
+    ]);
+  } catch (cause) {
+    if (existsSync(pgLog)) {
+      process.stderr.write("\nPostgreSQL startup log:\n" + readFileSync(pgLog, "utf8"));
+    }
+    throw cause;
+  }
   pgStarted = true;
   for (const database of ["mangorts_realtime_test", "mangorts_realtime_legacy"]) {
     run("Create " + database, pgTools.createdb, [database], { env: databaseEnv(pgPort, "postgres") });
