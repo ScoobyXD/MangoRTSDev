@@ -69,6 +69,7 @@ type ProjectManagementContentProps = {
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
+  targetProjectInformationID?: string;
   targetProjectRequestID?: number;
 };
 
@@ -646,6 +647,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   onProjectOpen,
   onProjectCollapseToTab,
   targetProjectID,
+  targetProjectInformationID,
   targetProjectRequestID,
 }) => {
   const companyID = getActiveCompanyID();
@@ -1218,6 +1220,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     return (
       <ProjectSummaryContent
         projectID={activeProjectID}
+        focusInformationID={targetProjectID?.trim() === activeProjectID ? targetProjectInformationID : undefined}
+        focusRequestID={targetProjectID?.trim() === activeProjectID ? targetProjectRequestID : undefined}
         accent={accent}
         workspace={workspace}
         onBack={() => setActiveProjectID("")}

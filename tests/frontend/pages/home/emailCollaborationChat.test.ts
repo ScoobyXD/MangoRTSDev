@@ -136,7 +136,7 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.doesNotMatch(surface, /optimisticInformationID/);
 });
 
-test("email-node UI reuses the canonical chat, exact reply marker, three-column origin layout, and source tabs", () => {
+test("email-created nodes reuse canonical chat data inside the standard three-column text-box layout", () => {
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
@@ -146,9 +146,10 @@ test("email-node UI reuses the canonical chat, exact reply marker, three-column 
   assert.match(workspace, /message\.collaboration_node_id\?\.trim\(\)[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
-  assert.match(nodeSurface, /emailOriginPrimaryRow[\s\S]*minmax\(280px, 0\.9fr\) minmax\(320px, 1\.15fr\) minmax\(280px, 0\.9fr\)/);
-  assert.match(nodeSurface, /blockID=\{chatBlockID\}[\s\S]*headerTrailing=\{emailOriginPrimaryRow/);
-  assert.match(nodeSurface, /tabbed=\{emailOriginPrimaryRow\}/);
+  assert.match(nodeSurface, /data-node-text-box-columns="email-editor-chat"/);
+  assert.match(nodeSurface, /blockID=\{block\.id\}[\s\S]*blockID=\{chatBlockID\}/);
+  assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
+  assert.match(nodeSurface, /tabbed=\{false\}/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
   assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
   assert.match(projection, /selection_block_id: input\.selectionBlockID/);

@@ -8,6 +8,7 @@ export type ProjectManagementPageProps = {
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
+  targetProjectInformationID?: string;
   targetProjectRequestID?: number;
 };
 
@@ -17,6 +18,7 @@ export function ProjectManagementPage({
   onProjectOpen,
   onProjectCollapseToTab,
   targetProjectID,
+  targetProjectInformationID,
   targetProjectRequestID,
 }: ProjectManagementPageProps) {
   return (
@@ -28,6 +30,7 @@ export function ProjectManagementPage({
         onProjectOpen={onProjectOpen}
         onProjectCollapseToTab={onProjectCollapseToTab}
         targetProjectID={targetProjectID}
+        targetProjectInformationID={targetProjectInformationID}
         targetProjectRequestID={targetProjectRequestID}
       />
     </div>

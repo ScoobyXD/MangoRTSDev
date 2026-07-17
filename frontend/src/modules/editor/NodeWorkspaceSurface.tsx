@@ -70,6 +70,8 @@ import {
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
+import { createEditorScrollMemory } from "./editorScroll";
+import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
 
 import {
   AttachedEmailOrganizerPane,
@@ -86,7 +88,6 @@ import {
   type AttachmentUploadDropdownItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
-  CHAT_PANE_DEFAULT_HEIGHT,
   DEFAULT_TEXT_BLOCK_TITLE,
   EMAIL_DRAG_MIME,
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -101,6 +102,10 @@ import {
   PaperclipIcon,
   parseDraggedEmail,
   PlusIcon,
+  TextEditorIcon,
+  TEXT_BLOCK_MIN_HEIGHT,
+  TEXT_BLOCK_ROW_GAP,
+  TEXT_BLOCK_ROW_HEIGHT,
   projectionsKey,
   uploadEditorAttachment,
   type NodeWorkspaceSurfaceProps,
@@ -122,7 +127,7 @@ const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
-const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v1";
+const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v2";
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
 
 function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
@@ -159,6 +164,8 @@ function createEmailSelectionDocument(ownerDocument: Document, quote: string): s
 type TextSidePaneKind = "email" | "chat";
 
 type TextPaneLayoutSnapshot = {
+  initialized: boolean;
+  openEditorBlockIDs: string[];
   openEmailBlockIDs: string[];
   openChatBlockIDs: string[];
   closedChatBlockIDs: string[];
@@ -259,11 +266,14 @@ function cleanSelectedEmailMap(value: unknown): Record<string, string> {
 
 function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLayoutSnapshot {
   if (typeof localStorage === "undefined") {
-    return { openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
+    return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
   }
   try {
-    const parsed = JSON.parse(localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID)) ?? "{}") as Record<string, unknown>;
+    const stored = localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID));
+    const parsed = JSON.parse(stored ?? "{}") as Record<string, unknown>;
     return {
+      initialized: stored !== null,
+      openEditorBlockIDs: cleanIDList(parsed.openEditorBlockIDs),
       openEmailBlockIDs: cleanIDList(parsed.openEmailBlockIDs),
       openChatBlockIDs: cleanIDList(parsed.openChatBlockIDs),
       closedChatBlockIDs: cleanIDList(parsed.closedChatBlockIDs),
@@ -271,13 +281,15 @@ function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLa
       activeChatBlockID: typeof parsed.activeChatBlockID === "string" && parsed.activeChatBlockID.trim() ? parsed.activeChatBlockID.trim() : undefined,
     };
   } catch {
-    return { openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
+    return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
   }
 }
 
 function storeTextPaneLayout(companyID: string, nodeID: string, snapshot: TextPaneLayoutSnapshot) {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(textPaneLayoutStorageKey(companyID, nodeID), JSON.stringify({
+    initialized: true,
+    openEditorBlockIDs: cleanIDList(snapshot.openEditorBlockIDs),
     openEmailBlockIDs: cleanIDList(snapshot.openEmailBlockIDs),
     openChatBlockIDs: cleanIDList(snapshot.openChatBlockIDs),
     closedChatBlockIDs: cleanIDList(snapshot.closedChatBlockIDs),
@@ -389,9 +401,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
+  const documentScrollMemoryRef = useRef(createEditorScrollMemory());
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
-  const previousNodeIDRef = useRef(nodeID);
+  const previousNodeIDRef = useRef("");
   const initialPaneLayoutRef = useRef(readStoredTextPaneLayout(companyID, nodeID));
   const skipNextPaneLayoutPersistRef = useRef(false);
   const [width, setWidth] = useState(0);
@@ -410,6 +423,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState(initialPaneLayoutRef.current.activeChatBlockID ?? "");
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>(() => initialPaneLayoutRef.current.selectedEmailIDsByBlock);
+  const [openEditorBlockIDs, setOpenEditorBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openEditorBlockIDs));
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openEmailBlockIDs));
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openChatBlockIDs));
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
@@ -419,6 +433,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
+  const [activeRowBlockID, setActiveRowBlockID] = useState("");
+  const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
@@ -612,6 +628,57 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return items;
   }, [nodeID, unseenChanges]);
+  const focusTargetBlockID = useMemo(() => {
+    const targetID = focusInformationID?.trim() ?? "";
+    const emailMessageID = focusEmailMessageID?.trim() ?? "";
+    if (!targetID && !emailMessageID) return "";
+    if (blocks.some((block) => block.id === targetID)) return targetID;
+    const chatMessage = chatMessages.find((message) => message.id === targetID);
+    if (chatMessage) {
+      return chatMessage.blockID === emailOriginChatBlockID ? blocks[0]?.id ?? "" : chatMessage.blockID;
+    }
+    const contentChange = unseenChanges.find((change) => change.change_id === targetID && change.node_id === nodeID);
+    if (contentChange?.information_id) return contentChange.information_id;
+    const attachedEmail = nodeAttachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.messageID === emailMessageID);
+    if (attachedEmail?.blockID && blocks.some((block) => block.id === attachedEmail.blockID)) return attachedEmail.blockID;
+    if ((emailMessageID || attachedEmail) && emailOriginChatBlockID) return blocks[0]?.id ?? "";
+    return "";
+  }, [blocks, chatMessages, emailOriginChatBlockID, focusEmailMessageID, focusInformationID, nodeAttachedEmails, nodeID, unseenChanges]);
+  const focusTargetIndex = useMemo(
+    () => focusTargetBlockID ? blocks.findIndex((block) => block.id === focusTargetBlockID) : -1,
+    [blocks, focusTargetBlockID],
+  );
+  const pinnedRowIndices = useMemo(() => {
+    const indices = new Set<number>();
+    if (focusedTextBlockID) {
+      const focusedIndex = blocks.findIndex((block) => block.id === focusedTextBlockID);
+      if (focusedIndex >= 0) indices.add(focusedIndex);
+    }
+    if (activeChatBlockID) {
+      const chatIndex = activeChatBlockID === emailOriginChatBlockID
+        ? (blocks.length > 0 ? 0 : -1)
+        : blocks.findIndex((block) => block.id === activeChatBlockID);
+      if (chatIndex >= 0) indices.add(chatIndex);
+    }
+    if (activeRowBlockID) {
+      const activeRowIndex = blocks.findIndex((block) => block.id === activeRowBlockID);
+      if (activeRowIndex >= 0) indices.add(activeRowIndex);
+    }
+    if (emailReplyBlockID) {
+      const replyRowIndex = blocks.findIndex((block) => block.id === emailReplyBlockID);
+      if (replyRowIndex >= 0) indices.add(replyRowIndex);
+    }
+    return Array.from(indices);
+  }, [activeChatBlockID, activeRowBlockID, blocks, emailOriginChatBlockID, emailReplyBlockID, focusedTextBlockID]);
+  const rowVirtualizer = useBoundedEditorRowVirtualization({
+    itemCount: blocks.length,
+    rowHeight: TEXT_BLOCK_ROW_HEIGHT,
+    rowGap: TEXT_BLOCK_ROW_GAP,
+    scrollElementRef: rootRef,
+    targetIndex: focusTargetIndex >= 0 ? focusTargetIndex : null,
+    targetRequestKey: `${nodeID}:${focusInformationID ?? ""}:${focusEmailMessageID ?? ""}:${focusRequestID ?? 0}`,
+    pinnedIndices: pinnedRowIndices,
+  });
 
   const refreshNodeAttachments = useCallback(() => {
     invalidateMangoResourceAttachmentsCache(requestJSON, {
@@ -878,6 +945,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const layout = readStoredTextPaneLayout(companyID, nodeID);
     skipNextPaneLayoutPersistRef.current = true;
     setSelectedEmailIDsByBlock(layout.selectedEmailIDsByBlock);
+    setOpenEditorBlockIDs(new Set(layout.openEditorBlockIDs));
     setOpenEmailBlockIDs(new Set(layout.openEmailBlockIDs));
     setOpenChatBlockIDs(new Set(layout.openChatBlockIDs));
     setClosedChatBlockIDs(new Set(layout.closedChatBlockIDs));
@@ -896,13 +964,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return;
     }
     storeTextPaneLayout(companyID, nodeID, {
+      initialized: true,
+      openEditorBlockIDs: Array.from(openEditorBlockIDs),
       openEmailBlockIDs: Array.from(openEmailBlockIDs),
       openChatBlockIDs: Array.from(openChatBlockIDs),
       closedChatBlockIDs: Array.from(closedChatBlockIDs),
       selectedEmailIDsByBlock,
       activeChatBlockID,
     });
-  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
+  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEditorBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
 
   useEffect(() => {
     const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
@@ -937,6 +1007,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const nodeChanged = previousNodeIDRef.current !== nodeID;
     previousNodeIDRef.current = nodeID;
     const blockIDs = new Set(textBlocks.map((block) => block.id));
+    const emailOriginChatID = parsedAttachedEmails.find((email) => email.createdFromEmail)?.id.trim() ?? "";
+    const chatBlockIDs = new Set(blockIDs);
+    if (emailOriginChatID) chatBlockIDs.add(emailOriginChatID);
+    const defaultChatBlockIDs = textBlocks.map((block, index) => index === 0 && emailOriginChatID ? emailOriginChatID : block.id);
     const emailIDsByBlock = new Map<string, Set<string>>();
     for (const email of parsedAttachedEmails) {
       const blockID = email.blockID?.trim() ?? "";
@@ -968,17 +1042,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       !current || (!nodeChanged && Boolean(messageIDsByBlock.get(current.blockID)?.has(current.messageID))) ? current : null
     ));
     if (projectionsLoaded) {
-      setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
+      const storedLayout = nodeChanged ? readStoredTextPaneLayout(companyID, nodeID) : null;
+      setActiveChatBlockID((current) => (nodeChanged || !chatBlockIDs.has(current) ? "" : current));
       setSelectedEmailIDsByBlock((current) => Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID)))));
-      setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
-      setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
-      setClosedChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
+      setOpenEditorBlockIDs((current) => new Set(nodeChanged
+        ? (storedLayout?.initialized ? storedLayout.openEditorBlockIDs : blockIDs)
+        : Array.from(current).filter((id) => blockIDs.has(id))));
+      setOpenEmailBlockIDs((current) => new Set(nodeChanged
+        ? (storedLayout?.initialized ? storedLayout.openEmailBlockIDs : blockIDs)
+        : Array.from(current).filter((id) => blockIDs.has(id))));
+      setOpenChatBlockIDs((current) => new Set(nodeChanged
+        ? (storedLayout?.initialized ? storedLayout.openChatBlockIDs : defaultChatBlockIDs)
+        : Array.from(current).filter((id) => chatBlockIDs.has(id))));
+      setClosedChatBlockIDs((current) => new Set(nodeChanged
+        ? (storedLayout?.initialized ? storedLayout.closedChatBlockIDs : [])
+        : Array.from(current).filter((id) => chatBlockIDs.has(id))));
     }
     setFocusedTextBlockID((current) => {
-      if (nodeChanged || current === null) return textBlocks[0]?.id ?? "";
+      if (nodeChanged || current === null) return "";
       return blockIDs.has(current) ? current : "";
     });
-  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
+  }, [companyID, loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1070,12 +1154,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     const blockID = focusBlockIDRef.current;
     focusBlockIDRef.current = "";
+    const blockIndex = blocks.findIndex((block) => block.id === blockID);
+    if (blockIndex >= 0) rowVirtualizer.mountAndScrollToIndex(blockIndex);
     window.requestAnimationFrame(() => {
       const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${blockID}"]`);
       editor?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
       focusContentEditableAtEnd(editor ?? null);
     });
-  }, [blocks.length, canEdit]);
+  }, [blocks, canEdit, rowVirtualizer.mountAndScrollToIndex]);
 
   const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
     if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block_metadata");
@@ -1150,6 +1236,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       },
       ...current,
     ]);
+    setOpenEditorBlockIDs((current) => new Set(current).add(blockID));
+    setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
+    setOpenChatBlockIDs((current) => new Set(current).add(blockID));
     textBlockProjectionSaveController.startLatestContentSave(blockID);
   }, [editorTextCanEdit, textBlockProjectionSaveController]);
 
@@ -1972,6 +2061,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       next.add(cleanBlockID);
       return next;
     });
+    setActiveRowBlockID(cleanBlockID);
     setFocusedTextBlockID("");
   }, []);
 
@@ -1998,10 +2088,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return clampTextSidePaneWidth(readStoredTextSidePaneWidth(companyID, nodeID, blockID, pane, fallback), maxWidth);
   }, [companyID, nodeID, sidePaneWidths]);
 
-  const startTextSidePaneResize = useCallback((blockID: string, pane: TextSidePaneKind, fallbackWidth: number, maxWidth: number, event: React.PointerEvent<HTMLDivElement>) => {
+  const startTextSidePaneResize = useCallback((blockID: string, pane: TextSidePaneKind, edge: "before" | "after", fallbackWidth: number, maxWidth: number, event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const paneElement = event.currentTarget.nextElementSibling;
+    const paneElement = edge === "before" ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling;
     if (!(paneElement instanceof HTMLElement)) return;
     const paneRect = paneElement.getBoundingClientRect();
     const startX = event.clientX;
@@ -2012,7 +2102,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     let latestWidth = clampTextSidePaneWidth(startWidth, maxWidth);
 
     const updateWidth = (clientX: number) => {
-      latestWidth = clampTextSidePaneWidth(startWidth + startX - clientX, maxWidth);
+      latestWidth = clampTextSidePaneWidth(startWidth + (edge === "before" ? startX - clientX : clientX - startX), maxWidth);
       setSidePaneWidths((current) => ({
         ...current,
         [blockID]: {
@@ -2041,11 +2131,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     const cleanInformationID = focusInformationID?.trim() ?? "";
-    if (!cleanInformationID || !projectionsLoaded) return;
-    const requestKey = `${nodeID}:${cleanInformationID}:${focusRequestID ?? 0}`;
-    if (handledFocusRequestRef.current === requestKey) return;
-
     const cleanEmailMessageID = focusEmailMessageID?.trim() ?? "";
+    if ((!cleanInformationID && !cleanEmailMessageID) || !projectionsLoaded) return;
+    const requestKey = `${nodeID}:${cleanInformationID}:${cleanEmailMessageID}:${focusRequestID ?? 0}`;
+    if (handledFocusRequestRef.current === requestKey) return;
+    if (focusTargetIndex < 0) return;
+    rowVirtualizer.mountAndScrollToIndex(focusTargetIndex);
+
     if (cleanEmailMessageID && emailOriginChatBlockID) {
       const anchoredChat = chatMessages.slice().reverse().find((item) => item.blockID === emailOriginChatBlockID && item.selectionMessageID === cleanEmailMessageID);
       if (anchoredChat) {
@@ -2054,44 +2146,47 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         setActiveChatBlockID(emailOriginChatBlockID);
         setOpenChatBlockIDs((current) => new Set(current).add(emailOriginChatBlockID));
         setActiveChatMessageIDs((current) => ({ ...current, [emailOriginChatBlockID]: anchoredChat.id }));
-        window.requestAnimationFrame(() => scrollNodeWorkspaceInformationIntoView(rootRef.current, anchoredChat.id));
+        window.requestAnimationFrame(() => {
+          scrollNodeWorkspaceInformationIntoView(rootRef.current, anchoredChat.id);
+        });
         return;
       }
     }
 
-    const block = blocks.find((item) => item.id === cleanInformationID);
+    const block = blocks[focusTargetIndex];
     if (block) {
       handledFocusRequestRef.current = requestKey;
-      setFocusedTextBlockID(block.id);
-      setActiveChatBlockID("");
+      const message = chatMessages.find((item) => item.id === cleanInformationID);
+      const attachedEmail = nodeAttachedEmails.find((email) => email.id === cleanInformationID || email.messageID === cleanInformationID || email.messageID === cleanEmailMessageID);
+      if (message) {
+        const messages = chatMessagesByBlock.get(message.blockID) ?? [];
+        navigateToChatMessage(message.blockID, messages, message.id);
+      } else if (attachedEmail) {
+        setFocusedTextBlockID("");
+        setActiveRowBlockID(block.id);
+        setOpenEmailBlockIDs((current) => new Set(current).add(block.id));
+        setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: attachedEmail.messageID }));
+      } else {
+        setFocusedTextBlockID(block.id);
+        setActiveChatBlockID("");
+      }
       window.requestAnimationFrame(() => {
         const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${block.id}"]`) ?? null;
-        scrollNodeWorkspaceInformationIntoView(rootRef.current, block.id);
-        if (canEdit && focusInformationMode !== "scroll") focusContentEditableAtEnd(editor);
+        scrollNodeWorkspaceInformationIntoView(rootRef.current, message?.id || attachedEmail?.messageID || block.id);
+        if (!message && !attachedEmail && canEdit && focusInformationMode !== "scroll") focusContentEditableAtEnd(editor);
       });
       return;
     }
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded, rowVirtualizer.mountAndScrollToIndex]);
 
-    const message = chatMessages.find((item) => item.id === cleanInformationID);
-    if (!message) return;
-    const messages = chatMessagesByBlock.get(message.blockID) ?? [];
-    handledFocusRequestRef.current = requestKey;
-    navigateToChatMessage(message.blockID, messages, message.id);
-    window.requestAnimationFrame(() => {
-      scrollNodeWorkspaceInformationIntoView(rootRef.current, message.blockID);
-      scrollNodeWorkspaceInformationIntoView(rootRef.current, message.id);
-    });
-  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
-
-  const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, fallbackWidth: number, maxWidth: number) => {
-    if (compact) return null;
+  const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, edge: "before" | "after", fallbackWidth: number, maxWidth: number) => {
     return (
       <div
         role="separator"
         aria-label={`Resize ${pane} column`}
         aria-orientation="vertical"
         data-frame-interactive="true"
-        onPointerDown={(event) => startTextSidePaneResize(blockID, pane, fallbackWidth, maxWidth, event)}
+        onPointerDown={(event) => startTextSidePaneResize(blockID, pane, edge, fallbackWidth, maxWidth, event)}
         style={{
           alignSelf: "stretch",
           minHeight: 40,
@@ -2662,17 +2757,30 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           </>
         )}
 
-        {blocks.map((block, index) => {
+        <div
+          ref={rowVirtualizer.listRef}
+          data-mango-bounded-editor-rows="node"
+          data-mounted-row-count={rowVirtualizer.mountedRowCount}
+          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0 }}
+        >
+        {rowVirtualizer.entries.map((entry) => {
+          if (entry.kind === "spacer") {
+            return <div key={entry.key} aria-hidden="true" data-editor-row-spacer="true" style={{ gridColumn: "1 / -1", height: entry.height, pointerEvents: "none" }} />;
+          }
+          const index = entry.index;
+          const block = blocks[index];
+          if (!block) return null;
           const emailOriginPrimaryRow = emailOriginNode && index === 0;
           const chatBlockID = emailOriginPrimaryRow ? emailOriginChatBlockID : block.id;
           const messages = chatMessagesByBlock.get(chatBlockID) ?? [];
           const blockEmails = nodeAttachedEmails;
           const chatIsActive = activeChatBlockID === chatBlockID;
-          const chatIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(chatBlockID));
-          const emailPaneIsVisible = emailOriginPrimaryRow || openEmailBlockIDs.has(block.id);
-          const chatPaneIsVisible = emailOriginPrimaryRow || chatIsVisible;
+          const chatIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
+          const editorPaneIsVisible = openEditorBlockIDs.has(block.id);
+          const emailPaneIsVisible = openEmailBlockIDs.has(block.id);
+          const emailPaneIsMounted = emailPaneIsVisible || emailReplyBlockID === block.id;
+          const chatPaneIsVisible = chatIsVisible;
           const sidePaneCount = (emailPaneIsVisible ? 1 : 0) + (chatPaneIsVisible ? 1 : 0);
-          const stackedSidePanes = compact || (!emailOriginPrimaryRow && sidePaneCount > 1 && width > 0 && width < 1080);
           const sidePaneChromeWidth = sidePaneCount > 0
             ? (TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX * sidePaneCount) + (TEXT_CHAT_GRID_COLUMN_GAP_PX * sidePaneCount * 2)
             : 0;
@@ -2702,17 +2810,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatPaneWidth = chatPaneIsVisible ? fittedSidePaneWidths[emailPaneIsVisible ? 1 : 0] ?? rawChatPaneWidth : rawChatPaneWidth;
           const emailPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (chatPaneIsVisible ? chatPaneWidth : 0));
           const chatPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (emailPaneIsVisible ? emailPaneWidth : 0));
-          const blockCommunicationGridTemplateColumns = emailOriginPrimaryRow && !stackedSidePanes
-            ? "minmax(280px, 0.9fr) minmax(320px, 1.15fr) minmax(280px, 0.9fr)"
-            : !stackedSidePanes && sidePaneCount > 0
-              ? [
-                `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr)`,
-                emailPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
-                emailPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${emailPaneWidth}px)` : "",
-                chatPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
-                chatPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${chatPaneWidth}px)` : "",
-              ].filter(Boolean).join(" ")
-              : "minmax(0, 1fr)";          const textBlockIsFocused = focusedTextBlockID === block.id;
+          const blockCommunicationGridTemplateColumns = [
+            emailPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${emailPaneWidth}px)` : "",
+            emailPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
+            editorPaneIsVisible ? `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr)` : "",
+            chatPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
+            chatPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${chatPaneWidth}px)` : "",
+          ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
+          const minimumCommunicationWidth = (emailPaneIsVisible ? emailPaneWidth + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX : 0)
+            + (editorPaneIsVisible ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX : 0)
+            + (chatPaneIsVisible ? chatPaneWidth + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX : 0);
+          const textBlockIsFocused = focusedTextBlockID === block.id;
           const selectionAnchor = chatSelectionAnchors[chatBlockID];
           const activeChatMessageID = activeChatMessageIDs[chatBlockID] ?? "";
           const activeChatMessage = activeChatMessageID ? messages.find((message) => message.id === activeChatMessageID) ?? null : null;
@@ -2747,9 +2855,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const blockAttachmentDropdownItems = (nodeTextBlockAttachmentsByInformationID.get(block.id) ?? []).map((resourceAttachment) => ({
             resourceAttachment,
           }));
-          const blockHeaderGridTemplateColumns = canEdit
-            ? "minmax(0, 1fr) 26px 38px 26px 26px 26px 26px"
-            : "minmax(0, 1fr) 38px 26px 26px 26px";
           const blockEmailPane = (
             <AttachedEmailOrganizerPane
               emails={blockEmails}
@@ -2759,7 +2864,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               companyUsers={companyUsers}
               attachmentRequestJSON={requestJSON}
               storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
-              tabbed={emailOriginPrimaryRow}
+              tabbed={false}
               editable={canEdit}
               accent={accent}
               surfaceText={surfaceText}
@@ -2775,6 +2880,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onClearSelectedMessage={() => clearBlockEmail(block.id)}
               onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
               onReplyEditorFocus={() => {
+                setActiveRowBlockID(block.id);
+                setEmailReplyBlockID(block.id);
                 setFocusedTextBlockID("");
                 if (formattingControllerRef) formattingControllerRef.current = null;
               }}
@@ -2824,6 +2931,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             setActiveChatBlockID(chatBlockID);
           };
           const focusChat = () => {
+            setActiveRowBlockID(block.id);
             setFocusedTextBlockID("");
             setOpenChatBlockIDs((current) => {
               if (current.has(chatBlockID)) return current;
@@ -2842,6 +2950,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const toggleEmail = () => {
             setFocusedTextBlockID("");
             setOpenEmailBlockIDs((current) => {
+              const next = new Set(current);
+              if (next.has(block.id)) next.delete(block.id);
+              else next.add(block.id);
+              return next;
+            });
+          };
+          const toggleEditor = () => {
+            if (editorPaneIsVisible) {
+              setFocusedTextBlockID("");
+              if (formattingControllerRef) formattingControllerRef.current = null;
+            }
+            setOpenEditorBlockIDs((current) => {
               const next = new Set(current);
               if (next.has(block.id)) next.delete(block.id);
               else next.add(block.id);
@@ -2897,138 +3017,111 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           };
           return (
             <React.Fragment key={block.id}>
-              <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
-              <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 8, alignItems: "start" }}>
-                <div style={{ gridColumn: emailOriginPrimaryRow && !stackedSidePanes ? 2 : undefined, border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
-                  <div style={{ display: "grid", gridTemplateColumns: blockHeaderGridTemplateColumns, alignItems: "center", gap: 6, minHeight: 34, borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 5px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", overflow: "visible" }}>
-                    <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, paddingRight: 6, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: compact ? "normal" : "nowrap", overflow: "visible" }}>
-                      <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7, overflow: "hidden", opacity: 0.58 }}>
-                        <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)}
+              <div style={{ height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+                <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
+              </div>
+              <div style={{ minWidth: 0, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+                <div
+                  data-node-text-box-row={block.id}
+                  className="mango-fixed-editor-row"
+                  style={{ height: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
+                >
+                  <div style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                    <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${emailPaneIsVisible ? emailPaneWidth : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
+                      <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+                        <button type="button" title={emailPaneIsVisible ? "Hide email" : "Open email"} aria-label="Toggle email column" aria-pressed={emailPaneIsVisible} onClick={toggleEmail} style={{ width: 28, height: 26, borderRadius: 8, border: emailPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: emailPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}>
+                          <MailIcon color={accent} />
+                        </button>
+                      </div>
+                      <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                        <button type="button" title={editorPaneIsVisible ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorPaneIsVisible} onClick={toggleEditor} style={{ width: 28, height: 26, flex: "0 0 auto", borderRadius: 8, border: editorPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: editorPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}>
+                          <TextEditorIcon color={accent} />
+                        </button>
+                        <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
+                          Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                         </span>
-                        <span aria-hidden="true" style={{ flex: "0 0 auto", opacity: 0.62 }}>|</span>
-                        <span title={`Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
-                        </span>
-                      </span>
+                        {canEdit && (
+                          <label title="Add attachment" aria-label="Add attachment" style={{ width: 26, height: 24, flex: "0 0 auto", borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}>
+                            <PaperclipIcon color={accent} />
+                            <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
+                              const files = event.currentTarget.files;
+                              if (files) void addTextBlockAttachments(block.id, files);
+                              event.currentTarget.value = "";
+                            }} />
+                          </label>
+                        )}
+                        <AttachmentCountDropdown items={blockAttachmentDropdownItems} apiBase={apiBase} companyID={companyID} accent={accent} surfaceText={surfaceText} compact loading={nodeAttachmentsLoading} loadError={nodeAttachmentsLoadError} onRetry={refreshNodeAttachments} onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined} onError={onError} />
+                        {canEdit && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}
+                      </div>
+                      <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
+                        {emailOriginPrimaryRow && emailChatParticipantRoster}
+                        <button type="button" title={chatPaneIsVisible ? "Hide chat" : "Open chat"} aria-label="Toggle chat column" aria-pressed={chatPaneIsVisible} onClick={toggleChat} style={{ width: 28, height: 26, borderRadius: 8, border: chatPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}>
+                          <ChatIcon color={accent} />
+                        </button>
+                      </div>
                     </div>
-                    {canEdit && (
-                      <label
-                        title="Add attachment"
-                        aria-label="Add attachment"
-                        style={{ width: 26, height: 24, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
-                      >
-                        <PaperclipIcon color={accent} />
-                        <input
-                          type="file"
-                          multiple
-                          style={{ display: "none" }}
-                          onChange={(event) => {
-                            const files = event.currentTarget.files;
-                            if (files) void addTextBlockAttachments(block.id, files);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    )}
-                    <AttachmentCountDropdown
-                      items={blockAttachmentDropdownItems}
-                      apiBase={apiBase}
-                      companyID={companyID}
-                      accent={accent}
-                      surfaceText={surfaceText}
-                      compact
-                      loading={nodeAttachmentsLoading}
-                      loadError={nodeAttachmentsLoadError}
-                      onRetry={refreshNodeAttachments}
-                      onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
-                      onError={onError}
-                    />
-                    <button
-                      type="button"
-                      title={emailPaneIsVisible ? "Hide email" : "Open email"}
-                      onClick={toggleEmail}
-                      style={{ position: "relative", width: 26, height: 24, borderRadius: 8, border: emailPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: emailPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
-                    >
-                      <MailIcon color={accent} />
-                    </button>
-                    <button
-                      type="button"
-                      title={chatPaneIsVisible ? "Hide chat" : "Open chat"}
-                      onClick={toggleChat}
-                      style={{ width: 26, height: 24, borderRadius: 8, border: chatPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
-                    >
-                      <ChatIcon color={accent} />
-                    </button>
-                    {canEdit ? (
-                      <TextBlockActionsMenu
-                        accent={accent}
-                        surfaceText={surfaceText}
-                        panelBackground={panelBackground}
-                        strokeColor={strokeColor}
-                        onDelete={(position) => requestDeleteTextBlock(block.id, position)}
-                      />
-                    ) : (
-                      <div aria-hidden="true" style={{ width: 26, height: 24 }} />
-                    )}
                   </div>
-                  <NodeTextBlockEditor
-                    blockID={chatBlockID}
-                    editable={editorTextCanEdit}
-                    nodeID={nodeID}
-                    apiBase={apiBase}
-                    companyID={companyID}
-                    attachmentResourceType="node"
-                    attachmentResourceID={nodeID}
-                    attachmentRequestJSON={requestJSON}
-                    attachmentEditorSurface="node_text_block"
-                    currentUserID={author.userID || "local-user"}
-                    companyUsers={companyUsers}
-                    documentValue={block.document}
-                    contentChanges={unseenChangesByBlockID.get(block.id) ?? []}
-                    chatMessages={messages}
-                    pendingChatSelectionAnchor={selectionAnchor}
-                    activeChatAnchorMessageID={activeChatAnchorMessageID}
-                    chatNavigationRequest={chatNavigationRequest?.blockID === block.id
-                      ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID }
-                      : null}
-                    surfaceText={surfaceText}
-                    accent={accent}
-                    outlineStyle={outlineStyle}
-                    indentGuideColor={ruleColor}
-                    scrollbarTrack={scrollbarTrack}
-                    onFocus={() => {
-                      setFocusedTextBlockID(block.id);
-                    }}
-                    onBlur={() => {
-                      // Keep the last focused editor active while toolbar inputs own browser focus.
-                    }}
-                    onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
-                    onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
-                    onDocumentConflict={() => onError("Mango is recovering this text box from its committed collaboration snapshot.")}
-                    onChangeSeen={onMarkChangeSeen}
-                    onChatHighlightActivate={revealChatMessage}
-                    onSelectionChatRequest={(selection) => openSelectionChat(selection, chatBlockID)}
-                    onImageChatRequest={addImageChatComment}
-                    onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
-                    formattingControllerRef={formattingControllerRef}
-                    formattingControllerActive={textBlockIsFocused}
-                    onSelectionFontSizeChange={onSelectionFontSizeChange}
-                    onSelectionInlineFormatChange={onSelectionInlineFormatChange}
-                    onSelectionHighlightColorChange={onSelectionHighlightColorChange}
-                    onSelectionTextAlignmentChange={onSelectionTextAlignmentChange}
-                  />
-                </div>
-                {emailPaneIsVisible && !stackedSidePanes && !emailOriginPrimaryRow && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth, emailPaneMaxWidth)}
-                {emailPaneIsVisible && (
-                  <div style={{ minWidth: 0, height: CHAT_PANE_DEFAULT_HEIGHT, gridColumn: stackedSidePanes ? "1 / -1" : emailOriginPrimaryRow ? 1 : undefined, gridRow: emailOriginPrimaryRow && !stackedSidePanes ? 1 : undefined, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}>
-                    {blockEmailPane}
-                  </div>
-                )}
-                {chatPaneIsVisible && !stackedSidePanes && !emailOriginPrimaryRow && renderTextSidePaneResizeHandle(chatBlockID, "chat", chatPaneWidth, chatPaneMaxWidth)}
-                {chatPaneIsVisible && (
-                  <div style={{ minWidth: 0, gridColumn: stackedSidePanes ? "1 / -1" : emailOriginPrimaryRow ? 3 : undefined, gridRow: emailOriginPrimaryRow && !stackedSidePanes ? 1 : undefined }}>
-                  <ChatPane
+                  <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
+                    <div data-node-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch" }}>
+                      {emailPaneIsMounted && (
+                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, display: emailPaneIsVisible ? "block" : "none", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: panelBackground, overflow: "hidden" }}>
+                          {blockEmailPane}
+                        </div>
+                      )}
+                      {emailPaneIsVisible && renderTextSidePaneResizeHandle(block.id, "email", "after", emailPaneWidth, emailPaneMaxWidth)}
+                      {editorPaneIsVisible && (
+                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
+                          <NodeTextBlockEditor
+                            blockID={block.id}
+                            editable={editorTextCanEdit}
+                            nodeID={nodeID}
+                            apiBase={apiBase}
+                            companyID={companyID}
+                            attachmentResourceType="node"
+                            attachmentResourceID={nodeID}
+                            attachmentRequestJSON={requestJSON}
+                            attachmentEditorSurface="node_text_block"
+                            currentUserID={author.userID || "local-user"}
+                            companyUsers={companyUsers}
+                            documentValue={block.document}
+                            contentChanges={unseenChangesByBlockID.get(block.id) ?? []}
+                            focusContentChangeID={unseenChanges.some((change) => change.change_id === focusInformationID && change.information_id === block.id) ? focusInformationID : undefined}
+                            chatMessages={messages}
+                            pendingChatSelectionAnchor={selectionAnchor}
+                            activeChatAnchorMessageID={activeChatAnchorMessageID}
+                            chatNavigationRequest={chatNavigationRequest?.blockID === chatBlockID ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID } : null}
+                            documentScrollMemoryRef={documentScrollMemoryRef}
+                            surfaceText={surfaceText}
+                            accent={accent}
+                            outlineStyle={outlineStyle}
+                            indentGuideColor={ruleColor}
+                            scrollbarTrack={scrollbarTrack}
+                            onFocus={() => {
+                              setActiveRowBlockID(block.id);
+                              setFocusedTextBlockID(block.id);
+                            }}
+                            onBlur={() => undefined}
+                            onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
+                            onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
+                            onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
+                            onChangeSeen={onMarkChangeSeen}
+                            onChatHighlightActivate={revealChatMessage}
+                            onSelectionChatRequest={(selection) => openSelectionChat(selection, chatBlockID)}
+                            onImageChatRequest={addImageChatComment}
+                            onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
+                            formattingControllerRef={formattingControllerRef}
+                            formattingControllerActive={textBlockIsFocused}
+                            onSelectionFontSizeChange={onSelectionFontSizeChange}
+                            onSelectionInlineFormatChange={onSelectionInlineFormatChange}
+                            onSelectionHighlightColorChange={onSelectionHighlightColorChange}
+                            onSelectionTextAlignmentChange={onSelectionTextAlignmentChange}
+                          />
+                        </div>
+                      )}
+                      {chatPaneIsVisible && renderTextSidePaneResizeHandle(chatBlockID, "chat", "before", chatPaneWidth, chatPaneMaxWidth)}
+                      {chatPaneIsVisible && (
+                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, overflow: "hidden" }}>
+                          <ChatPane
                     blockID={chatBlockID}
                     editable={canEdit}
                     apiBase={apiBase}
@@ -3053,6 +3146,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     replyTargetID={chatReplyTargets[chatBlockID] ?? ""}
                     draftAttachments={chatDraftAttachments[chatBlockID] ?? []}
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${chatBlockID}`}
+                    fixedHeight={TEXT_BLOCK_MIN_HEIGHT}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [chatBlockID]: draft }))}
                     onActivateMessage={activateChatMessage}
@@ -3065,12 +3159,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onRemoveDraftAttachment={(attachmentID) => removeChatDraftAttachment(chatBlockID, attachmentID)}
                     onSubmit={() => { void submitChat(chatBlockID); }}
                   />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             </React.Fragment>
           );
         })}
+        </div>
 
         <div />
         <div

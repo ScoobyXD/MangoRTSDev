@@ -1,11 +1,11 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 # Unified Editor Tests
 
 Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. `editorCollaboration.test.ts`, `realtimeWebSocket.test.ts`, backend collaboration/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. `scripts/run_realtime_production_path_tests.mjs` covers simultaneous multi-user/tab editing, exact scopes, lost acknowledgements, reconnect, rich-HTML migration compatibility, PostgreSQL, WebSockets, actual editor DOM, and hydrated images.
+- Business Logic Covered By Automated Tests: Partial overall. `editorCollaboration.test.ts`, `realtimeWebSocket.test.ts`, backend collaboration/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers bounded Node/Project row counts, moving windows, target-centered opens, long jumps, pinned rows, spacer geometry, layout/toggle contracts, safe unmount flushing, and the Logic Gate exclusion. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. `scripts/run_realtime_production_path_tests.mjs` covers simultaneous multi-user/tab editing, exact scopes, lost acknowledgements, reconnect, rich-HTML migration compatibility, PostgreSQL, WebSockets, actual editor DOM, and hydrated images.
 
 ## Business Logic
 
@@ -99,6 +99,7 @@ ED74 - Every unified rich editor adapter receives the active company people inve
 ED75 - Pasting a mixed rich document from an external app into any ED2 unified editor preserves the supported semantic order of headings, paragraphs, bold/italic/underline/strikethrough, highlights, font sizes, links, tables, alignment, indentation, ordered/bullet/checklists, and inline images. The shared path resolves every image to an authorized durable Mango attachment before one document commit: matching clipboard files upload directly, existing Mango references link to the destination, and external HTTP(S) sources use the protected server importer. Repeated sources import once and render at every occurrence, at most three unique images resolve concurrently, and one failed image preserves the rest of the document with safe fallback text instead of retaining an external, blob, data, or base64 source. Completion may commit only while the original editor root, target, resource context, saved range, and starting document remain current.
 ED76 - A primary-email-origin Node keeps the canonical Triage/email conversation in the primary right pane beside its per-text-box documents. A primary-editor selection written there persists `selection_block_id`; additional text-box rows retain their established per-block chat context. Email selections persist exact provider message/quote/offsets, and navigation focuses the referenced source without copying the Triage conversation.
 ED77 - Ordinary native or shared scripted typing uses one document-input batch across every unified editor surface. The batch captures one exact rich-HTML undo-before snapshot at its first mutation, keeps subsequent keystrokes on the live DOM without full serialization, and after 160 ms idle or 500 ms maximum captures one undo-after snapshot, sanitizes/serializes once, and emits one durable collaboration HTML delta. Input-kind changes, undo/redo, navigation, pointer selection, paste/drop/cut, structural commands, formatting, blur, and unmount flush the current batch before their own mutation. IME composition is one batch: composition updates defer idle/maximum timers until composition ends, then arm the normal idle boundary. A pending local DOM batch must be persisted into the ordered operation queue before a remote commit, recovery snapshot, or snapshot-retry reconciliation is applied, so batching cannot discard or overwrite concurrent local typing.
+ED78 - Node and Project text-box lists use one bounded fixed-row window. Only visible rows, two-row overscan, and a small number of active pinned rows may mount; height-preserving spacers retain full scroll geometry, and animation-frame scroll scheduling moves the window without mounting intervening rows. A normal open starts at the top, while block, chat, email, highlight/change, selection, search/navigation, and restoration targets mount their owning neighborhood before focus/scroll; unresolved intent waits for loaded projections. Every Node, including an email-created Node, and every Project row uses email-left, text-editor-middle, chat-right with three independent accessible toggles open by default. Closed sections unmount unless one pinned active email reply must remain alive to preserve an unsent draft; vertical row/editor resizing is absent, horizontal email/chat column resizing remains, narrow windows scroll horizontally, pending input flushes before unmount, and Logic Gate remains outside this virtualization contract.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1321,3 +1322,25 @@ Given:
 Expected:
 - Controlled rerenders retain the same image DOM node and object URL, issue no replacement fetch, and never show a one-frame blank or broken thumbnail.
 - Real unmount/context replacement still aborts pending work, restores the durable source, and revokes the owned object URL without weakening sanitization or original-image authorization.
+
+### Scenario ED-S16: Large Node And Project Keep A Bounded Text-Box Window
+
+Business logic covered:
+- ED43
+- ED76
+- ED77
+- ED78
+
+Given:
+- A Node or Project contains hundreds of text boxes, each with existing rich HTML, email associations, chat, images, and highlights.
+- The user opens it normally, scrolls gradually, jumps near the end, or follows a target to a block, chat message, email message, highlight/change, or other deep row content.
+- The user independently closes and reopens the email, text-editor, or chat section; edits content immediately before the row leaves the mounted window; and narrows the app window.
+
+Expected:
+- The normal open mounts only the top viewport plus two-row overscan. A target open first mounts a bounded neighborhood centered on the target row; unresolved target intent waits for projections instead of falling back permanently to row zero.
+- Scroll spacers retain exact row order, scrollbar geometry, and position. Gradual scrolling moves the window, while a fast long jump never mounts every intervening editor. The mounted count remains the viewport window plus only a small active pin allowance.
+- Node and Project rows both show email-left, text-editor-middle, chat-right. Email-created Nodes use the same layout and retain their original email/chat associations.
+- The three header toggles are separate keyboard-operable buttons and all three sections are open on first open. Closing one section unmounts only that section and preserves its data/draft association; an active unsent email reply is the bounded exception and stays pinned rather than being discarded.
+- Rows keep one fixed vertical height. No Node/Project text-box or chat-pane vertical resize control is exposed; email/chat column width separators still resize horizontally. Narrow windows scroll horizontally across the columns without changing row height.
+- Pending local document input flushes into the existing durable save path before editor unmount. Remount restores the current content and remembered inner scroll position for that document.
+- Logic Gate keeps its existing editor behavior and does not use the Node/Project row virtualizer.

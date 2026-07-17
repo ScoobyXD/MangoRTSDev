@@ -56,6 +56,7 @@ export function useCollaborativeEditorDocument(input: UseCollaborativeEditorDocu
     scheduledBeforeMountRef.current = null;
     if (early) controller.schedule(early.html, early.immediate);
     return () => {
+      callbacksRef.current.flushPendingLocalInput?.();
       void controller.flush().catch((cause) => callbacksRef.current.onError?.(cause));
       controller.stop();
       if (controllerRef.current === controller) controllerRef.current = null;

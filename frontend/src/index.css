@@ -1039,3 +1039,6 @@ button, input, textarea, select {
 .project-critical-path-node-window-stem {
   animation: project-critical-path-node-window-stem-reveal 180ms ease-out;
 }
+.mango-fixed-editor-row {
+  box-sizing: border-box;
+}

@@ -54,7 +54,7 @@ Each document generated one preflight plus four 304 snapshot reads.
 One Logic Gate view supplied 1,040,360 bytes by itself.
 Four attachment-content reads.
 Why this happens:
-Every text box creates a collaboration controller at [useCollaborativeEditorDocument.ts (line 35)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/useCollaborativeEditorDocument.ts:35).
+Every text box starts its frontend-backend textbox sync at [useCollaborativeEditorDocument.ts (line 35)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/useCollaborativeEditorDocument.ts:35).
 Starting it immediately subscribes and initiates recovery at [editorCollaboration.ts (line 387)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorCollaboration.ts:387).
 Every recovery unconditionally requests an initial snapshot and then a second “final” snapshot at [lines 509–537 (line 509)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorCollaboration.ts:509), even with no pending edits.
 Realtime connection recovery invokes every subscription’s recovery again at [realtimeWebSocket.ts (line 764)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/realtime/realtimeWebSocket.ts:764).
@@ -262,7 +262,7 @@ Most of those are legitimate features. The mistake is rebuilding broad portions 
 What the backend is actually doing
 The 48 collaboration reads are not all required merely to put the initial text on screen.
 The node view already contains the text projections needed to render it. Then each text box independently:
-Creates a collaboration controller.
+Starts frontend-backend textbox sync.
 Reads the canonical collaboration snapshot.
 Reads it again at the end of recovery.
 Subscribes to realtime.
@@ -496,8 +496,29 @@ Notes for implementing problem 4 here:
 
 ### Step 1:
 
+Completed in the bounded editor-mounting implementation on 2026-07-17.
+
+- Node and Project text-box lists now share a fixed-row virtualization primitive. The browser mounts only the visible rows, two rows of overscan above and below, and at most a small number of explicitly pinned active rows.
+- Height-preserving spacers represent every unmounted row, so the list keeps its full scroll height and order. Scroll-window updates are scheduled once per animation frame and do not walk or mount the intervening rows during a long jump.
+- Normal opens start at the top. Block, chat-message, attached-email, email-message, and Node change targets resolve to their owning row before navigation; their neighborhood mounts first. Target intent remains pending while projections load.
+- Node and Project use the same permanent row layout: email on the left, text editor in the middle, and chat on the right. Email-created Nodes retain their email and chat associations but no longer use a second visual Node layout.
+- Each header has independent, keyboard-accessible email, text-editor, and chat toggles. All three sections open by default the first time a Node or Project is opened. Closing a section unmounts that section's UI while keeping its data and draft state; the one deliberate exception is an active unsent email reply, whose row and reply UI stay pinned until another reply takes ownership so closing or scrolling cannot discard the draft.
+- Text-box rows and editor bodies use one fixed vertical height and no longer expose user-controlled vertical resizing. Node and Project email/chat panes participate in that fixed row height. Horizontal email/chat column resizing remains available; narrow windows retain the fixed row and scroll horizontally across the columns.
+- Before a virtualized editor unmounts, pending local textbox input crosses the existing frontend-backend textbox sync boundary and the existing flush/retry/recovery path continues. Inner editor scroll memory is kept outside the row so a remount restores it.
+- Stable block IDs remain React keys and persistence document IDs. Existing HTML and PostgreSQL storage, add/delete behavior, formatting, images, highlights, permissions, and mounted-editor undo behavior remain in place.
+- Logic Gate is explicitly excluded from row virtualization.
+- Focused regression coverage asserts bounded mounted counts for large Nodes and Projects, scrolling and long jumps, target-centered mounting, spacer geometry, the shared column order/toggles/defaults, fixed vertical height, retained horizontal resizing, safe unmount flushing, and the Logic Gate exclusion.
+
 ### Step 2:
+
+Not started. Improve when the mechanisms inside a mounted row activate, make them lazy where appropriate, and delete or simplify unnecessary work. Step 1 made only the lifecycle changes required for safe mount/unmount.
 
 ### Step 3:
 
+Not started. Replace expensive HTML/string editing work with Tiptap/ProseMirror's structured document model and transactions.
+
 ### Step 4:
+
+Not started. Convert existing PostgreSQL rich HTML documents into validated Tiptap-compatible JSON only after Step 3 defines and validates the final document model.
+
+Last updated: 2026-07-17

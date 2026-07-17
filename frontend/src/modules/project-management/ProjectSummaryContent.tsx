@@ -57,6 +57,8 @@ import {
 } from "../editor/nodeTextBlockAttachments.js";
 import { prepareTextBlockImageFile } from "../editor/nodeTextBlockImageFiles.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
+import { createEditorScrollMemory } from "../editor/editorScroll.js";
+import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
@@ -84,6 +86,10 @@ import {
   messageAttachmentPayload,
   PaperclipIcon,
   ChatIcon,
+  TextEditorIcon,
+  TEXT_BLOCK_MIN_HEIGHT,
+  TEXT_BLOCK_ROW_GAP,
+  TEXT_BLOCK_ROW_HEIGHT,
   TEXT_BLOCK_FONT_SIZE,
   uploadEditorAttachment,
   type TextBlockImageDraft,
@@ -136,6 +142,8 @@ import {
 
 type ProjectSummaryContentProps = {
   projectID: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
   accent: string;
   refreshToken?: number;
   onBack: () => void;
@@ -232,6 +240,8 @@ function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionApplied
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
+  focusInformationID,
+  focusRequestID,
   accent,
   refreshToken = 0,
   onBack,
@@ -246,6 +256,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const textBlocksScrollRef = useRef<HTMLDivElement | null>(null);
+  const projectDocumentScrollMemoryRef = useRef(createEditorScrollMemory());
+  const paneProjectIDRef = useRef("");
   const relationshipsColumnRef = useRef<HTMLElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
   const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
@@ -256,6 +269,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const projectTextBlockContentRevisionRef = useRef(0);
   const projectLoadRequestRef = useRef(0);
   const projectSaveScopeRef = useRef("");
+  const handledProjectFocusRequestRef = useRef("");
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [projectTitleEditing, setProjectTitleEditing] = useState(false);
@@ -275,9 +289,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
+  const [activeRowBlockID, setActiveRowBlockID] = useState("");
+  const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
+  const [openEditorBlockIDs, setOpenEditorBlockIDs] = useState<Set<string>>(() => new Set());
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
-  const [activePaneTabs, setActivePaneTabs] = useState<Record<string, "chat" | "email">>({});
+  const [projectSidePaneWidths, setProjectSidePaneWidths] = useState({ email: 340, chat: 340 });
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
@@ -427,6 +444,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           content: { title: block.title, document: block.document, attachments: block.attachments },
         })));
         setBlocks(nextBlocks);
+        const nextBlockIDs = new Set(nextBlocks.map((block) => block.id));
+        if (paneProjectIDRef.current !== cleanProjectID) {
+          paneProjectIDRef.current = cleanProjectID;
+          setOpenEditorBlockIDs(new Set(nextBlockIDs));
+          setOpenEmailBlockIDs(new Set(nextBlockIDs));
+          setOpenChatBlockIDs(new Set(nextBlockIDs));
+        } else {
+          setOpenEditorBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
+          setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
+          setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
+        }
       }
       setChatMessages(parseEditorTextBlockChats(view.projections ?? []));
       setAttachedEmails(parseEditorAttachedEmails(view.projections ?? []));
@@ -615,6 +643,91 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     return grouped;
   }, [attachedEmails]);
+  const focusTargetBlockID = useMemo(() => {
+    const targetID = focusInformationID?.trim() ?? "";
+    if (!targetID) return "";
+    if (blocks.some((block) => block.id === targetID)) return targetID;
+    const chatMessage = chatMessages.find((message) => message.id === targetID);
+    if (chatMessage) return chatMessage.blockID;
+    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID);
+    return attachedEmail?.blockID?.trim() ?? "";
+  }, [attachedEmails, blocks, chatMessages, focusInformationID]);
+  const focusTargetIndex = useMemo(
+    () => focusTargetBlockID ? blocks.findIndex((block) => block.id === focusTargetBlockID) : -1,
+    [blocks, focusTargetBlockID],
+  );
+  const pinnedProjectRowIndices = useMemo(() => {
+    const indices = new Set<number>();
+    for (const blockID of [focusedTextBlockID, activeRichTextBlockID, activeRowBlockID, emailReplyBlockID]) {
+      if (!blockID) continue;
+      const index = blocks.findIndex((block) => block.id === blockID);
+      if (index >= 0) indices.add(index);
+    }
+    return Array.from(indices);
+  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID]);
+  const projectRowVirtualizer = useBoundedEditorRowVirtualization({
+    itemCount: blocks.length,
+    rowHeight: TEXT_BLOCK_ROW_HEIGHT,
+    rowGap: TEXT_BLOCK_ROW_GAP,
+    scrollElementRef: textBlocksScrollRef,
+    targetIndex: focusTargetIndex >= 0 ? focusTargetIndex : null,
+    targetRequestKey: `${projectID}:${focusInformationID ?? ""}:${focusRequestID ?? 0}`,
+    pinnedIndices: pinnedProjectRowIndices,
+  });
+
+  useEffect(() => {
+    const targetID = focusInformationID?.trim() ?? "";
+    if (!targetID || focusTargetIndex < 0) return;
+    const requestKey = `${projectID}:${targetID}:${focusRequestID ?? 0}`;
+    if (handledProjectFocusRequestRef.current === requestKey) return;
+    handledProjectFocusRequestRef.current = requestKey;
+    const block = blocks[focusTargetIndex];
+    if (!block) return;
+    projectRowVirtualizer.mountAndScrollToIndex(focusTargetIndex);
+    const chatMessage = chatMessages.find((message) => message.id === targetID);
+    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID);
+    if (chatMessage) {
+      setOpenChatBlockIDs((current) => new Set(current).add(block.id));
+      setActiveChatMessageIDs((current) => ({ ...current, [block.id]: chatMessage.id }));
+      setChatMessageFocusRequests((current) => ({
+        ...current,
+        [block.id]: { messageID: chatMessage.id, requestID: (current[block.id]?.requestID ?? 0) + 1 },
+      }));
+    } else if (attachedEmail) {
+      setActiveRowBlockID(block.id);
+      setOpenEmailBlockIDs((current) => new Set(current).add(block.id));
+      setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: attachedEmail.messageID }));
+    } else {
+      setOpenEditorBlockIDs((current) => new Set(current).add(block.id));
+      setFocusedTextBlockID(block.id);
+      setActiveRichTextBlockID(block.id);
+    }
+  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusRequestID, focusTargetIndex, projectID, projectRowVirtualizer.mountAndScrollToIndex]);
+
+  const beginProjectColumnResize = useCallback((pane: "email" | "chat", event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = projectSidePaneWidths[pane];
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const previousCursor = ownerDocument.body.style.cursor;
+    ownerDocument.body.style.cursor = "col-resize";
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      pointerEvent.preventDefault();
+      const delta = pane === "email" ? pointerEvent.clientX - startX : startX - pointerEvent.clientX;
+      const width = Math.max(260, Math.min(560, Math.round(startWidth + delta)));
+      setProjectSidePaneWidths((current) => ({ ...current, [pane]: width }));
+    };
+    const finish = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.removeEventListener("pointermove", onPointerMove);
+      ownerDocument.removeEventListener("pointerup", finish);
+      ownerDocument.removeEventListener("pointercancel", finish);
+    };
+    ownerDocument.addEventListener("pointermove", onPointerMove);
+    ownerDocument.addEventListener("pointerup", finish);
+    ownerDocument.addEventListener("pointercancel", finish);
+  }, [projectSidePaneWidths]);
   const currentUserName = useMemo(() => {
     const cleanUserID = currentUserID.trim();
     const user = companyUsers.find((item) => item.user_id.trim() === cleanUserID);
@@ -719,6 +832,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     projectTextBlockSaveController.markHasChanged(id, initialContent);
     setError("");
     setBlocks((current) => [nextBlock, ...current]);
+    setOpenEditorBlockIDs((current) => new Set(current).add(id));
+    setOpenEmailBlockIDs((current) => new Set(current).add(id));
+    setOpenChatBlockIDs((current) => new Set(current).add(id));
     projectTextBlockSaveController.startLatestContentSave(id);
   }, [projectTextBlockSaveController]);
 
@@ -907,7 +1023,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     setOpenChatBlockIDs((current) => new Set(current).add(image.blockID));
-    setActivePaneTabs((current) => ({ ...current, [image.blockID]: "chat" }));
     setChatComposerFocusRequestIDs((current) => ({
       ...current,
       [image.blockID]: (current[image.blockID] ?? 0) + 1,
@@ -982,7 +1097,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       });
       setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID !== blockID)]);
       setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
-      setActivePaneTabs((current) => ({ ...current, [blockID]: "email" }));
       setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID]: payload.messageID }));
       setEmailPickerBlockID("");
     } catch (emailError) {
@@ -1809,7 +1923,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               />
             </div>
           </div>
-          <div className="kanban-board-scroll" style={textBlocksScrollStyle}>
+          <div ref={textBlocksScrollRef} className="kanban-board-scroll" style={textBlocksScrollStyle}>
             <button
               type="button"
               title="Add text box"
@@ -1819,220 +1933,220 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             >
               +
             </button>
-            {blocks.map((block, index) => (
-              <div key={block.id} style={projectTimelineRowStyle}>
-                <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
-                <div style={projectTextBlockGridStyle(openChatBlockIDs.has(block.id) || openEmailBlockIDs.has(block.id))}>
-                  <div style={projectTextBlockCardStyle(focusedTextBlockID === block.id)}>
-                    <div style={projectTextBlockHeaderStyle}>
-                      <div style={projectTextBlockMetadataStyle}>
-                        <span style={projectTextBlockMetadataInnerStyle}>
-                          <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)}`} style={projectTextBlockMetadataTextStyle}>
-                            Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)}
-                          </span>
-                          <span aria-hidden="true" style={projectTextBlockMetadataDividerStyle}>|</span>
-                          <span title={`Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={projectTextBlockMetadataTextStyle}>
-                            Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
-                          </span>
-                          {savingID === block.id ? <span style={savingStyle}>Saving</span> : null}
-                        </span>
-                      </div>
-                      <label
-                        title="Add attachment"
-                        aria-label="Add attachment"
-                        style={projectTextBlockIconButtonStyle(accent, false)}
-                      >
-                        <PaperclipIcon color={accent} />
-                        <input
-                          type="file"
-                          multiple
-                          style={{ display: "none" }}
-                          onChange={(event) => {
-                            const files = event.currentTarget.files;
-                            if (files) void addTextBlockAttachments(block, files);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        title={openEmailBlockIDs.has(block.id) ? "Hide email" : "Open email"}
-                        aria-label={openEmailBlockIDs.has(block.id) ? "Hide email" : "Open email"}
-                        onClick={() => {
-                          setOpenEmailBlockIDs((current) => toggleSetValue(current, block.id));
-                          setActivePaneTabs((current) => ({ ...current, [block.id]: "email" }));
-                        }}
-                        style={projectTextBlockIconButtonStyle(accent, openEmailBlockIDs.has(block.id))}
-                      >
-                        <MailIcon color={accent} />
-                      </button>
-                      <button
-                        type="button"
-                        title={openChatBlockIDs.has(block.id) ? "Hide chat" : "Open chat"}
-                        aria-label={openChatBlockIDs.has(block.id) ? "Hide chat" : "Open chat"}
-                        onClick={() => {
-                          setOpenChatBlockIDs((current) => toggleSetValue(current, block.id));
-                          setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
-                        }}
-                        style={projectTextBlockIconButtonStyle(accent, openChatBlockIDs.has(block.id))}
-                      >
-                        <ChatIcon color={accent} />
-                      </button>
-                      <TextBlockActionsMenu
-                        accent={accent}
-                        surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                        panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
-                        strokeColor={EDITOR_NEU_SOFT_BORDER}
-                        onDelete={() => void removeTextBlock(block.id)}
-                      />
-                    </div>
-                    <NodeTextBlockEditor
-                      blockID={block.id}
-                      surfaceKind="project"
-                      editable
-                      nodeID={`project:${projectID}`}
-                      apiBase={apiBase}
-                      companyID={companyID}
-                      attachmentResourceType="project"
-                      attachmentResourceID={projectID}
-                      attachmentRequestJSON={attachmentRequestJSON}
-                      attachmentEditorSurface="project_text_block"
-                      currentUserID={currentUserID || "local-user"}
-                      companyUsers={companyUsers}
-                      documentValue={block.document}
-                      contentChanges={[]}
-                      chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
-                      activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
-                      chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
-                      surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                      accent={accent}
-                      outlineStyle={outlineStyle}
-                      indentGuideColor={PROJECT_SUMMARY_RULE}
-                      scrollbarTrack="rgba(15, 23, 42, 0.08)"
-                      formattingControllerRef={projectFormattingControllerRef}
-                      onFocus={() => {
-                        setFocusedTextBlockID(block.id);
-                        setActiveRichTextBlockID(block.id);
-                        window.setTimeout(refreshProjectSelectionFormat, 0);
-                      }}
-                      onBlur={() => undefined}
-                      onDocumentChange={(document) => applyProjectCollaborativeDocument(block.id, document)}
-                      onDocumentFlush={(document) => applyProjectCollaborativeDocument(block.id, document)}
-                      onDocumentConflict={() => setError("Mango is recovering this project text box from its committed collaboration snapshot.")}
-                      onChangeSeen={() => undefined}
-                      onChatHighlightActivate={(messageID) => {
-                        setFocusedTextBlockID(block.id);
-                        setActiveRichTextBlockID("");
-                        projectFormattingControllerRef.current = null;
-                        setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-                        setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
-                        setActiveChatMessageIDs((current) => ({ ...current, [block.id]: messageID }));
-                        setChatMessageFocusRequests((current) => ({
-                          ...current,
-                          [block.id]: {
-                            messageID,
-                            requestID: (current[block.id]?.requestID ?? 0) + 1,
-                          },
-                        }));
-                      }}
-                      onSelectionChatRequest={(selection) => {
-                        setChatSelectionAnchors((current) => ({ ...current, [block.id]: selection }));
-                        setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-                        setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
-                      }}
-                      onImageChatRequest={(image) => { void addImageChatComment(image); }}
-                      onImageNodeRequest={() => undefined}
-                      onSelectionFontSizeChange={setProjectSelectionFontSize}
-                      onSelectionInlineFormatChange={setProjectInlineFormat}
-                      onSelectionHighlightColorChange={setProjectHighlightColor}
-                    />
-                  </div>
-                  {(openChatBlockIDs.has(block.id) || openEmailBlockIDs.has(block.id)) ? (
-                    <div style={projectSidePaneStyle}>
-                      <ChatPane
-                        blockID={block.id}
-                        editable
-                        apiBase={apiBase}
-                        companyID={companyID}
-                        messages={chatMessagesByBlockID.get(block.id) ?? []}
-                        emailPane={
-                          <div style={projectEmailPaneWrapStyle}>
-                            <div style={projectEmailPaneToolbarStyle}>
-                              <button type="button" style={projectEmailAttachButtonStyle} onClick={() => setEmailPickerBlockID(block.id)}>
-                                Attach email
-                              </button>
-                            </div>
-                            <AttachedEmailOrganizerPane
-                              emails={attachedEmailsByBlockID.get(block.id) ?? []}
-                              apiBase={apiBase}
-                              companyID={companyID}
-                              attachmentRequestJSON={attachmentRequestJSON}
-                              attachmentResourceType="project"
-                              attachmentResourceID={projectID}
-                              attachmentInformationID={block.id}
-                              attachmentEditorSurface="project-attached-email-reply"
-                              storageKey={`project-summary-email-pane:${companyID}:${projectID}:${block.id}`}
-                              editable
-                              accent={accent}
-                              surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                              strokeColor={EDITOR_NEU_SOFT_BORDER}
-                              ruleColor={PROJECT_SUMMARY_RULE}
-                              selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
-                              onSelectMessage={(messageID) => setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: messageID }))}
-                              onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, block.id))}
-                              onRemoveEmail={removeAttachedEmail}
-                              onReplyEditorFocus={() => {
-                                setFocusedTextBlockID(block.id);
+            <div ref={projectRowVirtualizer.listRef} data-mango-bounded-editor-rows="project" data-mounted-row-count={projectRowVirtualizer.mountedRowCount} style={{ display: "grid", gap: 0, minWidth: 0 }}>
+              {projectRowVirtualizer.entries.map((entry) => {
+                if (entry.kind === "spacer") return <div key={entry.key} aria-hidden="true" data-editor-row-spacer="true" style={{ height: entry.height, pointerEvents: "none" }} />;
+                const index = entry.index;
+                const block = blocks[index];
+                if (!block) return null;
+                const emailOpen = openEmailBlockIDs.has(block.id);
+                const emailMounted = emailOpen || emailReplyBlockID === block.id;
+                const editorOpen = openEditorBlockIDs.has(block.id);
+                const chatOpen = openChatBlockIDs.has(block.id);
+                const bodyColumns = [
+                  emailOpen ? `${projectSidePaneWidths.email}px` : "",
+                  emailOpen ? "8px" : "",
+                  editorOpen ? "minmax(360px, 1fr)" : "",
+                  chatOpen ? "8px" : "",
+                  chatOpen ? `${projectSidePaneWidths.chat}px` : "",
+                ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
+                const minimumWidth = (emailOpen ? projectSidePaneWidths.email + 8 : 0) + (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
+                return (
+                  <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+                    <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
+                    <div className="mango-fixed-editor-row" data-project-text-box-row={block.id} style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)" }}>
+                      <div style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                        <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${emailOpen ? projectSidePaneWidths.email : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
+                          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                            <button type="button" title={emailOpen ? "Hide email" : "Open email"} aria-label="Toggle email column" aria-pressed={emailOpen} onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, block.id))} style={projectTextBlockIconButtonStyle(accent, emailOpen)}>
+                              <MailIcon color={accent} />
+                            </button>
+                          </div>
+                          <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                            <button type="button" title={editorOpen ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorOpen} onClick={() => {
+                              if (editorOpen) {
+                                setFocusedTextBlockID("");
                                 setActiveRichTextBlockID("");
                                 projectFormattingControllerRef.current = null;
-                              }}
-                              onError={setError}
-                            />
+                              }
+                              setOpenEditorBlockIDs((current) => toggleSetValue(current, block.id));
+                            }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
+                              <TextEditorIcon color={accent} />
+                            </button>
+                            <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
+                              Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
+                            </span>
+                            {savingID === block.id ? <span style={savingStyle}>Saving</span> : null}
+                            <label title="Add attachment" aria-label="Add attachment" style={projectTextBlockIconButtonStyle(accent, false)}>
+                              <PaperclipIcon color={accent} />
+                              <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
+                                const files = event.currentTarget.files;
+                                if (files) void addTextBlockAttachments(block, files);
+                                event.currentTarget.value = "";
+                              }} />
+                            </label>
+                            <TextBlockActionsMenu accent={accent} surfaceText={PROJECT_SUMMARY_SURFACE_TEXT} panelBackground={EDITOR_NEU_PANEL_BACKGROUND} strokeColor={EDITOR_NEU_SOFT_BORDER} onDelete={() => void removeTextBlock(block.id)} />
                           </div>
-                        }
-                        activeTab={activePaneTabs[block.id] ?? (openEmailBlockIDs.has(block.id) ? "email" : "chat")}
-                        selectionAnchor={chatSelectionAnchors[block.id]}
-                        draft={chatDrafts[block.id] ?? ""}
-                        companyUsers={companyUsers}
-                        draftAttachments={chatDraftAttachments[block.id] ?? []}
-                        replyTargetID={chatReplyTargets[block.id] ?? ""}
-                        heightStorageKey={`project-summary-chat-pane-height:${companyID}:${projectID}:${block.id}`}
-                        active={focusedTextBlockID === block.id}
-                        currentUserID={currentUserID || "local-user"}
-                        activeMessageID={activeChatMessageIDs[block.id] ?? ""}
-                        messageFocusRequest={chatMessageFocusRequests[block.id] ?? null}
-                        composerFocusRequestID={chatComposerFocusRequestIDs[block.id] ?? 0}
-                        accent={accent}
-                        surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                        panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
-                        strokeColor={EDITOR_NEU_SOFT_BORDER}
-                        ruleColor={PROJECT_SUMMARY_RULE}
-                        onFocus={() => {
-                          setFocusedTextBlockID(block.id);
-                          setActiveRichTextBlockID("");
-                          projectFormattingControllerRef.current = null;
-                        }}
-                        onActiveTabChange={(tab) => {
-                          setActivePaneTabs((current) => ({ ...current, [block.id]: tab }));
-                          if (tab === "email") setOpenEmailBlockIDs((current) => new Set(current).add(block.id));
-                          if (tab === "chat") setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-                        }}
-                        onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
-                        onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => ({ ...current, [block.id]: current[block.id] === messageID ? "" : messageID }))}
-                        onNavigateToMessage={(messageID) => setChatNavigationRequests((current) => ({ ...current, [block.id]: { anchorMessageID: messageID, requestID: Date.now() } }))}
-                        onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}
-                        onDeleteMessage={(messageID) => void deleteChatMessage(messageID)}
-                        onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
-                        onClearSelectionAnchor={() => setChatSelectionAnchors((current) => omitRecordKey(current, block.id))}
-                        onAttachFiles={(files) => attachChatDraftFiles(block.id, files)}
-                        onRemoveDraftAttachment={(attachmentID) => setChatDraftAttachments((current) => ({ ...current, [block.id]: (current[block.id] ?? []).filter((attachment) => attachment.id !== attachmentID) }))}
-                        onSubmit={() => void submitChatMessage(block.id)}
-                      />
+                          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                            <button type="button" title={chatOpen ? "Hide chat" : "Open chat"} aria-label="Toggle chat column" aria-pressed={chatOpen} onClick={() => {
+                              setOpenChatBlockIDs((current) => toggleSetValue(current, block.id));
+                            }} style={projectTextBlockIconButtonStyle(accent, chatOpen)}>
+                              <ChatIcon color={accent} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
+                        <div data-project-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(1, minimumWidth), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: bodyColumns }}>
+                          {emailMounted && (
+                            <div style={{ ...projectEmailPaneWrapStyle, height: TEXT_BLOCK_MIN_HEIGHT, display: emailOpen ? "grid" : "none", overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+                              <div style={projectEmailPaneToolbarStyle}>
+                                <button type="button" style={projectEmailAttachButtonStyle} onClick={() => setEmailPickerBlockID(block.id)}>Attach email</button>
+                              </div>
+                              <AttachedEmailOrganizerPane
+                                emails={attachedEmailsByBlockID.get(block.id) ?? []}
+                                apiBase={apiBase}
+                                companyID={companyID}
+                                attachmentRequestJSON={attachmentRequestJSON}
+                                attachmentResourceType="project"
+                                attachmentResourceID={projectID}
+                                attachmentInformationID={block.id}
+                                attachmentEditorSurface="project-attached-email-reply"
+                                storageKey={`project-summary-email-pane:${companyID}:${projectID}:${block.id}`}
+                                editable
+                                accent={accent}
+                                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                                strokeColor={EDITOR_NEU_SOFT_BORDER}
+                                ruleColor={PROJECT_SUMMARY_RULE}
+                                selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
+                                onSelectMessage={(messageID) => {
+                                  setActiveRowBlockID(block.id);
+                                  setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: messageID }));
+                                }}
+                                onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, block.id))}
+                                onRemoveEmail={removeAttachedEmail}
+                                onReplyEditorFocus={() => {
+                                  setActiveRowBlockID(block.id);
+                                  setEmailReplyBlockID(block.id);
+                                  setFocusedTextBlockID(block.id);
+                                  setActiveRichTextBlockID("");
+                                  projectFormattingControllerRef.current = null;
+                                }}
+                                onError={setError}
+                              />
+                            </div>
+                          )}
+                          {emailOpen && <div role="separator" aria-label="Resize email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} />}
+                          {editorOpen && (
+                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
+                              <NodeTextBlockEditor
+                                blockID={block.id}
+                                surfaceKind="project"
+                                editable
+                                nodeID={`project:${projectID}`}
+                                apiBase={apiBase}
+                                companyID={companyID}
+                                attachmentResourceType="project"
+                                attachmentResourceID={projectID}
+                                attachmentRequestJSON={attachmentRequestJSON}
+                                attachmentEditorSurface="project_text_block"
+                                currentUserID={currentUserID || "local-user"}
+                                companyUsers={companyUsers}
+                                documentValue={block.document}
+                                documentScrollMemoryRef={projectDocumentScrollMemoryRef}
+                                contentChanges={[]}
+                                chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
+                                activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
+                                chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
+                                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                                accent={accent}
+                                outlineStyle={outlineStyle}
+                                indentGuideColor={PROJECT_SUMMARY_RULE}
+                                scrollbarTrack="rgba(15, 23, 42, 0.08)"
+                                formattingControllerRef={projectFormattingControllerRef}
+                                onFocus={() => {
+                                  setActiveRowBlockID(block.id);
+                                  setFocusedTextBlockID(block.id);
+                                  setActiveRichTextBlockID(block.id);
+                                  window.setTimeout(refreshProjectSelectionFormat, 0);
+                                }}
+                                onBlur={() => undefined}
+                                onDocumentChange={(document) => applyProjectCollaborativeDocument(block.id, document)}
+                                onDocumentFlush={(document) => applyProjectCollaborativeDocument(block.id, document)}
+                                onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}
+                                onChangeSeen={() => undefined}
+                                onChatHighlightActivate={(messageID) => {
+                                  setFocusedTextBlockID(block.id);
+                                  setActiveRichTextBlockID("");
+                                  projectFormattingControllerRef.current = null;
+                                  setOpenChatBlockIDs((current) => new Set(current).add(block.id));
+                                  setActiveChatMessageIDs((current) => ({ ...current, [block.id]: messageID }));
+                                  setChatMessageFocusRequests((current) => ({ ...current, [block.id]: { messageID, requestID: (current[block.id]?.requestID ?? 0) + 1 } }));
+                                }}
+                                onSelectionChatRequest={(selection) => {
+                                  setChatSelectionAnchors((current) => ({ ...current, [block.id]: selection }));
+                                  setOpenChatBlockIDs((current) => new Set(current).add(block.id));
+                                }}
+                                onImageChatRequest={(image) => { void addImageChatComment(image); }}
+                                onImageNodeRequest={() => undefined}
+                                onSelectionFontSizeChange={setProjectSelectionFontSize}
+                                onSelectionInlineFormatChange={setProjectInlineFormat}
+                                onSelectionHighlightColorChange={setProjectHighlightColor}
+                              />
+                            </div>
+                          )}
+                          {chatOpen && <div role="separator" aria-label="Resize chat column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("chat", event)} style={projectColumnResizeHandleStyle} />}
+                          {chatOpen && (
+                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden", borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+                              <ChatPane
+                                blockID={block.id}
+                                editable
+                                apiBase={apiBase}
+                                companyID={companyID}
+                                messages={chatMessagesByBlockID.get(block.id) ?? []}
+                                selectionAnchor={chatSelectionAnchors[block.id]}
+                                draft={chatDrafts[block.id] ?? ""}
+                                companyUsers={companyUsers}
+                                draftAttachments={chatDraftAttachments[block.id] ?? []}
+                                replyTargetID={chatReplyTargets[block.id] ?? ""}
+                                heightStorageKey={`project-summary-chat-pane-height:${companyID}:${projectID}:${block.id}`}
+                                fixedHeight={TEXT_BLOCK_MIN_HEIGHT}
+                                active={focusedTextBlockID === block.id}
+                                currentUserID={currentUserID || "local-user"}
+                                activeMessageID={activeChatMessageIDs[block.id] ?? ""}
+                                messageFocusRequest={chatMessageFocusRequests[block.id] ?? null}
+                                composerFocusRequestID={chatComposerFocusRequestIDs[block.id] ?? 0}
+                                accent={accent}
+                                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                                panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
+                                strokeColor={EDITOR_NEU_SOFT_BORDER}
+                                ruleColor={PROJECT_SUMMARY_RULE}
+                                onFocus={() => {
+                                  setActiveRowBlockID(block.id);
+                                  setFocusedTextBlockID(block.id);
+                                  setActiveRichTextBlockID("");
+                                  projectFormattingControllerRef.current = null;
+                                }}
+                                onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
+                                onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => ({ ...current, [block.id]: current[block.id] === messageID ? "" : messageID }))}
+                                onNavigateToMessage={(messageID) => setChatNavigationRequests((current) => ({ ...current, [block.id]: { anchorMessageID: messageID, requestID: Date.now() } }))}
+                                onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}
+                                onDeleteMessage={(messageID) => void deleteChatMessage(messageID)}
+                                onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
+                                onClearSelectionAnchor={() => setChatSelectionAnchors((current) => omitRecordKey(current, block.id))}
+                                onAttachFiles={(files) => attachChatDraftFiles(block.id, files)}
+                                onRemoveDraftAttachment={(attachmentID) => setChatDraftAttachments((current) => ({ ...current, [block.id]: (current[block.id] ?? []).filter((attachment) => attachment.id !== attachmentID) }))}
+                                onSubmit={() => void submitChatMessage(block.id)}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
@@ -4186,15 +4300,6 @@ const projectTimelineRowStyle: React.CSSProperties = {
   alignItems: "start",
 };
 
-const projectTextBlockGridStyle = (sidePaneOpen: boolean): React.CSSProperties => ({
-  minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: sidePaneOpen ? "minmax(0, 1fr) minmax(320px, 34%)" : "minmax(0, 1fr)",
-  columnGap: 10,
-  rowGap: 8,
-  alignItems: "start",
-});
-
 const projectTextBlockCardStyle = (focused: boolean): React.CSSProperties => ({
   minWidth: 0,
   border: focused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
@@ -4205,53 +4310,6 @@ const projectTextBlockCardStyle = (focused: boolean): React.CSSProperties => ({
     ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)"
     : EDITOR_NEU_SHADOW,
 });
-
-const projectTextBlockHeaderStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 26px minmax(38px, auto) 26px 26px 26px 26px",
-  alignItems: "center",
-  gap: 6,
-  minHeight: 34,
-  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
-  padding: "5px 6px 5px 8px",
-  background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))",
-  overflow: "visible",
-};
-
-const projectTextBlockMetadataStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "flex-start",
-  gap: 6,
-  paddingRight: 6,
-  color: PROJECT_SUMMARY_SURFACE_TEXT,
-  fontSize: 10,
-  fontWeight: 800,
-  letterSpacing: 0,
-  whiteSpace: "nowrap",
-  overflow: "visible",
-};
-
-const projectTextBlockMetadataInnerStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 7,
-  overflow: "hidden",
-  opacity: 0.58,
-};
-
-const projectTextBlockMetadataTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
-const projectTextBlockMetadataDividerStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  opacity: 0.62,
-};
 
 const projectTextBlockIconButtonStyle = (accent: string, active: boolean): React.CSSProperties => ({
   width: 26,
@@ -4267,13 +4325,12 @@ const projectTextBlockIconButtonStyle = (accent: string, active: boolean): React
   boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
 });
 
-const projectSidePaneStyle: React.CSSProperties = {
-  minWidth: 0,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 14,
-  background: EDITOR_NEU_PANEL_BACKGROUND,
-  overflow: "hidden",
-  boxShadow: EDITOR_NEU_SHADOW,
+const projectColumnResizeHandleStyle: React.CSSProperties = {
+  minWidth: 8,
+  height: "100%",
+  cursor: "col-resize",
+  touchAction: "none",
+  background: `linear-gradient(90deg, transparent 3px, ${PROJECT_SUMMARY_RULE} 3px, ${PROJECT_SUMMARY_RULE} 5px, transparent 5px)`,
 };
 
 const projectEmailPaneWrapStyle: React.CSSProperties = {

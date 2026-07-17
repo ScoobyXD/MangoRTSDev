@@ -25,6 +25,16 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - The shared shell does not own opener state or persistence. Popup size/fullscreen state, sidebar-aware bounds, dock restore state, Kanban overlay ratios, Updates notification context, and Project critical-path row selection remain with their current openers.
 - Node content still mounts through `EditorContent` and `NodeWorkspaceSurface`, so node text boxes, attached emails, and chats keep node information/projection persistence and the Phase 1 editor/chat boundaries.
 
+## Bounded Node And Project Rows (2026-07-17)
+
+- `editorRowVirtualization.ts` is the shared Node/Project fixed-row window. It mounts the viewport plus two-row overscan, preserves the complete list height with spacers, pins only active rows that must remain alive, and schedules raw scroll updates through one animation frame.
+- Normal opens begin at the top. Navigation first resolves a requested block, chat message, attached email, email message, or Node content change to its text-box row; the row's neighborhood mounts before scrolling or focus. An unresolved request stays pending until the needed projections arrive.
+- Every Node and Project text-box row has one layout: email left, text editor middle, chat right. Email-created Nodes keep their original data associations but do not have a different visual row type.
+- The three header buttons independently mount or unmount email, editor, and chat. All three are open on a first open. Section data and drafts remain owned above the mounted section. An active unsent email reply is the one correctness exception: its row and reply UI remain pinned when the email column closes so the draft is not discarded.
+- Rows use the fixed `TEXT_BLOCK_ROW_HEIGHT`; editor and Node/Project chat bodies use `TEXT_BLOCK_MIN_HEIGHT`. User-controlled vertical text-box resizing is removed. Email/chat column widths remain horizontally adjustable, and a narrow viewport scrolls across the fixed columns rather than changing row height.
+- Inner editor scroll memory lives above virtual rows. Unmount cleanup flushes pending local input through the existing frontend-backend textbox sync before stopping the mounted editor lifecycle.
+- Logic Gate remains on its existing nonvirtualized document surface.
+
 ## V1 Mango Attachment System Direction (2026-07-09)
 - Rich-editor pasted/dropped inline images should be integrated at the shared `useEditorDocumentSurfaceHandlers` / `editorImages` path so node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply bodies all store Mango attachment references instead of data URLs.
 - Temporary image previews may exist in component state while upload is pending, but durable editor, projection, saved-version, draft, and send payloads must not contain base64 file bytes.
