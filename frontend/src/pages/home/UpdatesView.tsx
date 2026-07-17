@@ -39,6 +39,7 @@ import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenP
 import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
+  resolveUpdatePriorityGroupOrder,
   withBuiltInUpdateGroupingSetting,
   type UpdateGroupingDirection,
   type UpdateGroupingField,
@@ -1596,8 +1597,9 @@ function getUpdateGroupValues(
     const nodeID = row.node?.id.trim() ?? "";
     const priority = updatePriorityValue(nodeID ? resolveNodeDetails?.(nodeID)?.priority : null);
     const option = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((item) => item.value === String(priority));
+    const priorityOrder = resolveUpdatePriorityGroupOrder(priority);
     return option
-      ? [{ key: `priority:${option.value}`, label: option.label.replace(/\u00a0/g, " "), sortValue: Number(option.value) }]
+      ? [{ key: `priority:${option.value}`, label: option.label.replace(/\u00a0/g, " "), ...priorityOrder }]
       : [{ key: "priority:none", label: "No priority", sortValue: 99, sortLast: true }];
   }
   if (field === "status") {
@@ -2032,7 +2034,8 @@ const updateRowCopyStyle: React.CSSProperties = {
 
 const updateInlineEntityStyle: React.CSSProperties = {
   minWidth: 0,
-  maxWidth: 230,
+  flex: "1 1 230px",
+  maxWidth: "100%",
   display: "inline-flex",
   alignItems: "center",
   gap: 3,
