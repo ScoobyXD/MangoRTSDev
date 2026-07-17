@@ -4685,6 +4685,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (result.html.trim() && replaceSelectionWithHTML(root, result.html)) {
         recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
         commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        refreshEditorAttachmentImageFrames(root);
         setActiveTableContextMenu(null);
         clearEditorTableCellSelections(root);
       }

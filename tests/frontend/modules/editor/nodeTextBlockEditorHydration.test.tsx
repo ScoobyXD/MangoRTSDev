@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React, { act } from "react";
+import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
+import type {
+  AttachmentRequestJSON,
+  MangoAttachmentUploadResponse,
+} from "../../../../frontend/src/modules/attachments/attachmentApi.ts";
 import type { EditorDocumentFormattingController } from "../../../../frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts";
 
 type Restore = () => void;
@@ -181,6 +186,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
   let mountedRoot: { unmount(): void } | null = null;
   let pendingMountedRoot: { unmount(): void } | null = null;
   let unifiedMountedRoot: { unmount(): void } | null = null;
+  let richPasteMountedRoot: { unmount(): void } | null = null;
   try {
     const [{ createRoot }, { NodeTextBlockEditor }, { UnifiedRichEditorSurface }] = await Promise.all([
       import("react-dom/client"),
@@ -415,7 +421,107 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     await act(async () => unifiedRoot.unmount());
     unifiedMountedRoot = null;
     assert.equal(revokedObjectURLs.length, revokedBeforeTyping + 1);
+
+    const richPasteContainer = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(richPasteContainer);
+    const richPasteDocuments: string[] = [];
+    const attachmentRequestPaths: string[] = [];
+    const importedAttachment: MangoAttachmentUploadResponse = {
+      attachment: {
+        company_id: "company-1",
+        attachment_id: "attachment-rich-paste",
+        original_filename: "procedure-step.png",
+        mime_type: "image/png",
+        byte_size: 5,
+        sha256: "hash",
+        source_kind: "editor_paste",
+        created_timestamp: "2026-07-16T00:00:00Z",
+      },
+      resource_attachment: {
+        resource_attachment_id: "resource-attachment-rich-paste",
+        company_id: "company-1",
+        resource_type: "node",
+        resource_id: "node-1",
+        attachment_id: "attachment-rich-paste",
+        information_id: "rich-paste-block",
+        editor_surface: "node_text_block",
+        relationship_kind: "inline_image",
+        created_timestamp: "2026-07-16T00:00:00Z",
+      },
+    };
+    const attachmentRequestJSON: AttachmentRequestJSON = async <T,>(path: string): Promise<T> => {
+      attachmentRequestPaths.push(path);
+      if (path !== "/v1/attachments/imports/remote-image") throw new Error("unexpected_attachment_request:" + path);
+      return importedAttachment as unknown as T;
+    };
+    function ControlledRichPasteEditor() {
+      const [documentValue, setDocumentValue] = React.useState("<!-- mango-editor-html-v1 --><p>Before paste</p>");
+      return (
+        <NodeTextBlockEditor
+          {...baseProps}
+          blockID="rich-paste-block"
+          currentUserID=""
+          documentValue={documentValue}
+          attachmentResourceType="node"
+          attachmentResourceID="node-1"
+          attachmentRequestJSON={attachmentRequestJSON}
+          attachmentEditorSurface="node_text_block"
+          onDocumentChange={(value) => {
+            richPasteDocuments.push(value);
+            setDocumentValue(value);
+          }}
+        />
+      );
+    }
+    const richPasteRoot = createRoot(richPasteContainer);
+    richPasteMountedRoot = richPasteRoot;
+    await act(async () => {
+      richPasteRoot.render(<ControlledRichPasteEditor />);
+    });
+    await flushAsyncWork();
+
+    const richPasteEditor = richPasteContainer.querySelector<HTMLElement>('[data-node-text-block-id="rich-paste-block"]');
+    assert.ok(richPasteEditor);
+    richPasteEditor.focus();
+    const pasteRange = dom.window.document.createRange();
+    pasteRange.selectNodeContents(richPasteEditor);
+    pasteRange.collapse(false);
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(pasteRange);
+    const fetchCountBeforeRichPaste = fetchedURLs.length;
+    await act(async () => {
+      Simulate.paste(richPasteEditor, {
+        clipboardData: {
+          items: [],
+          files: [],
+          getData: (type: string) => type === "text/html"
+            ? '<p>Imported procedure</p><img src="https://assets.example.test/procedure-step.png" alt="Procedure step">'
+            : "Imported procedure",
+        },
+      } as never);
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(attachmentRequestPaths, ["/v1/attachments/imports/remote-image"]);
+    assert.equal(fetchedURLs.length, fetchCountBeforeRichPaste + 1);
+    assert.match(fetchedURLs.at(-1) ?? "", /\/attachments\/attachment-rich-paste\/content\?.*variant=display/);
+    const richPasteFrame = richPasteEditor.querySelector<HTMLElement>('[data-mango-editor-attachment-id="attachment-rich-paste"]');
+    const richPasteImage = richPasteFrame?.querySelector("img");
+    assert.ok(richPasteFrame);
+    assert.ok(richPasteImage);
+    assert.match(richPasteImage.getAttribute("src") ?? "", /^blob:test-/);
+    richPasteImage.dispatchEvent(new dom.window.Event("load"));
+    assert.equal(richPasteFrame.getAttribute("data-mango-editor-image-hydration"), "ready");
+    assert.equal(richPasteImage.style.visibility, "visible");
+    assert.match(richPasteDocuments.at(-1) ?? "", /mango-attachment:attachment-rich-paste/);
+    assert.doesNotMatch(richPasteDocuments.at(-1) ?? "", /blob:test-/);
+
+    await act(async () => richPasteRoot.unmount());
+    richPasteMountedRoot = null;
   } finally {
+    if (richPasteMountedRoot) {
+      await act(async () => richPasteMountedRoot?.unmount());
+    }
     if (unifiedMountedRoot) {
       await act(async () => unifiedMountedRoot?.unmount());
     }

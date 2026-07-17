@@ -1302,6 +1302,7 @@ Given:
 Expected:
 - Mango keeps the supported rich structure and image ordering, normalizes it through the shared sanitizer, and commits the pasted document once after all durable image resolutions settle.
 - Repeated image sources create one imported attachment and multiple frames, no more than three unique images resolve concurrently, and every successful frame stores a durable Mango attachment reference.
+- The existing hydration owner immediately discovers those newly inserted frames, loads their display sources, and moves them from loading to ready without a browser reload or editor remount; saved HTML continues to contain durable Mango references rather than temporary display URLs.
 - An image failure leaves the text, formatting, lists, and successful images intact, inserts a safe image fallback label, reports the partial failure, and persists no third-party URL, blob URL, data URL, base64 bytes, credentials, or signed URL.
 - Switching targets, unmounting, losing the saved range, or editing the starting document before import completes prevents stale insertion into the current document.
 
