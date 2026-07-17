@@ -2213,7 +2213,6 @@ export function mailConversationCardStyle(expanded: boolean, sent: boolean, fill
   return {
     minWidth: 0,
     minHeight: fill ? "100%" : undefined,
-    height: fill ? "100%" : undefined,
     display: "grid",
     gridTemplateRows: fill ? "auto minmax(0, 1fr)" : "auto",
     gap: expanded ? 8 : 6,

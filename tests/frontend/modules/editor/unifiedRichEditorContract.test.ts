@@ -597,6 +597,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /frame\.style\.height = "0px"/);
   assert.match(homeParts, /fillAvailableHeight \? "100%" : minHeight/);
   assert.match(homeStyles, /gridTemplateRows: fill \? "auto minmax\(0, 1fr\)" : "auto"/);
+  assert.doesNotMatch(homeParts, /\n\s*height: fill \? "100%" : undefined,/);
+  assert.doesNotMatch(homeStyles, /\n\s*height: fill \? "100%" : undefined,/);
+  assert.match(homeParts, /alignItems: fill \? "start" : "stretch"/);
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
   assert.match(homeParts, /if \(!loading && newestMessage && !emailMessageBodyIsLoaded\(newestMessage\)\)/);
