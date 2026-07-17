@@ -5,6 +5,7 @@ Last updated: 2026-07-16
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
 
@@ -93,6 +94,8 @@ U82 - GVIC and Priority grouping titles render as compact elevated rectangular e
 U83 - Opening the built-in Updates tab or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
 U84 - The Updates page header provides Collapse all and Expand all actions. Collapse all closes every currently rendered grouping level, and Expand all opens every currently rendered grouping level without changing the active grouping view, filter, selection, or notification data.
 U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Icons and counts fill those cells at a larger readable size. A zero-count cell stays neutral; a nonzero urgent cell uses a fiery red-orange gradient, a nonzero normal-mention cell uses a teal-blue gradient, and a nonzero regular-update cell uses a yellow-orange gradient.
+U86 - Priority grouping orders assigned priorities by their numeric value: 1, 2, 3, 4, then 5 in ascending order. The shared `Unassigned to a Logic Gate` priority-zero group and any equivalent no-priority fallback always remain after assigned priorities, including when the saved grouping direction is descending.
+U87 - An Updates row keeps its existing horizontal width and fixed time/Seen controls. Within that unchanged row, the Node title area consumes the remaining title-line space after the actor/action copy and before any priority/status tokens, and truncates only at that available edge instead of using an early fixed-width cap.
 
 ## Update Row Copy And Visual Language
 
@@ -510,3 +513,23 @@ Expected:
 - The count half is divided into three equal cells for urgent ! mentions, normal @ mentions, and regular updates, with larger icons and numbers.
 - Every zero-count cell stays neutral.
 - A nonzero urgent cell uses the fiery red-orange gradient, a nonzero normal-mention cell uses the teal-blue gradient, and a nonzero regular-update cell uses the yellow-orange gradient.
+
+### Scenario U-S13: Priority Order And Row Title Width
+
+Automated regression: `tests/frontend/pages/home/updatesGrouping.test.ts`.
+
+Business logic covered:
+- U81
+- U86
+- U87
+
+Given:
+- Updates is grouped by Date -> GVIC -> Priority -> Logic Gate.
+- One Date/GVIC branch contains priorities 1 through 5 plus the shared `Unassigned to a Logic Gate` priority-zero group.
+- Several Updates rows contain long Node titles, priority/status tokens, timestamps, and Seen buttons.
+
+Expected:
+- Ascending Priority grouping renders priorities 1, 2, 3, 4, and 5 before the unassigned group.
+- Descending Priority grouping renders priorities 5, 4, 3, 2, and 1 before the unassigned group.
+- The outer row width, timestamp column, and Seen button stay unchanged.
+- Each Node title uses the remaining title-line width and ellipsizes only when it reaches the neighboring tokens or fixed right-side controls.

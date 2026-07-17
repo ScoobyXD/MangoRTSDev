@@ -22,6 +22,12 @@ export const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
   { field: "logic_gate", direction: "asc" },
 ];
 
+export function resolveUpdatePriorityGroupOrder(priority: number | null | undefined): { sortValue: number; sortLast?: true } {
+  const normalized = typeof priority === "number" && Number.isFinite(priority) ? Math.round(priority) : 0;
+  if (normalized >= 1 && normalized <= 5) return { sortValue: normalized };
+  return { sortValue: 99, sortLast: true };
+}
+
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
 
 export function normalizeUpdateGroupingStack(value: unknown): UpdateGroupingSetting[] {

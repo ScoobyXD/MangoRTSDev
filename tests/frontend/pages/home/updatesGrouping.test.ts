@@ -6,8 +6,10 @@ import {
   DEFAULT_UPDATE_GROUPINGS,
   UPDATE_GROUPING_FIELDS,
   normalizeUpdateGroupingStack,
+  resolveUpdatePriorityGroupOrder,
   withBuiltInUpdateGroupingSetting,
 } from "../../../../frontend/src/pages/home/updatesGrouping.js";
+import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 import {
   collectAllUpdateGroupIDs,
   reconcileExpandedUpdateGroupIDs,
@@ -35,6 +37,35 @@ test("explicit custom Updates grouping stacks and the valid empty stack are pres
     { field: "status", direction: "asc" },
   ]);
   assert.deepEqual(normalizeUpdateGroupingStack([]), []);
+});
+
+test("priority grouping orders 1 through 5 and keeps unassigned last", () => {
+  const assigned = [1, 2, 3, 4, 5].map((priority) => resolveUpdatePriorityGroupOrder(priority));
+  assert.deepEqual(assigned.map((group) => group.sortValue), [1, 2, 3, 4, 5]);
+  assert.equal(assigned.every((group) => group.sortLast !== true), true);
+  assert.deepEqual(resolveUpdatePriorityGroupOrder(0), { sortValue: 99, sortLast: true });
+  assert.deepEqual(resolveUpdatePriorityGroupOrder(null), { sortValue: 99, sortLast: true });
+
+  const orderPriorities = (direction: "asc" | "desc") => buildUniversalNestedGroups(
+    [0, 3, 1, 5, 2, 4],
+    [{ field: "priority" as const, direction }],
+    {
+      rootID: "priority-order",
+      rowKey: (priority) => String(priority),
+      getValues: (priority) => [{
+        key: `priority:${priority}`,
+        label: String(priority),
+        ...resolveUpdatePriorityGroupOrder(priority),
+      }],
+      sortRows: (priorities) => priorities,
+    },
+  ).map((group) => Number(group.key.slice("priority:".length)));
+  assert.deepEqual(orderPriorities("asc"), [1, 2, 3, 4, 5, 0]);
+  assert.deepEqual(orderPriorities("desc"), [5, 4, 3, 2, 1, 0]);
+
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  assert.match(source, /const priorityOrder = resolveUpdatePriorityGroupOrder\(priority\)/);
+  assert.match(source, /label: option\.label\.replace\(\/\\u00a0\/g, " "\), \.\.\.priorityOrder/);
 });
 
 test("the built-in Updates setting remains first without rewriting custom settings", () => {
@@ -132,4 +163,21 @@ test("Updates exposes all-group controls and a split three-cell live counter sur
   assert.match(appSidebar, /rgba\(254, 226, 226, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
   assert.match(appSidebar, /rgba\(204, 251, 241, 0\.98\)[\s\S]*rgba\(125, 211, 252, 0\.72\)/);
   assert.match(appSidebar, /rgba\(254, 249, 195, 0\.98\)[\s\S]*rgba\(251, 146, 60, 0\.62\)/);
+});
+
+test("Updates rows keep their width while node titles consume the available title-line space", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  const rowStyleStart = source.indexOf("function updateRowStyle(");
+  const rowStyleEnd = source.indexOf("function updateRowIconStyle(", rowStyleStart);
+  const entityStyleStart = source.indexOf("const updateInlineEntityStyle");
+  const entityStyleEnd = source.indexOf("const updateInlineEntityLabelStyle", entityStyleStart);
+  assert.ok(rowStyleStart >= 0 && rowStyleEnd > rowStyleStart);
+  assert.ok(entityStyleStart >= 0 && entityStyleEnd > entityStyleStart);
+
+  const rowStyle = source.slice(rowStyleStart, rowStyleEnd);
+  const entityStyle = source.slice(entityStyleStart, entityStyleEnd);
+  assert.match(rowStyle, /width: `min\(860px, calc\(100% -/);
+  assert.match(entityStyle, /flex: "1 1 230px"/);
+  assert.match(entityStyle, /maxWidth: "100%"/);
+  assert.doesNotMatch(entityStyle, /maxWidth: 230/);
 });
