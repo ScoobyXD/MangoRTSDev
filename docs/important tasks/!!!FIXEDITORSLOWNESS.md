@@ -1,3 +1,5 @@
+## Initial discussion context
+
 Yes—the HTTP storm is real and should be fixed. But it is not the primary reason the entire app remains slow. The sustained freeze is browser main-thread overload from mounting and repeatedly processing the complete node, every text box, and every chat message.
 Ranked diagnosis
 Confirmed: the complete node and chat history are mounted eagerly
@@ -400,3 +402,93 @@ Reimplement editor-specific features using ProseMirror’s native model, transac
 Prove backend application and validation of ProseMirror steps before committing to the final collaboration design. This is the largest unresolved architectural issue in the migration document because the backend is Go while ProseMirror’s canonical step implementation is JavaScript.
 Migrate HTML once, retain rollback data, and stop treating HTML and JSON as two authoritative editable documents.
 So the short answer is: Tiptap solves a large portion of the awful editor-internal work, but it does not solve the large-node page architecture. We should migrate the editor and fix the surrounding rendering architecture as coordinated parts of one modernization project.
+
+## Actual implementation planning and framework
+
+so basically, long story short, we could divide the problem up into three distinct sections. 
+The clean division
+Problem 1: Too much exists
+Solution: Virtualization and bounded DOM
+Problem 2: Too many mechanisms within each Dom
+A mounted editor currently brings or starts things such as:
+Collaboration recovery.
+Realtime subscription.
+IndexedDB recovery.
+Resize observation.
+Scroll state.
+Image loading.
+Comment/change highlighting.
+Selection and formatting management.
+Undo-history infrastructure.
+Solution: Lazy activation, delete or simplify mechanisms
+Problem 3: Necessary editor work is too expensive
+Solution: Tiptap/ProseMirror’s structured model and transactions
+
+
+Yes. I understand the dependency structure now.
+The clean rule is:
+Build the page shell first, build activation rules second, and build the new editor engine and JSON storage together.
+
+Problem 1 is independent of the document format
+Virtualization and bounded DOM can be implemented while Postgres still stores rich HTML.
+That work includes:
+Mounting only visible or nearby text boxes and chats.
+Using lightweight placeholders for offscreen blocks.
+Keeping focused, dirty, selected, or saving editors mounted.
+Separating chat state so one chat keystroke does not rerender the Node.
+Reducing broad React rerenders.
+Limiting mounted images and attachment thumbnails.
+It does not need to understand whether the document contains HTML or Tiptap JSON.
+The only future consideration is that virtualization should treat an editor as a contained unit. It should not reach inside the current HTML DOM to manage it. That allows the current editor to be replaced with Tiptap later without rewriting virtualization.
+Problem 2 has two different halves
+Your division is right.
+Half	Can improve now?	Tiptap dependency
+When an editor mounts, activates, sleeps, or unmounts	Yes	None
+When frontend-backend textbox sync starts	Mostly	Starting/stopping is independent; the future change format depends on Tiptap
+Realtime subscription lifetime	Yes	Message contents will change later
+Image loading and viewport eligibility	Yes	Tiptap image elements come later
+Resize and scroll observation	Yes	None
+Undo and redo	Avoid major current rewrite	Tiptap should own it
+Selection and caret positions	Avoid major current rewrite	ProseMirror positions should own it
+Formatting commands	Avoid major current rewrite	Tiptap commands and marks should own it
+Comment/change positions and highlights	Only emergency fixes now	ProseMirror mappings and decorations should replace it
+Document serialization and changes	No major HTML redesign	Tiptap transactions should replace it
+
+Some mechanisms therefore have two pieces.
+For frontend-backend textbox sync:
+Deciding when the sync starts and stops belongs to Problem 2’s page machinery.
+Deciding whether it sends HTML byte patches or ProseMirror change instructions belongs to Problem 3.
+For images:
+Deciding whether an offscreen image loads belongs to Problem 2.
+Defining the Tiptap image element and its attachment-ID attributes belongs to Problem 3.
+For comments:
+Deciding whether an inactive editor needs comment UI running belongs to Problem 2.
+Tracking the comment’s exact document position through edits belongs to Problem 3.
+Problem 3 should be built around Tiptap from the beginning
+We should not spend months building a better custom HTML undo system, selection model, range mapper, formatting engine, or document-difference system and then throw it away.
+The Tiptap work should include:
+A versioned Mango document schema.
+Paragraphs, lists, checklists, indentation, formatting, tables, mentions, and permanent attachment IDs.
+ProseMirror positions and mappings.
+ProseMirror decorations for comment and change overlays.
+Native transactions for typing and formatting.
+Native editor undo and selection behavior.
+Small change instructions for frontend-backend sync.
+A complete JSON snapshot for opening, reconnecting, and recovering.
+
+The implementation sequence is:
+1. We're gonna fix problem 1.
+2. We're gonna fix problem 2.
+3. We're gonna fix problem 3.
+4. Convert existing PostgreSQL rich HTML documents into validated Tiptap-compatible JSON.
+
+
+## Project Progress:
+
+### Step 1:
+
+### Step 2:
+
+### Step 3:
+
+### Step 4:
