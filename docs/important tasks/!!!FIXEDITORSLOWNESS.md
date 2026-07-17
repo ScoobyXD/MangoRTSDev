@@ -483,7 +483,16 @@ The implementation sequence is:
 4. Convert existing PostgreSQL rich HTML documents into validated Tiptap-compatible JSON.
 
 
-## Project Progress:
+Notes for implementing problem 1 here:
+
+Notes for implementing problem 2 here:
+
+Notes for implementing problem 3 here:
+
+Notes for implementing problem 4 here:
+
+
+## Project Progress: (make sure you leave datetime timestamps of when you inserted to this progress tracker below)
 
 ### Step 1:
 
