@@ -556,7 +556,7 @@ test("frontend source inventory contains only retained narrow scope families", (
   }
   assert.equal(existsSync(resolve(sourceRoot, "modules/workspace/workspaceRealtime.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/communications/communicationsStream.ts")), false);
-  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorCollaboration.ts")), true);
+  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorTextboxSync.ts")), true);
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorProjectionDeltas.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/kanban/kanbanProjectionDeltas.ts")), false);
 
@@ -568,7 +568,7 @@ test("frontend source inventory contains only retained narrow scope families", (
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/NotificationRealtimeBridge.tsx",
     "modules/editor/EditorContent.tsx",
-    "modules/editor/editorCollaboration.ts",
+    "modules/editor/editorTextboxSync.ts",
     "modules/kanban/KanbanContent.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/HomePage.tsx",

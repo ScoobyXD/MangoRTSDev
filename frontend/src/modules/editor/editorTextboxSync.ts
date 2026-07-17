@@ -7,14 +7,14 @@ import {
   type RealtimeEditorSnapshotRequiredMessage,
 } from "../realtime/realtimeWebSocket.js";
 
-export type EditorCollaborationResourceType = "node" | "logic_gate" | "project";
-export type EditorCollaborationSnapshot = {
+export type EditorTextboxSyncResourceType = "node" | "logic_gate" | "project";
+export type EditorTextboxSyncSnapshot = {
   revision: number;
   html: string;
   etag: string;
   deleted?: boolean;
 };
-type EditorCollaborationCommit = {
+type EditorTextboxSyncCommit = {
   operation_id: string;
   event_id?: string;
   revision: number;
@@ -27,16 +27,16 @@ type EditorCollaborationCommit = {
     patch: RealtimeEditorHTMLPatch;
   }>;
 };
-export type EditorCollaborationRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
-export type EditorCollaborationControllerOptions = {
+export type EditorTextboxSyncRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type EditorTextboxSyncOptions = {
   apiBase: string;
   companyID: string;
   currentUserID: string;
-  resourceType: EditorCollaborationResourceType;
+  resourceType: EditorTextboxSyncResourceType;
   resourceID: string;
   documentID: string;
   initialHTML: string;
-  requestJSON: EditorCollaborationRequest;
+  requestJSON: EditorTextboxSyncRequest;
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
   onDeleted?: () => void;
@@ -49,7 +49,7 @@ type PendingEditorOperation = {
   storage_key: string;
   user_id: string;
   company_id: string;
-  resource_type: EditorCollaborationResourceType;
+  resource_type: EditorTextboxSyncResourceType;
   resource_id: string;
   document_id: string;
   client_id: string;
@@ -104,7 +104,7 @@ function tabClientID(): string {
   return created;
 }
 
-function scopePrefix(options: EditorCollaborationControllerOptions, clientID: string): string {
+function scopePrefix(options: EditorTextboxSyncOptions, clientID: string): string {
   return encodedParts([
     options.currentUserID, options.companyID, options.resourceType,
     options.resourceID, options.documentID, clientID,
@@ -353,7 +353,7 @@ function patchesEqual(left: RealtimeEditorHTMLPatch, right: RealtimeEditorHTMLPa
   return left.start_utf8 === right.start_utf8 && left.delete_utf8 === right.delete_utf8 && left.insert === right.insert;
 }
 
-export class EditorCollaborationController {
+export class EditorTextboxSync {
   private readonly clientID: string;
   private readonly path: string;
   private readonly scope: string;
@@ -374,7 +374,7 @@ export class EditorCollaborationController {
   private deleted = false;
   private stopped = false;
 
-  constructor(private readonly options: EditorCollaborationControllerOptions) {
+  constructor(private readonly options: EditorTextboxSyncOptions) {
     this.clientID = tabClientID();
     this.confirmedHTML = options.initialHTML;
     this.optimisticHTML = options.initialHTML;
@@ -510,7 +510,7 @@ export class EditorCollaborationController {
   private async performRecovery(): Promise<void> {
     await this.persistStagedLocalInput();
     const mirrored = await readPending(this.pendingPrefix);
-    const snapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
+    const snapshot = await this.options.requestJSON<EditorTextboxSyncSnapshot>(this.path);
     this.deleted = Boolean(snapshot.deleted);
     this.revision = snapshot.revision;
     this.confirmedHTML = snapshot.html;
@@ -527,7 +527,7 @@ export class EditorCollaborationController {
       return;
     }
     if (this.pending.length > 0) await this.drain();
-    const finalSnapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
+    const finalSnapshot = await this.options.requestJSON<EditorTextboxSyncSnapshot>(this.path);
     if (finalSnapshot.deleted) {
       this.deleted = true;
       this.options.onDeleted?.();
@@ -564,9 +564,9 @@ export class EditorCollaborationController {
     while (!this.deleted) {
       const record = this.pending[0];
       if (!record) return;
-      let commit: EditorCollaborationCommit;
+      let commit: EditorTextboxSyncCommit;
       try {
-        commit = await this.options.requestJSON<EditorCollaborationCommit>(this.path, {
+        commit = await this.options.requestJSON<EditorTextboxSyncCommit>(this.path, {
           method: "POST",
           body: JSON.stringify({
             operation_id: record.operation_id,
@@ -594,7 +594,7 @@ export class EditorCollaborationController {
     return next;
   }
 
-  private async processCommit(commit: EditorCollaborationCommit): Promise<void> {
+  private async processCommit(commit: EditorTextboxSyncCommit): Promise<void> {
     await this.persistStagedLocalInput();
     const concurrent = [...(commit.concurrent_operations ?? [])].sort((left, right) => left.revision - right.revision);
     for (const operation of concurrent) {
@@ -680,7 +680,7 @@ export class EditorCollaborationController {
 
   private async reconcileSnapshotForPendingRetry(): Promise<void> {
     await this.persistStagedLocalInput();
-    const snapshot = await this.options.requestJSON<EditorCollaborationSnapshot>(this.path);
+    const snapshot = await this.options.requestJSON<EditorTextboxSyncSnapshot>(this.path);
     if (snapshot.deleted) {
       this.deleted = true;
       this.revision = Math.max(this.revision, snapshot.revision);

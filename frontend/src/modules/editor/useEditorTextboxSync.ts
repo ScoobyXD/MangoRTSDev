@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
-  EditorCollaborationController,
-  type EditorCollaborationRequest,
-  type EditorCollaborationResourceType,
-} from "./editorCollaboration.js";
+  EditorTextboxSync,
+  type EditorTextboxSyncRequest,
+  type EditorTextboxSyncResourceType,
+} from "./editorTextboxSync.js";
 
-type UseCollaborativeEditorDocumentInput = {
+type UseEditorTextboxSyncInput = {
   enabled: boolean;
   apiBase: string;
   companyID: string;
   currentUserID: string;
-  resourceType: EditorCollaborationResourceType;
+  resourceType: EditorTextboxSyncResourceType;
   resourceID: string;
   documentID: string;
   initialHTML: string;
-  requestJSON: EditorCollaborationRequest;
+  requestJSON: EditorTextboxSyncRequest;
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
   flushPendingLocalInput?: () => void;
@@ -22,8 +22,8 @@ type UseCollaborativeEditorDocumentInput = {
   onError?: (cause: unknown) => void;
 };
 
-export function useCollaborativeEditorDocument(input: UseCollaborativeEditorDocumentInput) {
-  const controllerRef = useRef<EditorCollaborationController | null>(null);
+export function useEditorTextboxSync(input: UseEditorTextboxSyncInput) {
+  const syncRef = useRef<EditorTextboxSync | null>(null);
   const callbacksRef = useRef(input);
   const scheduledBeforeMountRef = useRef<{ html: string; immediate: boolean } | null>(null);
   callbacksRef.current = input;
@@ -35,7 +35,7 @@ export function useCollaborativeEditorDocument(input: UseCollaborativeEditorDocu
   useEffect(() => {
     if (!identity) return undefined;
     const current = callbacksRef.current;
-    const controller = new EditorCollaborationController({
+    const sync = new EditorTextboxSync({
       apiBase: current.apiBase,
       companyID: current.companyID,
       currentUserID: current.currentUserID,
@@ -50,31 +50,31 @@ export function useCollaborativeEditorDocument(input: UseCollaborativeEditorDocu
       onDeleted: () => callbacksRef.current.onDeleted?.(),
       onError: (cause) => callbacksRef.current.onError?.(cause),
     });
-    controllerRef.current = controller;
-    controller.start();
+    syncRef.current = sync;
+    sync.start();
     const early = scheduledBeforeMountRef.current;
     scheduledBeforeMountRef.current = null;
-    if (early) controller.schedule(early.html, early.immediate);
+    if (early) sync.schedule(early.html, early.immediate);
     return () => {
       callbacksRef.current.flushPendingLocalInput?.();
-      void controller.flush().catch((cause) => callbacksRef.current.onError?.(cause));
-      controller.stop();
-      if (controllerRef.current === controller) controllerRef.current = null;
+      void sync.flush().catch((cause) => callbacksRef.current.onError?.(cause));
+      sync.stop();
+      if (syncRef.current === sync) syncRef.current = null;
     };
   }, [identity]);
 
   const scheduleDocumentSave = useCallback((html: string, immediate = false) => {
-    const controller = controllerRef.current;
-    if (controller) controller.schedule(html, immediate);
+    const sync = syncRef.current;
+    if (sync) sync.schedule(html, immediate);
     else scheduledBeforeMountRef.current = { html, immediate };
   }, []);
 
   const flushPendingDocumentSave = useCallback(async () => {
-    await controllerRef.current?.flush();
+    await syncRef.current?.flush();
   }, []);
 
   const recoverDocument = useCallback(async () => {
-    await controllerRef.current?.recover();
+    await syncRef.current?.recover();
   }, []);
 
   return { scheduleDocumentSave, flushPendingDocumentSave, recoverDocument };

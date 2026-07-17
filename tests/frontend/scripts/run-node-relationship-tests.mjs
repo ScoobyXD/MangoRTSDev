@@ -92,7 +92,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorProjection.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorCollaboration.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextboxSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockAttachments.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockDeletion.test.js"),
@@ -101,6 +101,10 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
 const componentTests = [
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/editorRowVirtualizationReact.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorRowVirtualizationReact.test.js"),
+  },
   {
     source: resolve(repoRoot, "tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js"),

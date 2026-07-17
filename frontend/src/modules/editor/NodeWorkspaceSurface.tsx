@@ -127,7 +127,8 @@ const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
-const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v2";
+const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v3";
+const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v2";
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
 
 function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
@@ -244,8 +245,8 @@ function storeTextSidePaneWidth(companyID: string, nodeID: string, blockID: stri
   localStorage.setItem(textSidePaneWidthStorageKey(companyID, nodeID, blockID, pane), String(clampTextSidePaneWidth(width)));
 }
 
-function textPaneLayoutStorageKey(companyID: string, nodeID: string): string {
-  return `${TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX}:${companyID || "company"}:${nodeID || "node"}`;
+function textPaneLayoutStorageKey(companyID: string, nodeID: string, prefix = TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX): string {
+  return `${prefix}:${companyID || "company"}:${nodeID || "node"}`;
 }
 
 function cleanIDList(value: unknown): string[] {
@@ -269,16 +270,33 @@ function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLa
     return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
   }
   try {
-    const stored = localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID));
+    const current = localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID));
+    const legacy = current === null
+      ? localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID, LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX))
+      : null;
+    const stored = current ?? legacy;
     const parsed = JSON.parse(stored ?? "{}") as Record<string, unknown>;
+    const openEditorBlockIDs = cleanIDList(parsed.openEditorBlockIDs);
+    const openEmailBlockIDs = cleanIDList(parsed.openEmailBlockIDs);
+    const openChatBlockIDs = cleanIDList(parsed.openChatBlockIDs);
+    const closedChatBlockIDs = cleanIDList(parsed.closedChatBlockIDs);
+    const selectedEmailIDsByBlock = cleanSelectedEmailMap(parsed.selectedEmailIDsByBlock);
+    const activeChatBlockID = typeof parsed.activeChatBlockID === "string" && parsed.activeChatBlockID.trim() ? parsed.activeChatBlockID.trim() : undefined;
+    const faultyLegacyEmptyLayout = legacy !== null
+      && openEditorBlockIDs.length === 0
+      && openEmailBlockIDs.length === 0
+      && openChatBlockIDs.length === 0
+      && closedChatBlockIDs.length === 0
+      && Object.keys(selectedEmailIDsByBlock).length === 0
+      && !activeChatBlockID;
     return {
-      initialized: stored !== null,
-      openEditorBlockIDs: cleanIDList(parsed.openEditorBlockIDs),
-      openEmailBlockIDs: cleanIDList(parsed.openEmailBlockIDs),
-      openChatBlockIDs: cleanIDList(parsed.openChatBlockIDs),
-      closedChatBlockIDs: cleanIDList(parsed.closedChatBlockIDs),
-      selectedEmailIDsByBlock: cleanSelectedEmailMap(parsed.selectedEmailIDsByBlock),
-      activeChatBlockID: typeof parsed.activeChatBlockID === "string" && parsed.activeChatBlockID.trim() ? parsed.activeChatBlockID.trim() : undefined,
+      initialized: stored !== null && !faultyLegacyEmptyLayout,
+      openEditorBlockIDs,
+      openEmailBlockIDs,
+      openChatBlockIDs,
+      closedChatBlockIDs,
+      selectedEmailIDsByBlock,
+      activeChatBlockID,
     };
   } catch {
     return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
@@ -391,6 +409,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRegisterSaveController,
   onError,
 }) => {
+  const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
@@ -404,9 +423,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const documentScrollMemoryRef = useRef(createEditorScrollMemory());
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
-  const previousNodeIDRef = useRef("");
+  const loadedNodeScopeRef = useRef("");
   const initialPaneLayoutRef = useRef(readStoredTextPaneLayout(companyID, nodeID));
-  const skipNextPaneLayoutPersistRef = useRef(false);
+  const paneLayoutReadyScopeRef = useRef("");
   const [width, setWidth] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
@@ -943,7 +962,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     const layout = readStoredTextPaneLayout(companyID, nodeID);
-    skipNextPaneLayoutPersistRef.current = true;
+    paneLayoutReadyScopeRef.current = "";
     setSelectedEmailIDsByBlock(layout.selectedEmailIDsByBlock);
     setOpenEditorBlockIDs(new Set(layout.openEditorBlockIDs));
     setOpenEmailBlockIDs(new Set(layout.openEmailBlockIDs));
@@ -959,10 +978,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [companyID, nodeID]);
 
   useEffect(() => {
-    if (skipNextPaneLayoutPersistRef.current) {
-      skipNextPaneLayoutPersistRef.current = false;
-      return;
-    }
+    if (paneLayoutReadyScopeRef.current !== paneLayoutScope) return;
     storeTextPaneLayout(companyID, nodeID, {
       initialized: true,
       openEditorBlockIDs: Array.from(openEditorBlockIDs),
@@ -972,7 +988,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       selectedEmailIDsByBlock,
       activeChatBlockID,
     });
-  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEditorBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
+  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEditorBlockIDs, openEmailBlockIDs, paneLayoutScope, selectedEmailIDsByBlock]);
 
   useEffect(() => {
     const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
@@ -1004,8 +1020,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     })));
     setChatMessages(parsedChatMessages);
     setAttachedEmails(parsedAttachedEmails);
-    const nodeChanged = previousNodeIDRef.current !== nodeID;
-    previousNodeIDRef.current = nodeID;
+    const nodeChanged = loadedNodeScopeRef.current !== paneLayoutScope;
     const blockIDs = new Set(textBlocks.map((block) => block.id));
     const emailOriginChatID = parsedAttachedEmails.find((email) => email.createdFromEmail)?.id.trim() ?? "";
     const chatBlockIDs = new Set(blockIDs);
@@ -1057,12 +1072,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setClosedChatBlockIDs((current) => new Set(nodeChanged
         ? (storedLayout?.initialized ? storedLayout.closedChatBlockIDs : [])
         : Array.from(current).filter((id) => chatBlockIDs.has(id))));
+      loadedNodeScopeRef.current = paneLayoutScope;
+      paneLayoutReadyScopeRef.current = paneLayoutScope;
     }
     setFocusedTextBlockID((current) => {
       if (nodeChanged || current === null) return "";
       return blockIDs.has(current) ? current : "";
     });
-  }, [companyID, loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
+  }, [companyID, loadedTextBlockProjections, nodeID, paneLayoutScope, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2167,6 +2184,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         setOpenEmailBlockIDs((current) => new Set(current).add(block.id));
         setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: attachedEmail.messageID }));
       } else {
+        setActiveRowBlockID(block.id);
+        setOpenEditorBlockIDs((current) => new Set(current).add(block.id));
         setFocusedTextBlockID(block.id);
         setActiveChatBlockID("");
       }

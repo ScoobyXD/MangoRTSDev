@@ -793,7 +793,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return nextContent;
   }, [projectTextBlockSaveController]);
 
-  const applyProjectCollaborativeDocument = useCallback((blockID: string, document: string) => {
+  const applyProjectSyncedDocument = useCallback((blockID: string, document: string) => {
     const existing = projectTextBlockContentRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
     if (existing.document === document) return;
     projectTextBlockContentRef.current.set(blockID, { ...existing, document });
@@ -2071,8 +2071,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   window.setTimeout(refreshProjectSelectionFormat, 0);
                                 }}
                                 onBlur={() => undefined}
-                                onDocumentChange={(document) => applyProjectCollaborativeDocument(block.id, document)}
-                                onDocumentFlush={(document) => applyProjectCollaborativeDocument(block.id, document)}
+                                onDocumentChange={(document) => applyProjectSyncedDocument(block.id, document)}
+                                onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}
                                 onChangeSeen={() => undefined}
                                 onChatHighlightActivate={(messageID) => {

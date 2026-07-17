@@ -1,7 +1,7 @@
 import {
-  EditorCollaborationController,
-  type EditorCollaborationRequest,
-} from "../modules/editor/editorCollaboration.js";
+  EditorTextboxSync,
+  type EditorTextboxSyncRequest,
+} from "../modules/editor/editorTextboxSync.js";
 import { deserializeEditorDocumentHTML, EDITOR_RICH_TEXT_PREFIX, serializeEditorDocumentHTML } from "../modules/editor/richTextEditing.js";
 import { hydrateEditorAttachmentImageFrames } from "../modules/editor/editorImages.js";
 import {
@@ -63,7 +63,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
   return fetch(new URL(path, apiBase), { ...init, headers, credentials: "include" });
 }
 
-const requestJSON: EditorCollaborationRequest = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+const requestJSON: EditorTextboxSyncRequest = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   const response = await authenticatedFetch(path, init);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({})) as { error?: string };
@@ -102,7 +102,7 @@ const realtime = new MangoRealtimeClient(apiBase, companyID, {
 const probeSubscriptions = new Map<number, () => void>();
 let nextProbeID = 1;
 let applyingRemote = false;
-const controller = new EditorCollaborationController({
+const textboxSync = new EditorTextboxSync({
   apiBase,
   companyID,
   currentUserID: subject,
@@ -165,16 +165,16 @@ const controller = new EditorCollaborationController({
 });
 
 editor.addEventListener("input", () => {
-  if (!applyingRemote) controller.schedule(serializeEditorDocumentHTML(editor));
+  if (!applyingRemote) textboxSync.schedule(serializeEditorDocumentHTML(editor));
 });
 
-controller.start();
+textboxSync.start();
 window.__mangoE2E = {
-  flush: () => controller.flush(),
+  flush: () => textboxSync.flush(),
   setHTML: (html, immediate = false) => {
     const stored = html.startsWith(EDITOR_RICH_TEXT_PREFIX) ? html : EDITOR_RICH_TEXT_PREFIX + html;
     renderStoredHTML(stored);
-    controller.schedule(serializeEditorDocumentHTML(editor), immediate);
+    textboxSync.schedule(serializeEditorDocumentHTML(editor), immediate);
   },
   getState: () => ({
     html: serializeEditorDocumentHTML(editor),
@@ -183,7 +183,7 @@ window.__mangoE2E = {
     errors: [...errors],
     maxAckConcurrentOperations,
   }),
-  stop: () => { attachmentHydrationCleanup?.(); attachmentHydrationCleanup = null; controller.stop(); },
+  stop: () => { attachmentHydrationCleanup?.(); attachmentHydrationCleanup = null; textboxSync.stop(); },
   reconnect: () => {
     realtime.close();
     realtime.ensureOpen();

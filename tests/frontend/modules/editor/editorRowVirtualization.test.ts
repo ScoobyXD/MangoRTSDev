@@ -86,7 +86,7 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   const node = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const project = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const parts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const syncHook = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useCollaborativeEditorDocument.ts"), "utf8");
+  const syncHook = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorTextboxSync.ts"), "utf8");
   const logicGate = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gate-map/LogicGateMapContent.tsx"), "utf8");
 
   assert.match(node, /data-mango-bounded-editor-rows="node"/);
@@ -110,9 +110,9 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.ok(node.includes("emailPaneIsVisible || emailReplyBlockID === block.id"));
   assert.ok(project.includes("emailOpen || emailReplyBlockID === block.id"));
   const flushInputIndex = syncHook.indexOf("flushPendingLocalInput?.();");
-  const flushControllerIndex = syncHook.indexOf("controller.flush()", flushInputIndex);
-  const stopControllerIndex = syncHook.indexOf("controller.stop();", flushControllerIndex);
-  assert.ok(flushInputIndex >= 0 && flushControllerIndex > flushInputIndex && stopControllerIndex > flushControllerIndex);
+  const flushSyncIndex = syncHook.indexOf("sync.flush()", flushInputIndex);
+  const stopSyncIndex = syncHook.indexOf("sync.stop();", flushSyncIndex);
+  assert.ok(flushInputIndex >= 0 && flushSyncIndex > flushInputIndex && stopSyncIndex > flushSyncIndex);
   assert.doesNotMatch(logicGate, /useBoundedEditorRowVirtualization|data-mango-bounded-editor-rows/);
 });
 
