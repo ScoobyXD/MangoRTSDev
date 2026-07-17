@@ -96,6 +96,7 @@ import {
 } from "./editorMentions";
 import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
+  EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE,
   DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
   EDITOR_IMAGE_MAX_WIDTH_INSET_PX,
   applyEditorImageFloatLayout,
@@ -109,6 +110,7 @@ import {
   editorAttachmentImageSource,
   editorAttachmentIDFromImageSource,
   createEditorImageFrame,
+  isEditorAttachmentImageSource,
   editorClipboardHTMLContainsOnlyOneImage,
   estimateEditorDocumentBytes,
   findEditorImageFrame,
@@ -2938,6 +2940,8 @@ type EditorImagePreviewDraft = {
   src: string;
   label: string;
   html: string;
+  loadRequestID: number;
+  loadState: "loading" | "ready" | "error";
   attachmentID?: string;
   filename?: string;
   mimeType?: string;
@@ -2952,17 +2956,55 @@ function previewEditorImageFrame(
 ): boolean {
   const data = readEditorImageData(frame);
   if (!data || !onPreviewImage) return false;
+  const attachmentID = data.attachmentID?.trim() ?? "";
+  const needsAttachmentLoad = Boolean(attachmentID && isEditorAttachmentImageSource(data.src));
   onPreviewImage({
-    src: data.src,
+    src: needsAttachmentLoad ? "" : data.src,
     label: "Editor image",
     html: createEditorImageClipboardHTML(root.ownerDocument, data),
-    attachmentID: data.attachmentID,
+    loadRequestID: 0,
+    loadState: needsAttachmentLoad ? "loading" : "ready",
+    attachmentID: attachmentID || undefined,
     filename: data.filename,
     mimeType: data.mimeType,
     width: data.width,
     height: data.height,
   });
   return true;
+}
+
+const EDITOR_IMAGE_PREVIEW_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
+
+function waitForEditorImagePreviewRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, Math.max(0, delayMs));
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function loadEditorImagePreviewObjectURL(
+  load: (signal: AbortSignal) => Promise<string>,
+  signal: AbortSignal,
+): Promise<string> {
+  let lastCause: unknown;
+  for (const delayMs of EDITOR_IMAGE_PREVIEW_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await waitForEditorImagePreviewRetry(delayMs, signal);
+    try {
+      return await load(signal);
+    } catch (cause) {
+      if (signal.aborted || (cause instanceof DOMException && cause.name === "AbortError")) throw cause;
+      lastCause = cause;
+    }
+  }
+  throw lastCause;
 }
 
 const EDITOR_MENTION_MENU_WIDTH_PX = 320;
@@ -4404,27 +4446,41 @@ export function useEditorDocumentSurfaceHandlers({
 
   useEffect(() => {
     const attachmentID = activeImagePreview?.attachmentID?.trim() ?? "";
+    const loadRequestID = activeImagePreview?.loadRequestID ?? 0;
     if (!attachmentID || !editorImageAttachmentContextReady(editorImageAttachmentContext)) return undefined;
     const controller = new AbortController();
     let objectURL = "";
-    void loadMangoAttachmentObjectURL(
-      editorImageAttachmentContext.apiBase,
-      editorImageAttachmentContext.companyID,
-      attachmentID,
-      "original",
-      { signal: controller.signal },
+    void loadEditorImagePreviewObjectURL(
+      (signal) => loadMangoAttachmentObjectURL(
+        editorImageAttachmentContext.apiBase,
+        editorImageAttachmentContext.companyID,
+        attachmentID,
+        "original",
+        { signal },
+      ),
+      controller.signal,
     ).then((url) => {
       objectURL = url;
       setActiveImagePreview((current) => (
-        current?.attachmentID === attachmentID ? { ...current, src: url } : current
+        current?.attachmentID === attachmentID && current.loadRequestID === loadRequestID
+          ? { ...current, src: url, loadState: "ready" }
+          : current
       ));
-    }).catch(() => undefined);
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setActiveImagePreview((current) => (
+        current?.attachmentID === attachmentID && current.loadRequestID === loadRequestID
+          ? { ...current, loadState: current.src ? "ready" : "error" }
+          : current
+      ));
+    });
     return () => {
       controller.abort();
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
   }, [
     activeImagePreview?.attachmentID,
+    activeImagePreview?.loadRequestID,
     editorImageAttachmentContext,
   ]);
 
@@ -4537,9 +4593,19 @@ export function useEditorDocumentSurfaceHandlers({
     ? React.createElement(EditorImagePreviewModal, {
       label: activeImagePreview.label,
       src: activeImagePreview.src,
+      loading: activeImagePreview.loadState === "loading",
       copyable: true,
       onClose: () => setActiveImagePreview(null),
       onDownload: downloadActiveImagePreview,
+      onRetry: activeImagePreview.loadState === "error"
+        ? () => setActiveImagePreview((current) => current
+          ? {
+            ...current,
+            loadRequestID: current.loadRequestID + 1,
+            loadState: "loading",
+          }
+          : current)
+        : undefined,
     })
     : null;
   const tableContextMenuButtonStyle = {
@@ -5107,6 +5173,9 @@ export function useEditorDocumentSurfaceHandlers({
       const root = event.currentTarget;
       const frame = findEditorImageFrame(root, event.target);
       if (!frame) return;
+      if (frame.getAttribute(EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE) === "error") {
+        refreshEditorAttachmentImageFrames(root);
+      }
       event.preventDefault();
       event.stopPropagation();
       clearPendingTypingStyle();

@@ -1065,6 +1065,11 @@ test("mentions, image preview and undo hydration, and retired table-cell control
   assert.ok(imagePreview.includes('aria-label="Download image"'));
   assert.ok(imagePreview.includes('data-mango-image-preview-download="true"'));
   assert.ok(imagePreview.includes("onClick={onDownload}"));
+  assert.ok(imagePreview.includes('aria-label="Retry image preview"'));
+  assert.ok(imagePreview.includes('"Loading preview..."'));
+  assert.match(editorSurfaceHandlers, /EDITOR_IMAGE_PREVIEW_RETRY_DELAYS_MS = \[0, 250, 1_000\]/);
+  assert.match(editorSurfaceHandlers, /loadRequestID: current\.loadRequestID \+ 1[\s\S]*loadState: "loading"/);
+  assert.match(editorSurfaceHandlers, /onDoubleClick\(event\)[\s\S]*EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE\) === "error"[\s\S]*refreshEditorAttachmentImageFrames\(root\)/);
   assert.ok(imagePreview.includes('maxWidth: "calc(100vw - 32px)"'));
   assert.ok(imagePreview.includes('maxHeight: "calc(100vh - 32px)"'));
   assert.doesNotMatch(imagePreview, /setTimeout|requestAnimationFrame|animation:|transition:|outline:/);
