@@ -1055,6 +1055,25 @@ export function mailboxLabel(mailbox: EmailMailbox): string {
 
 export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred">, number>>;
 
+export type InboxCountPresentation = {
+  count: number | undefined;
+  isMinimum: boolean;
+};
+
+export function inboxCountPresentation(
+  exactCount: number | undefined,
+  loadedCount: number | undefined,
+  hasMore: boolean,
+): InboxCountPresentation {
+  if (typeof exactCount === "number" && Number.isFinite(exactCount) && exactCount >= 0) {
+    return { count: Math.floor(exactCount), isMinimum: false };
+  }
+  if (typeof loadedCount === "number" && Number.isFinite(loadedCount) && loadedCount >= 0) {
+    return { count: Math.floor(loadedCount), isMinimum: hasMore };
+  }
+  return { count: undefined, isMinimum: false };
+}
+
 export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMap {
   const inboxFolder = findEmailFolder(folders, ["inbox"]);
   const primaryCategoryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]);

@@ -28,6 +28,7 @@ import {
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
   getHomeViewLabel,
+  inboxCountPresentation,
   inboxLogicGateLabel,
   isMailRowActivationKey,
   isWorkspacePanelHomeViewID,
@@ -587,7 +588,7 @@ test("message documents preserve Mango-authored email body structure", () => {
 
 
 
-test("mailbox count helper keeps visible Inbox and Starred counts", () => {
+test("mailbox count helper keeps provider totals for counter and mutation baselines", () => {
   const counts = mailboxCountsFromFolders([
     { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
     { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
@@ -596,6 +597,13 @@ test("mailbox count helper keeps visible Inbox and Starred counts", () => {
   ]);
 
   assert.deepEqual(counts, { primary: 30, starred: 4 });
+});
+
+test("Inbox count presentation prefers an exact total and otherwise labels a loaded minimum", () => {
+  assert.deepEqual(inboxCountPresentation(30, 12, true), { count: 30, isMinimum: false });
+  assert.deepEqual(inboxCountPresentation(undefined, 12, true), { count: 12, isMinimum: true });
+  assert.deepEqual(inboxCountPresentation(undefined, 0, false), { count: 0, isMinimum: false });
+  assert.deepEqual(inboxCountPresentation(undefined, undefined, false), { count: undefined, isMinimum: false });
 });
 
 

@@ -104,7 +104,7 @@ import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, 
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
 import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, sharedInboxIDForHomeView } from "./emailCollaborationRows";
@@ -463,6 +463,7 @@ export function HomePage({
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [mailboxCountOverrides, setMailboxCountOverrides] = useState<HomeMailboxCountOverrides>({});
+  const [inboxCountFallbacks, setInboxCountFallbacks] = useState<Record<string, { count: number; isMinimum: boolean }>>({});
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [sharedInboxesLoaded, setSharedInboxesLoaded] = useState(false);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
@@ -1242,6 +1243,7 @@ export function HomePage({
         pendingStarredMessageIDsRef.current.clear();
         setPendingStarredMessageIDs(new Set());
         setMailboxCountOverrides({});
+        setInboxCountFallbacks({});
         setFolders([]);
         setMessages([]);
         clearSelectedMessageState();
@@ -1270,6 +1272,7 @@ export function HomePage({
     setPendingStarredMessageIDs(new Set());
     invalidateCommunicationsCache();
     setMailboxCountOverrides({});
+    setInboxCountFallbacks({});
     setFolders([]);
     setMessages([]);
     clearSelectedMessageState();
@@ -5665,11 +5668,40 @@ export function HomePage({
   const currentMailboxCountOverrides = mailboxCountOverrides[currentMailboxCountKey] ?? {};
   const primaryMailboxCountOverride = currentMailboxCountOverrides.primary;
   const starredMailboxCountOverride = currentMailboxCountOverrides.starred;
-  const mailboxCounts = useMemo(() => ({
-    ...baseMailboxCounts,
-    primary: primaryMailboxCountOverride ?? baseMailboxCounts.primary,
-    starred: starredMailboxCountOverride ?? baseMailboxCounts.starred,
-  }), [baseMailboxCounts, primaryMailboxCountOverride, starredMailboxCountOverride]);
+  const exactInboxCount = baseMailboxCounts.primary === undefined
+    ? undefined
+    : primaryMailboxCountOverride ?? baseMailboxCounts.primary;
+  const loadedInboxCount = activeMailViewHasEmailConnection
+    && isArchivableListView
+    && mailbox === "primary"
+    && !searchQuery.trim()
+    && !unreadOnly
+    && loadedMessageListKey === activeMessageListKey
+    && !activeSharedInboxNeedsEmail
+    && !activeSharedInboxBlocksEmail
+    && !loadingMessages
+    ? messages.length
+    : undefined;
+  const currentLoadedInboxFallback = loadedInboxCount === undefined
+    ? undefined
+    : { count: loadedInboxCount, isMinimum: Boolean(nextPageToken) };
+  const storedInboxCountFallback = inboxCountFallbacks[currentMailboxCountKey];
+  const inboxCountFallback = currentLoadedInboxFallback ?? storedInboxCountFallback;
+  const inboxCount = inboxCountPresentation(
+    exactInboxCount,
+    inboxCountFallback?.count,
+    inboxCountFallback?.isMinimum ?? false,
+  );
+  const mailboxCounts = useMemo(() => ({ primary: inboxCount.count }), [inboxCount.count]);
+  useEffect(() => {
+    if (loadedInboxCount === undefined) return;
+    const nextFallback = { count: loadedInboxCount, isMinimum: Boolean(nextPageToken) };
+    setInboxCountFallbacks((previous) => {
+      const current = previous[currentMailboxCountKey];
+      if (current?.count === nextFallback.count && current.isMinimum === nextFallback.isMinimum) return previous;
+      return { ...previous, [currentMailboxCountKey]: nextFallback };
+    });
+  }, [currentMailboxCountKey, loadedInboxCount, nextPageToken]);
   useEffect(() => {
     if (baseMailboxCounts.primary === undefined || primaryMailboxCountOverride === undefined) return;
     if (baseMailboxCounts.primary === primaryMailboxCountOverride) setPrimaryMailboxCountOverride(currentMailboxCountKey, undefined);
@@ -5938,6 +5970,7 @@ export function HomePage({
             messageListOrder={messageListOrder}
             mailbox={mailbox}
             mailboxCounts={mailboxCounts}
+            inboxCountIsMinimum={inboxCount.isMinimum}
             messageListRef={messageListRef}
             messages={visibleMessages}
             companyUsers={companyUsers}

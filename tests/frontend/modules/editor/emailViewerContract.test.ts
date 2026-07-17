@@ -116,6 +116,7 @@ test("mail workspace preserves the fixed three-button lower row and new-message 
 
 test("mail list actions keep fixed positions, light inactive surfaces, clear selected states, and visible All-menu hover", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
   const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
   const indexCSS = source("frontend/src/index.css");
   const topStart = homeWorkspace.indexOf("<div style={mailArchiveActionsStyle}>");
@@ -123,12 +124,18 @@ test("mail list actions keep fixed positions, light inactive surfaces, clear sel
   const lowerEnd = homeWorkspace.indexOf("{!isArchivableListView && (", lowerStart);
   const topActions = homeWorkspace.slice(topStart, lowerStart);
   const lowerActions = homeWorkspace.slice(lowerStart, lowerEnd);
+  const starredAction = topActions.indexOf('title="Starred"');
 
   assert.ok(topStart >= 0 && lowerStart > topStart && lowerEnd > lowerStart);
-  assert.ok(topActions.indexOf('label="Inbox"') < topActions.indexOf('label="Starred"'));
-  assert.ok(topActions.indexOf('label="Starred"') < topActions.indexOf('mailbox === "sent"'));
+  assert.ok(topActions.indexOf('label="Inbox"') < starredAction);
+  assert.ok(starredAction < topActions.indexOf('mailbox === "sent"'));
   assert.ok(topActions.indexOf('mailbox === "sent"') < topActions.indexOf("allDropdownActive"));
   assert.match(topActions, /onOpenSentMailbox/);
+  assert.match(topActions, /label="Inbox" count=\{mailboxCounts\.primary\} countIsMinimum=\{inboxCountIsMinimum\}/);
+  assert.match(homeWorkspace, /return isMinimum \? `\$\{formattedCount\}\+` : formattedCount/);
+  assert.match(homePage, /const inboxCountFallback = currentLoadedInboxFallback \?\? storedInboxCountFallback/);
+  assert.match(topActions, /<span style=\{mailArchiveActionLabelStyle\}>Starred<\/span>/);
+  assert.doesNotMatch(topActions, /count=\{mailboxCounts\.starred\}/);
   assert.doesNotMatch(topActions, /onOpenDraftsMailbox/);
   assert.match(lowerActions, /mango-mail-vibrant-compose/);
   assert.match(lowerActions, /aria-pressed=\{compose\.open\}/);
