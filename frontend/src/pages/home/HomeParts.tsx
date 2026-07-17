@@ -6136,11 +6136,10 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   const itemStyle: React.CSSProperties = {
     minWidth: 0,
     minHeight: fill ? "100%" : undefined,
-    height: fill ? "100%" : undefined,
     display: "grid",
     gridTemplateColumns: fill ? "minmax(0, 1fr)" : "20px minmax(0, 1fr)",
     gap: fill ? 0 : 8,
-    alignItems: "stretch",
+    alignItems: fill ? "start" : "stretch",
   };
   return (
     <article data-email-timeline-item="true" data-email-message-id={message.id} data-email-message-sources={emailThreadMessageSourceLabel(message)} data-message-direction={sent ? "sent" : "received"} style={itemStyle}>
