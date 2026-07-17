@@ -528,3 +528,45 @@ test("staged local input is persisted before a remote commit is applied", async 
     dom.restore();
   }
 });
+
+test("local input scheduled during recovery is not repainted by an older snapshot", async () => {
+  const initial = "before recovery";
+  const next = "edited during recovery";
+  const dom = installEditorDOM(initial);
+  try {
+    const server = new HTMLPatchTestServer(initial);
+    let snapshotReads = 0;
+    let releaseFinalSnapshot!: () => void;
+    const finalSnapshotBlocked = new Promise<void>((resolve) => { releaseFinalSnapshot = resolve; });
+    let finalSnapshotStarted = false;
+    let visible = initial;
+    const controller = new EditorCollaborationController(controllerOptions(server, "edit-during-recovery", {
+      onHTML: (html) => { visible = html; },
+      requestJSON: async <T,>(_path: string, init?: RequestInit) => {
+        if (init?.method) return server.commit(JSON.parse(String(init.body)) as CommitBody) as T;
+        snapshotReads += 1;
+        if (snapshotReads === 2) {
+          finalSnapshotStarted = true;
+          const stale = server.currentSnapshot();
+          await finalSnapshotBlocked;
+          return stale as T;
+        }
+        return server.currentSnapshot() as T;
+      },
+    }));
+
+    const recovery = controller.recover();
+    await eventually(() => finalSnapshotStarted, "recovery final snapshot read");
+    visible = next;
+    controller.schedule(next, true);
+    releaseFinalSnapshot();
+
+    await recovery;
+    await controller.flush();
+    assert.equal(server.html, next);
+    assert.equal(visible, next);
+    controller.stop();
+  } finally {
+    dom.restore();
+  }
+});

@@ -425,6 +425,7 @@ export class EditorCollaborationController {
       this.rollbackVisibleEdit("editor_collaboration_document_too_large");
       return;
     }
+    if (this.recovery) this.recoveryRequested = true;
     this.renderedHTML = nextHTML;
     this.persistenceChain = this.persistenceChain.then(async () => {
       const patch = editorHTMLPatchForChange(this.optimisticHTML, nextHTML);
@@ -547,7 +548,7 @@ export class EditorCollaborationController {
       }, false);
     }
     this.rebuildOptimistic();
-    this.renderOptimistic("recovery", true);
+    if (!this.recoveryRequested) this.renderOptimistic("recovery", true);
     this.options.onPendingChange?.(this.pending.length);
   }
 
