@@ -146,9 +146,10 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { ChatPane, NodeTextBlockEditor }] = await Promise.all([
+    const [{ createRoot }, { ChatPane, NodeTextBlockEditor }, { AppModalPortal }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
+      import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
     const noop = () => undefined;
     const messages = [
@@ -356,6 +357,55 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     ));
     await flushFrames();
     assert.ok(container.querySelector('[data-mango-chat-message-id="comment-nested"]'), "the source annotation persists after chat creation succeeds");
+
+    const imageChatRequests: string[] = [];
+    const inlineImageDocument = '<!-- mango-editor-html-v1 --><span data-mango-editor-image="true" data-mango-editor-filename="inline.png" data-mango-editor-mime-type="image/png"><img src="data:image/png;base64,AA==" alt=""></span>';
+    await act(async () => root.render(
+      <AppModalPortal>
+        <NodeTextBlockEditor
+          {...nestedEditorProps}
+          blockID="block-image"
+          documentValue={inlineImageDocument}
+          pendingChatSelectionAnchor={undefined}
+          chatMessages={[]}
+          onImageChatRequest={(image) => imageChatRequests.push(image.blockID)}
+        />
+      </AppModalPortal>,
+    ));
+    await flushFrames();
+    const enclosingModalLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-modal-focus-trap="true"]');
+    const imageEditor = enclosingModalLayer?.querySelector<HTMLElement>('[data-node-text-block-id="block-image"]');
+    const imageFrame = imageEditor?.querySelector<HTMLElement>('[data-mango-editor-image="true"]');
+    const inlineImage = imageFrame?.querySelector<HTMLImageElement>("img");
+    assert.ok(enclosingModalLayer);
+    assert.ok(imageEditor);
+    assert.ok(imageFrame);
+    assert.ok(inlineImage);
+    imageEditor.getBoundingClientRect = () => rect(0, 0, 400, 300);
+    imageEditor.parentElement!.getBoundingClientRect = () => rect(0, 0, 400, 300);
+    imageFrame.getBoundingClientRect = () => rect(100, 100, 250, 220);
+    await act(async () => {
+      inlineImage.dispatchEvent(new dom.window.MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 175,
+        clientY: 160,
+      }));
+    });
+    const imageActions = dom.window.document.querySelector<HTMLElement>('[role="toolbar"][aria-label="Image actions"]');
+    assert.ok(imageActions, "selecting an inline image still exposes its chat/create-node controls");
+    assert.equal(
+      imageActions.closest('[data-mango-modal-layer="true"]'),
+      enclosingModalLayer,
+      "selected-image controls must stay above their enclosing editor modal instead of opening a lower sibling layer",
+    );
+    assert.equal(dom.window.document.querySelectorAll('[data-mango-modal-layer="true"]').length, 1);
+    dom.window.document.dispatchEvent(new dom.window.Event("pointerup"));
+    const imageCommentButton = imageActions.querySelector<HTMLButtonElement>('button[aria-label="Comment on image"]');
+    assert.ok(imageCommentButton);
+    await act(async () => imageCommentButton.click());
+    assert.deepEqual(imageChatRequests, ["block-image"]);
 
     const threadedMessages = [
       message({ id: "parent", message: "Parent comment" }),

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
+import { createPortal } from "react-dom";
+import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
@@ -801,6 +802,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onSelectionHighlightColorChange,
   onSelectionTextAlignmentChange,
 }) => {
+  // Reuse an enclosing editor modal layer; a new sibling layer would render underneath it.
+  const floatingImageActionTarget = useAppOverlayPortalTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const attachmentHydrationOwnerRef = useRef<{ contextKey: string; cleanup: () => void } | null>(null);
@@ -1576,8 +1579,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           <ChatIcon color={accent} />
         </button>
       )}
-      {imageDraft && (
-        <AppModalPortal trapFocus={false}>
+      {imageDraft && floatingImageActionTarget && createPortal(
+        <>
         <button
           type="button"
           title="Download image"
@@ -1595,7 +1598,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             position: "fixed",
             left: imageDraft.downloadX,
             top: imageDraft.downloadY,
-            zIndex: 6,
+            zIndex: 1991,
             width: 28,
             height: 28,
             borderRadius: 7,
@@ -1623,7 +1626,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             position: "fixed",
             left: imageDraft.x,
             top: imageDraft.y,
-            zIndex: 5,
+            zIndex: 1990,
             display: "grid",
             gridTemplateColumns: "28px 28px",
             gap: 5,
@@ -1664,7 +1667,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           </button>
         </div>
       )}
-        </AppModalPortal>
+        </>,
+        floatingImageActionTarget,
       )}
     </div>
   );

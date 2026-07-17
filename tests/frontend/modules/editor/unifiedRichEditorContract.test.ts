@@ -1438,7 +1438,9 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(nodeParts.includes("onDoubleClick={(event) => openAttachment(event, attachment)}"));
   assert.ok(nodeParts.includes("<EditorImagePreviewModal"));
   assert.ok(nodeParts.includes("onDownload={() =>"));
-  assert.ok(nodeParts.includes("<AppModalPortal trapFocus={false}>"));
+  assert.ok(nodeParts.includes("useAppOverlayPortalTarget"));
+  assert.ok(nodeParts.includes("createPortal("));
+  assert.ok(!nodeParts.includes("<AppModalPortal trapFocus={false}>"));
   assert.ok(nodeParts.includes('position: "fixed"'));
   assert.ok(nodeParts.includes('addEventListener("scroll", refreshFloatingImageActions, true)'));
   assert.ok(nodeSurface.includes("pendingChatSelectionAnchor={selectionAnchor}"));
