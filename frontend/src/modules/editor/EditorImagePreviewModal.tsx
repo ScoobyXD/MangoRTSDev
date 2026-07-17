@@ -6,9 +6,11 @@ export type EditorImagePreviewModalProps = {
   label: string;
   src: string;
   emptyLabel?: string;
+  loading?: boolean;
   copyable?: boolean;
   onClose: () => void;
   onDownload: () => void;
+  onRetry?: () => void;
 };
 
 /** Shared fullscreen image viewer for editor images and chat image attachments. */
@@ -16,9 +18,11 @@ export const EditorImagePreviewModal: React.FC<EditorImagePreviewModalProps> = (
   label,
   src,
   emptyLabel = "Preview unavailable",
+  loading = false,
   copyable = false,
   onClose,
   onDownload,
+  onRetry,
 }) => (
   <AppModalPortal onRequestClose={onClose}>
     <div
@@ -71,8 +75,30 @@ export const EditorImagePreviewModal: React.FC<EditorImagePreviewModalProps> = (
             }}
           />
         ) : (
-          <div style={{ minWidth: "min(420px, calc(100vw - 32px))", minHeight: "min(320px, calc(100vh - 32px))", display: "grid", placeItems: "center", color: "#ffffff", fontSize: 12, fontWeight: 850, lineHeight: 1.35 }}>
-            {emptyLabel}
+          <div style={{ minWidth: "min(420px, calc(100vw - 32px))", minHeight: "min(320px, calc(100vh - 32px))", display: "grid", placeItems: "center", alignContent: "center", gap: 12, color: "#ffffff", fontSize: 12, fontWeight: 850, lineHeight: 1.35 }}>
+            <span>{loading ? "Loading preview..." : emptyLabel}</span>
+            {!loading && onRetry ? (
+              <button
+                type="button"
+                aria-label="Retry image preview"
+                onClick={onRetry}
+                style={{
+                  minWidth: 84,
+                  height: 34,
+                  border: "1px solid rgba(255,255,255,0.82)",
+                  borderRadius: 8,
+                  background: "rgba(15,23,42,0.86)",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 850,
+                  lineHeight: 1,
+                  padding: "0 14px",
+                }}
+              >
+                Retry
+              </button>
+            ) : null}
           </div>
         )}
         <button

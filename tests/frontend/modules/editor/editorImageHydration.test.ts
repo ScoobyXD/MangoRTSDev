@@ -283,6 +283,29 @@ test("hydration retries a visible attachment after a bounded backoff", async () 
   }
 });
 
+test("hydration survives several transient failures without requiring a row remount", async () => {
+  const originalSpan = globalThis.HTMLSpanElement;
+  const originalObserver = globalThis.IntersectionObserver;
+  Object.assign(globalThis, { HTMLSpanElement: FakeSpan, IntersectionObserver: undefined });
+  try {
+    const frame = new FakeSpan("attachment-patient-retry");
+    let calls = 0;
+    const cleanup = hydrateEditorAttachmentImageFrames(new FakeRoot([frame]) as unknown as HTMLElement, async () => {
+      calls += 1;
+      if (calls <= 4) throw new Error("temporary_failure");
+      return "blob:attachment-patient-retry";
+    }, { retryDelaysMs: [0, 0, 0, 0] });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
+    assert.equal(calls, 5);
+    assert.equal(frame.image.src, "blob:attachment-patient-retry");
+    assert.equal(frame.getAttribute(EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE), "ready");
+    cleanup();
+  } finally {
+    Object.assign(globalThis, { HTMLSpanElement: originalSpan, IntersectionObserver: originalObserver });
+  }
+});
+
 test("a hung display request is aborted and retried through the original attachment", async () => {
   const originalSpan = globalThis.HTMLSpanElement;
   const originalObserver = globalThis.IntersectionObserver;

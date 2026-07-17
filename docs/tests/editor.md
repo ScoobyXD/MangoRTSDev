@@ -1344,3 +1344,20 @@ Expected:
 - Rows keep one fixed vertical height. No Node/Project text-box or chat-pane vertical resize control is exposed; email/chat column width separators still resize horizontally. Narrow windows scroll horizontally across the columns without changing row height.
 - Pending local document input flushes into the existing durable save path before editor unmount. Remount restores the current content and remembered inner scroll position for that document.
 - Logic Gate keeps its existing editor behavior and does not use the Node/Project row virtualizer.
+
+### Scenario ED-S17: Transient Inline-Image Loads Recover In Place
+
+Business logic covered:
+- ED46
+- ATT34
+- ATT60
+- ATT62
+
+Given:
+- A visible attachment-backed image in a mounted Node or Project text box encounters several temporary authenticated content-load failures.
+- The user leaves the row mounted or double-clicks the unavailable frame to open its original preview.
+
+Expected:
+- The mounted frame uses finite spaced retries and can reach ready without requiring the user to close/reopen the Node or scroll the row out and back into the virtualized window.
+- Double-clicking an unavailable frame starts fresh display hydration and a separately cancelable original-image load. The final dark overlay shows an explicit loading state, retries transient failures, and exposes a keyboard-accessible Retry button after terminal failure instead of attempting to render the internal attachment reference.
+- Closing the preview, replacing the document, or unmounting the virtualized row aborts obsolete requests and revokes owned object URLs without changing the durable attachment reference.

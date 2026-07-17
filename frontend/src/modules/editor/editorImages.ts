@@ -62,6 +62,7 @@ type EditorAttachmentHydrationOwner = {
 export type EditorAttachmentHydrationOptions = Readonly<{
   eager?: boolean;
   attemptTimeoutMs?: number;
+  retryDelaysMs?: readonly number[];
   onError?: (attachmentID: string) => void;
 }>;
 
@@ -74,7 +75,7 @@ type EditorAttachmentHydrationTask = {
 
 const EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN = "800px 0px";
 const EDITOR_ATTACHMENT_HYDRATION_MAX_CONCURRENCY = 4;
-const EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS = [100, 500] as const;
+const EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS = [100, 500, 2_000, 5_000] as const;
 const EDITOR_ATTACHMENT_HYDRATION_ATTEMPT_TIMEOUT_MS = 15_000;
 const EDITOR_ATTACHMENT_HYDRATION_OBSERVER_WATCHDOG_MS = 5_000;
 const editorAttachmentHydrationQueue: EditorAttachmentHydrationTask[] = [];
@@ -466,6 +467,7 @@ function startEditorAttachmentImageHydrationGeneration(
   loadObjectURL: EditorAttachmentImageObjectURLLoader,
   options: EditorAttachmentHydrationOptions,
 ): () => void {
+  const retryDelaysMs = options.retryDelaysMs ?? EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS;
   const frames = Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"], span[${EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE}]`))
     .filter((node): node is HTMLSpanElement => node instanceof HTMLSpanElement);
   const framesByAttachmentID = new Map<string, HTMLSpanElement[]>();
@@ -535,7 +537,7 @@ function startEditorAttachmentImageHydrationGeneration(
         if (timedOut) void pendingLoad?.then((lateURL) => URL.revokeObjectURL(lateURL)).catch(() => undefined);
         if (disposed || (controller.signal.aborted && !timedOut)) return;
         scheduledAttachmentIDs.delete(attachmentID);
-        const retryDelay = EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS[retryCount];
+        const retryDelay = retryDelaysMs[retryCount];
         if (retryDelay === undefined) {
           for (const frame of attachmentFrames) {
             if (root.contains(frame)) setEditorImageFrameHydrationState(frame, "error");
