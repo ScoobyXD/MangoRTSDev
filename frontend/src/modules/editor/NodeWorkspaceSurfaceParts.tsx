@@ -1694,6 +1694,13 @@ type ChatPaneProps = {
 
 const CHAT_COMPOSER_MIN_HEIGHT = 34;
 const CHAT_COMPOSER_PANE_HEIGHT_RESERVE = 116;
+const CHAT_COMPOSER_TEXT_METRICS: React.CSSProperties = {
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 400,
+  lineHeight: 1.35,
+  letterSpacing: 0,
+};
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
@@ -2221,9 +2228,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   padding: "8px 9px",
                   color: surfaceText,
                   background: EDITOR_NEU_ACTIVE_SURFACE,
-                  fontSize: 12,
-                  lineHeight: 1.35,
-                  letterSpacing: 0,
+                  ...CHAT_COMPOSER_TEXT_METRICS,
                   whiteSpace: "pre-wrap",
                   overflowWrap: "anywhere",
                   pointerEvents: "none",
@@ -2238,12 +2243,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     style={{
                       background: segment.text.startsWith("!") ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND,
                       color: EDITOR_MENTION_COLOR,
-                      border: segment.text.startsWith("!") ? "1px solid rgba(239,68,68,0.34)" : "1px solid rgba(183,124,255,0.34)",
+                      border: 0,
                       borderRadius: 6,
-                      padding: "0 4px",
-                      fontWeight: 850,
+                      padding: 0,
+                      fontWeight: "inherit",
                       boxDecorationBreak: "clone",
-                      boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
+                      // The transparent textarea owns the native caret. Keep the
+                      // painted chip's inline advance and glyph metrics identical
+                      // so accepted mentions cannot visually outrun that caret.
+                      boxShadow: segment.text.startsWith("!")
+                        ? "0 0 0 1px rgba(254,226,226,0.92), 0 0 0 2px rgba(239,68,68,0.34), inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)"
+                        : "0 0 0 1px rgba(247,239,255,0.92), 0 0 0 2px rgba(183,124,255,0.34), inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
                     }}
                   >
                     {segment.text}
@@ -2341,7 +2351,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"

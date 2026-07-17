@@ -433,7 +433,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     event.currentTarget.select();
                   }
                 }}
-                style={{ ...formatControlStyle("font-size", { width: 32 }), cursor: formatControlsDisabled ? "default" : "text", textAlign: "center", fontFamily: "inherit", fontSize: 8, fontWeight: 600, padding: 0 }}
+                style={{ ...formatControlStyle("font-size", { width: 32 }), cursor: formatControlsDisabled ? "default" : "text", textAlign: "center", fontFamily: "inherit", fontSize: 9, fontWeight: 600, padding: 0 }}
               />
               <button
                 type="button"
