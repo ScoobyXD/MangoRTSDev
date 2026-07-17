@@ -415,6 +415,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
+  const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
@@ -957,6 +958,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
+    setChatComposerFocusRequestIDs((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setSidePaneWidths((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setActiveChatMessageIDs((current) => {
       if (nodeChanged) return {};
@@ -1632,6 +1634,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setActiveChatBlockID(image.blockID);
+    setChatComposerFocusRequestIDs((current) => ({
+      ...current,
+      [image.blockID]: (current[image.blockID] ?? 0) + 1,
+    }));
+    setChatMessageFocusRequest((current) => current?.blockID === image.blockID ? null : current);
+    setActiveChatMessageIDs((current) => {
+      if (!current[image.blockID]) return current;
+      const next = { ...current };
+      delete next[image.blockID];
+      return next;
+    });
     setChatReplyTargets((current) => {
       if (!current[image.blockID]) return current;
       const next = { ...current };
@@ -3031,6 +3044,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     messageFocusRequest={chatMessageFocusRequest?.blockID === chatBlockID
                       ? { messageID: chatMessageFocusRequest.messageID, requestID: chatMessageFocusRequest.requestID }
                       : null}
+                    composerFocusRequestID={chatComposerFocusRequestIDs[chatBlockID] ?? 0}
                     accent={accent}
                     surfaceText={surfaceText}
                     panelBackground={panelBackground}

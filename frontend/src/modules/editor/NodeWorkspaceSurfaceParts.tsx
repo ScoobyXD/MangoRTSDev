@@ -1698,6 +1698,7 @@ type ChatPaneProps = {
   currentUserID: string;
   activeMessageID: string;
   messageFocusRequest?: ChatMessageFocusRequest | null;
+  composerFocusRequestID?: number;
   accent: string;
   surfaceText: string;
   panelBackground: string;
@@ -1747,6 +1748,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   currentUserID,
   activeMessageID,
   messageFocusRequest,
+  composerFocusRequestID = 0,
   accent,
   surfaceText,
   panelBackground,
@@ -1924,6 +1926,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [editable, replyTargetID, showingEmail]);
+
+  useEffect(() => {
+    if (!editable || showingEmail || !composerFocusRequestID) return;
+    if (messageFocusRequestPendingRef.current) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [composerFocusRequestID, editable, showingEmail]);
 
   useEffect(() => {
     if (!editable) return;
