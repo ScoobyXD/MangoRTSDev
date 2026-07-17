@@ -1709,23 +1709,26 @@ function SidebarNotificationBadges({ badges, large = false }: { badges: SidebarN
   if (visible.length === 0) return null;
   return (
     <span style={large ? appSidebarLargeBadgeStripStyle : appSidebarBadgeStripStyle} aria-label="Update counts">
-      {visible.map((badge) => (
-        <span
-          key={badge.key}
-          title={badge.title}
-          aria-label={badge.title}
-          style={appSidebarNotificationBadgeStyle(badge.tone, !large || normalizeSidebarNotificationCount(badge.count) > 0, large)}
-          onClick={(event) => {
-            if (!badge.onClick) return;
-            event.preventDefault();
-            event.stopPropagation();
-            badge.onClick(event);
-          }}
-        >
-          {badge.label && <span style={appSidebarNotificationBadgeLabelStyle(large)}>{badge.label}</span>}
-          {formatSidebarNotificationCount(badge.count)}
-        </span>
-      ))}
+      {visible.map((badge) => {
+        const highlighted = !large || normalizeSidebarNotificationCount(badge.count) > 0;
+        return (
+          <span
+            key={badge.key}
+            title={badge.title}
+            aria-label={badge.title}
+            style={appSidebarNotificationBadgeStyle(badge.tone, highlighted, large)}
+            onClick={(event) => {
+              if (!badge.onClick) return;
+              event.preventDefault();
+              event.stopPropagation();
+              badge.onClick(event);
+            }}
+          >
+            {badge.label && <span style={appSidebarNotificationBadgeLabelStyle(large)}>{badge.label}</span>}
+            <span style={appSidebarNotificationBadgeCountStyle(large)}>{formatSidebarNotificationCount(badge.count)}</span>
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -2567,11 +2570,11 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone, hi
       minWidth: 0,
       width: "100%",
       height: "100%",
-      display: "inline-flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 1,
+      display: "grid",
+      gridTemplateRows: "16px 12px",
+      alignContent: "center",
+      justifyItems: "center",
+      rowGap: 3,
       border: "none",
       borderLeft: `1px solid ${colors.border}`,
       borderRadius: 0,
@@ -2582,10 +2585,10 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone, hi
       fontSize: 13,
       fontWeight: 900,
       lineHeight: 1,
-      padding: 2,
+      padding: "3px 2px 4px",
       boxSizing: "border-box",
       flex: "0 0 auto",
-      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.68)",
+      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.78), inset 0 -1px 0 rgba(15, 23, 42, 0.06)",
     };
   }
   return {
@@ -2614,22 +2617,38 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone, hi
 function appSidebarNotificationBadgeLabelStyle(large: boolean): React.CSSProperties {
   if (large) {
     return {
-      minHeight: 14,
+      width: 16,
+      height: 16,
       display: "grid",
       placeItems: "center",
       fontSize: 15,
       fontWeight: 950,
-      lineHeight: 1,
+      lineHeight: "16px",
     };
   }
   return { fontSize: 10, fontWeight: 950, lineHeight: 1 };
 }
 
+function appSidebarNotificationBadgeCountStyle(large: boolean): React.CSSProperties {
+  if (large) {
+    return {
+      height: 12,
+      display: "grid",
+      placeItems: "center",
+      fontSize: 13,
+      fontWeight: 900,
+      lineHeight: "12px",
+      fontVariantNumeric: "tabular-nums",
+    };
+  }
+  return { lineHeight: 1, fontVariantNumeric: "tabular-nums" };
+}
+
 function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone, highlighted = true): { background: string; border: string; color: string } {
   if (!highlighted) return { background: "linear-gradient(135deg, rgba(248, 250, 252, 0.72), rgba(226, 232, 240, 0.42))", border: "rgba(148, 163, 184, 0.34)", color: "#94a3b8" };
-  if (tone === "urgent") return { background: "linear-gradient(135deg, rgba(254, 226, 226, 0.98), rgba(251, 146, 60, 0.62))", border: "rgba(239, 68, 68, 0.48)", color: "#b91c1c" };
-  if (tone === "mention") return { background: "linear-gradient(135deg, rgba(204, 251, 241, 0.98), rgba(125, 211, 252, 0.72))", border: "rgba(13, 148, 136, 0.44)", color: "#0f766e" };
-  if (tone === "updates") return { background: "linear-gradient(135deg, rgba(254, 249, 195, 0.98), rgba(251, 146, 60, 0.62))", border: "rgba(245, 158, 11, 0.48)", color: "#b45309" };
+  if (tone === "urgent") return { background: "linear-gradient(145deg, rgba(255, 247, 237, 0.98) 0%, rgba(254, 215, 170, 0.94) 30%, rgba(251, 113, 133, 0.82) 66%, rgba(234, 88, 12, 0.88) 100%)", border: "rgba(234, 88, 12, 0.56)", color: "#9f1239" };
+  if (tone === "mention") return { background: "linear-gradient(145deg, rgba(236, 254, 255, 0.98) 0%, rgba(165, 243, 252, 0.94) 30%, rgba(45, 212, 191, 0.78) 64%, rgba(14, 165, 233, 0.86) 100%)", border: "rgba(8, 145, 178, 0.52)", color: "#0f5f78" };
+  if (tone === "updates") return { background: "linear-gradient(145deg, rgba(255, 251, 235, 0.98) 0%, rgba(254, 240, 138, 0.94) 30%, rgba(251, 191, 36, 0.82) 64%, rgba(249, 115, 22, 0.88) 100%)", border: "rgba(234, 88, 12, 0.5)", color: "#9a4310" };
   if (tone === "mail") return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
   return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
 }
