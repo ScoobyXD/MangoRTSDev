@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AppModalPortal } from "../../app/AppModalPortal";
-import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE } from "./UnifiedNodeShell";
+import { EditorImagePreviewModal } from "./EditorImagePreviewModal.js";
 import {
   downloadMangoAttachment,
   fetchMangoAttachmentBlob,
@@ -4535,92 +4534,14 @@ export function useEditorDocumentSurfaceHandlers({
     : null;
 
   const imagePreviewModal = activeImagePreview
-    ? React.createElement(
-      "div",
-      {
-        role: "dialog",
-        "aria-modal": true,
-        "aria-label": activeImagePreview.label,
-        "data-mango-copyable-image": "true",
-        "data-mango-image-preview-backdrop": "translucent",
-        onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => {
-          if (event.target === event.currentTarget) setActiveImagePreview(null);
-        },
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 1,
-          background: "rgba(15,23,42,0.82)",
-          display: "grid",
-          placeItems: "center",
-          padding: 12,
-        } satisfies React.CSSProperties,
-      },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          "aria-label": "Close image preview",
-          title: "Close image preview",
-          "data-mango-image-preview-close": "true",
-          onClick: () => setActiveImagePreview(null),
-          style: {
-            ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE,
-            position: "fixed",
-            top: 18,
-            right: 18,
-            zIndex: 2,
-          } satisfies React.CSSProperties,
-        },
-        "X",
-      ),
-      React.createElement(
-        "div",
-        { style: { position: "relative", display: "inline-block", lineHeight: 0 } satisfies React.CSSProperties },
-        React.createElement("img", {
-          alt: activeImagePreview.label,
-          src: activeImagePreview.src,
-          style: {
-            width: "auto",
-            height: "auto",
-            maxWidth: "calc(100vw - 32px)",
-            maxHeight: "calc(100vh - 32px)",
-            objectFit: "contain",
-            display: "block",
-          } satisfies React.CSSProperties,
-        }),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            "aria-label": "Download image",
-            title: "Download image",
-            "data-mango-image-preview-download": "true",
-            onClick: downloadActiveImagePreview,
-            style: {
-              position: "absolute",
-              right: 10,
-              bottom: 10,
-              width: 36,
-              height: 36,
-              border: "1px solid rgba(255,255,255,0.82)",
-              borderRadius: 8,
-              background: "rgba(15,23,42,0.86)",
-              color: "#ffffff",
-              cursor: "pointer",
-              display: "grid",
-              placeItems: "center",
-              boxShadow: "0 6px 20px rgba(0,0,0,0.38)",
-              fontSize: 20,
-              lineHeight: 1,
-            } satisfies React.CSSProperties,
-          },
-          "⇩",
-        ),
-      ),
-    )
+    ? React.createElement(EditorImagePreviewModal, {
+      label: activeImagePreview.label,
+      src: activeImagePreview.src,
+      copyable: true,
+      onClose: () => setActiveImagePreview(null),
+      onDownload: downloadActiveImagePreview,
+    })
     : null;
-
   const tableContextMenuButtonStyle = {
     width: "100%",
     minHeight: 29,
@@ -5735,9 +5656,7 @@ export function useEditorDocumentSurfaceHandlers({
     return inserted;
   }, [clearPendingTypingStyle, documentUndoHistoryRef, editorInputBatcher, rememberEditorSelectionRange, restoreEditorSelectionRange, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
-  const blockingImagePreview = imagePreviewModal
-    ? React.createElement(AppModalPortal, { onRequestClose: () => setActiveImagePreview(null) }, imagePreviewModal)
-    : null;
+  const blockingImagePreview = imagePreviewModal;
   const overlay = React.createElement(React.Fragment, null, mentionMenu, tableContextMenu, blockingImagePreview);
   return { ...handlers, mentionMenu: overlay, insertTable, restoreSelection: restoreEditorSelectionRange, flushPendingInput };
 }

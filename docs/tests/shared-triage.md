@@ -859,7 +859,7 @@ Expected:
 - The navigable source Shared Triage shows one deduplicated ordinary conversation row; the participant without mailbox navigation sees the thread only through My Triage fallback.
 - Collaboration participation does not reveal the shared folder tree, unrelated messages, or another shared inbox.
 - Opening the source row keeps email detail full width and Chat closed. Only the explicit accessible Chat control mounts the right-hand rail; closing it or changing exact message/mailbox/view makes no collaboration mutation.
-- The open rail renders the same ChatPane and Node chat rows used by the standalone collaboration Node, and its header shows the canonical deduplicated participant/group-provenance roster rather than provider recipients or current group members.
+- The open rail renders the same ChatPane and Node chat rows used by the standalone collaboration Node, and its header shows the canonical deduplicated participant/group-provenance roster rather than provider recipients or current group members. Posted chat images include the same right-side original download and shared fullscreen double-click preview.
 - A failed ensure leaves no partial durable artifacts; a creation/write failure preserves the chat composer context, never inserts a false saved row before backend acknowledgement, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - Selection anchors target the exact shared message, and reading/highlighting/abandoning a chat does not create a Node.
 - Create Shared Draft uses the exact Reply All source message and every permanent participant sees one revisioned draft with its source shared inbox labeled.

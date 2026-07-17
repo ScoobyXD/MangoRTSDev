@@ -154,18 +154,18 @@ test("failed editor image transfers stay visible and block chat submission until
   assert.equal(editorChatAttachmentsReadyForSubmit(drafts), false);
 });
 
-test("inline image actions remain attached to the thumbnail as the editor scrolls", () => {
-  const wrapper = { left: 100, top: 100 };
-  const viewport = { left: 100, top: 100, right: 700, bottom: 500 };
+test("inline image actions use the elevated app layer without losing their image anchor", () => {
+  const editorViewport = { left: 100, top: 100, right: 700, bottom: 500 };
+  const appViewport = { left: 0, top: 0, right: 1200, bottom: 800 };
   const before = resolveTextBlockImageActionLayout(
     { left: 160, top: 180, right: 460, bottom: 380 },
-    wrapper,
-    viewport,
+    editorViewport,
+    appViewport,
   );
   const after = resolveTextBlockImageActionLayout(
     { left: 160, top: 130, right: 460, bottom: 330 },
-    wrapper,
-    viewport,
+    editorViewport,
+    appViewport,
   );
 
   if (!before || !after) throw new Error("expected visible image action layouts");
@@ -173,13 +173,21 @@ test("inline image actions remain attached to the thumbnail as the editor scroll
   assert.equal(after.downloadX, before.downloadX);
   assert.equal(after.x, before.x);
   assert.equal(after.downloadY - before.downloadY, -50);
+
+  const besideChatPane = resolveTextBlockImageActionLayout(
+    { left: 500, top: 180, right: 695, bottom: 380 },
+    editorViewport,
+    appViewport,
+  );
+  if (!besideChatPane) throw new Error("expected image actions beside the chat pane");
+  assert.equal(besideChatPane.x, 703);
+  assert.ok(besideChatPane.x > editorViewport.right, "the elevated action surface may cross the editor edge above the chat pane");
   assert.equal(resolveTextBlockImageActionLayout(
     { left: 160, top: -300, right: 460, bottom: -100 },
-    wrapper,
-    viewport,
+    editorViewport,
+    appViewport,
   ), null);
 });
-
 function editorAttachment(id: string, attachmentID: string, size: number): EditorChatAttachment {
   return { id, attachmentID, name: `${id}.bin`, type: "application/octet-stream", size };
 }

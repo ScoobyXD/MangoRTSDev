@@ -418,6 +418,41 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await flushFrames();
     assert.equal(dom.window.document.activeElement, focusedComment, "an ordinary rerender must not hand focus back to the composer");
 
+    const imageMessage = message({
+      id: "image-comment",
+      message: "Image reference",
+      attachments: [{
+        id: "image-1",
+        name: "diagram.png",
+        type: "image/png",
+        size: 4,
+        dataURL: "data:image/png;base64,AA==",
+      }],
+    });
+    await act(async () => root.render(
+      <ChatPane
+        {...chatProps}
+        messages={[imageMessage]}
+        activeMessageID=""
+        messageFocusRequest={null}
+      />,
+    ));
+    const chatDownload = container.querySelector<HTMLButtonElement>('[data-mango-chat-attachment-download="true"]');
+    assert.ok(chatDownload, "a posted chat image exposes its own row download button");
+    assert.equal(chatDownload.getAttribute("aria-label"), "Download diagram.png");
+    const previewTrigger = container.querySelector<HTMLButtonElement>('button[title="Double-click to preview"]');
+    assert.ok(previewTrigger);
+    await act(async () => previewTrigger.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true })));
+    await flushFrames();
+    const previewBackdrop = dom.window.document.querySelector<HTMLElement>('[data-mango-image-preview-backdrop="translucent"]');
+    assert.ok(previewBackdrop, "double-clicking the chat image opens the shared fullscreen image preview");
+    assert.ok(dom.window.document.querySelector('[data-mango-image-preview-download="true"]'));
+    const previewClose = dom.window.document.querySelector<HTMLButtonElement>('[data-mango-image-preview-close="true"]');
+    assert.ok(previewClose);
+    assert.equal(previewClose.textContent?.trim(), "X");
+    await act(async () => previewClose.click());
+    assert.equal(dom.window.document.querySelector('[data-mango-image-preview-backdrop="translucent"]'), null);
+
     const mentionUsers = [{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }];
     const mentionedPrincipals: string[] = [];
     const MentionComposerHarness: React.FC<{ initialDraft: string }> = ({ initialDraft }) => {

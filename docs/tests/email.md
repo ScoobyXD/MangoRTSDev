@@ -445,7 +445,7 @@ Expected:
 - The first nonempty chat submit opens mandatory priority selection, then converges on one private email Node keyed by exact mailbox scope and provider thread/message identity; the creator receives Generated GVIC, the Node remains outside Logic Gates initially, and a later chat-write failure reuses it rather than duplicating it.
 - A failed ensure leaves no partial durable collaboration artifacts; either failure preserves the typed composer context, never shows a saved row before acknowledgement, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - The Node starts with one source-scoped attached-email projection, the selected mandatory priority, creator Generated GVIC, private participant access, and Unfiled/Nodes placement; it starts with no Logic Gate but may use normal Node work behavior later.
-- Email detail and Node detail render the same durable chat IDs through the shared ChatPane and Node chat scope, including identical reply indentation, attachment, mention, link, delete, and refresh behavior.
+- Email detail and Node detail render the same durable chat IDs through the shared ChatPane and Node chat scope, including identical reply indentation, attachment, mention, link, delete, and refresh behavior. Posted chat images therefore expose the same right-side original download and shared fullscreen double-click preview in both mounts.
 - A selection-backed root chat stores and later navigates to the exact message, quote, and offsets; an unanchored root chat is valid, and replies retain the root's anchor instead of following the newest message.
 - A guessed collaboration or Node ID is denied before provider content is read.
 
