@@ -326,7 +326,7 @@ This is a security/correctness issue independent of the larger architecture deci
 
 The payload is full documentHTML plus a client ID and client timestamp revision:
 
-- frontend/src/modules/editor/editorCollaboration.ts:8-23, 61-88
+- frontend/src/modules/editor/editorTextboxSync.ts:8-23, 61-88
 
 The client sends after 140 ms, defers a remote replacement until 900 ms of local idle, then replaces innerHTML and resets undo history:
 
@@ -908,7 +908,7 @@ Everything in this manifest is approved for deletion now. Internal dependency or
 - Delete LogicGateArenaPage's workspace title subscription.
 - Delete communications/mail realtime delivery and frontend/src/modules/communications/communicationsStream.ts when no callers remain.
 - Delete KanbanContent's broad workspace:user subscription and the AppLiveFreshnessBridge/global CustomEvent invalidation path. Retain only the explicit mounted-board behavior, rewired away from event_rows in this same task.
-- Delete frontend editor whole-document collaboration publication/subscription, collaborator presence UI that depends on it, and frontend/src/modules/editor/editorCollaboration.ts.
+- Delete frontend editor whole-document collaboration publication/subscription, collaborator presence UI that depends on it, and frontend/src/modules/editor/editorTextboxSync.ts.
 - Split Node chat from generic editor projection delivery, then delete the generic editor projection subscription and document-update handling.
 - Delete the duplicate notifications:user subscription from useNotificationSummary. Exactly one app-lifetime notification owner remains; summary and an open Updates view consume it.
 - Delete frontend/src/modules/workspace/workspaceRealtime.ts after its broad consumers are gone, plus obsolete workspace/projection/communications protocol types in realtimeWebSocket.ts.

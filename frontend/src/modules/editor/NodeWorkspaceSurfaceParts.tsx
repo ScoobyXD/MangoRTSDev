@@ -58,7 +58,7 @@ import {
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
 import { createRequestJSON } from "../api/requestJSON.js";
-import { useCollaborativeEditorDocument } from "./useCollaborativeEditorDocument.js";
+import { useEditorTextboxSync } from "./useEditorTextboxSync.js";
 import {
   createStandaloneImageClipboardHTML,
   findEditorImageFrame,
@@ -979,8 +979,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     };
   }, [apiBase, companyID]);
 
-  const collaborationRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
-  const applyCollaborativeDocument = useCallback((nextDocument: string) => {
+  const textboxSyncRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const applySyncedDocument = useCallback((nextDocument: string) => {
     const editor = editorRef.current;
     const selection = editor && document.activeElement === editor ? getEditorSelectionOffsets(editor) : null;
     lastAppliedDocumentRef.current = nextDocument;
@@ -995,7 +995,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(editor));
     }
   }, [onDocumentChange, scheduleTextBlockIndentGuideUpdate, startAttachmentHydration, stopAttachmentHydration]);
-  const collaboration = useCollaborativeEditorDocument({
+  const textboxSync = useEditorTextboxSync({
     enabled: editable && Boolean(companyID.trim() && currentUserID.trim() && attachmentResourceID?.trim() && blockID.trim()),
     apiBase,
     companyID,
@@ -1004,10 +1004,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     resourceID: attachmentResourceID?.trim() || nodeID.replace(/^project:/, ""),
     documentID: blockID,
     initialHTML: documentValue,
-    requestJSON: collaborationRequestJSON,
-    onHTML: applyCollaborativeDocument,
+    requestJSON: textboxSyncRequestJSON,
+    onHTML: applySyncedDocument,
     flushPendingLocalInput: () => flushPendingLocalInputRef.current(),
-    onDeleted: () => applyCollaborativeDocument(""),
+    onDeleted: () => applySyncedDocument(""),
     onError: () => onDocumentConflict?.(),
   });
 
@@ -1016,8 +1016,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     userEditedDocumentRef.current = true;
     lastAppliedDocumentRef.current = nextDocument;
     onDocumentChange(nextDocument);
-    collaboration.scheduleDocumentSave(nextDocument, immediate);
-  }, [collaboration, editable, onDocumentChange]);
+    textboxSync.scheduleDocumentSave(nextDocument, immediate);
+  }, [editable, onDocumentChange, textboxSync]);
 
   const flushNodeDocumentSave = useCallback((fallbackDocument?: string) => {
     if (!editable) return;
@@ -1028,11 +1028,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
     if (userEditedDocumentRef.current) {
       onDocumentFlush(nextDocument);
-      collaboration.scheduleDocumentSave(nextDocument, true);
+      textboxSync.scheduleDocumentSave(nextDocument, true);
     }
-    void collaboration.flushPendingDocumentSave().catch(() => onDocumentConflict?.());
+    void textboxSync.flushPendingDocumentSave().catch(() => onDocumentConflict?.());
     userEditedDocumentRef.current = false;
-  }, [collaboration, editable, onDocumentConflict, onDocumentFlush]);
+  }, [editable, onDocumentConflict, onDocumentFlush, textboxSync]);
 
   const editorImageAttachmentContext = useMemo(() => (
     attachmentRequestJSON && attachmentResourceType && attachmentResourceID

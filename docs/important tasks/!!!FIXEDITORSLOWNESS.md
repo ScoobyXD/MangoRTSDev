@@ -54,9 +54,9 @@ Each document generated one preflight plus four 304 snapshot reads.
 One Logic Gate view supplied 1,040,360 bytes by itself.
 Four attachment-content reads.
 Why this happens:
-Every text box starts its frontend-backend textbox sync at [useCollaborativeEditorDocument.ts (line 35)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/useCollaborativeEditorDocument.ts:35).
-Starting it immediately subscribes and initiates recovery at [editorCollaboration.ts (line 387)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorCollaboration.ts:387).
-Every recovery unconditionally requests an initial snapshot and then a second “final” snapshot at [lines 509–537 (line 509)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorCollaboration.ts:509), even with no pending edits.
+Every text box starts its frontend-backend textbox sync at [useEditorTextboxSync.ts (line 35)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/useEditorTextboxSync.ts:35).
+Starting it immediately subscribes and initiates recovery at [editorTextboxSync.ts (line 387)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorTextboxSync.ts:387).
+Every recovery unconditionally requests an initial snapshot and then a second “final” snapshot at [lines 509–537 (line 509)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/editor/editorTextboxSync.ts:509), even with no pending edits.
 Realtime connection recovery invokes every subscription’s recovery again at [realtimeWebSocket.ts (line 764)](/C:/Users/Jonat/MangoRTSDev/frontend/src/modules/realtime/realtimeWebSocket.ts:764).
 React Strict Mode is enabled at [main.tsx (line 9)](/C:/Users/Jonat/MangoRTSDev/frontend/src/main.tsx:9), explaining duplicated subscription lifecycles in development.
 A 304 still performs authorization and loads the complete collaboration snapshot before checking its ETag at [editor_collaboration_handlers.go (line 30)](/C:/Users/Jonat/MangoRTSDev/backend/internal/http/editor_collaboration_handlers.go:30) and [line 71 (line 71)](/C:/Users/Jonat/MangoRTSDev/backend/internal/http/editor_collaboration_handlers.go:71).
@@ -508,6 +508,7 @@ Completed in the bounded editor-mounting implementation on 2026-07-17.
 - Stable block IDs remain React keys and persistence document IDs. Existing HTML and PostgreSQL storage, add/delete behavior, formatting, images, highlights, permissions, and mounted-editor undo behavior remain in place.
 - Logic Gate is explicitly excluded from row virtualization.
 - Focused regression coverage asserts bounded mounted counts for large Nodes and Projects, scrolling and long jumps, target-centered mounting, spacer geometry, the shared column order/toggles/defaults, fixed vertical height, retained horizontal resizing, safe unmount flushing, and the Logic Gate exclusion.
+- Corrective pass completed 2026-07-17 13:59:39 -07:00: Node pane defaults now initialize only after that Node's projections have loaded, the faulty v2 empty-pane browser state from the first implementation is bypassed while nonempty v2 preferences migrate forward, and an ordinary Node text/change deep target explicitly reopens its editor column. A real React lifecycle test now loads Node and Project hosts, checks the DOM row bound, moves the window, flushes an edited row through virtual unmount, remounts it, and follows deep targets; the earlier arithmetic/source-contract test remains as lower-level coverage.
 
 ### Step 2:
 

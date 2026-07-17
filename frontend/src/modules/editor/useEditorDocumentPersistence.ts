@@ -10,7 +10,7 @@ import {
   type DocumentSaveTarget,
   type LinkedEntityKind,
 } from "./editorTypes.js";
-import { useCollaborativeEditorDocument } from "./useCollaborativeEditorDocument.js";
+import { useEditorTextboxSync } from "./useEditorTextboxSync.js";
 
 type UseEditorDocumentPersistenceInput = {
   apiBase: string;
@@ -38,7 +38,7 @@ type UseEditorDocumentPersistenceInput = {
   invalidateDocumentTargetCaches: (target: DocumentSaveTarget) => void;
 };
 
-export function editorCollaborationUserMessage(cause: unknown): string {
+export function editorTextboxSyncUserMessage(cause: unknown): string {
   const code = cause instanceof Error ? cause.message : "";
   switch (code) {
     case "editor_collaboration_document_too_large":
@@ -100,7 +100,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     }
   }, [apiBase, attachmentHydrationCleanupRef, companyID, currentDocumentTargetKeyRef, documentDraftRef, documentInformationIDRef, editorDocumentRef, invalidateDocumentTargetCaches, linkedEntityID, linkedEntityKind, persistedDocumentRef, persistedDocumentTargetKeyRef]);
 
-  const { scheduleDocumentSave: scheduleCollaborativeSave, flushPendingDocumentSave: flushCollaborativeSave, recoverDocument } = useCollaborativeEditorDocument({
+  const { scheduleDocumentSave: scheduleSyncedSave, flushPendingDocumentSave: flushSyncedSave, recoverDocument } = useEditorTextboxSync({
     enabled: Boolean(currentUserID && companyID && linkedEntityID && documentInformationID && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate")),
     apiBase,
     companyID,
@@ -117,7 +117,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
       if (count === 0) queuedSaveRef.current = null;
     },
     onDeleted: () => applyCommittedHTML(""),
-    onError: (cause) => setError(editorCollaborationUserMessage(cause)),
+    onError: (cause) => setError(editorTextboxSyncUserMessage(cause)),
   });
 
   useEffect(() => {
@@ -144,21 +144,21 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     pendingSaveRef.current = request;
     if (!request) return;
     setError("");
-    scheduleCollaborativeSave(nextText, immediate);
+    scheduleSyncedSave(nextText, immediate);
     if (immediate) pendingSaveRef.current = null;
-  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, scheduleCollaborativeSave, setError]);
+  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, scheduleSyncedSave, setError]);
 
   const flushPendingDocumentSave = useCallback((fallbackText?: string) => {
     const next = typeof fallbackText === "string" ? fallbackText : documentDraftRef.current;
     if (next !== documentDraftRef.current || pendingSaveRef.current) scheduleDocumentSave(next, true);
     pendingSaveRef.current = null;
-    void flushCollaborativeSave().catch((cause) => setError(cause instanceof Error ? cause.message : "failed_to_sync_editor_operations"));
-  }, [documentDraftRef, flushCollaborativeSave, pendingSaveRef, scheduleDocumentSave, setError]);
+    void flushSyncedSave().catch((cause) => setError(cause instanceof Error ? cause.message : "failed_to_sync_editor_operations"));
+  }, [documentDraftRef, flushSyncedSave, pendingSaveRef, scheduleDocumentSave, setError]);
 
   const saveDocumentNow = useCallback(async (nextText: string) => {
     scheduleDocumentSave(nextText, true);
-    await flushCollaborativeSave();
-  }, [flushCollaborativeSave, scheduleDocumentSave]);
+    await flushSyncedSave();
+  }, [flushSyncedSave, scheduleDocumentSave]);
 
   return {
     buildDocumentSaveRequest,

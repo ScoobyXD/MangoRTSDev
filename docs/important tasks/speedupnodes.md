@@ -60,17 +60,17 @@ The implementation deliberately keeps exact rich-HTML before/after snapshots for
 
 A naive DOM debounce could lose local characters if a remote collaboration patch arrived during the 160-500 ms staging window. The implementation closes that race explicitly:
 
-- `EditorContent` and every Node/Project text block expose their pending DOM batch to the collaboration controller.
-- Before applying a remote commit, recovery snapshot, or snapshot-retry reconciliation, the controller forces the staged local batch through serialization and into the durable ordered pending-operation queue.
+- `EditorContent` and every Node/Project text block expose their pending DOM batch to the frontend-backend textbox sync.
+- Before applying a remote commit, recovery snapshot, or snapshot-retry reconciliation, the frontend-backend textbox sync forces the staged local batch through serialization and into the durable ordered pending-operation queue.
 - It waits for that IndexedDB persistence before advancing remote state, so the existing patch transform/rebase path preserves both edits.
 
-This wiring spans `editorCollaboration.ts`, `useCollaborativeEditorDocument.ts`, `useEditorDocumentPersistence.ts`, `EditorContent.tsx`, `NodeWorkspaceSurfaceParts.tsx`, and `UnifiedRichEditorSurface.tsx`.
+This wiring spans `editorTextboxSync.ts`, `useEditorTextboxSync.ts`, `useEditorDocumentPersistence.ts`, `EditorContent.tsx`, `NodeWorkspaceSurfaceParts.tsx`, and `UnifiedRichEditorSurface.tsx`.
 
 ### Proof added
 
 - `editorInputBatch.test.ts` proves one before snapshot per burst, idle flush, bounded 500 ms maximum latency, IME timer deferral until composition ends, edit-kind boundaries, and no persistence work for a before-input event with no DOM mutation.
 - `editorToolbarInteractions.test.tsx` mounts the real shared editor, types three separate characters, proves no save occurs before the batch boundary, proves exactly one save afterward, and proves one undo restores the complete burst.
-- `editorCollaboration.test.ts` stages a local batch while a disjoint remote commit arrives and proves the local/remote HTML converges without data loss.
+- `editorTextboxSync.test.ts` stages a local batch while a disjoint remote commit arrives and proves the local/remote HTML converges without data loss.
 - `unifiedRichEditorContract.test.ts` now owns the shared IME/batch integration contract.
 - `docs/tests/editor.md` ED43 and ED77 define the durable batching and realtime-ordering behavior.
 
@@ -206,19 +206,19 @@ This confirmed cause explains slow outer-node and chat scrolling and amplifies b
 
 #### Frontend path
 
-- `frontend/src/modules/editor/editorCollaboration.ts:80` — the product caps one canonical editor document at 2 MiB.
-- `frontend/src/modules/editor/editorCollaboration.ts:386-398` — each mounted text block starts its own exact-scope collaboration controller/subscription.
-- `frontend/src/modules/editor/editorCollaboration.ts:413-460` — `queueDocumentChange` checks/encodes the full HTML, calculates the patch, creates a pending operation, persists it to IndexedDB, and applies it locally.
-- `frontend/src/modules/editor/editorCollaboration.ts:419-425` — each queued change scans and UTF-8 encodes the full HTML.
-- `frontend/src/modules/editor/editorCollaboration.ts:428-430` — the persistence chain computes a full common prefix/suffix diff.
-- `frontend/src/modules/editor/editorCollaboration.ts:433-447` — one pending operation is created per scheduled document change.
-- `frontend/src/modules/editor/editorCollaboration.ts:449` — each operation is persisted with `putPending`.
-- `frontend/src/modules/editor/editorCollaboration.ts:467-477` — the 160 ms timer arms the drain; it does not merge operations already created.
-- `frontend/src/modules/editor/editorCollaboration.ts:252-269` — `editorHTMLPatchForChange` compares full old/new strings and encodes the prefix.
-- `frontend/src/modules/editor/editorCollaboration.ts:272-283` — `applyEditorHTMLPatch` encodes and rebuilds the canonical string.
-- `frontend/src/modules/editor/editorCollaboration.ts:555-581` — `performDrain` posts pending operations sequentially.
-- `frontend/src/modules/editor/editorCollaboration.ts:636-654` — acknowledgement applies canonical state, deletes the completed operation, and rewrites the remaining pending collection.
-- `frontend/src/modules/editor/useCollaborativeEditorDocument.ts:63-66` — every editor document change is scheduled into this path.
+- `frontend/src/modules/editor/editorTextboxSync.ts:80` — the product caps one canonical editor document at 2 MiB.
+- `frontend/src/modules/editor/editorTextboxSync.ts:386-398` — each mounted text block starts its own exact-scope frontend-backend textbox sync subscription.
+- `frontend/src/modules/editor/editorTextboxSync.ts:413-460` — `queueDocumentChange` checks/encodes the full HTML, calculates the patch, creates a pending operation, persists it to IndexedDB, and applies it locally.
+- `frontend/src/modules/editor/editorTextboxSync.ts:419-425` — each queued change scans and UTF-8 encodes the full HTML.
+- `frontend/src/modules/editor/editorTextboxSync.ts:428-430` — the persistence chain computes a full common prefix/suffix diff.
+- `frontend/src/modules/editor/editorTextboxSync.ts:433-447` — one pending operation is created per scheduled document change.
+- `frontend/src/modules/editor/editorTextboxSync.ts:449` — each operation is persisted with `putPending`.
+- `frontend/src/modules/editor/editorTextboxSync.ts:467-477` — the 160 ms timer arms the drain; it does not merge operations already created.
+- `frontend/src/modules/editor/editorTextboxSync.ts:252-269` — `editorHTMLPatchForChange` compares full old/new strings and encodes the prefix.
+- `frontend/src/modules/editor/editorTextboxSync.ts:272-283` — `applyEditorHTMLPatch` encodes and rebuilds the canonical string.
+- `frontend/src/modules/editor/editorTextboxSync.ts:555-581` — `performDrain` posts pending operations sequentially.
+- `frontend/src/modules/editor/editorTextboxSync.ts:636-654` — acknowledgement applies canonical state, deletes the completed operation, and rewrites the remaining pending collection.
+- `frontend/src/modules/editor/useEditorTextboxSync.ts:63-66` — every editor document change is scheduled into this path.
 
 #### Backend path
 
@@ -291,8 +291,8 @@ Full-original pressure is a plausible contributor when an affected node's displa
 
 - `frontend/src/modules/editor/EditorContent.tsx:1901-1958` — `refreshEditorSnapshot` invalidates and reloads node projections and content changes.
 - `frontend/src/modules/editor/EditorContent.tsx:1960-1993` — the node subscribes to `chat:node`; accepted/create/delete hints schedule a coalesced full canonical refresh after 80 ms.
-- `frontend/src/modules/editor/editorCollaboration.ts:386-398` — each mounted text block owns an exact editor collaboration subscription.
-- `frontend/src/modules/editor/editorCollaboration.ts:503-545` — recovery performs snapshot GETs, including requests at lines 506 and 523.
+- `frontend/src/modules/editor/editorTextboxSync.ts:386-398` — each mounted text block owns an exact frontend-backend textbox sync subscription.
+- `frontend/src/modules/editor/editorTextboxSync.ts:503-545` — recovery performs snapshot GETs, including requests at lines 506 and 523.
 
 Ordinary typing or scrolling does not trigger the broad chat snapshot refresh. Incoming chat activity, reconnect, revision recovery, and related realtime events can. On a large node, that refresh reparses and replaces broad state, causing a large rerender. Open/reconnect subscription and recovery work also scales with text-block count.
 

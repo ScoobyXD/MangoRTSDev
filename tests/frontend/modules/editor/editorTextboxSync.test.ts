@@ -9,11 +9,11 @@ import {
   editorHTMLPatchForChange,
   EDITOR_COLLABORATION_OPERATION_TARGET_BYTES,
   EDITOR_COLLABORATION_PRODUCT_MAX_HTML_BYTES,
-  EditorCollaborationController,
+  EditorTextboxSync,
   splitEditorHTMLPatch,
   transformEditorHTMLPatch,
-  type EditorCollaborationSnapshot,
-} from "../../../../frontend/src/modules/editor/editorCollaboration.js";
+  type EditorTextboxSyncSnapshot,
+} from "../../../../frontend/src/modules/editor/editorTextboxSync.js";
 import type {
   RealtimeEditorHTMLPatch,
   RealtimeEditorPatchCommittedMessage,
@@ -97,7 +97,7 @@ class HTMLPatchTestServer {
 
   constructor(public html: string) {}
 
-  currentSnapshot(): EditorCollaborationSnapshot {
+  currentSnapshot(): EditorTextboxSyncSnapshot {
     return { revision: this.revision, html: this.html, etag: `"editor-${this.revision}"` };
   }
 
@@ -164,7 +164,7 @@ class RealtimeBus {
 function controllerOptions(
   server: HTMLPatchTestServer,
   documentID: string,
-  overrides: Partial<ConstructorParameters<typeof EditorCollaborationController>[0]> = {},
+  overrides: Partial<ConstructorParameters<typeof EditorTextboxSync>[0]> = {},
 ) {
   return {
     apiBase: "https://mango.test",
@@ -235,7 +235,7 @@ test("Enter then typing keeps rows and caret intact when acknowledgement and dup
     const bus = new RealtimeBus();
     let renders = 0;
     const scope = "editor:node:node-1:enter-caret";
-    const controller = new EditorCollaborationController(controllerOptions(server, "enter-caret", {
+    const controller = new EditorTextboxSync(controllerOptions(server, "enter-caret", {
       subscribe: bus.subscribe,
       onHTML: (html) => { renders += 1; dom.editor.innerHTML = html; },
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
@@ -276,7 +276,7 @@ test("Node and Logic Gate recovery render rich DOM directly and never flatten wh
     for (const resourceType of ["node", "logic_gate"] as const) {
       const server = new HTMLPatchTestServer(completeRichHTML);
       const documentID = `rich-load-${resourceType}`;
-      const controller = new EditorCollaborationController(controllerOptions(server, documentID, {
+      const controller = new EditorTextboxSync(controllerOptions(server, documentID, {
         resourceType,
         resourceID: `${resourceType}-1`,
         initialHTML: "",
@@ -311,16 +311,16 @@ test("two browser contexts converge on disjoint HTML edits without refresh and e
       return commit as T;
     };
     dom.window.name = "";
-    const first = new EditorCollaborationController(controllerOptions(server, "shared-document", {
+    const first = new EditorTextboxSync(controllerOptions(server, "shared-document", {
       subscribe: bus.subscribe, requestJSON: request, onHTML: (html) => { htmlA = html; },
     }));
     dom.window.name = "";
-    const second = new EditorCollaborationController(controllerOptions(server, "shared-document", {
+    const second = new EditorTextboxSync(controllerOptions(server, "shared-document", {
       subscribe: bus.subscribe, requestJSON: request, onHTML: (html) => { htmlB = html; },
     }));
     const isolated = new HTMLPatchTestServer(initial);
     let isolatedRenders = 0;
-    const third = new EditorCollaborationController(controllerOptions(isolated, "other-document", {
+    const third = new EditorTextboxSync(controllerOptions(isolated, "other-document", {
       subscribe: bus.subscribe, onHTML: () => { isolatedRenders += 1; },
     }));
     first.start(); second.start(); third.start();
@@ -350,7 +350,7 @@ test("lost acknowledgement, retry, and duplicate acknowledgement/broadcast apply
     const server = new HTMLPatchTestServer("A");
     let lostOperationID = "";
     let loseAck = true;
-    const first = new EditorCollaborationController(controllerOptions(server, "lost-ack-html", {
+    const first = new EditorTextboxSync(controllerOptions(server, "lost-ack-html", {
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
         const body = JSON.parse(String(init.body)) as CommitBody;
@@ -366,7 +366,7 @@ test("lost acknowledgement, retry, and duplicate acknowledgement/broadcast apply
     first.stop();
 
     let retryOperationID = "";
-    const second = new EditorCollaborationController(controllerOptions(server, "lost-ack-html", {
+    const second = new EditorTextboxSync(controllerOptions(server, "lost-ack-html", {
       initialHTML: "AL",
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
@@ -395,7 +395,7 @@ test("revision gap and reconnect load full canonical HTML recovery without erasi
     const errors: string[] = [];
     let visible = initial;
     const scope = "editor:node:node-1:revision-gap";
-    const controller = new EditorCollaborationController(controllerOptions(server, "revision-gap", {
+    const controller = new EditorTextboxSync(controllerOptions(server, "revision-gap", {
       subscribe: bus.subscribe,
       onHTML: (html) => { visible = html; dom.editor.innerHTML = html; },
       onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
@@ -424,7 +424,7 @@ test("snapshot-required retry keeps the stable operation ID and rebases the HTML
     const server = new HTMLPatchTestServer("A");
     let posts = 0;
     const operationIDs: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "snapshot-retry-html", {
+    const controller = new EditorTextboxSync(controllerOptions(server, "snapshot-retry-html", {
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
         const body = JSON.parse(String(init.body)) as CommitBody;
@@ -463,7 +463,7 @@ test("storage failure, unsafe content, and oversize edits roll the visible DOM b
     const server = new HTMLPatchTestServer("A");
     const errors: string[] = [];
     const renders: string[] = [];
-    const controller = new EditorCollaborationController(controllerOptions(server, "preflight-html", {
+    const controller = new EditorTextboxSync(controllerOptions(server, "preflight-html", {
       onHTML: (html) => { renders.push(html); dom.editor.innerHTML = html; },
       onError: (cause) => errors.push(cause instanceof Error ? cause.message : String(cause)),
     }));
@@ -494,8 +494,8 @@ test("staged local input is persisted before a remote commit is applied", async 
     let visible = initial;
     let staged = false;
     let stagedFlushes = 0;
-    let controller!: EditorCollaborationController;
-    controller = new EditorCollaborationController(controllerOptions(server, "staged-local-input", {
+    let controller!: EditorTextboxSync;
+    controller = new EditorTextboxSync(controllerOptions(server, "staged-local-input", {
       subscribe: bus.subscribe,
       onHTML: (html) => { visible = html; },
       flushPendingLocalInput: () => {
@@ -540,7 +540,7 @@ test("local input scheduled during recovery is not repainted by an older snapsho
     const finalSnapshotBlocked = new Promise<void>((resolve) => { releaseFinalSnapshot = resolve; });
     let finalSnapshotStarted = false;
     let visible = initial;
-    const controller = new EditorCollaborationController(controllerOptions(server, "edit-during-recovery", {
+    const controller = new EditorTextboxSync(controllerOptions(server, "edit-during-recovery", {
       onHTML: (html) => { visible = html; },
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (init?.method) return server.commit(JSON.parse(String(init.body)) as CommitBody) as T;

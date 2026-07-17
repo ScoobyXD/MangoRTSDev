@@ -360,21 +360,21 @@ test("all unified rich editors use one contentEditable host and one formatting-c
 test("project text bodies use exact-document collaboration while metadata keeps its serialized queue", () => {
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const collaboration = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorCollaboration.ts"), "utf8");
+  const textboxSync = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorTextboxSync.ts"), "utf8");
 
   assert.match(projectSummary, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\)/);
   assert.match(projectSummary, /projectTextBlockSaveController\.configure\(\{/);
-  assert.match(projectSummary, /applyProjectCollaborativeDocument/);
-  assert.match(projectSummary, /onDocumentChange=\{\(document\) => applyProjectCollaborativeDocument\(block\.id, document\)\}/);
+  assert.match(projectSummary, /applyProjectSyncedDocument/);
+  assert.match(projectSummary, /onDocumentChange=\{\(document\) => applyProjectSyncedDocument\(block\.id, document\)\}/);
   assert.doesNotMatch(projectSummary, /scheduleProjectTextBlockSave/);
   assert.match(projectSummary, /flushProjectTextBlockSave\(block\.id, \{ attachments: nextAttachments \}\)/);
-  assert.match(nodeWorkspaceParts, /useCollaborativeEditorDocument\(\{/);
+  assert.match(nodeWorkspaceParts, /useEditorTextboxSync\(\{/);
   assert.match(nodeWorkspaceParts, /resourceType: surfaceKind === "project" \? "project" : "node"/);
-  assert.match(nodeWorkspaceParts, /collaboration\.scheduleDocumentSave\(nextDocument, immediate\)/);
-  assert.match(collaboration, /mango-editor-collaboration-v2/);
-  assert.match(collaboration, /indexedDB\.open/);
-  assert.match(collaboration, /microBatchMs \?\? 160/);
-  assert.doesNotMatch(collaboration, /mango-editor-projection-draft-v2:[^"\]]/);
+  assert.match(nodeWorkspaceParts, /textboxSync\.scheduleDocumentSave\(nextDocument, immediate\)/);
+  assert.match(textboxSync, /mango-editor-collaboration-v2/);
+  assert.match(textboxSync, /indexedDB\.open/);
+  assert.match(textboxSync, /microBatchMs \?\? 160/);
+  assert.doesNotMatch(textboxSync, /mango-editor-projection-draft-v2:[^"\]]/);
 });
 test("the active node or project text block keeps its formatting controller current across rerenders", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");

@@ -39,7 +39,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import { editorHTMLPatchForChange } from "./editorCollaboration";
+import { editorHTMLPatchForChange } from "./editorTextboxSync";
 import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";

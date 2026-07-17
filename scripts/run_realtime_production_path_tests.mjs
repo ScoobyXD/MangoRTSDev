@@ -184,7 +184,7 @@ function editorURL(frontendPort, apiPort, values) {
     resource: values.resource,
     document: values.document,
   });
-  return "http://127.0.0.1:" + frontendPort + "/editor-collaboration-e2e.html?" + query;
+  return "http://127.0.0.1:" + frontendPort + "/editor-textbox-sync-e2e.html?" + query;
 }
 
 async function openEditor(context, frontendPort, apiPort, values, frameLog) {
@@ -615,7 +615,7 @@ async function main() {
       const body = await response.text();
       assert.equal(response.status, 200, "test-only auth boundary failed on API " + port + ": " + body + "\n" + apiRecords.map((item) => item.label + ":\n" + item.logs.join("")).join("\n"));
     }
-    await waitForURL("http://127.0.0.1:" + frontendPort + "/editor-collaboration-e2e.html");
+    await waitForURL("http://127.0.0.1:" + frontendPort + "/editor-textbox-sync-e2e.html");
     try {
       await browserMatrix(frontendPort, apiPorts, pgPort, restartAPI);
     } catch (cause) {
