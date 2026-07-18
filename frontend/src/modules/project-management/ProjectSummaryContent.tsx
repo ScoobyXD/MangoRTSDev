@@ -683,7 +683,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     handledProjectFocusRequestRef.current = requestKey;
     const block = blocks[focusTargetIndex];
     if (!block) return;
-    projectRowVirtualizer.mountAndScrollToIndex(focusTargetIndex);
     const chatMessage = chatMessages.find((message) => message.id === targetID);
     const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID);
     if (chatMessage) {
@@ -702,7 +701,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setFocusedTextBlockID(block.id);
       setActiveRichTextBlockID(block.id);
     }
-  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusRequestID, focusTargetIndex, projectID, projectRowVirtualizer.mountAndScrollToIndex]);
+  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusRequestID, focusTargetIndex, projectID]);
 
   const beginProjectColumnResize = useCallback((pane: "email" | "chat", event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -4265,6 +4264,7 @@ const textBlocksScrollStyle: React.CSSProperties = {
   flex: "1 1 auto",
   overflow: "auto",
   display: "flex",
+  overflowAnchor: "none",
   flexDirection: "column",
   gap: 12,
   paddingRight: 4,

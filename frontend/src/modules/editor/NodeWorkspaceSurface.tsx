@@ -127,8 +127,8 @@ const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
-const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v3";
-const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v2";
+const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
+const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
 
 function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
@@ -170,6 +170,8 @@ type TextPaneLayoutSnapshot = {
   openEmailBlockIDs: string[];
   openChatBlockIDs: string[];
   closedChatBlockIDs: string[];
+  closedEditorBlockIDs: string[];
+  closedEmailBlockIDs: string[];
   selectedEmailIDsByBlock: Record<string, string>;
   activeChatBlockID?: string;
 };
@@ -265,20 +267,35 @@ function cleanSelectedEmailMap(value: unknown): Record<string, string> {
   return next;
 }
 
+function emptyTextPaneLayoutSnapshot(): TextPaneLayoutSnapshot {
+  return {
+    initialized: false,
+    openEditorBlockIDs: [],
+    openEmailBlockIDs: [],
+    openChatBlockIDs: [],
+    closedEditorBlockIDs: [],
+    closedEmailBlockIDs: [],
+    closedChatBlockIDs: [],
+    selectedEmailIDsByBlock: {},
+  };
+}
+
 function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLayoutSnapshot {
-  if (typeof localStorage === "undefined") {
-    return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
-  }
+  if (typeof localStorage === "undefined") return emptyTextPaneLayoutSnapshot();
   try {
     const current = localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID));
     const legacy = current === null
-      ? localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID, LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX))
+      ? LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES
+        .map((prefix) => localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID, prefix)))
+        .find((value) => value !== null) ?? null
       : null;
     const stored = current ?? legacy;
     const parsed = JSON.parse(stored ?? "{}") as Record<string, unknown>;
     const openEditorBlockIDs = cleanIDList(parsed.openEditorBlockIDs);
     const openEmailBlockIDs = cleanIDList(parsed.openEmailBlockIDs);
     const openChatBlockIDs = cleanIDList(parsed.openChatBlockIDs);
+    const closedEditorBlockIDs = cleanIDList(parsed.closedEditorBlockIDs);
+    const closedEmailBlockIDs = cleanIDList(parsed.closedEmailBlockIDs);
     const closedChatBlockIDs = cleanIDList(parsed.closedChatBlockIDs);
     const selectedEmailIDsByBlock = cleanSelectedEmailMap(parsed.selectedEmailIDsByBlock);
     const activeChatBlockID = typeof parsed.activeChatBlockID === "string" && parsed.activeChatBlockID.trim() ? parsed.activeChatBlockID.trim() : undefined;
@@ -286,6 +303,8 @@ function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLa
       && openEditorBlockIDs.length === 0
       && openEmailBlockIDs.length === 0
       && openChatBlockIDs.length === 0
+      && closedEditorBlockIDs.length === 0
+      && closedEmailBlockIDs.length === 0
       && closedChatBlockIDs.length === 0
       && Object.keys(selectedEmailIDsByBlock).length === 0
       && !activeChatBlockID;
@@ -294,12 +313,14 @@ function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLa
       openEditorBlockIDs,
       openEmailBlockIDs,
       openChatBlockIDs,
+      closedEditorBlockIDs,
+      closedEmailBlockIDs,
       closedChatBlockIDs,
       selectedEmailIDsByBlock,
       activeChatBlockID,
     };
   } catch {
-    return { initialized: false, openEditorBlockIDs: [], openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
+    return emptyTextPaneLayoutSnapshot();
   }
 }
 
@@ -310,6 +331,8 @@ function storeTextPaneLayout(companyID: string, nodeID: string, snapshot: TextPa
     openEditorBlockIDs: cleanIDList(snapshot.openEditorBlockIDs),
     openEmailBlockIDs: cleanIDList(snapshot.openEmailBlockIDs),
     openChatBlockIDs: cleanIDList(snapshot.openChatBlockIDs),
+    closedEditorBlockIDs: cleanIDList(snapshot.closedEditorBlockIDs),
+    closedEmailBlockIDs: cleanIDList(snapshot.closedEmailBlockIDs),
     closedChatBlockIDs: cleanIDList(snapshot.closedChatBlockIDs),
     selectedEmailIDsByBlock: cleanSelectedEmailMap(snapshot.selectedEmailIDsByBlock),
     activeChatBlockID: snapshot.activeChatBlockID?.trim() || "",
@@ -450,6 +473,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
+  const [closedEditorBlockIDs, setClosedEditorBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEditorBlockIDs));
+  const [closedEmailBlockIDs, setClosedEmailBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEmailBlockIDs));
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
@@ -968,6 +993,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setOpenEmailBlockIDs(new Set(layout.openEmailBlockIDs));
     setOpenChatBlockIDs(new Set(layout.openChatBlockIDs));
     setClosedChatBlockIDs(new Set(layout.closedChatBlockIDs));
+    setClosedEditorBlockIDs(new Set(layout.closedEditorBlockIDs));
+    setClosedEmailBlockIDs(new Set(layout.closedEmailBlockIDs));
     setActiveChatBlockID(layout.activeChatBlockID ?? "");
   }, [companyID, nodeID]);
 
@@ -984,11 +1011,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       openEditorBlockIDs: Array.from(openEditorBlockIDs),
       openEmailBlockIDs: Array.from(openEmailBlockIDs),
       openChatBlockIDs: Array.from(openChatBlockIDs),
+      closedEditorBlockIDs: Array.from(closedEditorBlockIDs),
+      closedEmailBlockIDs: Array.from(closedEmailBlockIDs),
       closedChatBlockIDs: Array.from(closedChatBlockIDs),
       selectedEmailIDsByBlock,
       activeChatBlockID,
     });
-  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEditorBlockIDs, openEmailBlockIDs, paneLayoutScope, selectedEmailIDsByBlock]);
+  }, [activeChatBlockID, closedChatBlockIDs, closedEditorBlockIDs, closedEmailBlockIDs, companyID, nodeID, openChatBlockIDs, openEditorBlockIDs, openEmailBlockIDs, paneLayoutScope, selectedEmailIDsByBlock]);
 
   useEffect(() => {
     const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
@@ -1058,20 +1087,48 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     ));
     if (projectionsLoaded) {
       const storedLayout = nodeChanged ? readStoredTextPaneLayout(companyID, nodeID) : null;
-      setActiveChatBlockID((current) => (nodeChanged || !chatBlockIDs.has(current) ? "" : current));
+      const validClosedEditorBlockIDs = new Set((nodeChanged
+        ? storedLayout?.closedEditorBlockIDs ?? []
+        : Array.from(closedEditorBlockIDs)).filter((id) => blockIDs.has(id)));
+      const validClosedEmailBlockIDs = new Set((nodeChanged
+        ? storedLayout?.closedEmailBlockIDs ?? []
+        : Array.from(closedEmailBlockIDs)).filter((id) => blockIDs.has(id)));
+      const validClosedChatBlockIDs = new Set((nodeChanged
+        ? storedLayout?.closedChatBlockIDs ?? []
+        : Array.from(closedChatBlockIDs)).filter((id) => chatBlockIDs.has(id)));
+      const hasAttachedEmails = parsedAttachedEmails.length > 0;
+
+      setActiveChatBlockID((current) => {
+        const candidate = nodeChanged ? storedLayout?.activeChatBlockID ?? "" : current;
+        return chatBlockIDs.has(candidate) ? candidate : "";
+      });
       setSelectedEmailIDsByBlock((current) => Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID)))));
-      setOpenEditorBlockIDs((current) => new Set(nodeChanged
-        ? (storedLayout?.initialized ? storedLayout.openEditorBlockIDs : blockIDs)
-        : Array.from(current).filter((id) => blockIDs.has(id))));
-      setOpenEmailBlockIDs((current) => new Set(nodeChanged
-        ? (storedLayout?.initialized ? storedLayout.openEmailBlockIDs : blockIDs)
-        : Array.from(current).filter((id) => blockIDs.has(id))));
-      setOpenChatBlockIDs((current) => new Set(nodeChanged
-        ? (storedLayout?.initialized ? storedLayout.openChatBlockIDs : defaultChatBlockIDs)
-        : Array.from(current).filter((id) => chatBlockIDs.has(id))));
-      setClosedChatBlockIDs((current) => new Set(nodeChanged
-        ? (storedLayout?.initialized ? storedLayout.closedChatBlockIDs : [])
-        : Array.from(current).filter((id) => chatBlockIDs.has(id))));
+      setClosedEditorBlockIDs(validClosedEditorBlockIDs);
+      setClosedEmailBlockIDs(validClosedEmailBlockIDs);
+      setClosedChatBlockIDs(validClosedChatBlockIDs);
+      setOpenEditorBlockIDs((current) => {
+        const next = new Set((nodeChanged ? storedLayout?.openEditorBlockIDs ?? [] : Array.from(current)).filter((id) => blockIDs.has(id)));
+        for (const blockID of blockIDs) {
+          if (!validClosedEditorBlockIDs.has(blockID)) next.add(blockID);
+        }
+        return next;
+      });
+      setOpenEmailBlockIDs((current) => {
+        const next = new Set((nodeChanged ? storedLayout?.openEmailBlockIDs ?? [] : Array.from(current)).filter((id) => blockIDs.has(id)));
+        if (hasAttachedEmails) {
+          for (const blockID of blockIDs) {
+            if (!validClosedEmailBlockIDs.has(blockID)) next.add(blockID);
+          }
+        }
+        return next;
+      });
+      setOpenChatBlockIDs((current) => {
+        const next = new Set((nodeChanged ? storedLayout?.openChatBlockIDs ?? [] : Array.from(current)).filter((id) => chatBlockIDs.has(id)));
+        for (const blockID of defaultChatBlockIDs) {
+          if (!validClosedChatBlockIDs.has(blockID)) next.add(blockID);
+        }
+        return next;
+      });
       loadedNodeScopeRef.current = paneLayoutScope;
       paneLayoutReadyScopeRef.current = paneLayoutScope;
     }
@@ -1253,11 +1310,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       },
       ...current,
     ]);
+    setClosedEditorBlockIDs((current) => {
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
+    setClosedChatBlockIDs((current) => {
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
     setOpenEditorBlockIDs((current) => new Set(current).add(blockID));
-    setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
+    if (nodeAttachedEmails.length > 0) setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
     setOpenChatBlockIDs((current) => new Set(current).add(blockID));
     textBlockProjectionSaveController.startLatestContentSave(blockID);
-  }, [editorTextCanEdit, textBlockProjectionSaveController]);
+  }, [editorTextCanEdit, nodeAttachedEmails.length, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
@@ -1479,24 +1546,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       delete next[blockID];
       return next;
     });
-    setOpenEmailBlockIDs((current) => {
+    const removeDeletedBlockID = (current: Set<string>) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
       next.delete(blockID);
       return next;
-    });
-    setOpenChatBlockIDs((current) => {
-      if (!current.has(blockID)) return current;
-      const next = new Set(current);
-      next.delete(blockID);
-      return next;
-    });
-    setClosedChatBlockIDs((current) => {
-      if (!current.has(blockID)) return current;
-      const next = new Set(current);
-      next.delete(blockID);
-      return next;
-    });
+    };
+    setOpenEditorBlockIDs(removeDeletedBlockID);
+    setOpenEmailBlockIDs(removeDeletedBlockID);
+    setOpenChatBlockIDs(removeDeletedBlockID);
+    setClosedEditorBlockIDs(removeDeletedBlockID);
+    setClosedEmailBlockIDs(removeDeletedBlockID);
+    setClosedChatBlockIDs(removeDeletedBlockID);
     setActiveChatBlockID((current) => current === blockID ? "" : current);
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
     onProjectionMutation();
@@ -1879,15 +1940,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     };
     setAttachedEmails((current) => [attached, ...current]);
     setEmailPickerTargetBlockID(null);
-    if (cleanBlockID) {
-      setSelectedEmailIDsByBlock((current) => ({ ...current, [cleanBlockID]: email.messageID }));
-      setOpenEmailBlockIDs((current) => {
-        if (current.has(cleanBlockID)) return current;
-        const next = new Set(current);
-        next.add(cleanBlockID);
-        return next;
-      });
-    }
+    if (cleanBlockID) setSelectedEmailIDsByBlock((current) => ({ ...current, [cleanBlockID]: email.messageID }));
+    setOpenEmailBlockIDs((current) => {
+      const next = new Set(current);
+      for (const block of blocks) {
+        if (!closedEmailBlockIDs.has(block.id)) next.add(block.id);
+      }
+      return next;
+    });
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
@@ -1902,7 +1962,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_attach_email");
     }
-  }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [attachedEmails, blocks, canEdit, closedEmailBlockIDs, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
@@ -2072,6 +2132,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const cleanMessageID = messageID.trim();
     if (!cleanBlockID || !cleanMessageID) return;
     setSelectedEmailIDsByBlock((current) => ({ ...current, [cleanBlockID]: cleanMessageID }));
+    setClosedEmailBlockIDs((current) => {
+      if (!current.has(cleanBlockID)) return current;
+      const next = new Set(current);
+      next.delete(cleanBlockID);
+      return next;
+    });
     setOpenEmailBlockIDs((current) => {
       if (current.has(cleanBlockID)) return current;
       const next = new Set(current);
@@ -2153,7 +2219,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const requestKey = `${nodeID}:${cleanInformationID}:${cleanEmailMessageID}:${focusRequestID ?? 0}`;
     if (handledFocusRequestRef.current === requestKey) return;
     if (focusTargetIndex < 0) return;
-    rowVirtualizer.mountAndScrollToIndex(focusTargetIndex);
 
     if (cleanEmailMessageID && emailOriginChatBlockID) {
       const anchoredChat = chatMessages.slice().reverse().find((item) => item.blockID === emailOriginChatBlockID && item.selectionMessageID === cleanEmailMessageID);
@@ -2163,6 +2228,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         setActiveChatBlockID(emailOriginChatBlockID);
         setOpenChatBlockIDs((current) => new Set(current).add(emailOriginChatBlockID));
         setActiveChatMessageIDs((current) => ({ ...current, [emailOriginChatBlockID]: anchoredChat.id }));
+        setClosedChatBlockIDs((current) => {
+          if (!current.has(emailOriginChatBlockID)) return current;
+          const next = new Set(current);
+          next.delete(emailOriginChatBlockID);
+          return next;
+        });
         window.requestAnimationFrame(() => {
           scrollNodeWorkspaceInformationIntoView(rootRef.current, anchoredChat.id);
         });
@@ -2183,10 +2254,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         setActiveRowBlockID(block.id);
         setOpenEmailBlockIDs((current) => new Set(current).add(block.id));
         setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: attachedEmail.messageID }));
+        setClosedEmailBlockIDs((current) => {
+          if (!current.has(block.id)) return current;
+          const next = new Set(current);
+          next.delete(block.id);
+          return next;
+        });
       } else {
         setActiveRowBlockID(block.id);
         setOpenEditorBlockIDs((current) => new Set(current).add(block.id));
         setFocusedTextBlockID(block.id);
+        setClosedEditorBlockIDs((current) => {
+          if (!current.has(block.id)) return current;
+          const next = new Set(current);
+          next.delete(block.id);
+          return next;
+        });
         setActiveChatBlockID("");
       }
       window.requestAnimationFrame(() => {
@@ -2196,7 +2279,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       });
       return;
     }
-  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded, rowVirtualizer.mountAndScrollToIndex]);
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded]);
 
   const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, edge: "before" | "after", fallbackWidth: number, maxWidth: number) => {
     return (
@@ -2522,6 +2605,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         left: 0,
         display: hidden ? "none" : "block",
         overflowY: "auto",
+        overflowAnchor: "none",
         overflowX: "hidden",
         pointerEvents: hidden ? "none" : "auto",
         scrollbarGutter: "stable",
@@ -2968,9 +3052,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           };
           const toggleEmail = () => {
             setFocusedTextBlockID("");
+            setClosedEmailBlockIDs((current) => {
+              const next = new Set(current);
+              if (emailPaneIsVisible) next.add(block.id);
+              else next.delete(block.id);
+              return next;
+            });
             setOpenEmailBlockIDs((current) => {
               const next = new Set(current);
-              if (next.has(block.id)) next.delete(block.id);
+              if (emailPaneIsVisible) next.delete(block.id);
               else next.add(block.id);
               return next;
             });
@@ -2980,9 +3070,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               setFocusedTextBlockID("");
               if (formattingControllerRef) formattingControllerRef.current = null;
             }
+            setClosedEditorBlockIDs((current) => {
+              const next = new Set(current);
+              if (editorPaneIsVisible) next.add(block.id);
+              else next.delete(block.id);
+              return next;
+            });
             setOpenEditorBlockIDs((current) => {
               const next = new Set(current);
-              if (next.has(block.id)) next.delete(block.id);
+              if (editorPaneIsVisible) next.delete(block.id);
               else next.add(block.id);
               return next;
             });
