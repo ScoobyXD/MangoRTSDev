@@ -5,6 +5,7 @@ import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import type { NodeProjectionItem } from "../../../../frontend/src/modules/node-map/NodeRecordStore.ts";
+import { buildEditorAttachedEmailPayload, buildEditorTextBlockChatPayload } from "../../../../frontend/src/modules/editor/editorProjection.ts";
 import type { ProjectProjection, ProjectView } from "../../../../frontend/src/modules/project-management/projectManagementApi.ts";
 
 type Restore = () => void;
@@ -46,6 +47,46 @@ function nodeProjections(count: number): NodeProjectionItem[] {
     created_timestamp: timestamp(index),
     updated_timestamp: timestamp(index),
   }));
+}
+
+function nodeChatProjection(blockID: string, message = `Chat for ${blockID}`): NodeProjectionItem {
+  const createdTimestamp = timestamp(61);
+  return {
+    company_id: COMPANY_ID,
+    node_id: NODE_ID,
+    information_id: `chat-${blockID}`,
+    type: "Text block chat",
+    information: buildEditorTextBlockChatPayload({
+      blockID,
+      authorID: "virtualization-user",
+      authorName: "Test User",
+      message,
+      createdTimestamp,
+    }),
+    revision: 1,
+    created_timestamp: createdTimestamp,
+    updated_timestamp: createdTimestamp,
+  };
+}
+
+function nodeEmailProjection(blockID: string): NodeProjectionItem {
+  const createdTimestamp = timestamp(62);
+  return {
+    company_id: COMPANY_ID,
+    node_id: NODE_ID,
+    information_id: `email-${blockID}`,
+    type: "Attached email",
+    information: buildEditorAttachedEmailPayload({
+      blockID,
+      messageID: `message-${blockID}`,
+      subject: `Email for ${blockID}`,
+      from: "sender@example.test",
+      attachedTimestamp: createdTimestamp,
+    }),
+    revision: 1,
+    created_timestamp: createdTimestamp,
+    updated_timestamp: createdTimestamp,
+  };
 }
 
 function projectProjections(count: number): ProjectProjection[] {
@@ -106,7 +147,7 @@ function assertBoundedRows(container: ParentNode, kind: "node" | "project", maxi
   return rowIDs;
 }
 
-function assertThreeOpenToggles(row: HTMLElement) {
+function assertPaneToggles(row: HTMLElement, expected: readonly [boolean, boolean, boolean]) {
   const toggles = Array.from(row.querySelectorAll<HTMLButtonElement>(
     'button[aria-label="Toggle email column"], button[aria-label="Toggle text editor column"], button[aria-label="Toggle chat column"]',
   ));
@@ -115,7 +156,15 @@ function assertThreeOpenToggles(row: HTMLElement) {
     "Toggle text editor column",
     "Toggle chat column",
   ]);
-  assert.deepEqual(toggles.map((button) => button.getAttribute("aria-pressed")), ["true", "true", "true"]);
+  assert.deepEqual(toggles.map((button) => button.getAttribute("aria-pressed")), expected.map(String));
+}
+
+function assertThreeOpenToggles(row: HTMLElement) {
+  assertPaneToggles(row, [true, true, true]);
+}
+
+function assertZeroEmailNodeDefaults(row: HTMLElement) {
+  assertPaneToggles(row, [false, true, true]);
 }
 
 test("real Node and Project surfaces keep rows bounded through load, edits, scrolling, and deep targets", { timeout: 20_000 }, async () => {
@@ -232,10 +281,11 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   }
   installGlobal("WebSocket", TestWebSocket, restores);
 
-  const nodeProjectionItems = nodeProjections(60);
+  const nodeTextBlockProjectionItems = nodeProjections(60);
+  let currentNodeProjectionItems = [...nodeTextBlockProjectionItems, nodeChatProjection("node-block-59")];
   const projectProjectionItems = projectProjections(60);
   const serverDocuments = new Map<string, { html: string; revision: number }>();
-  for (const projection of [...nodeProjectionItems, ...projectProjectionItems]) {
+  for (const projection of [...nodeTextBlockProjectionItems, ...projectProjectionItems]) {
     const payload = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
     serverDocuments.set(projection.information_id, { html: payload.document, revision: 0 });
   }
@@ -346,10 +396,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       onRequireNodePriorityForLogicGateAssignment: noop,
       onError: (message: string) => { runtimeErrors.push(message); },
     };
-    const renderNode = (options: { loaded: boolean; focusInformationID?: string; focusRequestID?: number }) => (
+    const renderNode = (options: { loaded: boolean; projections?: NodeProjectionItem[]; focusInformationID?: string; focusRequestID?: number }) => (
       <NodeWorkspaceSurface
         {...nodeProps}
-        projections={options.loaded ? nodeProjectionItems : []}
+        projections={options.projections ?? (options.loaded ? currentNodeProjectionItems : [])}
         projectionsLoaded={options.loaded}
         focusInformationID={options.focusInformationID}
         focusRequestID={options.focusRequestID}
@@ -361,6 +411,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     nodeRoot = createRoot(nodeContainer);
     await act(async () => { nodeRoot?.render(renderNode({ loaded: false })); });
     await flushWork();
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true, projections: [] })); });
+    await flushWork();
     await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
     await flushWork();
 
@@ -368,17 +420,73 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     for (const rowID of initialNodeRows) {
       const row = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${rowID}"]`);
       assert.ok(row);
-      assertThreeOpenToggles(row);
+      assertZeroEmailNodeDefaults(row);
       assert.ok(row.querySelector(`[data-node-text-block-id="${rowID}"]`), "open Node editor should be mounted");
+      assert.ok(row.querySelector(`[data-node-chat-block-id="${rowID}"]`), "open Node chat should be mounted");
     }
 
     const nodeScrollElement = nodeContainer.firstElementChild as HTMLElement | null;
     assert.ok(nodeScrollElement);
+    assert.equal(nodeScrollElement.style.overflowAnchor, "none");
     Object.defineProperty(nodeScrollElement, "clientHeight", { configurable: true, value: 900 });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
     await flushWork();
-    committedEditorOperations = 0;
     const editedBlockID = initialNodeRows[0];
+    assert.equal(editedBlockID, "node-block-59");
+    assert.match(
+      nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${editedBlockID}"]`)?.textContent ?? "",
+      /Chat for node-block-59/,
+      "late chat projection should render in the matching row",
+    );
+    const manualEditorToggle = nodeContainer.querySelector<HTMLButtonElement>(
+      `[data-node-text-box-row="${editedBlockID}"] button[aria-label="Toggle text editor column"]`,
+    );
+    const manualChatToggle = nodeContainer.querySelector<HTMLButtonElement>(
+      `[data-node-text-box-row="${editedBlockID}"] button[aria-label="Toggle chat column"]`,
+    );
+    assert.ok(manualEditorToggle);
+    assert.ok(manualChatToggle);
+    await act(async () => {
+      manualEditorToggle.click();
+      manualChatToggle.click();
+    });
+    await flushWork();
+    assert.equal(manualEditorToggle.getAttribute("aria-pressed"), "false");
+    assert.equal(manualChatToggle.getAttribute("aria-pressed"), "false");
+
+    const lateTextProjection = nodeProjections(61).find((projection) => projection.information_id === "node-block-60");
+    assert.ok(lateTextProjection);
+    const latePayload = JSON.parse(lateTextProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
+    serverDocuments.set(lateTextProjection.information_id, { html: latePayload.document, revision: 0 });
+    currentNodeProjectionItems = [
+      ...nodeProjections(61),
+      nodeChatProjection("node-block-59"),
+      nodeChatProjection("node-block-60"),
+    ];
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
+    await flushWork();
+
+    const lateRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-60"]');
+    assert.ok(lateRow, "late block should mount in the bounded top window");
+    assertZeroEmailNodeDefaults(lateRow);
+    assert.ok(lateRow.querySelector('[data-node-text-block-id="node-block-60"]'), "late block editor should mount");
+    assert.ok(lateRow.querySelector('[data-node-chat-block-id="node-block-60"]'), "late block chat should mount");
+    assert.match(lateRow.textContent ?? "", /Chat for node-block-60/);
+
+    const retainedRow = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${editedBlockID}"]`);
+    assert.ok(retainedRow);
+    assertPaneToggles(retainedRow, [false, false, false]);
+    const retainedEditorToggle = retainedRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
+    const retainedChatToggle = retainedRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
+    assert.ok(retainedEditorToggle);
+    assert.ok(retainedChatToggle);
+    await act(async () => {
+      retainedEditorToggle.click();
+    });
+    await flushWork();
+    assertPaneToggles(retainedRow, [false, true, false]);
+
+    committedEditorOperations = 0;
     const editedSurface = nodeContainer.querySelector<HTMLElement>(`[data-node-text-block-id="${editedBlockID}"]`);
     assert.ok(editedSurface);
     assert.equal(editedSurface.getAttribute("contenteditable"), "true", "Node editor should be editable before exercising unmount flush");
@@ -407,8 +515,16 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       } as never);
     });
 
-    await scroll(nodeScrollElement, 45_000);
-    const distantNodeRows = assertBoundedRows(nodeContainer, "node");
+    let distantNodeRows: string[] = [];
+    let previousScrollTop = nodeScrollElement.scrollTop;
+    for (const nextScrollTop of [6_000, 12_000, 24_000, 36_000, 45_000]) {
+      await scroll(nodeScrollElement, nextScrollTop);
+      assert.equal(nodeScrollElement.scrollTop, nextScrollTop, "user scrolling should not be rewritten by an old anchor");
+      assert.ok(nodeScrollElement.scrollTop >= previousScrollTop, "Node scrolling should remain monotonic");
+      previousScrollTop = nodeScrollElement.scrollTop;
+      distantNodeRows = assertBoundedRows(nodeContainer, "node");
+    }
+    assert.ok(distantNodeRows.includes("node-block-0"), "final Node row should mount at the bottom");
     assert.notDeepEqual(distantNodeRows, initialNodeRows, "Node scrolling should move the mounted window");
     assert.equal(nodeContainer.querySelector(`[data-node-text-box-row="${editedBlockID}"]`), null, "edited Node row should unmount");
     await flushWork();
@@ -423,6 +539,18 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const remountedSurface = nodeContainer.querySelector<HTMLElement>(`[data-node-text-block-id="${editedBlockID}"]`);
     assert.ok(remountedSurface, "edited Node row should remount when scrolled back");
     assert.match(remountedSurface.textContent ?? "", /Edited before virtual unmount/, "remounted Node editor should preserve the edit");
+    const remountedChatToggle = nodeContainer.querySelector<HTMLButtonElement>(
+      `[data-node-text-box-row="${editedBlockID}"] button[aria-label="Toggle chat column"]`,
+    );
+    assert.ok(remountedChatToggle);
+    assert.equal(remountedChatToggle.getAttribute("aria-pressed"), "false", "manual chat closure should survive virtualization");
+    await act(async () => { remountedChatToggle.click(); });
+    await flushWork();
+    const remountedChat = nodeContainer.querySelector<HTMLElement>(`[data-node-chat-block-id="${editedBlockID}"]`);
+    assert.ok(remountedChat, "matching Node chat should remount on demand");
+    assert.match(remountedChat.textContent ?? "", /Chat for node-block-59/);
+    await act(async () => { remountedChatToggle.click(); });
+    await flushWork();
 
     const topEditorToggle = nodeContainer.querySelector<HTMLButtonElement>(
       `[data-node-text-box-row="${editedBlockID}"] button[aria-label="Toggle text editor column"]`,
@@ -453,6 +581,38 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork();
     assertBoundedRows(nodeContainer, "node");
     assert.ok(nodeContainer.querySelector(`[data-node-text-box-row="${distantNodeTarget}"]`), "Node deep target should mount directly");
+
+    await scroll(nodeScrollElement, 0);
+    assert.equal(nodeScrollElement.scrollTop, 0);
+    await act(async () => {
+      nodeRoot?.render(renderNode({ loaded: true, focusInformationID: distantNodeTarget, focusRequestID: 2 }));
+    });
+    await flushWork();
+    assert.equal(nodeScrollElement.scrollTop, 0, "a handled deep target should not replay after the user scrolls away");
+    assertBoundedRows(nodeContainer, "node", 8);
+
+    await act(async () => { nodeRoot?.unmount(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    nodeRoot = null;
+
+    for (const version of ["v4", "v3", "v2"]) {
+      dom.window.localStorage.removeItem(`node-editor-pane-layout-${version}:${COMPANY_ID}:${NODE_ID}`);
+    }
+    currentNodeProjectionItems = [
+      ...nodeProjections(61),
+      nodeChatProjection("node-block-59"),
+      nodeChatProjection("node-block-60"),
+      nodeEmailProjection("node-block-59"),
+    ];
+    nodeRoot = createRoot(nodeContainer);
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
+    await flushWork();
+    const emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-59"]');
+    assert.ok(emailNodeRow);
+    assertThreeOpenToggles(emailNodeRow);
+    assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-59"]'));
+    assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-59"]'));
+    assert.match(emailNodeRow.textContent ?? "", /Email for node-block-59/, "attached email should stay associated with its text block");
 
     await act(async () => { nodeRoot?.unmount(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
@@ -489,6 +649,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const projectList = projectContainer.querySelector<HTMLElement>('[data-mango-bounded-editor-rows="project"]');
     const projectScrollElement = projectList?.parentElement;
     assert.ok(projectScrollElement);
+    assert.equal(projectScrollElement.style.overflowAnchor, "none");
     Object.defineProperty(projectScrollElement, "clientHeight", { configurable: true, value: 900 });
     await scroll(projectScrollElement, 45_000);
     const distantProjectRows = assertBoundedRows(projectContainer, "project");

@@ -45,6 +45,20 @@ test("a large Project uses the same bounded mounted-row invariant", () => {
   assert.ok(mountedCount(nearEnd) <= 6);
 });
 
+test("successive downward scroll windows stay monotonic and reach the final row", () => {
+  const positions = [0, 25, 100, 250, 500, 750, 999].map((index) => index * (ROW_HEIGHT + ROW_GAP));
+  let previousStart = -1;
+  let finalEnd = -1;
+  for (const scrollTop of positions) {
+    const rowWindow = windowAt(scrollTop);
+    assert.ok(rowWindow.startIndex >= previousStart);
+    assert.ok(mountedCount(scrollTop) <= 7);
+    previousStart = rowWindow.startIndex;
+    finalEnd = rowWindow.endIndex;
+  }
+  assert.equal(finalEnd, ITEM_COUNT - 1);
+});
+
 test("scrolling moves the mounted window without changing its bound", () => {
   const top = windowAt(0);
   const middle = windowAt(250 * (ROW_HEIGHT + ROW_GAP));
@@ -105,7 +119,9 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.match(parts, /resize: "none"/);
   assert.ok(node.includes("fixedHeight={TEXT_BLOCK_MIN_HEIGHT}"));
   assert.ok(project.includes("fixedHeight={TEXT_BLOCK_MIN_HEIGHT}"));
-  assert.ok(node.includes("storedLayout?.initialized ? storedLayout.openEditorBlockIDs : blockIDs"));
+  assert.ok(node.includes("closedEditorBlockIDs"));
+  assert.ok(node.includes("closedEmailBlockIDs"));
+  assert.ok(node.includes("const hasAttachedEmails = parsedAttachedEmails.length > 0"));
   assert.ok(project.includes("setOpenEditorBlockIDs(new Set(nextBlockIDs))"));
   assert.ok(node.includes("emailPaneIsVisible || emailReplyBlockID === block.id"));
   assert.ok(project.includes("emailOpen || emailReplyBlockID === block.id"));
@@ -123,5 +139,5 @@ test("target intent is passed through for Project navigation and resolved after 
   assert.ok(app.includes("targetProjectInformationID={projectManagementTarget?.informationID}"));
   assert.ok(content.includes("focusInformationID={targetProjectID?.trim() === activeProjectID ? targetProjectInformationID : undefined}"));
   assert.ok(summary.includes("if (!targetID || focusTargetIndex < 0) return;"));
-  assert.ok(summary.includes("projectRowVirtualizer.mountAndScrollToIndex(focusTargetIndex)"));
+  assert.doesNotMatch(summary, /projectRowVirtualizer\.mountAndScrollToIndex\(focusTargetIndex\)/);
 });

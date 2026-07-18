@@ -207,14 +207,14 @@ export function useBoundedEditorRowVirtualization({
   useLayoutEffect(() => {
     const scrollElement = scrollElementRef.current;
     if (!scrollElement) {
-      recalculateWindow(targetIndex);
+      recalculateWindow();
       return undefined;
     }
     const onScroll = () => scheduleRecalculateWindow();
     scrollElement.addEventListener("scroll", onScroll, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => measureAndRecalculateWindow());
     observer?.observe(scrollElement);
-    measureAndRecalculateWindow(targetIndex);
+    measureAndRecalculateWindow();
     return () => {
       scrollElement.removeEventListener("scroll", onScroll);
       observer?.disconnect();
@@ -223,7 +223,7 @@ export function useBoundedEditorRowVirtualization({
         scrollFrameRef.current = null;
       }
     };
-  }, [measureAndRecalculateWindow, scheduleRecalculateWindow, scrollElementRef, targetIndex]);
+  }, [measureAndRecalculateWindow, recalculateWindow, scheduleRecalculateWindow, scrollElementRef]);
 
   useLayoutEffect(() => {
     const cleanTargetIndex = targetIndex !== undefined && targetIndex !== null && Number.isFinite(targetIndex)
