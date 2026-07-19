@@ -5,7 +5,7 @@ import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -102,7 +102,6 @@ const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v2";
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
-const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
 const SIDEBAR_ACCOUNT_ICON_COLOR = "#14b8a6";
 const SIDEBAR_TEAMS_ICON_COLOR = "#6366f1";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
@@ -270,6 +269,7 @@ export function AppSidebar({
   onPinDrop,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
+  const myWorkActive = (homeActive && activeHomeView === "my-work") || activePage === "project-management";
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const notificationSummary = useNotificationSummary(companyID);
@@ -1268,7 +1268,7 @@ export function AppSidebar({
         <AppSidebarSectionHeader label="Tower" />
         <AppSidebarButton
           label="My Work"
-          active={homeActive && activeHomeView === "my-work"}
+          active={myWorkActive}
           icon={<HeaderMyWorkIcon color="#10b981" />}
           elevated
           onClick={() => onHomeViewSelect("my-work")}
@@ -1280,6 +1280,12 @@ export function AppSidebar({
           surface="my_work"
           active={homeActive && activeHomeView === "my-work"}
           onSelectSurface={() => onHomeViewSelect("my-work")}
+          builtInView={{
+            label: "Projects",
+            active: activePage === "project-management",
+            onSelect: () => onPageSelect("project-management"),
+            onPreload: preloadProjectManagementSurface,
+          }}
         />
       </section>
 
@@ -1392,16 +1398,6 @@ export function AppSidebar({
 
       <section style={appSidebarNavSectionStyle} aria-label="Entities">
         <AppSidebarSectionHeader label="Entities" />
-        <AppSidebarButton
-          label="Projects"
-          active={activePage === "project-management"}
-          icon={<HeaderProjectManagementIcon color={SIDEBAR_PROJECT_ICON_COLOR} />}
-          elevated
-          onPointerEnter={preloadProjectManagementSurface}
-          onFocus={preloadProjectManagementSurface}
-          onPointerDown={preloadProjectManagementSurface}
-          onClick={() => onPageSelect("project-management")}
-        />
         <AppSidebarButton
           label="Accounts"
           active={activePage === "account-manager"}
