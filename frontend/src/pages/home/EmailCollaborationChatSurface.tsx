@@ -20,7 +20,9 @@ import {
   editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
+  listEditorTextBlockProjections,
   parseEditorAttachedEmails,
+  parseEditorTextBlockContent,
   parseEditorTextBlockChats,
   type EditorChatAttachment,
   type EditorTextBlockChatMessage,
@@ -454,6 +456,14 @@ export function EmailCollaborationChatSurface({
       const emailMessageID = selection?.messageID?.trim() || message.id.trim();
       const createdTimestamp = new Date().toISOString();
       const subject = message.subject?.trim() || "Email";
+      const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
+      const existingEmailContents = listEditorTextBlockProjections(targetProjections)
+        .map((projection) => parseEditorTextBlockContent(projection.information));
+      const existingMessageAccent = existingEmailContents
+        .find((content) => content.emailMessageID?.trim() === emailMessageID)?.emailAccent?.trim() ?? "";
+      const existingEmailAccents = existingEmailContents
+        .filter((content) => content.emailMessageID?.trim() !== emailMessageID)
+        .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
       await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
         method: "POST",
         json: {
@@ -465,7 +475,7 @@ export function EmailCollaborationChatSurface({
             document: "",
             attachments: [],
             emailMessageID,
-            emailAccent: editorEmailMessageAccent(emailMessageID),
+            emailAccent: existingMessageAccent || editorEmailMessageAccent(emailMessageID, existingEmailAccents),
           }),
         },
       });

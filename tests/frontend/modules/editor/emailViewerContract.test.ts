@@ -19,6 +19,14 @@ test("node-attached email viewer discloses per-message recipients while retainin
   const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
 
   assert.match(nodeParts, /Expand all threads/);
+  assert.match(nodeParts, /Collapse all threads/);
+  assert.match(nodeParts, /NodeEmailConversationTimeline/);
+  assert.match(nodeParts, /gridTemplateColumns: "20px minmax\(0, 1fr\)"/);
+  assert.match(nodeParts, /linear-gradient\(180deg, rgba\(14,165,233,0\.34\), rgba\(124,58,237,0\.3\)\)/);
+  assert.match(nodeParts, /width: 13,[\s\S]{0,120}border: "3px solid rgba\(248, 250, 252, 0\.96\)"/);
+  assert.match(nodeParts, /onMessageActivate\?\.\(threadMessageID\)/);
+  assert.match(nodeParts, /focusMessageRequestID/);
+  assert.match(nodeParts, /aria-expanded=\{!collapsed\}/);
   assert.match(nodeParts, /replyAllAddressDrafts/);
   assert.match(nodeParts, /Reply all/);
   assert.match(nodeParts, /setCcDraft/);
@@ -59,6 +67,21 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.ok((nodeParts.match(/listEmailMessages\(\{\s*accountEmail,/g) ?? []).length >= 3);
   assert.match(calendarInviteCard, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
+});
+
+test("node email and linked text boxes expose animated two-way navigation and collision-free colors", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const triageChat = source("frontend/src/pages/home/EmailCollaborationChatSurface.tsx");
+
+  assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
+  assert.match(nodeSurface, /data-node-text-box-row/);
+  assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
+  assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
+  assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
+  assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
+  assert.match(nodeSurface, /Show the linked email message/);
+  assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
+  assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(emailMessageID, existingEmailAccents\)/);
 });
 
 test("both node-wide email attachment entry paths retain exact provider mailbox identity", () => {
