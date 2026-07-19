@@ -393,6 +393,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [lifecycle, setLifecycle] = useState<MangoEditorLifecycleSnapshot>(lifecycleRef.current.getSnapshot());
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
+  const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
+  const [pendingConflict, setPendingConflict] = useState<{
+    conflict: MangoTiptapConflict;
+    resolve: (choice: "keep-local" | "use-canonical") => Promise<void>;
+  } | null>(null);
+  const [resolvingConflict, setResolvingConflict] = useState(false);
   const [selectionAction, setSelectionAction] = useState<MangoTiptapSelectionAction | null>(null);
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
@@ -493,7 +499,23 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onConflict: (conflict) => {
         setError("This text box changed elsewhere. Choose which version to keep before editing.");
-        callbacksRef.current.onConflict?.(conflict, (choice) => sync.resolveConflict(choice));
+        const resolve = async (choice: "keep-local" | "use-canonical") => {
+          setResolvingConflict(true);
+          try {
+            await sync.resolveConflict(choice);
+            setPendingConflict(null);
+            setError("");
+          } catch (cause) {
+            const message = cause instanceof Error ? cause.message : "Unable to resolve the text box conflict";
+            setError(message);
+            callbacksRef.current.onError?.(message);
+            throw cause;
+          } finally {
+            setResolvingConflict(false);
+          }
+        };
+        setPendingConflict({ conflict, resolve });
+        callbacksRef.current.onConflict?.(conflict, resolve);
       },
       onError: (cause) => {
         const message = cause instanceof Error ? cause.message : "Unable to save this text box";
@@ -544,6 +566,25 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (syncStartedRef.current) lifecycleRef.current.activate();
     }
   }, [lifecycle.state, prepare]);
+
+  const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const coordinates = { left: event.clientX, top: event.clientY };
+    void activate().then(() => {
+      let attempts = 0;
+      const focusAtPointer = () => {
+        const editor = editorRef.current;
+        if (!editor) {
+          attempts += 1;
+          if (attempts < 8) window.requestAnimationFrame(focusAtPointer);
+          return;
+        }
+        const position = editor.view.posAtCoords(coordinates);
+        if (position) editor.commands.setTextSelection(position.pos);
+        editor.commands.focus();
+      };
+      window.requestAnimationFrame(focusAtPointer);
+    });
+  }, [activate]);
 
   useEffect(() => registerMangoTiptapFlusher({
     companyID, resourceType, resourceID, documentID,
@@ -670,6 +711,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     editor.registerPlugin(MangoTiptapAnnotations);
     updateMangoTiptapAnnotations(editor, annotations);
     editorRef.current = editor;
+    setActiveEditor(editor);
     const controller: MangoTiptapFormattingController = {
       focus: () => { editor.commands.focus(); },
       flush: () => {
@@ -718,6 +760,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return () => {
       if (formattingControllerRef?.current === controller) formattingControllerRef.current = null;
       editorRef.current = null;
+      setActiveEditor((current) => current === editor ? null : current);
       editor.destroy();
       releaseActive();
     };
@@ -794,11 +837,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       data-mango-editor-format="tiptap_json"
       data-mango-editor-state={lifecycle.state}
       data-mango-editor-pinned={lifecycle.pinned || undefined}
-      onPointerDown={!isActive ? activate : undefined}
+      onPointerDown={!isActive ? activateFromPointer : undefined}
       onFocusCapture={!isActive ? activate : undefined}
       onDoubleClick={!isActive ? activate : undefined}
     >
-      {isActive ? <EditorContent editor={editorRef.current} /> : (
+      {isActive ? <EditorContent editor={activeEditor} /> : (
         <MangoTiptapStaticRenderer
           value={document}
           ariaLabel={ariaLabel}
@@ -806,7 +849,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           renderAttachmentImage={renderStaticAttachment}
         />
       )}
-      {error && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error}</div>}
+      {pendingConflict ? (
+        <div role="alert" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, color: "#b91c1c", fontSize: 12, padding: "6px 8px" }}>
+          <span>{error || "This text box changed elsewhere."}</span>
+          <button type="button" disabled={resolvingConflict} onClick={() => void pendingConflict.resolve("keep-local").catch(() => undefined)}>Keep my version</button>
+          <button type="button" disabled={resolvingConflict} onClick={() => void pendingConflict.resolve("use-canonical").catch(() => undefined)}>Use saved version</button>
+        </div>
+      ) : error && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error}</div>}
       {isActive && editable && tableActive && (
         <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>
           <button type="button" onClick={() => editorRef.current?.chain().focus().addRowAfter().run()}>Add row</button>

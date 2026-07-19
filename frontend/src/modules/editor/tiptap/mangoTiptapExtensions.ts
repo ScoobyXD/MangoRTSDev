@@ -197,7 +197,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
     FontSize,
     Color,
     Highlight.configure({ multicolor: true }),
-    TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right", "justify"] }),
+    TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"] }),
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit.configure({

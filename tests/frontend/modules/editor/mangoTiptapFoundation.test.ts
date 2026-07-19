@@ -176,6 +176,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.chain().toggleBold().toggleItalic().toggleUnderline().toggleStrike().run(), true);
     assert.equal(editor.chain().setFontSize("22px").setColor("#112233").setHighlight({ color: "#fff59d" }).run(), true);
     assert.equal(editor.chain().setTextAlign("right").run(), true);
+    assert.equal(editor.chain().setTextAlign("justify").run(), false);
     const beforeTable = editor.getJSON();
     assert.equal(editor.chain().focus("end").insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run(), true);
     assert.equal(editor.getJSON().content?.some((node) => node.type === "table"), true);
@@ -296,6 +297,12 @@ test("all rich surfaces share the gate and no external collaboration service is 
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
   assert.match(sync, /store\.get\(storage_key\)/);
   assert.doesNotMatch(sync, /getAll\(/);
+  const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
+  assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);
+  assert.match(editor, /<EditorContent editor=\{activeEditor\}/);
+  assert.match(editor, /activateFromPointer/);
+  assert.match(editor, />Keep my version<\/button>/);
+  assert.match(editor, />Use saved version<\/button>/);
   const communications = read("frontend/src/modules/communications/communicationsApi.ts");
   assert.match(communications, /editor_format: tiptapJSON \? "tiptap_json" : "legacy_html"/);
 });
