@@ -119,6 +119,9 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	default:
 		return CommunicationsTriageConversionInput{}, ErrInvalid
 	}
+	if err := normalizeCommunicationsTriageAtomicWrites(&input); err != nil {
+		return CommunicationsTriageConversionInput{}, err
+	}
 	return input, nil
 }
 

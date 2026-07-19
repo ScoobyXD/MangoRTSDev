@@ -393,9 +393,14 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), true); err != nil {
+		emailInput := input
+		emailInput.NodeID = nodeID
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, emailInput, message, time.Now().UTC())
+		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		if _, err := tx.ExecContext(ctx, `
 delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
@@ -503,9 +508,12 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 			return CommunicationsTriageConversionResult{}, err
 		}
 		message = normalizeEmailMessageSnapshot(message)
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), false); err != nil {
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, input, message, time.Now().UTC())
+		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		if _, err := tx.ExecContext(ctx, `
 delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
@@ -528,6 +536,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 			NodeID:    input.NodeID,
 		})
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, input, &result); err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
 }
@@ -573,9 +584,14 @@ insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), true); err != nil {
+		emailInput := input
+		emailInput.NodeID = nodeID
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, emailInput, message, time.Now().UTC())
+		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		if _, err := tx.ExecContext(ctx, `
 delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
@@ -725,9 +741,12 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), false); err != nil {
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, input, message, time.Now().UTC())
+		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		if _, err := tx.ExecContext(ctx, `
 delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
@@ -757,6 +776,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, input, &result); err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
 }
@@ -836,14 +858,18 @@ limit 1`, companyID, nodeID, messageID).Scan(&information)
 }
 
 func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) error {
-	informationID := newUUIDv7String()
-	information := attachedEmailProjectionInformation(message, sharedInboxID, accountEmail, attachedAt, createdFromEmail)
+	_, err := addEmailProjectionSQLWithThread(ctx, tx, companyID, nodeID, sharedInboxID, accountEmail, message, "", attachedAt, createdFromEmail)
+	return err
+}
+
+func addEmailProjectionSQLWithThread(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, attachedAt time.Time, createdFromEmail bool) (string, error) {
+	informationID, information := newUUIDv7String(), attachedEmailProjectionInformationWithThread(message, sharedInboxID, accountEmail, emailThreadID, attachedAt, createdFromEmail)
 	if _, err := tx.ExecContext(ctx, `
 insert into node_information (
   company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp
 ) values ($1, $2, $3, 'Attached email'::information_type, $4, $5, $5)`,
 		companyID, informationID, nodeID, information, attachedAt); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 insert into node_projection_table (
@@ -855,9 +881,9 @@ do update set
   information=excluded.information,
   updated_timestamp=excluded.updated_timestamp`,
 		companyID, nodeID, informationID, information, attachedAt); err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return informationID, nil
 }
 
 func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {

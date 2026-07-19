@@ -111,10 +111,10 @@ func TestEmailCollaborationThreadPersonalOwnerReadsCompleteProviderHistory(t *te
 	if !response.HistoryComplete {
 		t.Fatalf("history_complete=false, messages=%+v", response.Messages)
 	}
-	if got := emailCollaborationThreadTestMessageIDs(response.Messages); got != "personal-old,personal-new" {
-		t.Fatalf("provider order=%q, want personal-old,personal-new", got)
+	if got := emailCollaborationThreadTestMessageIDs(response.Messages); got != "personal-root,personal-old,personal-new" {
+		t.Fatalf("durable order=%q, want personal-root,personal-old,personal-new", got)
 	}
-	if response.Messages[0].Body != "Older complete body" || response.Messages[1].Body != "Newer complete body" {
+	if response.Messages[1].Body != "Older complete body" || response.Messages[2].Body != "Newer complete body" {
 		t.Fatalf("messages were not hydrated: %+v", response.Messages)
 	}
 	threadGrants, threadIDs, messageGrants, requestedMessageIDs := client.calls()
@@ -153,8 +153,8 @@ func TestEmailCollaborationThreadSharedParticipantReadsWithoutSharedInboxAccess(
 	}
 	client := newEmailCollaborationThreadTestClient()
 	client.threadsByID["shared-thread"] = NylasThread{ID: "shared-thread", MessageIDs: []string{"shared-root", "shared-reply"}}
-	client.messagesByID["shared-root"] = NylasMessage{ID: "shared-root", ThreadID: "shared-thread", Body: "Shared root body"}
-	client.messagesByID["shared-reply"] = NylasMessage{ID: "shared-reply", ThreadID: "shared-thread", Body: "Shared reply body"}
+	client.messagesByID["shared-root"] = NylasMessage{ID: "shared-root", ThreadID: "shared-thread", Body: "Shared root body", Date: 1}
+	client.messagesByID["shared-reply"] = NylasMessage{ID: "shared-reply", ThreadID: "shared-thread", Body: "Shared reply body", Date: 2}
 
 	// The participant is only a company user and has no shared-inbox folder
 	// grant. Permanent collaboration participation is the authorization here.
@@ -325,7 +325,7 @@ func performEmailCollaborationThreadTestRequest(t *testing.T, repo store.Reposit
 	t.Helper()
 	server := newEmailCollaborationThreadTestServer(repo, client)
 	defer server.Close()
-	path := "/v1/communications/email-collaborations/" + collaborationID + "/thread?company_id=" + emailCollaborationThreadTestCompanyID + extraQuery
+	path := "/v1/communications/email-collaborations/" + collaborationID + "/thread?company_id=" + emailCollaborationThreadTestCompanyID + "&refresh=true" + extraQuery
 	req := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), actor, role)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)

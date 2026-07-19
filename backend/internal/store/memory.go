@@ -80,6 +80,9 @@ type MemoryRepo struct {
 	communicationsArchiveJobs      map[string]CommunicationsArchiveJob
 	communicationsArchiveJobItems  map[string]CommunicationsArchiveJobItem
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
+	emailThreads                   map[string]domain.CommunicationsEmailThread
+	emailThreadScopeIDs            map[string]string
+	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
 	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	logicGateShortcuts             map[string]domain.UserLogicGateShortcut
@@ -169,6 +172,9 @@ func NewMemoryRepo() *MemoryRepo {
 		communicationsArchiveJobs:      map[string]CommunicationsArchiveJob{},
 		communicationsArchiveJobItems:  map[string]CommunicationsArchiveJobItem{},
 		emailNodeLinks:                 map[string]communicationsEmailNodeLink{},
+		emailThreads:                   map[string]domain.CommunicationsEmailThread{},
+		emailThreadScopeIDs:            map[string]string{},
+		nodeEmailThreads:               map[string]domain.CommunicationsNodeEmailThread{},
 		emailCollaborations:            map[string]domain.CommunicationsEmailCollaboration{},
 		emailCollaborationParticipants: map[string]domain.CommunicationsEmailCollaborationParticipant{},
 		logicGateShortcuts:             map[string]domain.UserLogicGateShortcut{},

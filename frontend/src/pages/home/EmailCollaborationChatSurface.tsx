@@ -443,15 +443,7 @@ export function EmailCollaborationChatSurface({
     setPriorityMenuOpen(false);
     setSubmitting(true);
     try {
-      if (cleanNodeID !== detectedNodeID) {
-        await convertTriageMessagesToExplorerTarget({
-          companyID,
-          sharedInboxID,
-          accountEmail: sharedInboxID?.trim() ? undefined : accountEmail,
-          target: { mode: "existing_node", nodeID: cleanNodeID },
-          messageIDs: [message.id],
-        });
-      }
+      const shouldAttachEmail = cleanNodeID !== detectedNodeID;
       const textBlockID = generateStableInformationID();
       const emailMessageID = selection?.messageID?.trim() || message.id.trim();
       const createdTimestamp = new Date().toISOString();
@@ -464,21 +456,18 @@ export function EmailCollaborationChatSurface({
       const existingEmailAccents = existingEmailContents
         .filter((content) => content.emailMessageID?.trim() !== emailMessageID)
         .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
-      await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
-        method: "POST",
-        json: {
-          company_id: companyID,
-          type: EDITOR_TEXT_BLOCK_TYPE,
-          information_id: textBlockID,
-          information: buildEditorTextBlockProjectionPayload({
-            title: "Email: " + subject,
-            document: "",
-            attachments: [],
-            emailMessageID,
-            emailAccent: existingMessageAccent || editorEmailMessageAccent(emailMessageID, existingEmailAccents),
-          }),
-        },
-      });
+      const textBlockWrite = {
+        type: EDITOR_TEXT_BLOCK_TYPE,
+        informationID: textBlockID,
+        information: buildEditorTextBlockProjectionPayload({
+          title: "Email: " + subject,
+          document: "",
+          attachments: [],
+          emailMessageID,
+          emailAccent: existingMessageAccent || editorEmailMessageAccent(emailMessageID, existingEmailAccents),
+        }),
+      };
+      let initialChatWrite: { type: string; informationID: string; information: string } | undefined;
       if (includeChat && (cleanDraft || draftAttachments.length > 0)) {
         const informationID = generateStableInformationID();
         const mentions = mentionedPrincipalIDs(cleanDraft, principals);
@@ -491,29 +480,57 @@ export function EmailCollaborationChatSurface({
             mentions.mentionedUserIDs.push(principalID);
           }
         }
+        initialChatWrite = {
+          type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
+          informationID,
+          information: buildEditorTextBlockChatPayload({
+            blockID: textBlockID,
+            selectionSource: "email",
+            selectionMessageID: emailMessageID,
+            selectionQuote: selection?.quote,
+            selectionStart: selection?.startOffset,
+            selectionEnd: selection?.endOffset,
+            authorID: author.userID,
+            authorName: author.name,
+            message: cleanDraft,
+            createdTimestamp,
+            attachments: draftAttachments,
+            mentionedUserIDs: mentions.mentionedUserIDs,
+            mentionedGroupIDs: mentions.mentionedGroupIDs,
+          }),
+        };
+      }
+      if (shouldAttachEmail) {
+        await convertTriageMessagesToExplorerTarget({
+          companyID,
+          sharedInboxID,
+          accountEmail: sharedInboxID?.trim() ? undefined : accountEmail,
+          target: { mode: "existing_node", nodeID: cleanNodeID },
+          messageIDs: [message.id],
+          linkedTextBlock: textBlockWrite,
+          initialChat: initialChatWrite,
+        });
+      } else {
         await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
           method: "POST",
           json: {
             company_id: companyID,
-            type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-            information_id: informationID,
-            information: buildEditorTextBlockChatPayload({
-              blockID: textBlockID,
-              selectionSource: "email",
-              selectionMessageID: emailMessageID,
-              selectionQuote: selection?.quote,
-              selectionStart: selection?.startOffset,
-              selectionEnd: selection?.endOffset,
-              authorID: author.userID,
-              authorName: author.name,
-              message: cleanDraft,
-              createdTimestamp,
-              attachments: draftAttachments,
-              mentionedUserIDs: mentions.mentionedUserIDs,
-              mentionedGroupIDs: mentions.mentionedGroupIDs,
-            }),
+            type: textBlockWrite.type,
+            information_id: textBlockWrite.informationID,
+            information: textBlockWrite.information,
           },
         });
+        if (initialChatWrite) {
+          await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
+            method: "POST",
+            json: {
+              company_id: companyID,
+              type: initialChatWrite.type,
+              information_id: initialChatWrite.informationID,
+              information: initialChatWrite.information,
+            },
+          });
+        }
       }
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
       setDraft("");

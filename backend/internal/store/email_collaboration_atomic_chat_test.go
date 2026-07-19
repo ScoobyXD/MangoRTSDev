@@ -312,6 +312,10 @@ func TestMemoryEmailCollaborationMailboxHintCommitsAtomically(t *testing.T) {
 	if err != nil || stored.LatestMessageID != "mailbox-root" {
 		t.Fatalf("snapshot after outbox failure = %+v err=%v", stored, err)
 	}
+	rolledBackThread, err := repo.GetCommunicationsEmailThread(companyID, created.Collaboration.EmailThreadID)
+	if err != nil || len(rolledBackThread.Messages) != 1 || rolledBackThread.Messages[0].ProviderMessageID != "mailbox-root" {
+		t.Fatalf("durable thread after outbox rollback = %+v err=%v", rolledBackThread, err)
+	}
 	if len(repo.realtimeOutbox) != 0 {
 		t.Fatalf("outbox after rolled-back mailbox update = %d", len(repo.realtimeOutbox))
 	}
@@ -319,6 +323,10 @@ func TestMemoryEmailCollaborationMailboxHintCommitsAtomically(t *testing.T) {
 	repo.realtimeOutboxErr = nil
 	if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err != nil {
 		t.Fatal(err)
+	}
+	durableThread, err := repo.GetCommunicationsEmailThread(companyID, created.Collaboration.EmailThreadID)
+	if err != nil || len(durableThread.Messages) != 2 || durableThread.Messages[1].ProviderMessageID != "mailbox-next" {
+		t.Fatalf("durable thread after webhook update = %+v err=%v", durableThread, err)
 	}
 	if len(repo.realtimeOutbox) != 1 {
 		t.Fatalf("mailbox outbox rows = %d, want 1", len(repo.realtimeOutbox))
