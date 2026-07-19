@@ -103,6 +103,10 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/editor/editorRowVirtualizationReact.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorRowVirtualizationReact.test.js"),
   },

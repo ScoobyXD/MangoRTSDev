@@ -50,30 +50,12 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 	if gate.Code != http.StatusOK || !strings.Contains(gate.Body.String(), "\"editor_format\":\"tiptap_json\"") {
 		t.Fatalf("gate status=%d body=%s", gate.Code, gate.Body.String())
 	}
-	for _, resource := range []struct {
-		resourceType string
-		resourceID   string
-	}{
-		{resourceType: "email_draft", resourceID: "personal:another-user:owner%40example.test:draft-1"},
-		{resourceType: "email_signature", resourceID: "personal:another-user:owner%40example.test"},
-	} {
-		path := "/v1/editor-json/" + resource.resourceType + "/" + resource.resourceID + "/documents/body?company_id=" + companyID
+	for _, unsupportedType := range []string{"email_draft", "email_signature"} {
+		path := "/v1/editor-json/" + unsupportedType + "/mailbox/documents/body?company_id=" + companyID
 		response := doJSON(http.MethodGet, path, nil)
 		if response.Code != http.StatusNotFound {
-			t.Fatalf("cross-mailbox %s status=%d body=%s", resource.resourceType, response.Code, response.Body.String())
+			t.Fatalf("unsupported email JSON type %s status=%d body=%s", unsupportedType, response.Code, response.Body.String())
 		}
-	}
-	allowed, rejectCode, err := server.authorizeEditorJSONRealtime(ActorContext{
-		User: user,
-		Memberships: []domain.CompanyMembership{{
-			CompanyID: companyID, UserID: user.UserID, Role: domain.RoleCompanyAdmin,
-		}},
-	}, store.EditorJSONDocumentRef{
-		CompanyID: companyID, ResourceType: "email_signature",
-		ResourceID: "personal:another-user:owner%40example.test", DocumentID: "body",
-	})
-	if err != nil || allowed || rejectCode != "resource_not_found" {
-		t.Fatalf("cross-mailbox realtime allowed=%t reject=%q err=%v", allowed, rejectCode, err)
 	}
 	legacy := doJSON(http.MethodGet, legacyPath, nil)
 	if legacy.Code != http.StatusConflict || !strings.Contains(legacy.Body.String(), "editor_format_mismatch") {

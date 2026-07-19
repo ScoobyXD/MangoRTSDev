@@ -2,7 +2,7 @@
 
 ## Status and timing
 
-The inactive JSON-native foundation and Tiptap implementation were added on 2026-07-18. Existing data still uses the production HTML editor. The future HTML-to-JSON conversion and atomic workspace cutover remain an after-go-live project and require separate review.
+The inactive JSON-native foundation and Tiptap implementation were added on 2026-07-18 and refined on 2026-07-19. Existing data still uses the production HTML editor. The future HTML-to-JSON conversion and atomic workspace cutover remain an after-go-live project and require separate review. Email is not part of that conversion and remains rich HTML.
 
 This document is the project charter and decision record for that future migration. Implementation must update this file with discoveries, decisions, rollout evidence, failed approaches, risks, test results, and final proof. Do not create a competing tracker.
 
@@ -34,7 +34,7 @@ This decision does not invalidate the immediate work to restore Mango's existing
 
 1. Tiptap on ProseMirror will become the actual browser editor, not merely a JSON converter behind Mango's existing custom editor.
 2. Tiptap/ProseMirror JSON will become the single authoritative saved description of editor content after migration.
-3. HTML will remain an important import, clipboard, email, publishing, and compatibility format. It will not remain a second authoritative editable document after migration.
+3. For Node, Project, and Logic Gate rich documents, HTML remains an import, clipboard, publishing, and legacy-conversion format but will not remain a second authoritative editable document after migration. Email compose, reply, forward, attached-email reply, drafts, signatures, and display remain authoritative rich HTML and do not use Tiptap JSON.
 4. Normal typing and formatting use local ProseMirror transactions and a bounded debounce. The implemented Mango wire contract sends a strict complete JSON snapshot per batch with an exact base revision; it does not send one snapshot per character.
 5. The complete Document JSON will be loaded on initial open, refresh, reconnect, detected gaps, and explicit recovery.
 6. Mango's own backend and database will accept, order, store, authorize, and publish changes. No Tiptap-hosted service will participate.
@@ -43,7 +43,13 @@ This decision does not invalidate the immediate work to restore Mango's existing
 9. Conversion from legacy Mango HTML to Tiptap JSON will be a controlled migration operation. Mango will not translate the entire document from HTML to JSON and back during ordinary typing, acknowledgement, or remote delivery.
 10. Copy and paste quality is a first-class product requirement, not an incidental editor default.
 11. Automatic merging of simultaneous edits is shelved. A stale writer receives a visible conflict and cannot silently overwrite the accepted revision.
-12. One company/workspace gate selects the format for every rich-editor surface. The gate defaults to legacy and cannot become JSON-ready unless the complete expected document count is converted.
+12. One company/workspace gate selects the format for every non-email rich-document surface. The gate defaults to legacy and cannot become JSON-ready unless the complete expected Node, Project, and Logic Gate document count is converted. Email never consults this gate.
+
+## Current inactive implementation status and remaining proof
+
+The 2026-07-19 refinement corrected the first foundation pass: email was removed from the JSON resource/API/schema inventory; transaction bursts now produce one validated full snapshot and one exact IndexedDB write at a roughly 180 ms quiet boundary with a 1.5-second maximum; static sleeping documents render comment/change/chat decorations; exact document realtime scopes exist only while the textbox intersects the viewport; and dirty Node/Project rows publish a real pin to the outer virtualizer until acknowledgement. The backend remains canonical and revision-protected, and IndexedDB contains only unacknowledged pending work.
+
+For JSON-mode annotations, `from`, `to`, selection endpoints, deep-link positions, comment/change positions, and chat highlight endpoints are ProseMirror positions in the exact versioned document. They are not plain-text character offsets and must never be adjusted arithmetically. ProseMirror transaction mappings move them through structured edits. In legacy HTML mode, existing offset contracts remain unchanged. The later conversion must translate legacy stored offsets against the converted document and validate the result. Durable writeback of every mapped existing annotation, complete Word/Google/PDF paste fixtures, and full production-path browser/PostgreSQL parity remain acceptance work; the transition is not complete merely because the inactive component route exists.
 
 ## What Tiptap and ProseMirror will own in the browser
 
@@ -172,7 +178,7 @@ Tiptap runs in the user's browser and ProseMirror owns the current JSON and tran
 
 1. The user edits the Tiptap editor in their browser.
 2. Tiptap/ProseMirror immediately updates the local visible document.
-3. The frontend-backend textbox sync coalesces transactions for 500 milliseconds, with a two-second maximum batch window.
+3. The frontend-backend textbox sync coalesces transactions for roughly 180 milliseconds of quiet, with a 1.5-second maximum batch window during continuous typing.
 4. Before network submission, Mango writes the strict JSON snapshot, stable operation ID, client ID, and exact base revision to the document's exact IndexedDB record.
 5. The browser submits that batch to Mango's exact company/resource/document API.
 6. The Go API authorizes the actor, validates the complete versioned JSON schema and size, deduplicates the operation, requires the exact base revision, and atomically commits the canonical JSONB document, operation/version history, and realtime outbox event.
@@ -333,7 +339,7 @@ The future implementation should proceed in deliberate stages:
 7. **Integrate direct-to-S3 images.** Reuse the existing Mango upload intents, signed uploads, completion, attachment IDs, variants, and hydration paths.
 8. **Implement a one-time HTML conversion tool.** Convert every stored rich document in the workspace outside ordinary editor runtime. Preserve the original source for the approved rollback period and produce a migration report for unsupported content.
 9. **Validate a complete disposable workspace.** A production workspace cannot mix formats or route only newly created documents to JSON.
-10. **Migrate each editor owner deliberately.** Nodes, Logic Gates, Projects, individual text boxes, and any other editor surface must use the same core editor and schema while retaining exact document identity and permission scope.
+10. **Migrate each non-email editor owner deliberately.** Nodes, Logic Gates, Projects, individual text boxes, and any other non-email rich-document surface must use the same core editor and schema while retaining exact document identity and permission scope. Email stays on its rich-HTML contract.
 11. **Remove temporary compatibility code.** After migration proof and the approved rollback window, delete the legacy HTML editing path and any dual-write mechanism. Do not maintain two competing editable sources indefinitely.
 
 The conversion tool may read legacy HTML and write the inactive JSON tables while the workspace remains in converting state. Ordinary runtime never reads stored HTML into Tiptap, never dual-writes document content, and never chooses a format per document.

@@ -209,17 +209,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
     ]);
     const noop = () => undefined;
-    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
-      if (path !== "/v1/editor-data-format?company_id=company-1") throw new Error("unexpected_format_request:" + path);
-      return {
-        company_id: "company-1",
-        editor_format: "legacy_html",
-        migration_state: "not_started",
-        document_schema_version: 1,
-        expected_document_count: 0,
-        converted_document_count: 0,
-      } as T;
-    };
     const emptyUsers: never[] = [];
     const flushedDocuments: string[] = [];
     const emptyChanges: never[] = [];
@@ -410,11 +399,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
               resourceType: "email_draft",
               resourceID: "personal:user-1:owner@example.test:draft-1",
               editorSurface: "my-triage-compose",
-            }}
-            editorDataFormatContext={{
-              apiBase: "https://api.test",
-              companyID: "company-1",
-              requestJSON: legacyFormatRequestJSON,
             }}
             eagerEditorImageHydration
             onChange={setDocumentValue}

@@ -6,7 +6,6 @@ import type { NodeRecord } from "../node-map/shared.js";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
-import { parseMangoTiptapDocument } from "../editor/tiptap/mangoTiptapDocument.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -1074,7 +1073,6 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
   const cleanDraftID = input.draftID.trim();
   if (!cleanCompanyID || !cleanDraftID) throw new Error("email_draft_id_required");
   const scheduledSendTimestamp = normalizeDraftTimestampForAPI(input.scheduledSendTimestamp);
-  const tiptapJSON = parseMangoTiptapDocument(input.bodyEditorHTML).valid;
   const payload = await apiFetchJSON<{ draft: CommunicationsEmailDraft }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -1089,8 +1087,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       cc_recipients: input.cc,
       bcc_recipients: input.bcc,
       subject: input.subject,
-      editor_format: tiptapJSON ? "tiptap_json" : "legacy_html",
-      body_editor_html: tiptapJSON ? "" : input.bodyEditorHTML,
+      body_editor_html: input.bodyEditorHTML,
       reply_to_message: input.replyToMessage ?? null,
       scheduled_send_timestamp: scheduledSendTimestamp,
       collaboration_id: input.collaborationID?.trim() || undefined,
@@ -1132,7 +1129,6 @@ export async function saveEmailSignature(input: {
 }): Promise<CommunicationsEmailSignature> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID) throw new Error("company_id_required");
-  const tiptapJSON = parseMangoTiptapDocument(input.bodyEditorHTML).valid;
   const payload = await apiFetchJSON<{ signature: CommunicationsEmailSignature }>("/v1/communications/signature", {
     method: "PUT",
     body: JSON.stringify({
@@ -1140,8 +1136,7 @@ export async function saveEmailSignature(input: {
       shared_inbox_id: input.sharedInboxID?.trim() || undefined,
       account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim() || undefined,
       name: input.name?.trim() || undefined,
-      editor_format: tiptapJSON ? "tiptap_json" : "legacy_html",
-      body_editor_html: tiptapJSON ? "" : input.bodyEditorHTML,
+      body_editor_html: input.bodyEditorHTML,
       is_default: input.isDefault ?? true,
     }),
   });

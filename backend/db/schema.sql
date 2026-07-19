@@ -4062,7 +4062,7 @@ create table if not exists editor_json_documents (
   constraint editor_json_documents_company_fkey
     foreign key (company_id) references companies(company_id) on delete cascade,
   constraint editor_json_documents_resource_type_chk
-    check (resource_type in ('node', 'logic_gate', 'project', 'email_draft', 'email_signature')),
+    check (resource_type in ('node', 'logic_gate', 'project')),
   constraint editor_json_documents_resource_id_chk
     check (btrim(resource_id) <> '' and octet_length(resource_id) <= 500),
   constraint editor_json_documents_document_id_chk

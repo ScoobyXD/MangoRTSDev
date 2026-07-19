@@ -69,14 +69,6 @@ func (s *Server) authorizeEditorJSON(w http.ResponseWriter, r *http.Request, act
 			return false
 		}
 		return true
-	case "email_draft":
-		return s.requireEmailScopedAttachmentResourceAccess(
-			w, r, ref.CompanyID, "email_draft", ref.ResourceID, r.Method != http.MethodGet,
-		)
-	case "email_signature":
-		return s.requireEmailSignatureAttachmentResourceAccess(
-			w, r, ref.CompanyID, ref.ResourceID, store.EntityPermissionEdit,
-		)
 	default:
 		writeError(w, http.StatusNotFound, "editor_document_route_not_found")
 		return false
@@ -90,39 +82,6 @@ func (s *Server) authorizeEditorJSONRealtime(actor ActorContext, ref store.Edito
 	switch ref.ResourceType {
 	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject:
 		return s.authorizeRealtimeEntityScope(actor, ref.CompanyID, ref.ResourceType, ref.ResourceID, store.EntityPermissionEdit)
-	case "email_draft":
-		allowed, err := s.canViewEmailDraftAttachmentResource(actor, ref.CompanyID, ref.ResourceID)
-		if err != nil {
-			return false, "", err
-		}
-		if !allowed {
-			return false, "resource_not_found", nil
-		}
-		return true, "", nil
-	case "email_signature":
-		parsed, ok := parseEmailSignatureAttachmentResourceID(ref.ResourceID)
-		if !ok {
-			return false, "invalid_scope", nil
-		}
-		if parsed.scope == "personal" {
-			if strings.TrimSpace(actor.User.UserID) != parsed.userID {
-				return false, "resource_not_found", nil
-			}
-			return true, "", nil
-		}
-		if actorCanManageCompany(actor, ref.CompanyID) {
-			return true, "", nil
-		}
-		allowed, err := s.repo.UserHasEffectiveAccess(
-			ref.CompanyID, actor.User.UserID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionEdit,
-		)
-		if err != nil {
-			return false, "", err
-		}
-		if !allowed {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
 	default:
 		return false, "unsupported_scope", nil
 	}

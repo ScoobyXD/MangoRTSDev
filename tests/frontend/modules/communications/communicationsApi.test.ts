@@ -270,12 +270,12 @@ test("email signature helpers preserve exact personal and shared mailbox scope",
       {
         path: "/v1/communications/signature",
         method: "PUT",
-        body: { company_id: "company-1", account_email: "person@example.test", body_editor_html: "Regards", editor_format: "legacy_html", is_default: true },
+        body: { company_id: "company-1", account_email: "person@example.test", body_editor_html: "Regards", is_default: true },
       },
       {
         path: "/v1/communications/signature",
         method: "PUT",
-        body: { company_id: "company-1", shared_inbox_id: "shared-1", body_editor_html: "Shared regards", editor_format: "legacy_html", is_default: true },
+        body: { company_id: "company-1", shared_inbox_id: "shared-1", body_editor_html: "Shared regards", is_default: true },
       },
     ]);
   } finally {

@@ -307,6 +307,7 @@ type NodeTextBlockEditorProps = {
   scrollbarTrack: string;
   onFocus: () => void;
   onBlur: () => void;
+  onPinChange?: (pinned: boolean) => void;
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
   onDocumentConflict?: () => void;
@@ -1704,8 +1705,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
     ...props.contentChanges.flatMap((change) => change.end_offset > change.start_offset ? [{
       id: change.change_id,
       kind: "change" as const,
-      from: change.start_offset + 1,
-      to: change.end_offset + 1,
+      from: change.start_offset,
+      to: change.end_offset,
       active: change.change_id === props.focusContentChangeID,
     }] : []),
     ...props.chatMessages.flatMap((message) => (
@@ -1715,15 +1716,26 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
     ) ? [{
       id: message.id,
       kind: "chat" as const,
-      from: message.selectionStart + 1,
-      to: message.selectionEnd + 1,
+      from: message.selectionStart,
+      to: message.selectionEnd,
       active: message.id === props.activeChatAnchorMessageID,
     }] : []),
+    ...(() => {
+      const pending = props.pendingChatSelectionAnchor;
+      return pending?.source !== "email" && pending && pending.endOffset > pending.startOffset ? [{
+        id: "pending-chat-selection",
+        kind: "chat" as const,
+        from: pending.startOffset,
+        to: pending.endOffset,
+        active: true,
+      }] : [];
+    })(),
   ], [
     props.activeChatAnchorMessageID,
     props.chatMessages,
     props.contentChanges,
     props.focusContentChangeID,
+    props.pendingChatSelectionAnchor,
   ]);
   const target = useMemo(() => {
     if (props.chatNavigationRequest) {
@@ -1783,8 +1795,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onSelectionChatRequest={(selection) => props.onSelectionChatRequest({
         blockID: props.blockID,
         quote: selection.quote,
-        startOffset: Math.max(0, selection.from - 1),
-        endOffset: Math.max(0, selection.to - 1),
+        startOffset: selection.from,
+        endOffset: selection.to,
         x: selection.x,
         y: selection.y,
       })}
@@ -1820,6 +1832,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onSelectionInlineFormatChange={props.onSelectionInlineFormatChange}
       onSelectionHighlightColorChange={props.onSelectionHighlightColorChange}
       onSelectionTextAlignmentChange={props.onSelectionTextAlignmentChange}
+      onLifecycleChange={(snapshot) => props.onPinChange?.(snapshot.pinned)}
       />
     </React.Suspense>
   );
@@ -6893,10 +6906,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onSelectionHighlightColorChange={setReplyHighlightColor}
                 onSelectionTextAlignmentChange={setReplyTextAlignment}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
-                editorDataFormatContext={attachmentRequestJSON ? { apiBase, companyID, requestJSON: attachmentRequestJSON } : undefined}
-                jsonResourceType="email_draft"
-                jsonResourceID={replyAttachmentResourceID}
-                jsonDocumentID={replyTargetMessageID || messageID || "reply"}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
                   onError(message);

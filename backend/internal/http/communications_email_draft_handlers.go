@@ -25,7 +25,6 @@ type communicationsEmailDraftRequest struct {
 	BccRecipients          string          `json:"bcc_recipients"`
 	Subject                string          `json:"subject"`
 	BodyEditorHTML         string          `json:"body_editor_html"`
-	EditorFormat           string          `json:"editor_format"`
 	ReplyToMessage         json.RawMessage `json:"reply_to_message"`
 	ScheduledSendTimestamp string          `json:"scheduled_send_timestamp"`
 	CollaborationID        string          `json:"collaboration_id"`
@@ -39,7 +38,6 @@ type communicationsEmailSignatureRequest struct {
 	AccountEmail   string `json:"account_email"`
 	Name           string `json:"name"`
 	BodyEditorHTML string `json:"body_editor_html"`
-	EditorFormat   string `json:"editor_format"`
 	IsDefault      *bool  `json:"is_default"`
 }
 
@@ -145,17 +143,8 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 		return
 	}
 	responses := make([]communicationsEmailDraftResponse, 0, len(drafts))
-	jsonFormat, formatErr := s.communicationsJSONEditorFormatActive(companyID)
-	if formatErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_editor_data_format")
-		return
-	}
 	for _, draft := range drafts {
-		response := s.communicationsEmailDraftResponse(draft)
-		if jsonFormat {
-			response.BodyEditorHTML = ""
-		}
-		responses = append(responses, response)
+		responses = append(responses, s.communicationsEmailDraftResponse(draft))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"drafts": responses})
 }
@@ -206,16 +195,7 @@ func (s *Server) handleCommunicationsEmailDraftGet(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "failed_to_load_email_draft")
 		return
 	}
-	response := s.communicationsEmailDraftResponse(draft)
-	jsonFormat, formatErr := s.communicationsJSONEditorFormatActive(companyID)
-	if formatErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_editor_data_format")
-		return
-	}
-	if jsonFormat {
-		response.BodyEditorHTML = ""
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"draft": response})
+	writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponse(draft)})
 }
 
 func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *http.Request, pathDraftID string) {
@@ -242,10 +222,6 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "draft_id_required")
 		return
 	}
-	jsonFormat, formatOK := s.enforceCommunicationsEditorFormatWrite(w, companyID, req.EditorFormat, req.BodyEditorHTML)
-	if !formatOK {
-		return
-	}
 	scope := resolvedCommunicationsEmailScope{}
 	if req.IsShared {
 		if !requireCompanyAccess(w, r, companyID) {
@@ -255,21 +231,6 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		var ok bool
 		scope, ok = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
 		if !ok {
-			return
-		}
-	}
-	if jsonFormat {
-		getInput := store.CommunicationsEmailDraftGetInput{
-			CompanyID: companyID, DraftID: draftID, ParticipantUserID: actor.User.UserID,
-		}
-		if !req.IsShared {
-			getInput = scope.draftGetInput(companyID, draftID)
-			getInput.ParticipantUserID = actor.User.UserID
-		}
-		if existing, loadErr := s.repo.GetCommunicationsEmailDraft(getInput); loadErr == nil {
-			req.BodyEditorHTML = existing.BodyEditorHTML
-		} else if !errors.Is(loadErr, store.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "failed_to_preserve_legacy_email_draft_body")
 			return
 		}
 	}
@@ -338,11 +299,7 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed_to_save_email_draft")
 		return
 	}
-	response := s.communicationsEmailDraftResponse(draft)
-	if jsonFormat {
-		response.BodyEditorHTML = ""
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"draft": response})
+	writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponse(draft)})
 }
 
 func (s *Server) handleCommunicationsEmailDraftDelete(w http.ResponseWriter, r *http.Request, draftID string) {
@@ -439,14 +396,6 @@ func (s *Server) handleCommunicationsEmailSignatureGet(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "failed_to_load_email_signature")
 		return
 	}
-	jsonFormat, formatErr := s.communicationsJSONEditorFormatActive(companyID)
-	if formatErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_editor_data_format")
-		return
-	}
-	if jsonFormat {
-		signature.BodyEditorHTML = ""
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"signature": signature})
 }
 
@@ -469,21 +418,9 @@ func (s *Server) handleCommunicationsEmailSignatureUpsert(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	jsonFormat, formatOK := s.enforceCommunicationsEditorFormatWrite(w, companyID, req.EditorFormat, req.BodyEditorHTML)
-	if !formatOK {
-		return
-	}
 	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
 	if !ok {
 		return
-	}
-	if jsonFormat {
-		if existing, loadErr := s.repo.GetCommunicationsEmailSignature(scope.signatureScopeInput(companyID)); loadErr == nil {
-			req.BodyEditorHTML = existing.BodyEditorHTML
-		} else if !errors.Is(loadErr, store.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "failed_to_preserve_legacy_email_signature_body")
-			return
-		}
 	}
 	isDefault := true
 	if req.IsDefault != nil {
@@ -512,41 +449,7 @@ func (s *Server) handleCommunicationsEmailSignatureUpsert(w http.ResponseWriter,
 		writeError(w, http.StatusInternalServerError, "failed_to_save_email_signature")
 		return
 	}
-	if jsonFormat {
-		signature.BodyEditorHTML = ""
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"signature": signature})
-}
-
-func (s *Server) communicationsJSONEditorFormatActive(companyID string) (bool, error) {
-	gate, err := s.repo.GetEditorDataFormat(strings.TrimSpace(companyID))
-	if err != nil {
-		return false, err
-	}
-	return gate.EditorFormat == store.EditorFormatTiptapJSON &&
-		gate.MigrationState == store.EditorMigrationReady &&
-		gate.ExpectedDocumentCount == gate.ConvertedDocumentCount, nil
-}
-
-func (s *Server) enforceCommunicationsEditorFormatWrite(w http.ResponseWriter, companyID, claimedFormat, legacyBody string) (bool, bool) {
-	jsonFormat, err := s.communicationsJSONEditorFormatActive(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_editor_data_format")
-		return false, false
-	}
-	claimedFormat = strings.TrimSpace(claimedFormat)
-	if jsonFormat {
-		if claimedFormat != store.EditorFormatTiptapJSON || strings.TrimSpace(legacyBody) != "" {
-			writeError(w, http.StatusConflict, "stale_editor_data_format")
-			return false, false
-		}
-		return true, true
-	}
-	if claimedFormat == store.EditorFormatTiptapJSON {
-		writeError(w, http.StatusConflict, "editor_json_format_not_ready")
-		return false, false
-	}
-	return false, true
 }
 
 type resolvedCommunicationsEmailScope struct {

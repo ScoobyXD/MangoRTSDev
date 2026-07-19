@@ -27,18 +27,11 @@ import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDoc
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import type { MentionableCompanyUser } from "./editorMentions";
-import { useMangoEditorDataFormat } from "./editorDataFormat";
-
-const MangoTiptapEditor = React.lazy(async () => {
-  const module = await import("./tiptap/MangoTiptapEditor.js");
-  return { default: module.MangoTiptapEditor };
-});
 
 export type UnifiedRichEditorFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
   flush: () => string;
 };
-
 type UnifiedRichEditorSurfaceProps = {
   value: string;
   editable?: boolean;
@@ -55,15 +48,6 @@ type UnifiedRichEditorSurfaceProps = {
   mentionUsers?: MentionableCompanyUser[];
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
-  editorDataFormatContext?: {
-    apiBase: string;
-    companyID: string;
-    requestJSON: EditorImageAttachmentContext["requestJSON"];
-  };
-  jsonResourceType?: "email_draft" | "email_signature";
-  jsonResourceID?: string;
-  jsonDocumentID?: string;
-  prepareJSONIdentity?: () => Promise<unknown>;
   eagerEditorImageHydration?: boolean;
   onEditorImageAttachmentError?: (message: string) => void;
   onChange: (nextValue: string) => void;
@@ -76,7 +60,7 @@ type UnifiedRichEditorSurfaceProps = {
   onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
 };
 
-const LegacyUnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = ({
+export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = ({
   value,
   editable = true,
   outlineStyle,
@@ -355,80 +339,5 @@ const LegacyUnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = 
       />
       {mentionMenu}
     </div>
-  );
-};
-
-const PreparingMangoJSONIdentity: React.FC<{
-  prepare: () => Promise<unknown>;
-  minHeight: React.CSSProperties["minHeight"];
-}> = ({ prepare, minHeight }) => {
-  const [error, setError] = useState("");
-  const startedRef = useRef(false);
-  useEffect(() => {
-    if (startedRef.current) return undefined;
-    startedRef.current = true;
-    let active = true;
-    void prepare().catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : "Unable to prepare the JSON editor identity");
-    });
-    return () => { active = false; };
-  }, [prepare]);
-  return error
-    ? <div role="alert" style={{ minHeight, color: "#b91c1c", padding: 8 }}>{error}</div>
-    : <div aria-label="Preparing JSON editor identity" style={{ minHeight }} />;
-};
-
-export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = (props) => {
-  const formatContext = props.editorDataFormatContext ?? props.editorImageAttachmentContext;
-  const format = useMangoEditorDataFormat(
-    formatContext?.apiBase ?? "",
-    formatContext?.companyID ?? "",
-    formatContext?.requestJSON,
-  );
-  if (format.loading) {
-    return <div aria-label="Preparing editor data format" style={{ minHeight: props.style?.minHeight ?? 120 }} />;
-  }
-  if (format.error || !format.gate || !formatContext) {
-    return <div role="alert" style={{ minHeight: props.style?.minHeight ?? 120, color: "#b91c1c", padding: 8 }}>Unable to verify this workspace's editor format.</div>;
-  }
-  if (format.gate.editor_format === "legacy_html") {
-    return <LegacyUnifiedRichEditorSurface {...props} />;
-  }
-  const resourceID = props.jsonResourceID?.trim() || props.editorImageAttachmentContext?.resourceID.trim() || "";
-  if (!resourceID || !props.jsonResourceType || !props.jsonDocumentID?.trim()) {
-    if (!resourceID && props.prepareJSONIdentity) {
-      return <PreparingMangoJSONIdentity prepare={props.prepareJSONIdentity} minHeight={props.style?.minHeight ?? 120} />;
-    }
-    return <div role="alert" style={{ minHeight: props.style?.minHeight ?? 120, color: "#b91c1c", padding: 8 }}>The JSON editor identity is not ready.</div>;
-  }
-  return (
-    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: props.style?.minHeight ?? 120 }} />}>
-      <MangoTiptapEditor
-      key={`${format.gate.company_id}:${props.jsonResourceType}:${resourceID}:${props.jsonDocumentID}`}
-      value={props.value}
-      editable={props.editable}
-      ariaLabel={props.ariaLabel}
-      placeholder={props.placeholder}
-      className={props.className}
-      style={props.style}
-      companyID={format.gate.company_id}
-      resourceType={props.jsonResourceType}
-      resourceID={resourceID}
-      documentID={props.jsonDocumentID}
-      requestJSON={formatContext.requestJSON}
-      attachmentContext={props.editorImageAttachmentContext}
-      mentionUsers={props.mentionUsers}
-      formattingControllerRef={props.formattingControllerRef}
-      onChange={props.onChange}
-      onFlush={props.onFlush}
-      onFocus={props.onFocus}
-      onBlur={props.onBlur}
-      onError={props.onEditorImageAttachmentError}
-      onSelectionFontSizeChange={props.onSelectionFontSizeChange}
-      onSelectionInlineFormatChange={props.onSelectionInlineFormatChange}
-      onSelectionHighlightColorChange={props.onSelectionHighlightColorChange}
-      onSelectionTextAlignmentChange={props.onSelectionTextAlignmentChange}
-      />
-    </React.Suspense>
   );
 };

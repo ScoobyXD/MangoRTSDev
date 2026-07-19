@@ -1,6 +1,7 @@
 import React from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
+import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 
 export type MangoStaticAttachmentImageProps = {
   attachmentId: string;
@@ -22,6 +23,7 @@ type MangoTiptapStaticRendererProps = {
   className?: string;
   style?: React.CSSProperties;
   ariaLabel?: string;
+  annotations?: readonly MangoTiptapAnnotation[];
   renderAttachmentImage?: (attributes: MangoStaticAttachmentImageProps) => React.ReactNode;
 };
 
@@ -42,22 +44,71 @@ function markContent(content: React.ReactNode, mark: NonNullable<JSONContent["ma
   }
 }
 
-function renderChildren(node: JSONContent, renderAttachmentImage: MangoTiptapStaticRendererProps["renderAttachmentImage"]): React.ReactNode {
-  return node.content?.map((child, index) => renderNode(child, `${node.type || "node"}:${index}`, renderAttachmentImage));
+function staticNodeSize(node: JSONContent): number {
+  if (node.type === "text") return node.text?.length ?? 0;
+  if (node.type === "doc") return (node.content ?? []).reduce((total, child) => total + staticNodeSize(child), 0);
+  if (["hardBreak", "horizontalRule", "mention", "mangoAttachmentImage"].includes(node.type ?? "")) return 1;
+  return 2 + (node.content ?? []).reduce((total, child) => total + staticNodeSize(child), 0);
+}
+
+function annotationClass(annotation: MangoTiptapAnnotation): string {
+  return `mango-tiptap-annotation mango-tiptap-annotation--${annotation.kind}${annotation.active ? " is-active" : ""}`;
+}
+
+function renderAnnotatedText(node: JSONContent, key: React.Key, position: number, annotations: readonly MangoTiptapAnnotation[]): React.ReactNode {
+  const text = node.text ?? "";
+  const end = position + text.length;
+  const relevant = annotations.filter((annotation) => annotation.from < end && annotation.to > position);
+  if (relevant.length === 0) {
+    return <React.Fragment key={key}>{(node.marks ?? []).reduce<React.ReactNode>((content, mark, index) => markContent(content, mark, index), text)}</React.Fragment>;
+  }
+  const boundaries = new Set([position, end]);
+  relevant.forEach((annotation) => {
+    boundaries.add(Math.max(position, annotation.from));
+    boundaries.add(Math.min(end, annotation.to));
+  });
+  const ordered = [...boundaries].sort((left, right) => left - right);
+  return <React.Fragment key={key}>{ordered.slice(0, -1).map((start, index) => {
+    const finish = ordered[index + 1];
+    let content = (node.marks ?? []).reduce<React.ReactNode>(
+      (current, mark, markIndex) => markContent(current, mark, markIndex),
+      text.slice(start - position, finish - position),
+    );
+    const covering = relevant.filter((annotation) => annotation.from < finish && annotation.to > start);
+    covering.forEach((annotation) => {
+      content = <span className={annotationClass(annotation)} data-mango-annotation-id={annotation.id} data-mango-annotation-kind={annotation.kind}>{content}</span>;
+    });
+    return <React.Fragment key={`${String(key)}:${start}`}>{content}</React.Fragment>;
+  })}</React.Fragment>;
+}
+
+function renderChildren(
+  node: JSONContent,
+  renderAttachmentImage: MangoTiptapStaticRendererProps["renderAttachmentImage"],
+  annotations: readonly MangoTiptapAnnotation[],
+  position: number,
+): React.ReactNode {
+  let childPosition = node.type === "doc" ? position : position + 1;
+  return node.content?.map((child, index) => {
+    const rendered = renderNode(child, `${node.type || "node"}:${index}`, renderAttachmentImage, annotations, childPosition);
+    childPosition += staticNodeSize(child);
+    return rendered;
+  });
 }
 
 function renderNode(
   node: JSONContent,
   key: React.Key,
   renderAttachmentImage: MangoTiptapStaticRendererProps["renderAttachmentImage"],
+  annotations: readonly MangoTiptapAnnotation[],
+  position: number,
 ): React.ReactNode {
   const attrs = node.attrs ?? {};
   if (node.type === "text") {
-    return (node.marks ?? []).reduce<React.ReactNode>((content, mark, index) => markContent(content, mark, index), node.text ?? "");
+    return renderAnnotatedText(node, key, position, annotations);
   }
-  const children = renderChildren(node, renderAttachmentImage);
+  const children = renderChildren(node, renderAttachmentImage, annotations, position);
   const blockProps = {
-    key,
     "data-mango-block-id": attrs.blockId ? String(attrs.blockId) : undefined,
   };
   const style: React.CSSProperties = {
@@ -66,25 +117,25 @@ function renderNode(
   };
   switch (node.type) {
     case "doc": return <>{children}</>;
-    case "paragraph": return <p {...blockProps} style={style}>{children}</p>;
+    case "paragraph": return <p key={key} {...blockProps} style={style}>{children}</p>;
     case "heading": {
       const level = Math.max(1, Math.min(6, Number(attrs.level) || 1));
-      return React.createElement(`h${level}`, { ...blockProps, style }, children);
+      return React.createElement(`h${level}`, { key, ...blockProps, style }, children);
     }
-    case "blockquote": return <blockquote {...blockProps}>{children}</blockquote>;
-    case "codeBlock": return <pre {...blockProps}><code>{children}</code></pre>;
-    case "horizontalRule": return <hr {...blockProps} />;
+    case "blockquote": return <blockquote key={key} {...blockProps}>{children}</blockquote>;
+    case "codeBlock": return <pre key={key} {...blockProps}><code>{children}</code></pre>;
+    case "horizontalRule": return <hr key={key} {...blockProps} />;
     case "hardBreak": return <br key={key} />;
-    case "bulletList": return <ul {...blockProps}>{children}</ul>;
-    case "orderedList": return <ol {...blockProps} start={Number(attrs.start) || 1}>{children}</ol>;
-    case "listItem": return <li {...blockProps}>{children}</li>;
-    case "taskList": return <ul {...blockProps} data-type="taskList">{children}</ul>;
+    case "bulletList": return <ul key={key} {...blockProps}>{children}</ul>;
+    case "orderedList": return <ol key={key} {...blockProps} start={Number(attrs.start) || 1}>{children}</ol>;
+    case "listItem": return <li key={key} {...blockProps}>{children}</li>;
+    case "taskList": return <ul key={key} {...blockProps} data-type="taskList">{children}</ul>;
     case "taskItem": return (
-      <li {...blockProps} data-type="taskItem" data-checked={Boolean(attrs.checked)}>
+      <li key={key} {...blockProps} data-type="taskItem" data-checked={Boolean(attrs.checked)}>
         <input type="checkbox" checked={Boolean(attrs.checked)} readOnly tabIndex={-1} aria-hidden="true" /> {children}
       </li>
     );
-    case "table": return <table {...blockProps} style={{ borderCollapse: "collapse", width: "100%", tableLayout: attrs.style === "fixed" ? "fixed" : undefined }}><tbody>{children}</tbody></table>;
+    case "table": return <table key={key} {...blockProps} style={{ borderCollapse: "collapse", width: "100%", tableLayout: attrs.style === "fixed" ? "fixed" : undefined }}><tbody>{children}</tbody></table>;
     case "tableRow": return <tr key={key}>{children}</tr>;
     case "tableHeader": {
       const width = Array.isArray(attrs.colwidth) && Number(attrs.colwidth[0]) > 0 ? Number(attrs.colwidth[0]) : undefined;
@@ -94,7 +145,10 @@ function renderNode(
       const width = Array.isArray(attrs.colwidth) && Number(attrs.colwidth[0]) > 0 ? Number(attrs.colwidth[0]) : undefined;
       return <td key={key} colSpan={Number(attrs.colspan) || 1} rowSpan={Number(attrs.rowspan) || 1} style={{ width, textAlign: attrs.align as React.CSSProperties["textAlign"], backgroundColor: attrs.backgroundColor ? String(attrs.backgroundColor) : undefined }}>{children}</td>;
     }
-    case "mention": return <span key={key} className="mango-tiptap-mention" data-mango-user-id={String(attrs.userId || "")}>@{String(attrs.label || "user")}</span>;
+    case "mention": {
+      const kind = attrs.kind === "urgent" ? "urgent" : "normal";
+      return <span key={key} className={`mango-tiptap-mention mango-tiptap-mention--${kind}`} data-mango-user-id={String(attrs.userId || "")} data-mango-mention-kind={kind}>{kind === "urgent" ? "!" : "@"}{String(attrs.label || "user")}</span>;
+    }
     case "mangoAttachmentImage": {
       const image = {
         attachmentId: String(attrs.attachmentId || ""),
@@ -110,7 +164,12 @@ function renderNode(
         alt: typeof attrs.alt === "string" ? attrs.alt : undefined,
         title: typeof attrs.title === "string" ? attrs.title : undefined,
       };
-      return <React.Fragment key={key}>{renderAttachmentImage?.(image) ?? <span data-mango-attachment-id={image.attachmentId}>{image.alt || image.filename || "Attached image"}</span>}</React.Fragment>;
+      const content = renderAttachmentImage?.(image) ?? <span data-mango-attachment-id={image.attachmentId}>{image.alt || image.filename || "Attached image"}</span>;
+      const covering = annotations.filter((item) => item.from <= position && item.to >= position + 1);
+      const annotated = covering.reduce<React.ReactNode>((current, annotation) => (
+        <div className={annotationClass(annotation)} data-mango-annotation-id={annotation.id} data-mango-annotation-kind={annotation.kind}>{current}</div>
+      ), content);
+      return <React.Fragment key={key}>{annotated}</React.Fragment>;
     }
     default: return null;
   }
@@ -121,9 +180,10 @@ export const MangoTiptapStaticRenderer: React.FC<MangoTiptapStaticRendererProps>
   className,
   style,
   ariaLabel,
+  annotations = [],
   renderAttachmentImage,
 }) => (
   <div className={className} style={style} aria-label={ariaLabel} data-mango-editor-state="sleeping">
-    {renderNode(value.document, "document", renderAttachmentImage)}
+    {renderNode(value.document, "document", renderAttachmentImage, annotations, 0)}
   </div>
 );

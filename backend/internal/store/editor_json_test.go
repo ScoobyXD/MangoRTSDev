@@ -31,7 +31,7 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 		"document":{"type":"doc","content":[
 			{"type":"heading","attrs":{"level":2,"blockId":"heading-1","textAlign":"center","indentLevel":0},"content":[{"type":"text","text":"Plan","marks":[{"type":"bold"}]}]},
 			{"type":"paragraph","attrs":{"blockId":"paragraph-1","textAlign":"left","indentLevel":1},"content":[
-				{"type":"mention","attrs":{"userId":"user-1","label":"Ada"}},
+				{"type":"mention","attrs":{"userId":"user-1","label":"Ada","kind":"normal"}},
 				{"type":"text","text":" link","marks":[{"type":"link","attrs":{"href":"https://example.test","target":"_blank","rel":"noopener"}},{"type":"textStyle","attrs":{"fontSize":"18px","color":"#123456"}},{"type":"highlight","attrs":{"color":"#fff59d"}}]}
 			]},
 			{"type":"bulletList","attrs":{"blockId":"list-1"},"content":[{"type":"listItem","attrs":{"blockId":"item-1"},"content":[{"type":"paragraph","content":[{"type":"text","text":"Nested"}]}]}]},

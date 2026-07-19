@@ -219,6 +219,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             parseHTML: (element) => element.getAttribute("data-mango-user-label"),
             renderHTML: () => ({}),
           },
+          kind: {
+            default: "normal",
+            parseHTML: (element) => element.getAttribute("data-mango-mention-kind") ?? "normal",
+            renderHTML: () => ({}),
+          },
         };
       },
       renderHTML({ node, HTMLAttributes }) {
@@ -226,14 +231,16 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           "data-type": "mention",
           "data-mango-user-id": node.attrs.userId,
           "data-mango-user-label": node.attrs.label,
-          class: "mango-tiptap-mention",
-        }), `@${String(node.attrs.label || "user")}`];
+          "data-mango-mention-kind": node.attrs.kind,
+          class: `mango-tiptap-mention mango-tiptap-mention--${node.attrs.kind === "urgent" ? "urgent" : "normal"}`,
+        }), `${node.attrs.kind === "urgent" ? "!" : "@"}${String(node.attrs.label || "user")}`];
       },
     }).configure({
       HTMLAttributes: { class: "mango-tiptap-mention" },
-      renderText: ({ node }) => `@${String(node.attrs.label || "user")}`,
+      renderText: ({ node }) => `${node.attrs.kind === "urgent" ? "!" : "@"}${String(node.attrs.label || "user")}`,
       deleteTriggerWithBackspace: true,
-      suggestion: {
+      suggestions: (["normal", "urgent"] as const).map((kind) => ({
+        char: kind === "urgent" ? "!" : "@",
         items: ({ query }) => {
           const normalized = query.trim().toLowerCase();
           return (options.mentionUsers ?? [])
@@ -245,7 +252,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           const value = props as { userId?: string; id?: string; label?: string };
           editor.chain().focus().insertContentAt(range, [{
             type: "mention",
-            attrs: { userId: value.userId || value.id, label: value.label || "user" },
+            attrs: { userId: value.userId || value.id, label: value.label || "user", kind },
           }, { type: "text", text: " " }]).run();
         },
         render: () => {
@@ -292,7 +299,8 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               current = props as typeof current;
               menu = document.createElement("div");
               menu.setAttribute("role", "listbox");
-              menu.setAttribute("aria-label", "Mention people");
+              menu.setAttribute("aria-label", kind === "urgent" ? "Urgently mention people" : "Mention people");
+              menu.setAttribute("data-mango-tiptap-mention-menu", "true");
               Object.assign(menu.style, {
                 position: "fixed", zIndex: "2100", minWidth: "180px", maxHeight: "240px",
                 overflowY: "auto", padding: "4px", border: "1px solid #cbd5e1",
@@ -315,7 +323,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
                 paint();
                 return true;
               }
-              if (event.key === "Enter" && current.items[selectedIndex]) {
+              if ((event.key === "Enter" || event.key === "Tab") && current.items[selectedIndex]) {
                 event.preventDefault();
                 current.command(current.items[selectedIndex]);
                 return true;
@@ -329,7 +337,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             onExit: close,
           };
         },
-      },
+      })),
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,
     MangoBlockIdentity,

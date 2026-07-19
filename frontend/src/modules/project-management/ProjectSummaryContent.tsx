@@ -291,6 +291,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [summarySplitPct, setSummarySplitPct] = useState(58);
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
+  const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
@@ -666,8 +667,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const index = blocks.findIndex((block) => block.id === blockID);
       if (index >= 0) indices.add(index);
     }
+    for (const blockID of tiptapPinnedBlockIDs) {
+      const index = blocks.findIndex((block) => block.id === blockID);
+      if (index >= 0) indices.add(index);
+    }
     return Array.from(indices);
-  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID]);
+  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const projectRowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -1975,7 +1980,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 if (!block) return null;
                 const emailOpen = openEmailBlockIDs.has(block.id);
                 const emailMounted = emailOpen || emailReplyBlockID === block.id;
-                const editorOpen = openEditorBlockIDs.has(block.id);
+                const editorOpen = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
                 const chatOpen = openChatBlockIDs.has(block.id);
                 const bodyColumns = [
                   emailOpen ? `${projectSidePaneWidths.email}px` : "",
@@ -2003,7 +2008,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 setActiveRichTextBlockID("");
                                 projectFormattingControllerRef.current = null;
                               }
-                              setOpenEditorBlockIDs((current) => toggleSetValue(current, block.id));
+                              setOpenEditorBlockIDs((current) => {
+                                const next = new Set(current);
+                                if (editorOpen) next.delete(block.id);
+                                else next.add(block.id);
+                                return next;
+                              });
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
@@ -2105,6 +2115,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   window.setTimeout(refreshProjectSelectionFormat, 0);
                                 }}
                                 onBlur={() => undefined}
+                                onPinChange={(pinned) => setTiptapPinnedBlockIDs((current) => {
+                                  const has = current.has(block.id);
+                                  if (has === pinned) return current;
+                                  const next = new Set(current);
+                                  if (pinned) next.add(block.id);
+                                  else next.delete(block.id);
+                                  return next;
+                                })}
                                 onDocumentChange={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}

@@ -46,7 +46,6 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
-import { serializeRichEditorBodyForEmailDelivery } from "../../modules/editor/tiptap/mangoTiptapEmail.js";
 import { buildForwardedComposeBody } from "./emailForwarding.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import {
@@ -313,10 +312,9 @@ export async function sendHomeMailComposeCommand(args: {
   const subject = args.compose.subject.trim();
   const bodyText = args.compose.body;
   const kind = args.compose.kind ?? (args.compose.replyToMessageID ? "reply" : "compose");
-  const tiptapDeliveryBody = serializeRichEditorBodyForEmailDelivery(bodyText);
   const body = kind === "forward"
     ? buildForwardedComposeBody(bodyText, args.compose.replyToMessage)
-    : tiptapDeliveryBody ?? (editorBodyHasEmailContent(bodyText) ? serializeEditorBodyForEmailHTML(bodyText) : "");
+    : editorBodyHasEmailContent(bodyText) ? serializeEditorBodyForEmailHTML(bodyText) : "";
   const attachments = (args.compose.attachments ?? [])
     .map((attachment) => ({
       id: attachment.attachmentID.trim(),

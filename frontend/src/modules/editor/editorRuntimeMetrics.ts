@@ -8,6 +8,7 @@ export type EditorRuntimeMetricName =
   | "indexeddb_writes"
   | "image_requests"
   | "transactions"
+  | "full_document_serializations"
   | "network_saves"
   | "conflicts";
 
@@ -15,7 +16,8 @@ export type EditorRuntimeMetricsSnapshot = Readonly<Record<EditorRuntimeMetricNa
 
 const metricNames: readonly EditorRuntimeMetricName[] = [
   "active_editors", "dirty_editors", "listeners", "observers", "recovery_requests",
-  "indexeddb_reads", "indexeddb_writes", "image_requests", "transactions", "network_saves", "conflicts",
+  "indexeddb_reads", "indexeddb_writes", "image_requests", "transactions", "full_document_serializations",
+  "network_saves", "conflicts",
 ];
 const metrics = new Map<EditorRuntimeMetricName, number>(metricNames.map((name) => [name, 0]));
 const listeners = new Set<(snapshot: EditorRuntimeMetricsSnapshot) => void>();

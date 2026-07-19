@@ -33,9 +33,9 @@ import {
   updateMangoTiptapAnnotations,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapAnnotations.js";
 import {
-  serializeMangoTiptapEmailHTML,
-  serializeRichEditorBodyForEmailDelivery,
-} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapEmail.js";
+  getEditorRuntimeMetrics,
+  resetEditorRuntimeMetricsForTests,
+} from "../../../../frontend/src/modules/editor/editorRuntimeMetrics.js";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -57,7 +57,7 @@ function richDocument(text = "Mango"): MangoTiptapDocument {
         type: "paragraph",
         attrs: { blockId: "paragraph-1", textAlign: "center", indentLevel: 1 },
         content: [
-          { type: "mention", attrs: { userId: "user-1", label: "Ada" } },
+          { type: "mention", attrs: { userId: "user-1", label: "Ada", kind: "normal" } },
           { type: "text", text, marks: [
             { type: "bold" },
             { type: "underline" },
@@ -132,17 +132,6 @@ test("strict Mango Tiptap contract covers rich features and fails closed", () =>
   const oversizedImageNode = oversizedImage.document.content?.[2];
   if (oversizedImageNode?.attrs) oversizedImageNode.attrs.displayWidth = 1_000_000;
   assert.equal(validateMangoTiptapDocument(oversizedImage).valid, false);
-});
-
-test("JSON-native email delivery projection preserves rich semantics without legacy editor storage", () => {
-  const serialized = JSON.stringify(richDocument("Email"));
-  const html = serializeMangoTiptapEmailHTML(serialized);
-  assert.match(html, /data-mango-editor-format="tiptap-json"/);
-  assert.match(html, /<table/);
-  assert.match(html, /data-mango-mention-user-id="user-1"/);
-  assert.match(html, /mango-attachment:attachment-1/);
-  assert.doesNotMatch(html, /blob:|data:image|mango-tiptap-json/);
-  assert.equal(serializeRichEditorBodyForEmailDelivery("<p>legacy</p>"), null);
 });
 
 test("Tiptap owns commands, history, tables, positions, and annotation mapping", () => {
@@ -239,6 +228,7 @@ test("Tiptap sync durably records one exact document before network completion",
   Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
   Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
   Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  resetEditorRuntimeMetricsForTests();
   let releaseCommit: (() => void) | undefined;
   let postStarted = false;
   let canonicalReads = 0;
@@ -265,11 +255,20 @@ test("Tiptap sync durably records one exact document before network completion",
     await sync.start();
     await Promise.all([sync.recover(), sync.recover()]);
     assert.equal(canonicalReads, 2, "overlapping exact recoveries share one canonical request");
-    sync.schedule(next);
+    let snapshotReads = 0;
+    for (let index = 0; index < 25; index += 1) {
+      sync.schedule(() => {
+        snapshotReads += 1;
+        return next;
+      });
+    }
     for (let count = 0; count < 100 && !postStarted; count += 1) {
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
     assert.equal(postStarted, true);
+    assert.equal(snapshotReads, 1, "a transaction burst reads one complete JSON snapshot at the batch boundary");
+    assert.equal(getEditorRuntimeMetrics().full_document_serializations, 1);
+    assert.equal(getEditorRuntimeMetrics().indexeddb_writes, 1, "a transaction burst writes one pending IndexedDB record");
     const key = mangoTiptapPendingStorageKey(options);
     const pending = await readExactMangoTiptapPending(key);
     assert.equal(pending?.commits.length, 1);
@@ -287,10 +286,10 @@ test("Tiptap sync durably records one exact document before network completion",
   }
 });
 
-test("all rich surfaces share the gate and no external collaboration service is installed", () => {
+test("non-email document surfaces share the gate and email stays on the HTML editor", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
-  assert.match(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /useMangoEditorDataFormat/);
+  assert.doesNotMatch(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /MangoTiptapEditor|useMangoEditorDataFormat|tiptap_json/);
   assert.match(read("frontend/src/modules/editor/EditorContent.tsx"), /useMangoEditorDataFormat/);
   const packageJSON = read("frontend/package.json").toLowerCase();
   assert.doesNotMatch(packageJSON, /hocuspocus|\byjs\b|tiptap-cloud/);
@@ -304,5 +303,52 @@ test("all rich surfaces share the gate and no external collaboration service is 
   assert.match(editor, />Keep my version<\/button>/);
   assert.match(editor, />Use saved version<\/button>/);
   const communications = read("frontend/src/modules/communications/communicationsApi.ts");
-  assert.match(communications, /editor_format: tiptapJSON \? "tiptap_json" : "legacy_html"/);
+  assert.doesNotMatch(communications, /mangoTiptap|tiptap_json|editor_format/);
+});
+
+test("exact realtime scope exists only while the document is visibly eligible", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  let subscriptions = 0;
+  let unsubscriptions = 0;
+  let canonicalReads = 0;
+  const sync = new MangoTiptapSync({
+    companyID: "company-visible",
+    resourceType: "project",
+    resourceID: "project-1",
+    documentID: "document-1",
+    requestJSON: async <T>() => {
+      canonicalReads += 1;
+      return { revision: 0, schema_version: 1, document: createEmptyMangoTiptapDocument() } as T;
+    },
+    onDocument: () => undefined,
+    subscribeToCanonicalChange: () => {
+      subscriptions += 1;
+      return () => { unsubscriptions += 1; };
+    },
+  });
+  try {
+    await sync.start();
+    assert.equal(subscriptions, 0, "near-viewport recovery does not register the exact document scope");
+    sync.setRealtimeVisible(true);
+    await sync.recover();
+    assert.equal(subscriptions, 1);
+    assert.equal(canonicalReads, 2, "visible entry subscribes first and then refreshes canonical state");
+    sync.setRealtimeVisible(false);
+    assert.equal(unsubscriptions, 1);
+    sync.setRealtimeVisible(false);
+    assert.equal(unsubscriptions, 1, "visibility cleanup is idempotent");
+  } finally {
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
 });

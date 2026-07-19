@@ -227,6 +227,7 @@ Given:
 
 Expected:
 - The body editor uses the shared editor behavior.
+- Every email body and signature remains on `UnifiedRichEditorSurface`/`EditorDocumentSurface` with rich HTML as its only editable and stored body. Email does not consult the Tiptap workspace gate, write `editor_json_documents`, or maintain JSON/HTML dual state.
 - Legacy plain text loads safely as escaped/linkified rich content.
 - Sent or saved rich content is sanitized.
 - Indented blocks remain indented in sent HTML instead of flattening.
@@ -1367,14 +1368,19 @@ Expected:
 
 This scenario covers the inactive `tiptap_json` workspace mode added on 2026-07-18.
 
-- The data-format request is one coherent company/workspace decision shared by Node, email-created Node, Project, standalone Logic Gate/Editor, email compose/reply/forward, attached-email reply, and signature surfaces.
-- Legacy mode never sends stored HTML to Tiptap. JSON-ready mode never mounts the legacy editor. An incomplete converted-document count is rejected instead of choosing a format per document.
-- A sleeping row uses the static JSON renderer and has no Tiptap instance. Near-viewport preparation performs exact recovery and returns to sleeping. Focus or a deep target creates one instance. Dirty/pending or targeted work remains pinned until durable resolution.
-- `mangoTiptapFoundation.test.ts` exercises the strict versioned node/mark contract, invalid nesting and unknown-version rejection, native marks/lists/tables/history, annotation mapping, deep block navigation, exact IndexedDB recovery, JSON email delivery, and the absence of Hocuspocus/Yjs/Tiptap Cloud.
+- The data-format request is one coherent company/workspace decision shared by Node, email-created Node non-email text documents, Project, and standalone Logic Gate/Editor. Email compose/reply/forward, attached-email reply, drafts, signatures, display, recovery, and send formatting remain exclusively on the rich-HTML path and never consult this gate.
+- Legacy mode never sends stored HTML to Tiptap. JSON-ready mode never mounts the legacy editor for a non-email rich document. An incomplete converted-document count is rejected instead of choosing a format per document.
+- A sleeping row uses the static JSON renderer and has no Tiptap instance, but renders current comment/change/chat annotations. A 600-pixel preparation margin may perform exact recovery; only literal viewport intersection registers the exact realtime document scope. Entering view subscribes and then refreshes canonical state. Leaving view unsubscribes even if the dirty row remains mounted to finish saving.
+- JSON-mode `from`, `to`, selection endpoints, annotation endpoints, and deep-link positions are genuine ProseMirror positions. Transaction mappings move them through paragraphs, lists, tables, formatting, and images, and decorations paint both active and static views. Legacy HTML offsets retain their existing semantics until Step 4 converts and validates them.
+- ProseMirror transactions apply immediately in memory. A roughly 180 ms quiet batch with a 1.5-second maximum reads/validates/serializes at most one complete JSON snapshot, writes one exact pending IndexedDB record, and notifies the parent once. Blur, navigation, explicit flush, and impending unmount close the batch. Successful acknowledgement deletes that exact pending record.
+- A dirty Node/Project row publishes lifecycle state to the outer virtualizer and remains pinned/mounted until the save is acknowledged. A DOM data attribute is diagnostic only and is not the ownership signal.
+- `mangoTiptapFoundation.test.ts` exercises the strict versioned node/mark contract, invalid nesting and unknown-version rejection, native marks/lists/tables/history, annotation mapping, deep block navigation, exact IndexedDB recovery, batched full-document metrics, visible-only sync lifetime, HTML-only email, and the absence of Hocuspocus/Yjs/Tiptap Cloud. `mangoTiptapEditorIntegration.test.tsx` mounts the real React/Tiptap component and verifies multi-block/list/table/image static annotations, exact viewport subscription/re-entry recovery, immediate transactions with one batched snapshot/IndexedDB write, pending pinning, offscreen unsubscribe, acknowledgement unpin, and recovery-record deletion.
 - Backend store and HTTP tests exercise strict validation, two-MiB/version boundaries, exact base revisions, idempotent operation replay, version history, delete behavior, the default legacy gate, partial-conversion rejection, legacy-route rejection after cutover, JSON-route rejection before cutover, and metadata projections that never contain canonical document content.
-- Communications tests prove that old email draft/signature HTML writes are rejected once the gate is JSON-ready, while metadata updates preserve the untouched old HTML field and the JSON body remains canonical only in `editor_json_documents`.
+- Communications tests continue to prove rich-HTML email draft/signature storage, autosave/recovery, mailbox scope, attachment references, reply/forward behavior, sanitization, and delivery formatting independently of the JSON workspace gate. JSON editor routes reject email draft/signature resource types.
 - Realtime tests cover the exact URL-encoded `editor-json:<resource-type>:<resource-id>:<document-id>` scope. One document's event must not wake another document.
 - Performance contracts expose counts for active/dirty instances, listeners, observers, recovery, IndexedDB reads/writes, image requests, transactions, network saves, and conflicts. Network/PostgreSQL timing is measured separately from browser main-thread work.
 - The production build must keep `MangoTiptapEditor` in a lazy chunk so legacy workspaces do not pay the editor-engine parse/mount cost.
 
 The later HTML-to-JSON conversion is deliberately not part of this scenario. A cutover test environment must convert and validate the complete workspace before flipping the gate.
+
+This scenario is not yet the complete migration acceptance suite. Durable mapped-annotation writeback across reload, the permanent Word/Google/PDF paste fixture library, complete image-action parity in production hosts, and production-path browser/PostgreSQL JSON-mode tests remain required before Step 4 can be approved.

@@ -8,9 +8,7 @@ import {
 export type MangoTiptapResourceType =
   | "node"
   | "project"
-  | "logic_gate"
-  | "email_draft"
-  | "email_signature";
+  | "logic_gate";
 
 export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
@@ -51,6 +49,7 @@ export type MangoTiptapSyncOptions = {
   requestJSON: MangoTiptapRequest;
   initialRevision?: number;
   onDocument: (document: MangoTiptapDocument, source: "canonical" | "recovery") => void;
+  onSnapshot?: (document: MangoTiptapDocument, serialized: string) => void;
   onPendingChange?: (pendingCount: number) => void;
   onConflict?: (conflict: MangoTiptapConflict) => void;
   onError?: (cause: unknown) => void;
@@ -152,7 +151,9 @@ export class MangoTiptapSync {
   private maxBatchTimer: ReturnType<typeof setTimeout> | undefined;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private retryAttempt = 0;
+  private snapshotProvider: (() => MangoTiptapDocument) | undefined;
   private unsubscribe: (() => void) | undefined;
+  private realtimeVisible = false;
   private stopped = false;
   private conflicted = false;
 
@@ -165,17 +166,44 @@ export class MangoTiptapSync {
 
   async start(): Promise<void> {
     this.stopped = false;
-    this.unsubscribe = this.options.subscribeToCanonicalChange?.(() => {
-      void this.recover().catch((cause) => this.options.onError?.(cause));
-    }, this.clientID);
     await this.recover();
   }
 
-  schedule(document: MangoTiptapDocument, immediate = false): void {
+  setRealtimeVisible(visible: boolean): void {
+    if (this.realtimeVisible === visible) return;
+    this.realtimeVisible = visible;
+    if (!visible) {
+      this.unsubscribe?.();
+      this.unsubscribe = undefined;
+      return;
+    }
+    if (this.stopped || this.unsubscribe) return;
+    this.unsubscribe = this.options.subscribeToCanonicalChange?.(() => {
+      void this.recover().catch((cause) => this.options.onError?.(cause));
+    }, this.clientID);
+  }
+
+  schedule(document: MangoTiptapDocument | (() => MangoTiptapDocument), immediate = false): void {
     if (this.stopped || this.conflicted) return;
-    const serialized = serializeMangoTiptapDocument(document);
+    this.snapshotProvider = typeof document === "function" ? document : () => document;
+    this.armDrain(immediate);
+  }
+
+  private captureScheduledSnapshot(): Promise<void> {
+    const provider = this.snapshotProvider;
+    this.snapshotProvider = undefined;
+    if (!provider) return this.persistence;
+    let serialized: string;
+    try {
+      serialized = serializeMangoTiptapDocument(provider());
+      incrementEditorRuntimeMetric("full_document_serializations");
+    } catch (cause) {
+      this.options.onError?.(cause);
+      return this.persistence;
+    }
+    const pendingDocument = JSON.parse(serialized) as MangoTiptapDocument;
+    this.options.onSnapshot?.(pendingDocument, serialized);
     this.persistence = this.persistence.then(async () => {
-      const pendingDocument = JSON.parse(serialized) as MangoTiptapDocument;
       const last = this.pending[this.pending.length - 1];
       if (last && this.drainPromise === undefined) {
         last.document = pendingDocument;
@@ -190,20 +218,27 @@ export class MangoTiptapSync {
       }
       await this.persistPending();
       this.options.onPendingChange?.(this.pending.length);
-      this.armDrain(immediate);
     }).catch((cause) => this.options.onError?.(cause));
+    return this.persistence;
+  }
+
+  private async captureAndDrain(): Promise<void> {
+    this.clearTimers();
+    await this.captureScheduledSnapshot();
+    await this.drain();
   }
 
   async flush(): Promise<void> {
     this.clearTimers();
-    await this.persistence;
+    await this.captureScheduledSnapshot();
     await this.drain();
   }
 
   async shutdown(): Promise<void> {
-    this.stopped = true;
+    this.setRealtimeVisible(false);
     this.clearTimers();
-    await this.persistence;
+    await this.captureScheduledSnapshot();
+    this.stopped = true;
     try {
       await this.drain();
     } catch (cause) {
@@ -225,7 +260,7 @@ export class MangoTiptapSync {
 
   private async performRecovery(): Promise<void> {
     incrementEditorRuntimeMetric("recovery_requests");
-    await this.persistence;
+    await this.captureScheduledSnapshot();
     const [record, canonical] = await Promise.all([
       readExactMangoTiptapPending(this.storageKey),
       this.options.requestJSON<MangoTiptapSnapshot>(this.path),
@@ -289,24 +324,23 @@ export class MangoTiptapSync {
   private armDrain(immediate: boolean): void {
     this.clearTimer("batch");
     if (immediate) {
-      void this.drain().catch((cause) => this.options.onError?.(cause));
+      void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
       return;
     }
     this.batchTimer = setTimeout(() => {
       this.batchTimer = undefined;
-      void this.drain().catch((cause) => this.options.onError?.(cause));
-    }, this.options.batchMs ?? 500);
+      void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
+    }, this.options.batchMs ?? 180);
     if (this.maxBatchTimer === undefined) {
       this.maxBatchTimer = setTimeout(() => {
         this.maxBatchTimer = undefined;
-        void this.drain().catch((cause) => this.options.onError?.(cause));
-      }, this.options.maxBatchMs ?? 2_000);
+        void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
+      }, this.options.maxBatchMs ?? 1_500);
     }
   }
 
   private async drain(): Promise<void> {
     if (this.drainPromise) return this.drainPromise;
-    this.clearTimers();
     this.drainPromise = (async () => {
       while (this.pending.length > 0 && !this.conflicted) {
         const commit = this.pending[0];

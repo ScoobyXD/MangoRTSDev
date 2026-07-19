@@ -22,7 +22,7 @@ const annotationMetaKey = "mangoTiptapAnnotations:set";
 
 function normalizedAnnotations(annotations: readonly MangoTiptapAnnotation[], documentSize: number): MangoTiptapAnnotation[] {
   return annotations.flatMap((annotation) => {
-    const from = Math.max(1, Math.min(documentSize, Math.trunc(annotation.from)));
+    const from = Math.max(0, Math.min(documentSize, Math.trunc(annotation.from)));
     const to = Math.max(from, Math.min(documentSize, Math.trunc(annotation.to)));
     return to > from && annotation.id.trim()
       ? [{ ...annotation, id: annotation.id.trim(), from, to }]
@@ -31,7 +31,7 @@ function normalizedAnnotations(annotations: readonly MangoTiptapAnnotation[], do
 }
 
 function createDecorations(document: Parameters<typeof DecorationSet.create>[0], annotations: readonly MangoTiptapAnnotation[]): DecorationSet {
-  return DecorationSet.create(document, annotations.map((annotation) => Decoration.inline(
+  const decorations = annotations.map((annotation) => Decoration.inline(
     annotation.from,
     annotation.to,
     {
@@ -40,7 +40,18 @@ function createDecorations(document: Parameters<typeof DecorationSet.create>[0],
       "data-mango-annotation-kind": annotation.kind,
     },
     { mangoAnnotationId: annotation.id },
-  )));
+  ));
+  document.descendants((node, position) => {
+    if (!node.isAtom) return;
+    annotations.filter((item) => item.from <= position && item.to >= position + node.nodeSize).forEach((annotation) => {
+      decorations.push(Decoration.node(position, position + node.nodeSize, {
+        class: `mango-tiptap-annotation mango-tiptap-annotation--${annotation.kind}${annotation.active ? " is-active" : ""}`,
+        "data-mango-annotation-id": annotation.id,
+        "data-mango-annotation-kind": annotation.kind,
+      }, { mangoAnnotationId: annotation.id }));
+    });
+  });
+  return DecorationSet.create(document, decorations);
 }
 
 export const MangoTiptapAnnotations = new Plugin<AnnotationPluginState>({

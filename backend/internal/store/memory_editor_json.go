@@ -71,8 +71,6 @@ func (r *MemoryRepo) editorJSONResourceExistsLocked(ref EditorJSONDocumentRef) b
 			CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
 			ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,
 		})
-	case "email_draft", "email_signature":
-		return true
 	default:
 		return false
 	}

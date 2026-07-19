@@ -32,7 +32,7 @@ const nodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
   tableRow: new Set(),
   tableHeader: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
   tableCell: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
-  mention: new Set(["userId", "label"]),
+  mention: new Set(["userId", "label", "kind"]),
   mangoAttachmentImage: new Set([
     "attachmentId", "filename", "mimeType", "width", "height", "displayWidth",
     "displayHeight", "alignment", "position", "layout", "alt", "title",
@@ -96,6 +96,9 @@ function validateAttributes(
   const attrs = value as Record<string, unknown>;
   if (kind === "mention" && (typeof attrs.userId !== "string" || !attrs.userId.trim())) {
     return `${path}.attrs.userId is required`;
+  }
+  if (kind === "mention" && !["normal", "urgent"].includes(String(attrs.kind))) {
+    return `${path}.attrs.kind must be normal or urgent`;
   }
   if (kind === "mangoAttachmentImage") {
     if (typeof attrs.attachmentId !== "string" || !attrs.attachmentId.trim()) return `${path}.attrs.attachmentId is required`;

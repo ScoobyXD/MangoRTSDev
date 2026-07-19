@@ -86,7 +86,7 @@ func NormalizeEditorJSONDocumentRef(ref EditorJSONDocumentRef) (EditorJSONDocume
 		return EditorJSONDocumentRef{}, ErrInvalid
 	}
 	switch ref.ResourceType {
-	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate, "email_draft", "email_signature":
+	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate:
 	default:
 		return EditorJSONDocumentRef{}, ErrInvalid
 	}
@@ -171,7 +171,7 @@ var editorJSONNodeAttrs = map[string]map[string]bool{
 	"table": {"blockId": true, "style": true}, "tableRow": {},
 	"tableHeader": {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
 	"tableCell":   {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
-	"mention":     {"userId": true, "label": true},
+	"mention":     {"userId": true, "label": true, "kind": true},
 	"mangoAttachmentImage": {
 		"attachmentId": true, "filename": true, "mimeType": true, "width": true, "height": true,
 		"displayWidth": true, "displayHeight": true, "alignment": true, "position": true,
@@ -254,6 +254,10 @@ func validateEditorJSONNode(value any, path string, depth int, count *int) error
 	if nodeType == "mention" {
 		if userID, ok := attrs["userId"].(string); !ok || strings.TrimSpace(userID) == "" {
 			return fmt.Errorf("%w: mention userId required", ErrInvalid)
+		}
+		kind, ok := attrs["kind"].(string)
+		if !ok || (kind != "normal" && kind != "urgent") {
+			return fmt.Errorf("%w: mention kind required", ErrInvalid)
 		}
 	}
 	if nodeType == "mangoAttachmentImage" {
