@@ -2,6 +2,7 @@ import React from "react";
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import { createRequestJSON, isAbortError } from "../../modules/api/requestJSON";
 import {
+  convertTriageMessagesToExplorerTarget,
   ensureEmailCollaboration,
   getEmailCollaboration,
   resolveEmailCollaboration,
@@ -14,8 +15,12 @@ import {
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "../../modules/editor/editorMentions";
 import {
   buildEditorTextBlockChatPayload,
+  buildEditorTextBlockProjectionPayload,
   canDeleteEditorTextBlockChatMessage,
+  editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
+  EDITOR_TEXT_BLOCK_TYPE,
+  parseEditorAttachedEmails,
   parseEditorTextBlockChats,
   type EditorChatAttachment,
   type EditorTextBlockChatMessage,
@@ -31,6 +36,7 @@ import {
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
 } from "../../modules/node-map/NodeRecordStore";
+import type { NodeRecord } from "../../modules/node-map/shared";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { EmailCollaborationParticipantRoster } from "./EmailCollaborationParticipantRoster";
 import {
@@ -56,6 +62,8 @@ type EmailCollaborationChatSurfaceProps = {
   companyUsers: CompanyUser[];
   companyUserGroups: CompanyUserGroup[];
   companyUserGroupMembers: CompanyUserGroupMember[];
+  nodes: NodeRecord[];
+  onOpenImportedNode?: (nodeID: string, informationID: string, emailMessageID: string) => void;
   selection: EmailCollaborationSelection | null;
   onClearSelection: () => void;
   onNavigateToEmailSelection: (selection: EmailCollaborationSelection) => void;
@@ -130,6 +138,8 @@ export function EmailCollaborationChatSurface({
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
+  nodes,
+  onOpenImportedNode,
   selection,
   onClearSelection,
   onNavigateToEmailSelection,
@@ -148,6 +158,10 @@ export function EmailCollaborationChatSurface({
   const [activeMessageID, setActiveMessageID] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [priorityMenuOpen, setPriorityMenuOpen] = React.useState(false);
+  const [pendingAction, setPendingAction] = React.useState<"chat" | "create" | "import">("chat");
+  const [nodeSearch, setNodeSearch] = React.useState("");
+  const [detectedNodeID, setDetectedNodeID] = React.useState("");
+  const [resolvingNode, setResolvingNode] = React.useState(false);
   const [selectedPriority, setSelectedPriority] = React.useState<number | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
@@ -240,6 +254,10 @@ export function EmailCollaborationChatSurface({
       setSelectedMentionPrincipals([]);
       setPriorityMenuOpen(false);
       setSelectedPriority(null);
+      setPendingAction("chat");
+      setNodeSearch("");
+      setDetectedNodeID("");
+      setResolvingNode(false);
       setSubmitting(false);
       if (previousSourceKey) onClearSelection();
     }
@@ -281,6 +299,51 @@ export function EmailCollaborationChatSurface({
       if (loadSequenceRef.current === requestSequence) loadSequenceRef.current += 1;
     };
   }, [acceptCollaboration, accountEmail, active, companyID, loadProjection, message.id, message.thread_id, onClearSelection, onError, onSuccess, sharedInboxID, sourceKey]);
+
+  React.useEffect(() => {
+    if (!active || loading || collaboration || !message.id.trim() || nodes.length === 0) {
+      if (collaboration) setDetectedNodeID("");
+      return undefined;
+    }
+    let cancelled = false;
+    setResolvingNode(true);
+    const resolve = async () => {
+      const cleanThreadID = message.thread_id?.trim() ?? "";
+      const cleanMessageID = message.id.trim();
+      const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+      const cleanAccountEmail = cleanSharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? "";
+      for (let offset = 0; offset < nodes.length && !cancelled; offset += 8) {
+        const batch = nodes.slice(offset, offset + 8);
+        const results = await Promise.all(batch.map(async (node) => {
+          try {
+            const projections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, node.node_id);
+            const attached = parseEditorAttachedEmails(projections).some((email) => {
+              const scopeMatches = cleanSharedInboxID
+                ? email.sharedInboxID?.trim() === cleanSharedInboxID
+                : (email.accountEmail?.trim().toLowerCase() ?? "") === cleanAccountEmail;
+              const messageMatches = email.messageID === cleanMessageID
+                || Boolean(cleanThreadID && email.threadID?.trim() === cleanThreadID);
+              return scopeMatches && messageMatches;
+            });
+            return attached ? node.node_id : "";
+          } catch {
+            return "";
+          }
+        }));
+        const match = results.find(Boolean);
+        if (match) return match;
+      }
+      return "";
+    };
+    void resolve().then((nodeID) => {
+      if (!cancelled) setDetectedNodeID(nodeID);
+    }).finally(() => {
+      if (!cancelled) setResolvingNode(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountEmail, active, apiBase, collaboration, companyID, loading, message.id, message.thread_id, nodes, sharedInboxID]);
 
   React.useEffect(() => {
     if (!active || !messageCollaborationID) return undefined;
@@ -371,11 +434,118 @@ export function EmailCollaborationChatSurface({
       : [...current, principal]);
   }, []);
 
+  const importIntoExistingNode = React.useCallback(async (targetNodeID: string, includeChat: boolean) => {
+    const cleanNodeID = targetNodeID.trim();
+    if (!cleanNodeID || submitting) return;
+    const cleanDraft = draft.trim();
+    setPriorityMenuOpen(false);
+    setSubmitting(true);
+    try {
+      if (cleanNodeID !== detectedNodeID) {
+        await convertTriageMessagesToExplorerTarget({
+          companyID,
+          sharedInboxID,
+          accountEmail: sharedInboxID?.trim() ? undefined : accountEmail,
+          target: { mode: "existing_node", nodeID: cleanNodeID },
+          messageIDs: [message.id],
+        });
+      }
+      const textBlockID = generateStableInformationID();
+      const emailMessageID = selection?.messageID?.trim() || message.id.trim();
+      const createdTimestamp = new Date().toISOString();
+      const subject = message.subject?.trim() || "Email";
+      await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
+        method: "POST",
+        json: {
+          company_id: companyID,
+          type: EDITOR_TEXT_BLOCK_TYPE,
+          information_id: textBlockID,
+          information: buildEditorTextBlockProjectionPayload({
+            title: "Email: " + subject,
+            document: "",
+            attachments: [],
+            emailMessageID,
+            emailAccent: editorEmailMessageAccent(emailMessageID),
+          }),
+        },
+      });
+      if (includeChat && (cleanDraft || draftAttachments.length > 0)) {
+        const informationID = generateStableInformationID();
+        const mentions = mentionedPrincipalIDs(cleanDraft, principals);
+        for (const principal of selectedMentionPrincipals) {
+          const principalID = principal.user_id.trim();
+          if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
+            const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
+            if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
+          } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
+            mentions.mentionedUserIDs.push(principalID);
+          }
+        }
+        await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
+          method: "POST",
+          json: {
+            company_id: companyID,
+            type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
+            information_id: informationID,
+            information: buildEditorTextBlockChatPayload({
+              blockID: textBlockID,
+              selectionSource: "email",
+              selectionMessageID: emailMessageID,
+              selectionQuote: selection?.quote,
+              selectionStart: selection?.startOffset,
+              selectionEnd: selection?.endOffset,
+              authorID: author.userID,
+              authorName: author.name,
+              message: cleanDraft,
+              createdTimestamp,
+              attachments: draftAttachments,
+              mentionedUserIDs: mentions.mentionedUserIDs,
+              mentionedGroupIDs: mentions.mentionedGroupIDs,
+            }),
+          },
+        });
+      }
+      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
+      setDraft("");
+      setDraftAttachments([]);
+      setSelectedMentionPrincipals([]);
+      setReplyTargetID("");
+      setDetectedNodeID(cleanNodeID);
+      onClearSelection();
+      onSuccess();
+      onOpenImportedNode?.(cleanNodeID, textBlockID, emailMessageID);
+    } catch (cause) {
+      onError(formatEmailCollaborationChatError(cause, includeChat ? "Failed to import this email chat into the node." : "Failed to import this email into the node."));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, onClearSelection, onError, onOpenImportedNode, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+
+  const createEmailNode = React.useCallback(async (priorityOverride: number) => {
+    if (submitting) return;
+    setPriorityMenuOpen(false);
+    setSubmitting(true);
+    try {
+      const created = await ensureCollaboration(priorityOverride);
+      onSuccess();
+      onOpenImportedNode?.(created.node_id, created.attached_email_information_id, message.id);
+    } catch (cause) {
+      onError(formatEmailCollaborationChatError(cause, "Failed to create a node for this email."));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [ensureCollaboration, message.id, onError, onOpenImportedNode, onSuccess, submitting]);
+
   const submit = React.useCallback(async (priorityOverride?: number) => {
     const cleanDraft = draft.trim();
     if ((!cleanDraft && draftAttachments.length === 0) || submitting) return;
     const priority = priorityOverride ?? selectedPriority;
+    if (!collaboration && detectedNodeID) {
+      await importIntoExistingNode(detectedNodeID, true);
+      return;
+    }
     if (!collaboration && (!priority || priority < 1 || priority > 5)) {
+      setPendingAction("chat");
       setPriorityMenuOpen(true);
       return;
     }
@@ -456,7 +626,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [author.name, author.userID, collaboration, companyID, draft, draftAttachments, ensureCollaboration, onClearSelection, onError, onSuccess, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selectedPriority, selection, submitting]);
+  }, [author.name, author.userID, collaboration, companyID, detectedNodeID, draft, draftAttachments, ensureCollaboration, importIntoExistingNode, onClearSelection, onError, onSuccess, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selectedPriority, selection, submitting]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
@@ -518,6 +688,14 @@ export function EmailCollaborationChatSurface({
   }, [messages, onNavigateToEmailSelection]);
 
   const snapshot = collaboration ? collaborationMessageSnapshot(collaboration) : null;
+  const cleanNodeSearch = nodeSearch.trim().toLowerCase();
+  const filteredNodes = nodes.filter((node) => (
+    !cleanNodeSearch
+    || node.name.toLowerCase().includes(cleanNodeSearch)
+    || node.node_id.toLowerCase().includes(cleanNodeSearch)
+  )).slice(0, 12);
+  const detectedNode = nodes.find((node) => node.node_id === detectedNodeID);
+
   return (
     <aside
       id={id}
@@ -535,23 +713,67 @@ export function EmailCollaborationChatSurface({
       {snapshot?.subject && snapshot.subject !== message.subject && (
         <div style={{ color: "rgba(100,116,139,0.72)", fontSize: 10, padding: "0 8px" }}>Thread: {snapshot.subject}</div>
       )}
-      {priorityMenuOpen && !collaboration && (
-        <div role="dialog" aria-label="Choose email node priority" style={{ margin: "0 8px", display: "grid", gap: 5, border: "1px solid rgba(249,115,22,0.36)", borderRadius: 10, background: "rgba(255,247,237,0.96)", padding: 8, boxShadow: "0 8px 20px rgba(15,23,42,0.10)" }}>
-          <strong style={{ color: "#9a3412", fontSize: 11 }}>Choose a priority to create this email node</strong>
-          {INBOX_PRIORITIES.map((priority) => (
-            <button
-              key={priority.value}
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                setSelectedPriority(priority.value);
-                void submit(priority.value);
-              }}
-              style={{ minHeight: 28, border: "1px solid rgba(249,115,22,0.28)", borderRadius: 8, background: "#ffffff", color: "#7c2d12", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}
-            >
-              {priority.label}
+      {!collaboration && (
+        <div style={{ margin: "0 8px", display: "grid", gap: 5 }}>
+          {resolvingNode && <div role="status" style={{ color: "#64748b", fontSize: 10, fontWeight: 800 }}>Checking whether this thread is already in a node</div>}
+          {detectedNode && (
+            <button type="button" onClick={() => onOpenImportedNode?.(detectedNode.node_id, "", message.id)} style={{ minHeight: 30, border: "1px solid rgba(20,184,166,0.36)", borderRadius: 9, background: "rgba(240,253,250,0.94)", color: "#0f766e", cursor: "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 900 }}>
+              This email thread is already in {detectedNode.name || "this node"}
             </button>
-          ))}
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+            <button type="button" disabled={submitting} onClick={() => {
+              setPendingAction("create");
+              setPriorityMenuOpen(true);
+            }} style={{ minHeight: 30, border: "1px solid rgba(249,115,22,0.34)", borderRadius: 9, background: "#ffffff", color: "#9a3412", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", fontSize: 10.5, fontWeight: 900 }}>
+              Create node for this email
+            </button>
+            <button type="button" disabled={submitting} onClick={() => {
+              setPendingAction("import");
+              setPriorityMenuOpen(true);
+            }} style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.34)", borderRadius: 9, background: "#ffffff", color: "#0369a1", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", fontSize: 10.5, fontWeight: 900 }}>
+              Import into existing node
+            </button>
+          </div>
+        </div>
+      )}
+      {priorityMenuOpen && !collaboration && (
+        <div role="dialog" aria-label="Place email in a node" style={{ margin: "0 8px", display: "grid", gap: 6, border: "1px solid rgba(249,115,22,0.36)", borderRadius: 10, background: "rgba(255,247,237,0.96)", padding: 8, boxShadow: "0 8px 20px rgba(15,23,42,0.10)" }}>
+          {pendingAction !== "create" && (
+            <>
+              <strong style={{ color: "#0369a1", fontSize: 11 }}>{pendingAction === "chat" ? "Import this email and chat into an existing node" : "Import this email into an existing node"}</strong>
+              <input value={nodeSearch} onChange={(event) => setNodeSearch(event.target.value)} placeholder="Search nodes" aria-label="Search existing nodes" style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.3)", borderRadius: 8, background: "#ffffff", padding: "4px 8px", fontSize: 11 }} />
+              <div style={{ maxHeight: 180, overflowY: "auto", display: "grid", gap: 4 }}>
+                {filteredNodes.map((node) => (
+                  <button key={node.node_id} type="button" disabled={submitting} onClick={() => { void importIntoExistingNode(node.node_id, pendingAction === "chat"); }} style={{ minHeight: 28, border: "1px solid rgba(14,165,233,0.24)", borderRadius: 8, background: node.node_id === detectedNodeID ? "rgba(240,253,250,0.94)" : "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                    {node.name || node.node_id}{node.node_id === detectedNodeID ? " - thread already attached" : ""}
+                  </button>
+                ))}
+                {filteredNodes.length === 0 && <div style={{ color: "#64748b", fontSize: 10.5 }}>No matching nodes</div>}
+              </div>
+            </>
+          )}
+          {pendingAction !== "import" && (
+            <>
+              <strong style={{ color: "#9a3412", fontSize: 11 }}>{pendingAction === "create" ? "Choose a priority to create this email node" : "Or choose a priority for a new email node"}</strong>
+              {INBOX_PRIORITIES.map((priority) => (
+                <button
+                  key={priority.value}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setSelectedPriority(priority.value);
+                    if (pendingAction === "create") void createEmailNode(priority.value);
+                    else void submit(priority.value);
+                  }}
+                  style={{ minHeight: 28, border: "1px solid rgba(249,115,22,0.28)", borderRadius: 8, background: "#ffffff", color: "#7c2d12", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}
+                >
+                  {priority.label}
+                </button>
+              ))}
+            </>
+          )}
+          <button type="button" onClick={() => setPriorityMenuOpen(false)} style={{ minHeight: 26, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}>Cancel</button>
         </div>
       )}
       {submitting && <div role="status" style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800, padding: "0 8px" }}>Saving comment and email node</div>}

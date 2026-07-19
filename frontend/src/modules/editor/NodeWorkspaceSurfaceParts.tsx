@@ -104,6 +104,7 @@ import {
   messageAttachmentPayload,
   PaperclipIcon,
   PlusIcon,
+  TextEditorIcon,
   readStoredChatPaneHeight,
   storeChatPaneHeight,
   uploadEditorAttachment,
@@ -3816,7 +3817,10 @@ type AttachedEmailOrganizerPaneProps = {
   onClearSelectedMessage?: () => void;
   onRemoveEmail?: (emailID: string) => void;
   onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
+  onEmailSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
+  onEmailMessageTextBoxRequest?: (messageID: string) => void;
+  messageAccents?: Record<string, string>;
   onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
 };
@@ -4011,9 +4015,12 @@ const AttachedEmailThreadCard: React.FC<{
   onDragEnd: React.DragEventHandler<HTMLDivElement>;
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
+  onSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
+  onMessageTextBoxRequest?: (messageID: string) => void;
+  messageAccents?: Record<string, string>;
   companyUsers?: MentionableCompanyUser[];
-}> = ({ email, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, initialFocusMessageID, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, initialFocusMessageID, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionTextBoxRequest, onSelectionNodeRequest, onMessageTextBoxRequest, messageAccents = {} }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -4207,7 +4214,10 @@ const AttachedEmailThreadCard: React.FC<{
               onReplyEditorFocus={onReplyEditorFocus}
               onError={onError}
               onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(selection.messageID || email.messageID, selection) : undefined}
+              onSelectionTextBoxRequest={onSelectionTextBoxRequest ? (selection) => onSelectionTextBoxRequest(selection.messageID || email.messageID, selection.quote) : undefined}
               onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => onSelectionNodeRequest(selection.messageID || email.messageID, selection.quote) : undefined}
+              onMessageTextBoxRequest={onMessageTextBoxRequest}
+              messageAccents={messageAccents}
             />
           </div>
         )}
@@ -4271,7 +4281,7 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, messageAccents = {}, onReplyEditorFocus, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -4570,7 +4580,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         setDraggingMessageID("");
       }}
       onSelectionChatRequest={onEmailSelectionChatRequest}
+      onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
       onSelectionNodeRequest={onEmailSelectionNodeRequest}
+      onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
+      messageAccents={messageAccents}
     />
   );
 
@@ -4897,7 +4910,10 @@ type EmailConversationPaneProps = {
   onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
+  onSelectionTextBoxRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (selection: EmailSelectionDraft) => void;
+  onMessageTextBoxRequest?: (messageID: string) => void;
+  messageAccents?: Record<string, string>;
 };
 
 type EmailSelectionDraft = {
@@ -5669,7 +5685,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   onReplyEditorFocus,
   onError,
   onSelectionChatRequest,
+  onSelectionTextBoxRequest,
   onSelectionNodeRequest,
+  onMessageTextBoxRequest,
+  messageAccents = {},
 }) => {
   const mailboxScope = useMemo(
     () => resolveEditorEmailMailboxScope(sharedInboxID, accountEmail),
@@ -5899,7 +5918,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       editorSurface: attachmentEditorSurface,
     }
     : undefined;
-  const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
+  const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionTextBoxRequest || onSelectionNodeRequest);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
   useEffect(() => {
     setExpandedThreadMessageID((current) => {
@@ -5935,7 +5954,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       return changed ? next : current;
     });
   }, [displayThreadMessages]);
-  const selectionActionCount = (onSelectionChatRequest ? 1 : 0) + (onSelectionNodeRequest ? 1 : 0);
+  const selectionActionCount = (onSelectionChatRequest ? 1 : 0) + (onSelectionTextBoxRequest ? 1 : 0) + (onSelectionNodeRequest ? 1 : 0);
   const selectionActionToolbarWidth = emailSelectionActionToolbarWidth(selectionActionCount);
   const selectionActionToolbarHeight = EMAIL_SELECTION_ACTION_BUTTON_SIZE + (EMAIL_SELECTION_ACTION_PADDING * 2) + (EMAIL_SELECTION_ACTION_BORDER * 2);
   const updateFrameSelection = useCallback((selectionMessageID: string, frameSelection: EmailFrameSelection | null) => {
@@ -6345,6 +6364,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           >
             {displayThreadMessages.map((threadMessage, index) => {
               const threadMessageID = threadMessage.id || messageID;
+              const threadMessageAccent = messageAccents[threadMessageID]?.trim() || "";
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = false;
               const isExpanded = expandedThreadMessageID === threadMessageID;
@@ -6375,9 +6395,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     margin: inlineExpansion ? "8px 0" : "12px 0",
                     padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "9px 10px 10px" : "13px 12px 15px",
                     border: `1px solid ${isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER}`,
-                    borderLeft: `3px solid ${threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)"}`,
+                    borderLeft: `3px solid ${threadMessageAccent || (threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)")}`,
                     borderRadius: 12,
-                    background: isExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                    background: threadMessageAccent ? `linear-gradient(135deg, ${threadMessageAccent}26, rgba(255,255,255,0.94))` : isExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
                     boxShadow: isReplyTarget && !hideInlineMessageChrome
                       ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)"
                       : isExpanded ? EDITOR_NEU_SHADOW : "4px 4px 11px rgba(174,174,192,0.2), -4px -4px 11px rgba(255,255,255,0.82)",
@@ -6386,7 +6406,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 >
                   {!hideInlineMessageChrome && (
                     <>
-                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
+                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${onMessageTextBoxRequest ? " auto" : ""} auto auto`, alignItems: "start", gap: 8 }}>
                         <button
                           type="button"
                           aria-expanded={isExpanded}
@@ -6414,6 +6434,17 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
                           </span>
                         </button>
+                        {onMessageTextBoxRequest && (
+                          <button
+                            type="button"
+                            title="Create text box for this email"
+                            aria-label="Create text box for this email"
+                            onClick={() => onMessageTextBoxRequest(threadMessageID)}
+                            style={{ minHeight: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: threadMessageAccent || accent, cursor: "pointer", padding: "0 6px", display: "grid", placeItems: "center", boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                          >
+                            <TextEditorIcon color={threadMessageAccent || accent} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={!replyEditingEnabled}
@@ -6600,6 +6631,25 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   >
                     <EmailSelectionActionIconFrame>
                       <ChatIcon color={accent} />
+                    </EmailSelectionActionIconFrame>
+                  </button>
+                )}
+                {onSelectionTextBoxRequest && (
+                  <button
+                    type="button"
+                    title="Create text box from selection"
+                    aria-label="Create text box from selection"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      addEmailLocalHighlight(selectionDraft);
+                      onSelectionTextBoxRequest(selectionDraft);
+                      setSelectionDraft(null);
+                      bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
+                    }}
+                    style={{ ...emailSelectionActionButtonStyle, color: accent }}
+                  >
+                    <EmailSelectionActionIconFrame>
+                      <TextEditorIcon color={accent} />
                     </EmailSelectionActionIconFrame>
                   </button>
                 )}

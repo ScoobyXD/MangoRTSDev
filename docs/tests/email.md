@@ -134,6 +134,8 @@ EMAIL105 - The normal Archive action in an open My Triage or Shared Triage email
 EMAIL106 - A non-primary mailbox tab with a next page but no actual list scroll range automatically appends pages until the list becomes scrollable or the provider reports exhaustion. This prevents condensed All, Starred, Sent, Spam, or Archive results from trapping the user on a short first page; ordinary scroll continues loading near the bottom without replacing the selected detail.
 EMAIL107 - While the selected detail owner is already fetching a message/thread, the mounted conversation viewer must not start a competing newest-message body hydration. Same-key caches and in-flight coalescing remain a safety net, but the visible contract is one stable loading transition from row preview to the complete canonical timeline, never a one-message/detail blip followed by repeated thread reconstruction.
 EMAIL108 - Personal Email, My Triage, and Shared Triage use the same ordered mailbox actions: Inbox, Starred, Sent, and the All/Spam dropdown form four equal top controls; Compose, My Drafts, and Archive page/next always form three equal lower controls in fixed positions. The lower workflow actions rest on lightly tinted blue-violet, violet-fuchsia, and cyan-teal elevated surfaces. Compose or My Drafts receives its full gradient only when it is the single selected destination; Archive page/next receives stronger teal interaction feedback when available and remains visibly disabled, never removed, on mailbox tabs where that action is inappropriate. The All and Spam menu rows show a clear hover and keyboard-focus highlight across the full row without a dead gap between options.
+EMAIL109 - My Triage and Shared Triage expose the same three email-to-node paths: create a priority-backed new node without requiring a chat, import the message into a chosen existing node with a matching email-linked text box, or submit a chat. Before asking for priority, chat submission resolves the node-level attached-email projections by mailbox and thread/message identity; if the thread already belongs to a node, the new linked text box and chat go there automatically. Importing one reply stores one node-level thread source, not duplicate raw messages, and opens the resulting node at the linked text box/message.
+
 EMAIL109 - Every Node whose primary origin is email, whether created from Triage comment or an existing email drag/conversion, uses the email-origin layout and email icon contract. The left pane shows the complete chronological conversation, opens at the exact clicked/referenced reply, and activates the stored quote when present. Attached email sources render as browser-style tabs across that one pane; switching tabs changes the source thread. When the Node later appears in Logic Gate, Kanban, or Project work, immediate mutation responses and canonical projections preserve `created_from_email=true` so the established email icon renders without waiting for refresh.
 
 ## Scenarios
@@ -711,3 +713,18 @@ Given:
 Expected:
 - The four equal top controls read Inbox, Starred, Sent, and All/Spam; the three equal lower controls always read Compose, My Drafts, and Archive/next without moving or collapsing when the mailbox changes.
 - Inactive lower actions use light modern tints. Only the selected Compose or My Drafts destination receives its full gradient; Archive/next stays in its third slot and is disabled outside Inbox. The menu option under pointer or focus receives an immediate full-row highlight.
+
+### Scenario EMAIL-S27: Unified Email-to-Node Placement
+
+Business logic covered:
+- EMAIL109
+
+Given:
+- A user opens either My Triage or Shared Triage on a message that may be a standalone email, a reply in a larger thread, or a thread already attached to a Node.
+- The user creates a node without chatting, imports into a selected existing Node, or writes a chat and presses Enter.
+
+Expected:
+- Create node asks for priority and creates/opens the email Node even when the chat draft is empty.
+- Existing-node import attaches the thread once, creates an email-linked text box with a deterministic matching accent, and opens that Node.
+- Chat submission first detects a same-mailbox attached message/thread. A match routes the linked text box and chat to that Node without a new priority choice; otherwise the user can choose an existing Node or a priority for a new email Node.
+- My Triage and Shared Triage use the same controls and persistence path.

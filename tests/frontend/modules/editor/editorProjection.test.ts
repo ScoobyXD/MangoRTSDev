@@ -18,11 +18,15 @@ test("text-block metadata payloads cannot carry a full document or attachment by
     title: " Decision notes ",
     document: "stale body must not be serialized",
     attachments: [{ id: "local", attachmentID: "attachment-1", name: "diagram.png", type: "image/png", size: 128, dataURL: "data:image/png;base64,AAAA" }],
+    emailMessageID: " message-9 ",
+    emailAccent: " #0ea5e9 ",
   });
   assert.equal(payload.title, "Decision notes");
   assert.equal(JSON.stringify(payload).includes("stale body"), false);
   assert.equal(JSON.stringify(payload).includes("base64"), false);
   assert.equal(payload.attachments[0].attachment_id, "attachment-1");
+  assert.equal(payload.email_message_id, "message-9");
+  assert.equal(payload.email_accent, "#0ea5e9");
 });
 test("selects the newest text-box projection for the single editor document", () => {
   const selected = selectCurrentEditorTextProjection([
@@ -162,6 +166,8 @@ test("parses titled node text block content payloads with legacy fallback", () =
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachment_id: "attachment-2", name: "diagram.png", type: "image/png", size: 128 }],
+    email_message_id: "message-9",
+    email_accent: "#0ea5e9",
   })}`;
   assert.equal(payload.includes("attachment_id"), true);
   assert.equal(payload.includes("data_url"), false);
@@ -170,6 +176,8 @@ test("parses titled node text block content payloads with legacy fallback", () =
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128, dataURL: undefined }],
+    emailMessageID: "message-9",
+    emailAccent: "#0ea5e9",
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {
     title: "",

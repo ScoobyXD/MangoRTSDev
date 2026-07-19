@@ -110,7 +110,9 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	}
 
 	metadata := doJSON(http.MethodPatch, allowedToken, map[string]any{
-		"title": "Block title",
+		"title":            "Block title",
+		"email_message_id": "provider-message-9",
+		"email_accent":     "#0ea5e9",
 		"attachments": []map[string]any{{
 			"id": "53535353-5353-4353-8353-535353535353", "attachment_id": "53535353-5353-4353-8353-535353535353",
 			"name": "image.png", "filename": "image.png", "type": "image/png", "mime_type": "image/png", "size": 12, "byte_size": 12,
@@ -119,6 +121,11 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	if metadata.Code != http.StatusOK {
 		t.Fatalf("metadata status=%d body=%s", metadata.Code, metadata.Body.String())
 	}
+	invalidAccent := doJSON(http.MethodPatch, allowedToken, map[string]any{"title": "bad", "attachments": []any{}, "email_message_id": "provider-message-9", "email_accent": "blue"}, "")
+	if invalidAccent.Code != http.StatusBadRequest {
+		t.Fatalf("invalid email accent status=%d body=%s", invalidAccent.Code, invalidAccent.Body.String())
+	}
+
 	bodyInjection := doJSON(http.MethodPatch, allowedToken, map[string]any{"title": "bad", "attachments": []any{}, "document": "stale overwrite"}, "")
 	if bodyInjection.Code != http.StatusBadRequest {
 		t.Fatalf("metadata body injection status=%d body=%s", bodyInjection.Code, bodyInjection.Body.String())

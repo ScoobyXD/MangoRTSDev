@@ -61,14 +61,14 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
 
-test("both node email attachment entry paths retain exact provider mailbox identity", () => {
+test("both node-wide email attachment entry paths retain exact provider mailbox identity", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
 
   assert.match(nodeSurface, /const attachEmail = useCallback/);
   assert.match(nodeSurface, /sharedInboxID: email\.sharedInboxID/);
   assert.match(nodeSurface, /accountEmail: email\.accountEmail/);
-  assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(\{ \.\.\.email, blockID: cleanBlockID \}\)/);
+  assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(email\)/);
   assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
   assert.match(nodeSurface, /messageAttachmentPayload\(message, scope\.sharedInboxID, scope\.accountEmail\)/);
   assert.match(editorProjection, /shared_inbox_id: input\.sharedInboxID\?\.trim\(\) \?\? ""/);

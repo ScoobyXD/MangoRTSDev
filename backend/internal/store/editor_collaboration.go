@@ -89,9 +89,11 @@ type EditorCollaborationAttachmentReference struct {
 }
 
 type EditorCollaborationMetadataInput struct {
-	Document    EditorDocumentRef                        `json:"document"`
-	Title       string                                   `json:"title"`
-	Attachments []EditorCollaborationAttachmentReference `json:"attachments"`
+	Document       EditorDocumentRef                        `json:"document"`
+	Title          string                                   `json:"title"`
+	Attachments    []EditorCollaborationAttachmentReference `json:"attachments"`
+	EmailMessageID string                                   `json:"email_message_id"`
+	EmailAccent    string                                   `json:"email_accent"`
 }
 
 type EditorCollaborationMetadataCommit struct {
@@ -106,7 +108,9 @@ func NormalizeEditorCollaborationMetadata(input EditorCollaborationMetadataInput
 	}
 	input.Document = ref
 	input.Title = strings.TrimSpace(input.Title)
-	if len(input.Title) > 500 || len(input.Attachments) > 100 {
+	input.EmailMessageID = strings.TrimSpace(input.EmailMessageID)
+	input.EmailAccent = strings.TrimSpace(input.EmailAccent)
+	if len(input.Title) > 500 || len(input.Attachments) > 100 || len(input.EmailMessageID) > 500 || (input.EmailAccent != "" && !validEditorEmailAccent(input.EmailAccent)) {
 		return EditorCollaborationMetadataInput{}, ErrInvalid
 	}
 	for index := range input.Attachments {
@@ -152,8 +156,20 @@ func NormalizeEditorCollaborationMetadata(input EditorCollaborationMetadataInput
 	return input, nil
 }
 
+func validEditorEmailAccent(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, char := range value[1:] {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 func editorProjectionInformationWithMetadata(input EditorCollaborationMetadataInput, document string) (string, error) {
-	encoded, err := json.Marshal(map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments})
+	encoded, err := json.Marshal(map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments, "email_message_id": input.EmailMessageID, "email_accent": input.EmailAccent})
 	if err != nil {
 		return "", err
 	}

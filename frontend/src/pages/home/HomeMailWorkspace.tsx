@@ -1,6 +1,7 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import type { NodeRecord } from "../../modules/node-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
@@ -248,6 +249,7 @@ export function HomeMailWorkspace({
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
+  nodes,
   notice,
   noticeAction,
   pendingStarredMessageIDs,
@@ -302,6 +304,7 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly,
   onEmailCollaborationChange,
   onOpenCollaborationNode,
+  onOpenImportedNode,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -331,6 +334,7 @@ export function HomeMailWorkspace({
   companyUsers: CompanyUser[];
   companyUserGroups: CompanyUserGroup[];
   companyUserGroupMembers: CompanyUserGroupMember[];
+  nodes: NodeRecord[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
   pendingStarredMessageIDs: Set<string>;
@@ -385,6 +389,7 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
   onOpenCollaborationNode: (message: EmailMessage) => void;
+  onOpenImportedNode: (nodeID: string, informationID: string, emailMessageID: string) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
@@ -926,10 +931,12 @@ export function HomeMailWorkspace({
                 companyUsers={companyUsers}
                 companyUserGroups={companyUserGroups}
                 companyUserGroupMembers={companyUserGroupMembers}
+                nodes={nodes}
                 selection={emailSelection}
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
                 onCollaborationChange={onEmailCollaborationChange}
+                onOpenImportedNode={onOpenImportedNode}
                 onError={setEmailCollaborationError}
                 onSuccess={clearEmailCollaborationError}
               />

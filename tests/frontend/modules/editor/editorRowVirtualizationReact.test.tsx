@@ -163,8 +163,16 @@ function assertThreeOpenToggles(row: HTMLElement) {
   assertPaneToggles(row, [true, true, true]);
 }
 
-function assertZeroEmailNodeDefaults(row: HTMLElement) {
-  assertPaneToggles(row, [false, true, true]);
+
+function assertNodePaneToggles(row: HTMLElement, expected: readonly [boolean, boolean]) {
+  const toggles = Array.from(row.querySelectorAll<HTMLButtonElement>(
+    'button[aria-label="Toggle text editor column"], button[aria-label="Toggle chat column"]',
+  ));
+  assert.deepEqual(toggles.map((button) => button.getAttribute("aria-label")), [
+    "Toggle text editor column",
+    "Toggle chat column",
+  ]);
+  assert.deepEqual(toggles.map((button) => button.getAttribute("aria-pressed")), expected.map(String));
 }
 
 test("real Node and Project surfaces keep rows bounded through load, edits, scrolling, and deep targets", { timeout: 20_000 }, async () => {
@@ -420,7 +428,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     for (const rowID of initialNodeRows) {
       const row = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${rowID}"]`);
       assert.ok(row);
-      assertZeroEmailNodeDefaults(row);
+      assertNodePaneToggles(row, [true, true]);
       assert.ok(row.querySelector(`[data-node-text-block-id="${rowID}"]`), "open Node editor should be mounted");
       assert.ok(row.querySelector(`[data-node-chat-block-id="${rowID}"]`), "open Node chat should be mounted");
     }
@@ -468,14 +476,14 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
 
     const lateRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-60"]');
     assert.ok(lateRow, "late block should mount in the bounded top window");
-    assertZeroEmailNodeDefaults(lateRow);
+    assertNodePaneToggles(lateRow, [true, true]);
     assert.ok(lateRow.querySelector('[data-node-text-block-id="node-block-60"]'), "late block editor should mount");
     assert.ok(lateRow.querySelector('[data-node-chat-block-id="node-block-60"]'), "late block chat should mount");
     assert.match(lateRow.textContent ?? "", /Chat for node-block-60/);
 
     const retainedRow = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${editedBlockID}"]`);
     assert.ok(retainedRow);
-    assertPaneToggles(retainedRow, [false, false, false]);
+    assertNodePaneToggles(retainedRow, [false, false]);
     const retainedEditorToggle = retainedRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
     const retainedChatToggle = retainedRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
     assert.ok(retainedEditorToggle);
@@ -484,7 +492,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       retainedEditorToggle.click();
     });
     await flushWork();
-    assertPaneToggles(retainedRow, [false, true, false]);
+    assertNodePaneToggles(retainedRow, [true, false]);
 
     committedEditorOperations = 0;
     const editedSurface = nodeContainer.querySelector<HTMLElement>(`[data-node-text-block-id="${editedBlockID}"]`);
@@ -609,10 +617,12 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork();
     const emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-59"]');
     assert.ok(emailNodeRow);
-    assertThreeOpenToggles(emailNodeRow);
+    assertNodePaneToggles(emailNodeRow, [true, true]);
+    assert.ok(nodeContainer.querySelector('[data-node-email-column="true"]'), "attached email should render once in the node-wide column");
+    assert.ok(nodeContainer.querySelector('button[aria-label="Toggle node email column"]'));
     assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-59"]'));
     assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-59"]'));
-    assert.match(emailNodeRow.textContent ?? "", /Email for node-block-59/, "attached email should stay associated with its text block");
+    assert.match(nodeContainer.textContent ?? "", /Email for node-block-59/, "attached email should stay in the node-wide column");
 
     await act(async () => { nodeRoot?.unmount(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
