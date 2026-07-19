@@ -134,9 +134,13 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /if \(!collaboration && \(!priority \|\| priority < 1 \|\| priority > 5\)\) \{[\s\S]*setPriorityMenuOpen\(true\)/);
   assert.match(surface, /priority,[\s\S]*await requestJSON\([\s\S]*setMessages\([\s\S]*setDraft\(""\)/);
   assert.doesNotMatch(surface, /optimisticInformationID/);
+  assert.match(surface, /Create node for this email/);
+  assert.match(surface, /Import into existing node/);
+  assert.match(surface, /convertTriageMessagesToExplorerTarget/);
+  assert.match(surface, /parseEditorAttachedEmails/);
 });
 
-test("email-created nodes reuse canonical chat data inside the standard three-column text-box layout", () => {
+test("email-created nodes reuse canonical chat data with one node email column", () => {
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
@@ -146,7 +150,8 @@ test("email-created nodes reuse canonical chat data inside the standard three-co
   assert.match(workspace, /message\.collaboration_node_id\?\.trim\(\)[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
-  assert.match(nodeSurface, /data-node-text-box-columns="email-editor-chat"/);
+  assert.match(nodeSurface, /data-node-email-column="true"/);
+  assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);
   assert.match(nodeSurface, /blockID=\{block\.id\}[\s\S]*blockID=\{chatBlockID\}/);
   assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
   assert.match(nodeSurface, /tabbed=\{false\}/);

@@ -105,13 +105,15 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
 
   assert.match(node, /data-mango-bounded-editor-rows="node"/);
   assert.match(project, /data-mango-bounded-editor-rows="project"/);
-  assert.match(node, /data-node-text-box-columns="email-editor-chat"/);
+  assert.match(node, /data-node-text-box-columns="editor-chat"/);
   assert.match(project, /data-project-text-box-columns="email-editor-chat"/);
-  for (const source of [node, project]) {
-    assert.match(source, /aria-label="Toggle email column"/);
-    assert.match(source, /aria-label="Toggle text editor column"/);
-    assert.match(source, /aria-label="Toggle chat column"/);
-  }
+  assert.match(node, /aria-label="Toggle node email column"/);
+  assert.match(node, /data-node-email-column="true"/);
+  assert.match(node, /aria-label="Toggle text editor column"/);
+  assert.match(node, /aria-label="Toggle chat column"/);
+  assert.match(project, /aria-label="Toggle email column"/);
+  assert.match(project, /aria-label="Toggle text editor column"/);
+  assert.match(project, /aria-label="Toggle chat column"/);
   assert.ok(node.includes("Resize ${pane} column"));
   assert.ok(project.includes('aria-label="Resize email column"'));
   assert.ok(project.includes('aria-label="Resize chat column"'));
@@ -123,7 +125,7 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.ok(node.includes("closedEmailBlockIDs"));
   assert.ok(node.includes("const hasAttachedEmails = parsedAttachedEmails.length > 0"));
   assert.ok(project.includes("setOpenEditorBlockIDs(new Set(nextBlockIDs))"));
-  assert.ok(node.includes("emailPaneIsVisible || emailReplyBlockID === block.id"));
+  assert.ok(node.includes("nodeEmailColumnVisible && renderTextSidePaneResizeHandle"));
   assert.ok(project.includes("emailOpen || emailReplyBlockID === block.id"));
   const flushInputIndex = syncHook.indexOf("flushPendingLocalInput?.();");
   const flushSyncIndex = syncHook.indexOf("sync.flush()", flushInputIndex);

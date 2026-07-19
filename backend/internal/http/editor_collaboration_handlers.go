@@ -113,8 +113,10 @@ func (s *Server) handleEditorCollaborationOperation(w http.ResponseWriter, r *ht
 
 func (s *Server) handleEditorCollaborationMetadata(w http.ResponseWriter, r *http.Request, ref store.EditorDocumentRef) {
 	var request struct {
-		Title       string                                         `json:"title"`
-		Attachments []store.EditorCollaborationAttachmentReference `json:"attachments"`
+		Title          string                                         `json:"title"`
+		Attachments    []store.EditorCollaborationAttachmentReference `json:"attachments"`
+		EmailMessageID string                                         `json:"email_message_id"`
+		EmailAccent    string                                         `json:"email_accent"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -124,6 +126,7 @@ func (s *Server) handleEditorCollaborationMetadata(w http.ResponseWriter, r *htt
 	}
 	commit, err := s.repo.UpdateEditorCollaborationMetadata(store.EditorCollaborationMetadataInput{
 		Document: ref, Title: request.Title, Attachments: request.Attachments,
+		EmailMessageID: request.EmailMessageID, EmailAccent: request.EmailAccent,
 	})
 	if err != nil {
 		writeEditorCollaborationStoreError(w, err)

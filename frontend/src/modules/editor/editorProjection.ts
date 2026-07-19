@@ -13,6 +13,23 @@ export const EDITOR_TEXT_BLOCK_CHAT_TYPE = "Text block chat";
 export const EDITOR_ATTACHED_EMAIL_TYPE = "Attached email";
 export const EDITOR_TEXT_BLOCK_CONTENT_PREFIX = "<!-- mango-node-text-block-v1 -->";
 
+const EMAIL_MESSAGE_ACCENTS = [
+  "#0ea5e9",
+  "#14b8a6",
+  "#8b5cf6",
+  "#f59e0b",
+  "#ec4899",
+  "#22c55e",
+  "#f97316",
+  "#6366f1",
+] as const;
+
+export function editorEmailMessageAccent(messageID: string): string {
+  let hash = 0;
+  for (const char of messageID.trim()) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return EMAIL_MESSAGE_ACCENTS[hash % EMAIL_MESSAGE_ACCENTS.length] ?? EMAIL_MESSAGE_ACCENTS[0];
+}
+
 export type EditorTextBlockProjection<T extends EditorProjectionItem = EditorProjectionItem> = T & {
   type: typeof EDITOR_TEXT_BLOCK_TYPE;
 };
@@ -73,6 +90,8 @@ export type EditorTextBlockContent = {
   title: string;
   document: string;
   attachments?: EditorChatAttachment[];
+  emailMessageID?: string;
+  emailAccent?: string;
 };
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
@@ -200,17 +219,30 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
     attachments: parseEditorChatAttachments(record.attachments),
+    emailMessageID: stringValue(record, "email_message_id") || undefined,
+    emailAccent: stringValue(record, "email_accent") || undefined,
   };
 }
 
 export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockContent): {
   title: string;
   attachments: Record<string, unknown>[];
+  email_message_id: string;
+  email_accent: string;
 } {
   return {
     title: input.title.trim(),
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
+    email_message_id: input.emailMessageID?.trim() ?? "",
+    email_accent: input.emailAccent?.trim() ?? "",
   };
+}
+
+export function buildEditorTextBlockProjectionPayload(input: EditorTextBlockContent): string {
+  return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({
+    ...buildEditorTextBlockMetadataPayload(input),
+    document: input.document,
+  })}`;
 }
 function parsePayload(value: string): unknown {
   try {

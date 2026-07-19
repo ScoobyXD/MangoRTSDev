@@ -4673,6 +4673,18 @@ export function HomePage({
     openNodeEditorOverlay(node, message.collaboration_information_id, message.id);
   }, [companyID, nodeByID, openNodeEditorOverlay]);
 
+  const openImportedEmailNode = useCallback((nodeID: string, informationID: string, emailMessageID: string) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const node = nodeByID.get(cleanNodeID) ?? {
+      company_id: companyID,
+      node_id: cleanNodeID,
+      name: selectedMessage?.subject?.trim() || "Email conversation",
+      created_timestamp: "",
+    };
+    openNodeEditorOverlay(node, informationID || undefined, emailMessageID || undefined);
+  }, [companyID, nodeByID, openNodeEditorOverlay, selectedMessage?.subject]);
+
   useEffect(() => {
     if (deepLinkNodeID === undefined) return;
     const nodeID = deepLinkNodeID.trim();
@@ -5988,6 +6000,7 @@ export function HomePage({
             inboxCountIsMinimum={inboxCount.isMinimum}
             messageListRef={messageListRef}
             messages={visibleMessages}
+            nodes={nodes}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
             companyUserGroupMembers={companyUserGroupMembers}
@@ -6056,6 +6069,7 @@ export function HomePage({
             }}
             onEmailCollaborationChange={applyEmailCollaborationChange}
             onOpenCollaborationNode={openEmailCollaborationNode}
+            onOpenImportedNode={openImportedEmailNode}
           />
           {showLocalEntityRail && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
           {showLocalEntityRail && (
