@@ -84,13 +84,13 @@ func (r *PostgresRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJ
 		return EditorJSONSnapshot{}, err
 	}
 	snapshot := EditorJSONSnapshot{Document: ref, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...), UpdatedTimestamp: time.Now().UTC()}
-	var raw []byte
+	var raw, annotationRaw []byte
 	err = tx.QueryRowContext(ctx, `
-		select revision, document_schema_version, canonical_document, is_deleted, updated_timestamp
+		select revision, document_schema_version, canonical_document, canonical_annotations, is_deleted, updated_timestamp
 		from editor_json_documents
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID,
-	).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &raw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
+	).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &raw, &annotationRaw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EditorJSONSnapshot{}, err
 	}
@@ -100,6 +100,11 @@ func (r *PostgresRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJ
 			return EditorJSONSnapshot{}, validateErr
 		}
 		snapshot.JSONDocument = canonical
+		annotations, annotationErr := decodePostgresEditorJSONAnnotations(annotationRaw)
+		if annotationErr != nil {
+			return EditorJSONSnapshot{}, annotationErr
+		}
+		snapshot.Annotations = annotations
 	}
 	if err := tx.Commit(); err != nil {
 		return EditorJSONSnapshot{}, err
@@ -114,29 +119,49 @@ type postgresEditorJSONOperation struct {
 	Revision      int64
 	SchemaVersion int
 	JSONDocument  json.RawMessage
+	Annotations   []EditorJSONAnnotation
 	EventID       string
 	CommittedAt   time.Time
 	Deleted       bool
 }
 
+func decodePostgresEditorJSONAnnotations(raw []byte) ([]EditorJSONAnnotation, error) {
+	if len(raw) == 0 {
+		return []EditorJSONAnnotation{}, nil
+	}
+	var annotations []EditorJSONAnnotation
+	if err := json.Unmarshal(raw, &annotations); err != nil {
+		return nil, ErrInvalid
+	}
+	return NormalizeEditorJSONAnnotations(annotations)
+}
+
 func loadPostgresEditorJSONOperationTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef, operationID string) (postgresEditorJSONOperation, bool, error) {
 	var item postgresEditorJSONOperation
-	var raw []byte
+	var raw, annotationRaw []byte
 	err := tx.QueryRowContext(ctx, `
 		select operation_id, client_id, base_revision, revision, document_schema_version,
-		       canonical_document, event_id::text, committed_timestamp, is_delete
+		       canonical_document, canonical_annotations, event_id::text, committed_timestamp, is_delete
 		from editor_json_operations
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4 and operation_id=$5`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, operationID,
 	).Scan(&item.OperationID, &item.ClientID, &item.BaseRevision, &item.Revision, &item.SchemaVersion,
-		&raw, &item.EventID, &item.CommittedAt, &item.Deleted)
+		&raw, &annotationRaw, &item.EventID, &item.CommittedAt, &item.Deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return postgresEditorJSONOperation{}, false, nil
 	}
 	if err != nil {
 		return postgresEditorJSONOperation{}, false, err
 	}
-	item.JSONDocument = append(json.RawMessage(nil), raw...)
+	canonical, err := ValidateMangoTiptapJSON(raw)
+	if err != nil {
+		return postgresEditorJSONOperation{}, false, err
+	}
+	item.JSONDocument = canonical
+	item.Annotations, err = decodePostgresEditorJSONAnnotations(annotationRaw)
+	if err != nil {
+		return postgresEditorJSONOperation{}, false, err
+	}
 	return item, true, nil
 }
 
@@ -146,6 +171,10 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 		return EditorJSONCommit{}, err
 	}
 	input.Document, err = normalizePostgresEditorJSONRef(input.Document)
+	if err != nil {
+		return EditorJSONCommit{}, err
+	}
+	annotationsRaw, err := json.Marshal(input.Annotations)
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -182,7 +211,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 	if existing, found, loadErr := loadPostgresEditorJSONOperationTx(ctx, tx, input.Document, input.OperationID); loadErr != nil {
 		return EditorJSONCommit{}, loadErr
 	} else if found {
-		if existing.Deleted || existing.ClientID != input.ClientID || existing.BaseRevision != input.BaseRevision || !bytes.Equal(existing.JSONDocument, input.JSONDocument) {
+		if existing.Deleted || existing.ClientID != input.ClientID || existing.BaseRevision != input.BaseRevision || !bytes.Equal(existing.JSONDocument, input.JSONDocument) || !editorJSONAnnotationsEqual(existing.Annotations, input.Annotations) {
 			return EditorJSONCommit{}, ErrInvalid
 		}
 		if err := tx.Commit(); err != nil {
@@ -191,6 +220,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 		return EditorJSONCommit{
 			OperationID: existing.OperationID, EventID: existing.EventID, Revision: existing.Revision,
 			SchemaVersion: existing.SchemaVersion, JSONDocument: existing.JSONDocument,
+			Annotations: append([]EditorJSONAnnotation(nil), existing.Annotations...),
 			CommittedAt: existing.CommittedAt, Deduplicated: true,
 		}, nil
 	}
@@ -215,31 +245,31 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 		insert into editor_json_operations (
 			company_id, resource_type, resource_id, document_id, revision, operation_id,
 			client_id, actor_user_id, base_revision, document_schema_version,
-			canonical_document, event_id, is_delete, committed_timestamp
-		) values ($1::uuid,$2,$3,$4,$5,$6,$7,nullif($8,'')::uuid,$9,1,$10::jsonb,$11::uuid,false,$12)`,
+			canonical_document, canonical_annotations, event_id, is_delete, committed_timestamp
+		) values ($1::uuid,$2,$3,$4,$5,$6,$7,nullif($8,'')::uuid,$9,1,$10::jsonb,$11::jsonb,$12::uuid,false,$13)`,
 		input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID, input.Document.DocumentID,
 		nextRevision, input.OperationID, input.ClientID, input.ActorUserID, input.BaseRevision,
-		input.JSONDocument, eventID, now,
+		input.JSONDocument, annotationsRaw, eventID, now,
 	); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		insert into editor_json_versions (
 			company_id, resource_type, resource_id, document_id, revision, document_schema_version,
-			canonical_document, operation_id, actor_user_id, is_deleted, created_timestamp
-		) values ($1::uuid,$2,$3,$4,$5,1,$6::jsonb,$7,nullif($8,'')::uuid,false,$9)`,
+			canonical_document, canonical_annotations, operation_id, actor_user_id, is_deleted, created_timestamp
+		) values ($1::uuid,$2,$3,$4,$5,1,$6::jsonb,$7::jsonb,$8,nullif($9,'')::uuid,false,$10)`,
 		input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID, input.Document.DocumentID,
-		nextRevision, input.JSONDocument, input.OperationID, input.ActorUserID, now,
+		nextRevision, input.JSONDocument, annotationsRaw, input.OperationID, input.ActorUserID, now,
 	); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		update editor_json_documents
 		set revision=$5, document_schema_version=1, canonical_document=$6::jsonb,
-		    is_deleted=false, updated_timestamp=$7
+		    canonical_annotations=$7::jsonb, is_deleted=false, updated_timestamp=$8
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4`,
 		input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID,
-		input.Document.DocumentID, nextRevision, input.JSONDocument, now,
+		input.Document.DocumentID, nextRevision, input.JSONDocument, annotationsRaw, now,
 	); err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -257,7 +287,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 	return EditorJSONCommit{
 		OperationID: input.OperationID, EventID: eventID, Revision: nextRevision,
 		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), input.JSONDocument...),
-		CommittedAt: now,
+		Annotations: append([]EditorJSONAnnotation(nil), input.Annotations...), CommittedAt: now,
 	}, nil
 }
 
@@ -289,6 +319,7 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 		return EditorJSONCommit{
 			OperationID: operation.OperationID, EventID: operation.EventID, Revision: operation.Revision,
 			SchemaVersion: operation.SchemaVersion, JSONDocument: append(json.RawMessage(nil), operation.JSONDocument...),
+			Annotations: append([]EditorJSONAnnotation(nil), operation.Annotations...),
 			CommittedAt: operation.CommittedAt, Deduplicated: true,
 		}, nil
 	}
@@ -303,16 +334,20 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 		return EditorJSONCommit{}, err
 	}
 	var revision int64
-	var raw []byte
+	var raw, annotationRaw []byte
 	var deleted bool
 	if err := tx.QueryRowContext(ctx, `
-		select revision, canonical_document, is_deleted from editor_json_documents
+		select revision, canonical_document, canonical_annotations, is_deleted from editor_json_documents
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4 for update`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID,
-	).Scan(&revision, &raw, &deleted); err != nil {
+	).Scan(&revision, &raw, &annotationRaw, &deleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return EditorJSONCommit{}, ErrNotFound
 		}
+		return EditorJSONCommit{}, err
+	}
+	annotations, err := decodePostgresEditorJSONAnnotations(annotationRaw)
+	if err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if deleted {
@@ -331,19 +366,19 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 	if _, err := tx.ExecContext(ctx, `
 		insert into editor_json_operations (
 			company_id,resource_type,resource_id,document_id,revision,operation_id,client_id,
-			actor_user_id,base_revision,document_schema_version,canonical_document,event_id,is_delete,committed_timestamp
-		) values ($1::uuid,$2,$3,$4,$5,$6,$7,nullif($8,'')::uuid,$9,1,$10::jsonb,$11::uuid,true,$12)`,
+			actor_user_id,base_revision,document_schema_version,canonical_document,canonical_annotations,event_id,is_delete,committed_timestamp
+		) values ($1::uuid,$2,$3,$4,$5,$6,$7,nullif($8,'')::uuid,$9,1,$10::jsonb,$11::jsonb,$12::uuid,true,$13)`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, nextRevision, input.OperationID,
-		input.ClientID, input.ActorUserID, input.BaseRevision, raw, eventID, now,
+		input.ClientID, input.ActorUserID, input.BaseRevision, raw, annotationRaw, eventID, now,
 	); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		insert into editor_json_versions (
 			company_id,resource_type,resource_id,document_id,revision,document_schema_version,
-			canonical_document,operation_id,actor_user_id,is_deleted,created_timestamp
-		) values ($1::uuid,$2,$3,$4,$5,1,$6::jsonb,$7,nullif($8,'')::uuid,true,$9)`,
-		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, nextRevision, raw,
+			canonical_document,canonical_annotations,operation_id,actor_user_id,is_deleted,created_timestamp
+		) values ($1::uuid,$2,$3,$4,$5,1,$6::jsonb,$7::jsonb,$8,nullif($9,'')::uuid,true,$10)`,
+		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, nextRevision, raw, annotationRaw,
 		input.OperationID, input.ActorUserID, now,
 	); err != nil {
 		return EditorJSONCommit{}, err
@@ -375,7 +410,8 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 	}
 	return EditorJSONCommit{
 		OperationID: input.OperationID, EventID: eventID, Revision: nextRevision,
-		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), raw...), CommittedAt: now,
+		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), raw...),
+		Annotations: annotations, CommittedAt: now,
 	}, nil
 }
 
@@ -388,7 +424,7 @@ func (r *PostgresRepo) ListEditorJSONVersions(ref EditorJSONDocumentRef, limit i
 		limit = 50
 	}
 	rows, err := r.db.Query(`
-		select revision,document_schema_version,canonical_document,operation_id,
+		select revision,document_schema_version,canonical_document,canonical_annotations,operation_id,
 		       coalesce(actor_user_id::text,''),created_timestamp,is_deleted
 		from editor_json_versions
 		where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4
@@ -402,11 +438,18 @@ func (r *PostgresRepo) ListEditorJSONVersions(ref EditorJSONDocumentRef, limit i
 	result := make([]EditorJSONVersion, 0)
 	for rows.Next() {
 		var item EditorJSONVersion
-		var raw []byte
-		if err := rows.Scan(&item.Revision, &item.SchemaVersion, &raw, &item.OperationID, &item.ActorUserID, &item.CreatedAt, &item.Deleted); err != nil {
+		var raw, annotationRaw []byte
+		if err := rows.Scan(&item.Revision, &item.SchemaVersion, &raw, &annotationRaw, &item.OperationID, &item.ActorUserID, &item.CreatedAt, &item.Deleted); err != nil {
 			return nil, err
 		}
-		item.JSONDocument = append(json.RawMessage(nil), raw...)
+		item.JSONDocument, err = ValidateMangoTiptapJSON(raw)
+		if err != nil {
+			return nil, err
+		}
+		item.Annotations, err = decodePostgresEditorJSONAnnotations(annotationRaw)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, item)
 	}
 	return result, rows.Err()

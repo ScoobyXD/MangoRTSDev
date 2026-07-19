@@ -71,16 +71,21 @@ func TestMangoTiptapJSONRejectsUnknownSchemaHTMLAndTransientURLs(t *testing.T) {
 func TestEditorJSONExactRevisionDedupeConflictVersionsAndDelete(t *testing.T) {
 	repo, ref := editorJSONTestDocument(t, "11111111-1111-4111-8111-111111111111")
 	firstDocument := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"first"}]}]}}`)
+	annotations := []EditorJSONAnnotation{
+		{ID: "comment-1", Kind: "comment", From: 2, To: 7},
+		{ID: "change-1", Kind: "change", From: 8, To: 12},
+		{ID: "chat-1", Kind: "chat", From: 13, To: 18},
+	}
 	input := EditorJSONCommitInput{
 		Document: ref, OperationID: "operation-1", ClientID: "client-1",
-		BaseRevision: 0, SchemaVersion: 1, JSONDocument: firstDocument,
+		BaseRevision: 0, SchemaVersion: 1, JSONDocument: firstDocument, Annotations: annotations,
 	}
 	first, err := repo.CommitEditorJSONDocument(input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	duplicate, err := repo.CommitEditorJSONDocument(input)
-	if err != nil || !duplicate.Deduplicated || duplicate.Revision != first.Revision || duplicate.EventID != first.EventID {
+	if err != nil || !duplicate.Deduplicated || duplicate.Revision != first.Revision || duplicate.EventID != first.EventID || !editorJSONAnnotationsEqual(duplicate.Annotations, annotations) {
 		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
 	}
 	stale := input
@@ -90,11 +95,11 @@ func TestEditorJSONExactRevisionDedupeConflictVersionsAndDelete(t *testing.T) {
 		t.Fatalf("stale commit error=%v", err)
 	}
 	snapshot, err := repo.GetEditorJSONSnapshot(ref)
-	if err != nil || snapshot.Revision != 1 || string(snapshot.JSONDocument) != string(first.JSONDocument) {
+	if err != nil || snapshot.Revision != 1 || string(snapshot.JSONDocument) != string(first.JSONDocument) || !editorJSONAnnotationsEqual(snapshot.Annotations, annotations) {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	versions, err := repo.ListEditorJSONVersions(ref, 10)
-	if err != nil || len(versions) != 1 || versions[0].Revision != 1 {
+	if err != nil || len(versions) != 1 || versions[0].Revision != 1 || !editorJSONAnnotationsEqual(versions[0].Annotations, annotations) {
 		t.Fatalf("versions=%+v err=%v", versions, err)
 	}
 	deleted, err := repo.DeleteEditorJSONDocument(EditorJSONDeleteInput{
@@ -112,6 +117,31 @@ func TestEditorJSONExactRevisionDedupeConflictVersionsAndDelete(t *testing.T) {
 	snapshot, err = repo.GetEditorJSONSnapshot(ref)
 	if err != nil || !snapshot.Deleted {
 		t.Fatalf("deleted snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
+func TestEditorJSONRejectsInvalidOrChangedStableOperationAnnotations(t *testing.T) {
+	repo, ref := editorJSONTestDocument(t, "55555555-5555-4555-8555-555555555555")
+	document := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"mapped"}]}]}}`)
+	input := EditorJSONCommitInput{
+		Document: ref, OperationID: "stable-operation", ClientID: "stable-client", BaseRevision: 0,
+		SchemaVersion: 1, JSONDocument: document,
+		Annotations: []EditorJSONAnnotation{{ID: "comment-1", Kind: "comment", From: 2, To: 5}},
+	}
+	if _, err := repo.CommitEditorJSONDocument(input); err != nil {
+		t.Fatal(err)
+	}
+	changed := input
+	changed.Annotations = []EditorJSONAnnotation{{ID: "comment-1", Kind: "comment", From: 3, To: 6}}
+	if _, err := repo.CommitEditorJSONDocument(changed); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("changed stable operation annotations error=%v", err)
+	}
+	invalid := input
+	invalid.OperationID = "invalid-annotation"
+	invalid.BaseRevision = 1
+	invalid.Annotations = []EditorJSONAnnotation{{ID: "comment-1", Kind: "unknown", From: 2, To: 5}}
+	if _, err := repo.CommitEditorJSONDocument(invalid); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid annotation error=%v", err)
 	}
 }
 

@@ -526,12 +526,18 @@ async function main() {
   run("Apply the inactive Tiptap JSON foundation migration on the clean canonical schema", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
+  copyFileSync(resolve(backend, "db", "migrations", "20260719_zz_tiptap_annotation_positions.sql"), resolve(migrationDir, "20260719_zz_tiptap_annotation_positions.sql"));
+  run("Apply revision-bound Tiptap annotation positions on the clean canonical schema", migrateExe, [
+    "-mode", "migrate", "-migrations", migrationDir,
+  ], { cwd: backend, env: cleanEnv });
   run("Prove recorded migration rerun is idempotent", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260715%';"), "2");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260716%';"), "1");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260718%';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version='20260719_zz_tiptap_annotation_positions.sql';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name in ('editor_json_documents','editor_json_operations','editor_json_versions') and column_name='canonical_annotations';"), "3");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from workspace_editor_formats;"), "0");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.tables where table_name in ('workspace_editor_formats','editor_json_documents','editor_json_operations','editor_json_versions');"), "4");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from pg_constraint where conname in ('editor_collaboration_documents_model_version_chk','editor_collaboration_operations_kind_chk');"), "0");
@@ -575,6 +581,11 @@ async function main() {
   run("Add the inactive Tiptap JSON foundation without converting the legacy fixture", migrateExe, [
     "-mode", "migrate", "-migrations", legacyMigrationDir,
   ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
+  copyFileSync(resolve(backend, "db", "migrations", "20260719_zz_tiptap_annotation_positions.sql"), resolve(legacyMigrationDir, "20260719_zz_tiptap_annotation_positions.sql"));
+  run("Add revision-bound Tiptap annotation positions without converting the legacy fixture", migrateExe, [
+    "-mode", "migrate", "-migrations", legacyMigrationDir,
+  ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from information_schema.columns where table_name in ('editor_json_documents','editor_json_operations','editor_json_versions') and column_name='canonical_annotations';"), "3");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select canonical_html from editor_collaboration_documents where company_id='" + COMPANY_A + "' and resource_id='" + NODE_A + "' and document_id='" + DOC_A + "';"), INITIAL_RICH_EDITOR_HTML);
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from workspace_editor_formats;"), "0");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from editor_json_documents;"), "0");

@@ -1770,6 +1770,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         from: pending.startOffset,
         to: pending.endOffset,
         active: true,
+        durable: false as const,
       }] : [];
     })(),
   ], [

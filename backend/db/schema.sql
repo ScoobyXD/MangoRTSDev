@@ -4213,6 +4213,7 @@ create table if not exists editor_json_documents (
   document_schema_version integer not null default 1,
   revision bigint not null default 0,
   canonical_document jsonb not null,
+  canonical_annotations jsonb not null default '[]'::jsonb,
   is_deleted boolean not null default false,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -4234,6 +4235,11 @@ create table if not exists editor_json_documents (
     and jsonb_typeof(canonical_document->'document') = 'object'
     and canonical_document->'document'->>'type' = 'doc'
     and pg_column_size(canonical_document) <= 2097152
+  ),
+  constraint editor_json_documents_annotations_chk check (
+    jsonb_typeof(canonical_annotations) = 'array'
+    and jsonb_array_length(canonical_annotations) <= 10000
+    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 
@@ -4252,6 +4258,7 @@ create table if not exists editor_json_operations (
   base_revision bigint not null,
   document_schema_version integer not null default 1,
   canonical_document jsonb not null,
+  canonical_annotations jsonb not null default '[]'::jsonb,
   event_id uuid not null unique,
   is_delete boolean not null default false,
   committed_timestamp timestamptz not null default now(),
@@ -4275,6 +4282,11 @@ create table if not exists editor_json_operations (
     and canonical_document->>'format' = 'mango-tiptap-json'
     and canonical_document->>'schema_version' = '1'
     and pg_column_size(canonical_document) <= 2097152
+  ),
+  constraint editor_json_operations_annotations_chk check (
+    jsonb_typeof(canonical_annotations) = 'array'
+    and jsonb_array_length(canonical_annotations) <= 10000
+    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 
@@ -4286,6 +4298,7 @@ create table if not exists editor_json_versions (
   revision bigint not null,
   document_schema_version integer not null default 1,
   canonical_document jsonb not null,
+  canonical_annotations jsonb not null default '[]'::jsonb,
   operation_id text not null,
   actor_user_id uuid,
   is_deleted boolean not null default false,
@@ -4303,6 +4316,11 @@ create table if not exists editor_json_versions (
     and canonical_document->>'format' = 'mango-tiptap-json'
     and canonical_document->>'schema_version' = '1'
     and pg_column_size(canonical_document) <= 2097152
+  ),
+  constraint editor_json_versions_annotations_chk check (
+    jsonb_typeof(canonical_annotations) = 'array'
+    and jsonb_array_length(canonical_annotations) <= 10000
+    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 

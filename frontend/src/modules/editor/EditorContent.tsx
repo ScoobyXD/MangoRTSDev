@@ -107,13 +107,8 @@ import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type Co
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
+import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
-
-const MangoTiptapEditor = React.lazy(async () => {
-  const module = await import("./tiptap/MangoTiptapEditor.js");
-  return { default: module.MangoTiptapEditor };
-});
-
 
 function editorSnapshotScope(resourceType: "node" | "logic_gate", resourceID: string): string {
   const cleanID = resourceID.trim();
@@ -2955,28 +2950,26 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         )}
         {hasLinkedDocument && linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationID && (
           <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
-            <MangoTiptapEditor
-            key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
-            value={documentDraftRef.current}
-            editable={editorWriteEnabled}
-            ariaLabel="Logic Gate editor"
-            style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
-            companyID={companyID}
-            resourceType="logic_gate"
-            resourceID={linkedNodeID}
-            documentID={documentInformationID}
-            currentUserID={currentUserID}
-            requestJSON={requestJSON}
-            attachmentContext={editorImageAttachmentContext}
-            mentionUsers={companyUsers}
-            formattingControllerRef={logicFormattingControllerRef}
-            onChange={(next) => { documentDraftRef.current = next; }}
-            onFlush={(next) => { documentDraftRef.current = next; }}
-            onError={setError}
-            onSelectionFontSizeChange={updateSelectionFontSize}
-            onSelectionInlineFormatChange={updateSelectionInlineFormat}
-            onSelectionHighlightColorChange={setSelectionHighlightColor}
-            onSelectionTextAlignmentChange={setSelectionTextAlignment}
+            <LogicGateTiptapEditorSurface
+              key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
+              value={documentDraftRef.current}
+              editable={editorWriteEnabled}
+              style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
+              companyID={companyID}
+              resourceID={linkedNodeID}
+              documentID={documentInformationID}
+              currentUserID={currentUserID}
+              requestJSON={requestJSON}
+              attachmentContext={editorImageAttachmentContext}
+              mentionUsers={companyUsers}
+              formattingControllerRef={logicFormattingControllerRef}
+              onChange={(next) => { documentDraftRef.current = next; }}
+              onFlush={(next) => { documentDraftRef.current = next; }}
+              onError={setError}
+              onSelectionFontSizeChange={updateSelectionFontSize}
+              onSelectionInlineFormatChange={updateSelectionInlineFormat}
+              onSelectionHighlightColorChange={setSelectionHighlightColor}
+              onSelectionTextAlignmentChange={setSelectionTextAlignment}
             />
           </React.Suspense>
         )}

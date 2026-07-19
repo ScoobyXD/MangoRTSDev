@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"html"
 	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -11,6 +12,53 @@ import (
 )
 
 const editorJSONRoutePrefix = "/v1/editor-json/"
+
+func mangoTiptapMentionNotificationHTML(raw json.RawMessage) string {
+	var envelope struct {
+		Document struct {
+			Type    string `json:"type"`
+			Content []any  `json:"content"`
+		} `json:"document"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Document.Type != "doc" {
+		return ""
+	}
+	var output strings.Builder
+	var visit func(any)
+	visit = func(value any) {
+		node, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		if node["type"] == "mention" {
+			attrs, _ := node["attrs"].(map[string]any)
+			userID, _ := attrs["userId"].(string)
+			label, _ := attrs["label"].(string)
+			kind, _ := attrs["kind"].(string)
+			if kind == "normal" {
+				kind = "regular"
+			}
+			output.WriteString(`<span data-mango-mention="true" data-mango-mention-user-id="`)
+			output.WriteString(html.EscapeString(userID))
+			output.WriteString(`" data-mango-mention-kind="`)
+			output.WriteString(html.EscapeString(kind))
+			output.WriteString(`">`)
+			output.WriteString(html.EscapeString(label))
+			output.WriteString(`</span>`)
+		}
+		if text, ok := node["text"].(string); ok {
+			output.WriteString(html.EscapeString(text))
+		}
+		if content, ok := node["content"].([]any); ok {
+			for _, child := range content {
+				visit(child)
+			}
+			output.WriteByte(' ')
+		}
+	}
+	visit(map[string]any{"type": envelope.Document.Type, "content": envelope.Document.Content})
+	return strings.TrimSpace(output.String())
+}
 
 func (s *Server) handleEditorDataFormat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -146,11 +194,12 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPost:
 		var request struct {
-			OperationID   string          `json:"operation_id"`
-			ClientID      string          `json:"client_id"`
-			BaseRevision  int64           `json:"base_revision"`
-			SchemaVersion int             `json:"schema_version"`
-			Document      json.RawMessage `json:"document"`
+			OperationID   string                       `json:"operation_id"`
+			ClientID      string                       `json:"client_id"`
+			BaseRevision  int64                        `json:"base_revision"`
+			SchemaVersion int                          `json:"schema_version"`
+			Document      json.RawMessage              `json:"document"`
+			Annotations   []store.EditorJSONAnnotation `json:"annotations"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -162,10 +211,14 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			Document: ref, OperationID: request.OperationID, ClientID: request.ClientID,
 			ActorUserID: actor.User.UserID, BaseRevision: request.BaseRevision,
 			SchemaVersion: request.SchemaVersion, JSONDocument: request.Document,
+			Annotations: request.Annotations,
 		})
 		if err != nil {
 			writeEditorJSONStoreError(w, err)
 			return
+		}
+		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeLogicGate {
+			s.recordMentionNotifications(r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", mangoTiptapMentionNotificationHTML(commit.JSONDocument))
 		}
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, commit)
@@ -215,6 +268,9 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeEditorJSONStoreError(w, err)
 			return
+		}
+		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeLogicGate {
+			s.recordMentionNotifications(r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", mangoTiptapMentionNotificationHTML(commit.JSONDocument))
 		}
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, commit)

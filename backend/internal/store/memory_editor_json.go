@@ -13,6 +13,7 @@ type memoryEditorJSONDocument struct {
 	Revision         int64
 	SchemaVersion    int
 	JSONDocument     json.RawMessage
+	Annotations      []EditorJSONAnnotation
 	Deleted          bool
 	UpdatedTimestamp time.Time
 }
@@ -22,6 +23,7 @@ type memoryEditorJSONOperation struct {
 	ClientID     string
 	BaseRevision int64
 	JSONDocument json.RawMessage
+	Annotations  []EditorJSONAnnotation
 	EventID      string
 	Revision     int64
 	CommittedAt  time.Time
@@ -84,6 +86,7 @@ func memoryEditorJSONSnapshot(ref EditorJSONDocumentRef, document memoryEditorJS
 	return EditorJSONSnapshot{
 		Document: ref, Revision: document.Revision, SchemaVersion: MangoTiptapSchemaVersion,
 		JSONDocument: append(json.RawMessage(nil), jsonDocument...), Deleted: document.Deleted,
+		Annotations:      append([]EditorJSONAnnotation(nil), document.Annotations...),
 		UpdatedTimestamp: document.UpdatedTimestamp,
 	}
 }
@@ -130,13 +133,14 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 		if operation.OperationID != input.OperationID {
 			continue
 		}
-		if operation.Deleted || operation.ClientID != input.ClientID || operation.BaseRevision != input.BaseRevision || !bytes.Equal(operation.JSONDocument, input.JSONDocument) {
+		if operation.Deleted || operation.ClientID != input.ClientID || operation.BaseRevision != input.BaseRevision || !bytes.Equal(operation.JSONDocument, input.JSONDocument) || !editorJSONAnnotationsEqual(operation.Annotations, input.Annotations) {
 			return EditorJSONCommit{}, ErrInvalid
 		}
 		return EditorJSONCommit{
 			OperationID: operation.OperationID, EventID: operation.EventID,
 			Revision: operation.Revision, SchemaVersion: MangoTiptapSchemaVersion,
 			JSONDocument: append(json.RawMessage(nil), operation.JSONDocument...),
+			Annotations:  append([]EditorJSONAnnotation(nil), operation.Annotations...),
 			CommittedAt:  operation.CommittedAt, Deduplicated: true,
 		}, nil
 	}
@@ -177,23 +181,39 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	document.Revision = revision
 	document.SchemaVersion = MangoTiptapSchemaVersion
 	document.JSONDocument = append(json.RawMessage(nil), input.JSONDocument...)
+	document.Annotations = append([]EditorJSONAnnotation(nil), input.Annotations...)
 	document.UpdatedTimestamp = now
 	r.editorJSONDocuments[key] = document
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,
 		JSONDocument: append(json.RawMessage(nil), input.JSONDocument...),
+		Annotations:  append([]EditorJSONAnnotation(nil), input.Annotations...),
 		EventID:      eventID, Revision: revision, CommittedAt: now,
 	})
 	r.editorJSONVersions[key] = append(r.editorJSONVersions[key], EditorJSONVersion{
 		Revision: revision, SchemaVersion: MangoTiptapSchemaVersion,
 		JSONDocument: append(json.RawMessage(nil), input.JSONDocument...),
+		Annotations:  append([]EditorJSONAnnotation(nil), input.Annotations...),
 		OperationID:  input.OperationID, ActorUserID: input.ActorUserID, CreatedAt: now,
 	})
 	return EditorJSONCommit{
 		OperationID: input.OperationID, EventID: eventID, Revision: revision,
 		SchemaVersion: MangoTiptapSchemaVersion,
-		JSONDocument:  append(json.RawMessage(nil), input.JSONDocument...), CommittedAt: now,
+		JSONDocument:  append(json.RawMessage(nil), input.JSONDocument...),
+		Annotations:   append([]EditorJSONAnnotation(nil), input.Annotations...), CommittedAt: now,
 	}, nil
+}
+
+func editorJSONAnnotationsEqual(left, right []EditorJSONAnnotation) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (EditorJSONCommit, error) {
@@ -224,6 +244,7 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 		return EditorJSONCommit{
 			OperationID: operation.OperationID, EventID: operation.EventID, Revision: operation.Revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), operation.JSONDocument...),
+			Annotations: append([]EditorJSONAnnotation(nil), operation.Annotations...),
 			CommittedAt: operation.CommittedAt, Deduplicated: true,
 		}, nil
 	}
@@ -258,7 +279,8 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 	r.editorJSONDocuments[key] = document
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,
-		JSONDocument: append(json.RawMessage(nil), document.JSONDocument...), Deleted: true,
+		JSONDocument: append(json.RawMessage(nil), document.JSONDocument...),
+		Annotations:  append([]EditorJSONAnnotation(nil), document.Annotations...), Deleted: true,
 		EventID: eventID, Revision: revision, CommittedAt: now,
 	})
 	r.deleteEditorProjectionLocked(EditorDocumentRef{
@@ -268,11 +290,13 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 	r.editorJSONVersions[key] = append(r.editorJSONVersions[key], EditorJSONVersion{
 		Revision: revision, SchemaVersion: MangoTiptapSchemaVersion,
 		JSONDocument: append(json.RawMessage(nil), document.JSONDocument...),
+		Annotations:  append([]EditorJSONAnnotation(nil), document.Annotations...),
 		OperationID:  input.OperationID, ActorUserID: input.ActorUserID, CreatedAt: now, Deleted: true,
 	})
 	return EditorJSONCommit{
 		OperationID: input.OperationID, EventID: eventID, Revision: revision,
 		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), document.JSONDocument...),
+		Annotations: append([]EditorJSONAnnotation(nil), document.Annotations...),
 		CommittedAt: now,
 	}, nil
 }

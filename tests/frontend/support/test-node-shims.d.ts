@@ -23,4 +23,5 @@ declare module "jsdom" {
 declare module "fake-indexeddb" {
   export const indexedDB: IDBFactory;
   export const IDBKeyRange: typeof globalThis.IDBKeyRange;
+  export const IDBObjectStore: typeof globalThis.IDBObjectStore;
 }

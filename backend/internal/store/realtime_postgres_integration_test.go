@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
@@ -273,6 +274,65 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		}
 		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2", company.CompanyID, EditorRealtimeScope(limitRef)); got != 0 {
 			t.Fatalf("oversized outbox rows = %d", got)
+		}
+	})
+
+	t.Run("JSON editor annotations, atomicity, and lost acknowledgement replay", func(t *testing.T) {
+		if _, err := db.Exec(`
+insert into workspace_editor_formats (
+  company_id, editor_format, migration_state, document_schema_version,
+  expected_document_count, converted_document_count, validated_timestamp, cutover_timestamp
+) values ($1::uuid, 'tiptap_json', 'ready', 1, 0, 0, now(), now())
+on conflict (company_id) do update set
+  editor_format=excluded.editor_format, migration_state=excluded.migration_state,
+  document_schema_version=excluded.document_schema_version,
+  expected_document_count=excluded.expected_document_count,
+  converted_document_count=excluded.converted_document_count,
+  validated_timestamp=excluded.validated_timestamp, cutover_timestamp=excluded.cutover_timestamp`, company.CompanyID); err != nil {
+			t.Fatal(err)
+		}
+		documentID := "00000000-0000-4000-8000-000000000131"
+		ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: documentID}
+		document := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Postgres mapped positions"}]}]}}`)
+		annotations := []EditorJSONAnnotation{
+			{ID: "comment-pg", Kind: "comment", From: 2, To: 8},
+			{ID: "change-pg", Kind: "change", From: 9, To: 15},
+			{ID: "chat-pg", Kind: "chat", From: 16, To: 22},
+		}
+		input := EditorJSONCommitInput{
+			Document: ref, OperationID: "pg-json-stable-operation", ClientID: "pg-json-client",
+			ActorUserID: user.UserID, BaseRevision: 0, SchemaVersion: 1,
+			JSONDocument: document, Annotations: annotations,
+		}
+		forceRealtimeOutboxEvent(t, db, EditorJSONSnapshotEventType, true)
+		if _, err := repo.CommitEditorJSONDocument(input); err == nil {
+			t.Fatal("JSON editor commit succeeded with forced outbox failure")
+		}
+		if got := countPostgresRows(t, db, "select count(*) from editor_json_documents where company_id=$1::uuid and document_id=$2", company.CompanyID, documentID); got != 0 {
+			t.Fatalf("rolled-back JSON editor documents = %d", got)
+		}
+		forceRealtimeOutboxEvent(t, db, EditorJSONSnapshotEventType, false)
+		first, err := repo.CommitEditorJSONDocument(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := repo.CommitEditorJSONDocument(input)
+		if err != nil || !duplicate.Deduplicated || duplicate.Revision != first.Revision || duplicate.EventID != first.EventID {
+			t.Fatalf("lost-ack duplicate=%+v first=%+v err=%v", duplicate, first, err)
+		}
+		if !editorJSONAnnotationsEqual(duplicate.Annotations, annotations) {
+			t.Fatalf("deduplicated annotations=%+v", duplicate.Annotations)
+		}
+		snapshot, err := repo.GetEditorJSONSnapshot(ref)
+		if err != nil || snapshot.Revision != 1 || !editorJSONAnnotationsEqual(snapshot.Annotations, annotations) {
+			t.Fatalf("JSON snapshot=%+v err=%v", snapshot, err)
+		}
+		versions, err := repo.ListEditorJSONVersions(ref, 10)
+		if err != nil || len(versions) != 1 || !editorJSONAnnotationsEqual(versions[0].Annotations, annotations) {
+			t.Fatalf("JSON versions=%+v err=%v", versions, err)
+		}
+		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2 and event_type=$3", company.CompanyID, EditorJSONRealtimeScope(ref), EditorJSONSnapshotEventType); got != 1 {
+			t.Fatalf("idempotent JSON outbox rows = %d, want 1", got)
 		}
 	})
 }

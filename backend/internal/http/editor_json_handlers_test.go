@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
@@ -72,8 +73,10 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 	created := doJSON(http.MethodPost, jsonPath, map[string]any{
 		"operation_id": "json-operation-1", "client_id": "json-client",
 		"base_revision": 0, "schema_version": 1, "document": document,
+		"annotations": []any{map[string]any{"id": "comment-1", "kind": "comment", "from": 2, "to": 6}},
 	})
-	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), "\"revision\":1") {
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), "\"revision\":1") ||
+		!strings.Contains(created.Body.String(), "\"annotations\":[{\"id\":\"comment-1\"") {
 		t.Fatalf("created status=%d body=%s", created.Code, created.Body.String())
 	}
 	metadata := doJSON(http.MethodPatch, jsonPath, map[string]any{
@@ -94,6 +97,7 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 	stale := doJSON(http.MethodPost, jsonPath, map[string]any{
 		"operation_id": "json-operation-2", "client_id": "json-client",
 		"base_revision": 0, "schema_version": 1, "document": document,
+		"annotations": []any{map[string]any{"id": "comment-1", "kind": "comment", "from": 2, "to": 6}},
 	})
 	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), "editor_json_revision_conflict") {
 		t.Fatalf("stale status=%d body=%s", stale.Code, stale.Body.String())
@@ -111,6 +115,87 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 	}
 }
 
+func TestEditorJSONHTTPOnlyCreatesUpdatesForNormalAndUrgentMentions(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "85858585-8585-4585-8585-858585858585"
+	repo.EnsureCompany(companyID, "JSON mention editor")
+	actor := mustRealtimeAuthUser(t, repo, companyID, "json-mention-actor", domain.RoleCompanyAdmin)
+	mentioned := mustRealtimeAuthUser(t, repo, companyID, "json-mention-target", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "JSON mention node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetEditorDataFormatForTests(store.EditorDataFormatGate{
+		CompanyID: companyID, EditorFormat: store.EditorFormatTiptapJSON,
+		MigrationState: store.EditorMigrationReady, DocumentSchemaVersion: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const token = "json-mention-token"
+	server := newRealtimeAuthServerForTest(repo, token, actor)
+	defer server.Close()
+	path := "/v1/editor-json/node/" + node.NodeID + "/documents/86868686-8686-4686-8686-868686868686?company_id=" + companyID
+	post := func(operationID string, baseRevision int, content []any) *httptest.ResponseRecorder {
+		t.Helper()
+		document := map[string]any{
+			"format": "mango-tiptap-json", "schema_version": 1,
+			"document": map[string]any{
+				"type":    "doc",
+				"content": []any{map[string]any{"type": "paragraph", "content": content}},
+			},
+		}
+		body, _ := json.Marshal(map[string]any{
+			"operation_id": operationID, "client_id": "json-mention-client",
+			"base_revision": baseRevision, "schema_version": 1, "document": document,
+			"annotations": []any{},
+		})
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, request)
+		return response
+	}
+
+	if response := post("plain-operation", 0, []any{map[string]any{"type": "text", "text": "ordinary typing"}}); response.Code != http.StatusOK {
+		t.Fatalf("plain status=%d body=%s", response.Code, response.Body.String())
+	}
+	items, err := repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 10})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("ordinary edit notifications=%+v err=%v", items, err)
+	}
+
+	mentionContent := func(kind string) []any {
+		return []any{
+			map[string]any{"type": "text", "text": "Please review "},
+			map[string]any{"type": "mention", "attrs": map[string]any{
+				"userId": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind,
+			}},
+		}
+	}
+	if response := post("regular-operation", 1, mentionContent("normal")); response.Code != http.StatusOK {
+		t.Fatalf("regular mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := post("urgent-operation", 2, mentionContent("urgent")); response.Code != http.StatusOK {
+		t.Fatalf("urgent mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	for attempts := 0; attempts < 100; attempts++ {
+		items, err = repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 10})
+		if err != nil || len(items) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err != nil || len(items) != 2 {
+		t.Fatalf("mention notifications=%+v err=%v", items, err)
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		seen[item.Type] = true
+	}
+	if !seen["mention.created"] || !seen["mention.urgent_created"] {
+		t.Fatalf("mention notification types=%v", seen)
+	}
+}
 func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "83838383-8383-4383-8383-838383838383"

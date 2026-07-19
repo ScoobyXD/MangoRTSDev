@@ -94,12 +94,20 @@ func NormalizeEditorJSONDocumentRef(ref EditorJSONDocumentRef) (EditorJSONDocume
 }
 
 type EditorJSONSnapshot struct {
-	Document         EditorJSONDocumentRef `json:"document_ref"`
-	Revision         int64                 `json:"revision"`
-	SchemaVersion    int                   `json:"schema_version"`
-	JSONDocument     json.RawMessage       `json:"document"`
-	Deleted          bool                  `json:"deleted,omitempty"`
-	UpdatedTimestamp time.Time             `json:"updated_timestamp"`
+	Document         EditorJSONDocumentRef  `json:"document_ref"`
+	Revision         int64                  `json:"revision"`
+	SchemaVersion    int                    `json:"schema_version"`
+	JSONDocument     json.RawMessage        `json:"document"`
+	Annotations      []EditorJSONAnnotation `json:"annotations"`
+	Deleted          bool                   `json:"deleted,omitempty"`
+	UpdatedTimestamp time.Time              `json:"updated_timestamp"`
+}
+
+type EditorJSONAnnotation struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	From int    `json:"from"`
+	To   int    `json:"to"`
 }
 
 type EditorJSONCommitInput struct {
@@ -110,16 +118,18 @@ type EditorJSONCommitInput struct {
 	BaseRevision  int64
 	SchemaVersion int
 	JSONDocument  json.RawMessage
+	Annotations   []EditorJSONAnnotation
 }
 
 type EditorJSONCommit struct {
-	OperationID   string          `json:"operation_id"`
-	EventID       string          `json:"event_id"`
-	Revision      int64           `json:"revision"`
-	SchemaVersion int             `json:"schema_version"`
-	JSONDocument  json.RawMessage `json:"document"`
-	CommittedAt   time.Time       `json:"committed_at"`
-	Deduplicated  bool            `json:"deduplicated,omitempty"`
+	OperationID   string                 `json:"operation_id"`
+	EventID       string                 `json:"event_id"`
+	Revision      int64                  `json:"revision"`
+	SchemaVersion int                    `json:"schema_version"`
+	JSONDocument  json.RawMessage        `json:"document"`
+	Annotations   []EditorJSONAnnotation `json:"annotations"`
+	CommittedAt   time.Time              `json:"committed_at"`
+	Deduplicated  bool                   `json:"deduplicated,omitempty"`
 }
 
 type EditorJSONDeleteInput struct {
@@ -131,13 +141,14 @@ type EditorJSONDeleteInput struct {
 }
 
 type EditorJSONVersion struct {
-	Revision      int64           `json:"revision"`
-	SchemaVersion int             `json:"schema_version"`
-	JSONDocument  json.RawMessage `json:"document"`
-	OperationID   string          `json:"operation_id"`
-	ActorUserID   string          `json:"actor_user_id,omitempty"`
-	CreatedAt     time.Time       `json:"created_timestamp"`
-	Deleted       bool            `json:"deleted,omitempty"`
+	Revision      int64                  `json:"revision"`
+	SchemaVersion int                    `json:"schema_version"`
+	JSONDocument  json.RawMessage        `json:"document"`
+	Annotations   []EditorJSONAnnotation `json:"annotations"`
+	OperationID   string                 `json:"operation_id"`
+	ActorUserID   string                 `json:"actor_user_id,omitempty"`
+	CreatedAt     time.Time              `json:"created_timestamp"`
+	Deleted       bool                   `json:"deleted,omitempty"`
 }
 
 func NormalizeEditorJSONCommit(input EditorJSONCommitInput) (EditorJSONCommitInput, error) {
@@ -158,7 +169,39 @@ func NormalizeEditorJSONCommit(input EditorJSONCommitInput) (EditorJSONCommitInp
 		return EditorJSONCommitInput{}, err
 	}
 	input.JSONDocument = canonical
+	annotations, err := NormalizeEditorJSONAnnotations(input.Annotations)
+	if err != nil {
+		return EditorJSONCommitInput{}, err
+	}
+	input.Annotations = annotations
 	return input, nil
+}
+
+func NormalizeEditorJSONAnnotations(input []EditorJSONAnnotation) ([]EditorJSONAnnotation, error) {
+	if len(input) > 10000 {
+		return nil, ErrInvalid
+	}
+	result := make([]EditorJSONAnnotation, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, annotation := range input {
+		annotation.ID = strings.TrimSpace(annotation.ID)
+		annotation.Kind = strings.TrimSpace(annotation.Kind)
+		if annotation.ID == "" || len(annotation.ID) > 500 || annotation.From < 0 || annotation.To <= annotation.From || annotation.To > EditorJSONDocumentMaxBytes {
+			return nil, ErrInvalid
+		}
+		switch annotation.Kind {
+		case "comment", "change", "chat", "email-selection":
+		default:
+			return nil, ErrInvalid
+		}
+		key := annotation.Kind + "\x00" + annotation.ID
+		if _, exists := seen[key]; exists {
+			return nil, ErrInvalid
+		}
+		seen[key] = struct{}{}
+		result = append(result, annotation)
+	}
+	return result, nil
 }
 
 var editorJSONNodeAttrs = map[string]map[string]bool{

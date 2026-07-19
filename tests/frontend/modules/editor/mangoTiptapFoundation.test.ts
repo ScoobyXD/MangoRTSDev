@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
+import { IDBKeyRange, IDBObjectStore, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import { JSDOM } from "jsdom";
 
 import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/editorLifecycle.js";
@@ -278,6 +278,171 @@ test("Tiptap sync durably records one exact document before network completion",
     assert.equal(await readExactMangoTiptapPending(key), null);
   } finally {
     releaseCommit?.();
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("lost acknowledgement recovery replays the stable operation before conflict detection", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const original = createEmptyMangoTiptapDocument();
+  const edited = richDocument("accepted despite a lost response");
+  const annotations = [
+    { id: "comment-1", kind: "comment" as const, from: 3, to: 9 },
+    { id: "change-1", kind: "change" as const, from: 10, to: 14 },
+    { id: "chat-1", kind: "chat" as const, from: 15, to: 19 },
+  ];
+  let revision = 0;
+  let canonical = original;
+  let canonicalAnnotations = [] as typeof annotations;
+  let acceptedOperationID = "";
+  let loseFirstAcknowledgement = true;
+  let conflicts = 0;
+  const request = async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (init?.method !== "POST") {
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    }
+    const body = init.json as {
+      operation_id: string;
+      base_revision: number;
+      document: MangoTiptapDocument;
+      annotations: typeof annotations;
+    };
+    if (body.operation_id === acceptedOperationID) {
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations, deduplicated: true } as T;
+    }
+    assert.equal(body.base_revision, revision);
+    acceptedOperationID = body.operation_id;
+    revision += 1;
+    canonical = body.document;
+    canonicalAnnotations = body.annotations;
+    if (loseFirstAcknowledgement) {
+      loseFirstAcknowledgement = false;
+      throw new Error("connection closed after commit");
+    }
+    return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+  };
+  const options = {
+    companyID: "company-lost-ack", resourceType: "node" as const,
+    resourceID: "resource-lost-ack", documentID: "document-lost-ack", requestJSON: request,
+    onDocument: () => undefined, onConflict: () => { conflicts += 1; }, batchMs: 60_000, maxBatchMs: 60_000,
+  };
+  const first = new MangoTiptapSync(options);
+  const second = new MangoTiptapSync({ ...options, onAnnotations: (next) => { canonicalAnnotations = [...next] as typeof annotations; } });
+  try {
+    await first.start();
+    first.schedule(edited, false, () => annotations);
+    await assert.rejects(() => first.flush(), /connection closed/);
+    assert.equal(revision, 1, "the server accepted the operation before its response was lost");
+    assert.ok(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(options)));
+
+    await second.start();
+    assert.equal(conflicts, 0, "replaying an accepted stable operation is an acknowledgement, not a conflict");
+    assert.equal(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(options)), null);
+    assert.deepEqual(canonicalAnnotations, annotations);
+  } finally {
+    await second.shutdown();
+    await first.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("IndexedDB failure is explicit while server acknowledgement still releases pending work", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  delete (globalThis as Record<string, unknown>).indexedDB;
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const pendingCounts: number[] = [];
+  const storageErrors: string[] = [];
+  let revision = 0;
+  const edited = richDocument("saved without browser recovery storage");
+  const sync = new MangoTiptapSync({
+    companyID: "company-idb-failure", resourceType: "logic_gate",
+    resourceID: "resource-idb-failure", documentID: "document-idb-failure",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      revision += 1;
+      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+    },
+    onDocument: () => undefined,
+    onPendingChange: (count) => pendingCounts.push(count),
+    onRecoveryStorageError: (message) => storageErrors.push(message),
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+  try {
+    await sync.start();
+    sync.schedule(edited);
+    await sync.recover();
+    assert.equal(revision, 1, "canonical backend save still succeeds");
+    assert.ok(storageErrors.some((message) => message.startsWith("Browser recovery storage failed:")));
+    assert.ok(pendingCounts.includes(1));
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0, "backend acknowledgement releases the dirty-row pin despite storage cleanup failure");
+  } finally {
+    await sync.shutdown();
+    if (previous.indexedDB === undefined) delete (globalThis as Record<string, unknown>).indexedDB;
+    else Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: previous.indexedDB });
+    if (previous.sessionStorage === undefined) delete (globalThis as Record<string, unknown>).sessionStorage;
+    else Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previous.sessionStorage });
+  }
+});
+
+test("IndexedDB quota write failure is visible and does not block acknowledgement unpin", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const originalPut = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function quotaFailure(): IDBRequest<IDBValidKey> {
+    throw new DOMException("The pending document exceeds this browser quota", "QuotaExceededError");
+  };
+  const pendingCounts: number[] = [];
+  const storageErrors: string[] = [];
+  let revision = 0;
+  const edited = richDocument("saved after quota failure");
+  const sync = new MangoTiptapSync({
+    companyID: "company-idb-quota", resourceType: "project",
+    resourceID: "resource-idb-quota", documentID: "document-idb-quota",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      revision += 1;
+      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+    },
+    onDocument: () => undefined,
+    onPendingChange: (count) => pendingCounts.push(count),
+    onRecoveryStorageError: (message) => storageErrors.push(message),
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+  try {
+    await sync.start();
+    sync.schedule(edited);
+    await sync.flush();
+    assert.equal(revision, 1);
+    assert.ok(storageErrors.some((message) => message.includes("pending document exceeds this browser quota")));
+    assert.ok(pendingCounts.includes(1));
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0);
+  } finally {
+    IDBObjectStore.prototype.put = originalPut;
     await sync.shutdown();
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
