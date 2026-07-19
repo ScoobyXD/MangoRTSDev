@@ -165,7 +165,7 @@ export type RealtimeEditorSnapshotRequiredMessage = RealtimeBaseMessage & {
   company_id: string;
   scope: string;
   event_id: string;
-  resource_type: "node" | "logic_gate" | "project";
+  resource_type: "node" | "logic_gate" | "project" | "email_draft" | "email_signature";
   resource_id: string;
   document_id: string;
   resource_revision: number;
@@ -180,7 +180,7 @@ export type RealtimeEditorDocumentDeletedMessage = RealtimeBaseMessage & {
   company_id: string;
   scope: string;
   event_id: string;
-  resource_type: "node" | "logic_gate" | "project";
+  resource_type: "node" | "logic_gate" | "project" | "email_draft" | "email_signature";
   resource_id: string;
   document_id: string;
   resource_revision: number;
@@ -383,13 +383,13 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
     case "editor.document.deleted": {
       const scoped = scopedMessageBase(payload, type);
       const eventID = stringValue(payload.event_id);
-      const resourceType = stringValue(payload.resource_type) as "node" | "logic_gate" | "project";
+      const resourceType = stringValue(payload.resource_type) as "node" | "logic_gate" | "project" | "email_draft" | "email_signature";
       const resourceID = stringValue(payload.resource_id);
       const documentID = stringValue(payload.document_id);
       const operationID = stringValue(payload.operation_id);
       const clientID = stringValue(payload.client_id);
       const resourceRevision = optionalNumber(payload.resource_revision);
-      if (!eventID || !["node", "logic_gate", "project"].includes(resourceType) || !resourceID || !documentID || !operationID || !clientID || resourceRevision === undefined) {
+      if (!eventID || !["node", "logic_gate", "project", "email_draft", "email_signature"].includes(resourceType) || !resourceID || !documentID || !operationID || !clientID || resourceRevision === undefined) {
         throw new Error("realtime_editor_event_required");
       }
       const common = {
@@ -420,7 +420,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
@@ -440,6 +440,17 @@ export function realtimeEditorScope(resourceType: "node" | "logic_gate" | "proje
   const cleanDocumentID = documentID.trim();
   if (!cleanResourceID || cleanResourceID.includes(":") || !cleanDocumentID || cleanDocumentID.includes(":")) return "";
   return `editor:${resourceType}:${cleanResourceID}:${cleanDocumentID}`;
+}
+
+export function realtimeEditorJSONScope(
+  resourceType: "node" | "logic_gate" | "project" | "email_draft" | "email_signature",
+  resourceID: string,
+  documentID: string,
+): string {
+  const cleanResourceID = resourceID.trim();
+  const cleanDocumentID = documentID.trim();
+  if (!cleanResourceID || !cleanDocumentID) return "";
+  return `editor-json:${encodeURIComponent(resourceType)}:${encodeURIComponent(cleanResourceID)}:${encodeURIComponent(cleanDocumentID)}`;
 }
 
 export function realtimeWebSocketURL(apiBase: string, companyID: string): string {

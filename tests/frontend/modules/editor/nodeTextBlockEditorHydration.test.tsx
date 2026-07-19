@@ -181,7 +181,22 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     if (init?.signal) fetchSignals.push(init.signal);
     return new Response(new Blob(["image"], { type: "image/png" }), { status: 200 });
   };
-  installGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => fetchImplementation(input, init), restores);
+  const gatedFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input), dom.window.location.href);
+    if (url.pathname === "/v1/editor-data-format") {
+      return Promise.resolve(new Response(JSON.stringify({
+        company_id: "company-1",
+        editor_format: "legacy_html",
+        migration_state: "not_started",
+        document_schema_version: 1,
+        expected_document_count: 0,
+        converted_document_count: 0,
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    }
+    return fetchImplementation(input, init);
+  };
+  installGlobal("fetch", gatedFetch, restores);
+  dom.window.fetch = gatedFetch;
 
   let mountedRoot: { unmount(): void } | null = null;
   let pendingMountedRoot: { unmount(): void } | null = null;
@@ -194,6 +209,17 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
     ]);
     const noop = () => undefined;
+    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
+      if (path !== "/v1/editor-data-format?company_id=company-1") throw new Error("unexpected_format_request:" + path);
+      return {
+        company_id: "company-1",
+        editor_format: "legacy_html",
+        migration_state: "not_started",
+        document_schema_version: 1,
+        expected_document_count: 0,
+        converted_document_count: 0,
+      } as T;
+    };
     const emptyUsers: never[] = [];
     const flushedDocuments: string[] = [];
     const emptyChanges: never[] = [];
@@ -385,6 +411,11 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
               resourceID: "personal:user-1:owner@example.test:draft-1",
               editorSurface: "my-triage-compose",
             }}
+            editorDataFormatContext={{
+              apiBase: "https://api.test",
+              companyID: "company-1",
+              requestJSON: legacyFormatRequestJSON,
+            }}
             eagerEditorImageHydration
             onChange={setDocumentValue}
           />
@@ -450,6 +481,16 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       },
     };
     const attachmentRequestJSON: AttachmentRequestJSON = async <T,>(path: string): Promise<T> => {
+      if (path === "/v1/editor-data-format?company_id=company-1") {
+        return {
+          company_id: "company-1",
+          editor_format: "legacy_html",
+          migration_state: "not_started",
+          document_schema_version: 1,
+          expected_document_count: 0,
+          converted_document_count: 0,
+        } as T;
+      }
       attachmentRequestPaths.push(path);
       if (path !== "/v1/attachments/imports/remote-image") throw new Error("unexpected_attachment_request:" + path);
       return importedAttachment as unknown as T;

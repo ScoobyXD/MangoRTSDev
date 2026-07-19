@@ -1362,3 +1362,19 @@ Expected:
 - The mounted frame uses finite spaced retries and can reach ready without requiring the user to close/reopen the Node or scroll the row out and back into the virtualized window.
 - Double-clicking an unavailable frame starts fresh display hydration and a separately cancelable original-image load. The final dark overlay shows an explicit loading state, retries transient failures, and exposes a keyboard-accessible Retry button after terminal failure instead of attempting to render the internal attachment reference.
 - Closing the preview, replacing the document, or unmounting the virtualized row aborts obsolete requests and revokes owned object URLs without changing the durable attachment reference.
+
+### Scenario ED-S18: Atomic JSON-Native Tiptap Path
+
+This scenario covers the inactive `tiptap_json` workspace mode added on 2026-07-18.
+
+- The data-format request is one coherent company/workspace decision shared by Node, email-created Node, Project, standalone Logic Gate/Editor, email compose/reply/forward, attached-email reply, and signature surfaces.
+- Legacy mode never sends stored HTML to Tiptap. JSON-ready mode never mounts the legacy editor. An incomplete converted-document count is rejected instead of choosing a format per document.
+- A sleeping row uses the static JSON renderer and has no Tiptap instance. Near-viewport preparation performs exact recovery and returns to sleeping. Focus or a deep target creates one instance. Dirty/pending or targeted work remains pinned until durable resolution.
+- `mangoTiptapFoundation.test.ts` exercises the strict versioned node/mark contract, invalid nesting and unknown-version rejection, native marks/lists/tables/history, annotation mapping, deep block navigation, exact IndexedDB recovery, JSON email delivery, and the absence of Hocuspocus/Yjs/Tiptap Cloud.
+- Backend store and HTTP tests exercise strict validation, two-MiB/version boundaries, exact base revisions, idempotent operation replay, version history, delete behavior, the default legacy gate, partial-conversion rejection, legacy-route rejection after cutover, JSON-route rejection before cutover, and metadata projections that never contain canonical document content.
+- Communications tests prove that old email draft/signature HTML writes are rejected once the gate is JSON-ready, while metadata updates preserve the untouched old HTML field and the JSON body remains canonical only in `editor_json_documents`.
+- Realtime tests cover the exact URL-encoded `editor-json:<resource-type>:<resource-id>:<document-id>` scope. One document's event must not wake another document.
+- Performance contracts expose counts for active/dirty instances, listeners, observers, recovery, IndexedDB reads/writes, image requests, transactions, network saves, and conflicts. Network/PostgreSQL timing is measured separately from browser main-thread work.
+- The production build must keep `MangoTiptapEditor` in a lazy chunk so legacy workspaces do not pay the editor-engine parse/mount cost.
+
+The later HTML-to-JSON conversion is deliberately not part of this scenario. A cutover test environment must convert and validate the complete workspace before flipping the gate.

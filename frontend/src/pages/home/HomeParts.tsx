@@ -5566,6 +5566,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           onSelectionHighlightColorChange={setBodyHighlightColor}
           onSelectionTextAlignmentChange={setBodyTextAlignment}
           editorImageAttachmentContext={composeEditorImageAttachmentContext}
+          editorDataFormatContext={{ apiBase, companyID, requestJSON: attachmentRequestJSON }}
+          jsonResourceType="email_draft"
+          jsonResourceID={composeAttachmentResourceID}
+          jsonDocumentID="body"
+          prepareJSONIdentity={() => onEnsureDraft(compose)}
           eagerEditorImageHydration
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
@@ -5707,6 +5712,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               onSelectionHighlightColorChange={setSignatureHighlightColor}
               onSelectionTextAlignmentChange={setSignatureTextAlignment}
               editorImageAttachmentContext={signatureEditorImageAttachmentContext}
+              editorDataFormatContext={{ apiBase, companyID, requestJSON: attachmentRequestJSON }}
+              jsonResourceType="email_signature"
+              jsonResourceID={signatureAttachmentResourceID}
+              jsonDocumentID="signature"
               eagerEditorImageHydration
               onEditorImageAttachmentError={setAttachmentError}
               onChange={onEmailSignatureChange}

@@ -6,6 +6,7 @@ import {
   type RealtimeEditorDocumentDeletedMessage,
   type RealtimeEditorSnapshotRequiredMessage,
 } from "../realtime/realtimeWebSocket.js";
+import { incrementEditorRuntimeMetric } from "./editorRuntimeMetrics.js";
 
 export type EditorTextboxSyncResourceType = "node" | "logic_gate" | "project";
 export type EditorTextboxSyncSnapshot = {
@@ -184,12 +185,12 @@ async function pendingTransaction<T>(
 }
 
 async function readPending(prefix: string): Promise<PendingEditorOperation[]> {
+  incrementEditorRuntimeMetric("indexeddb_reads");
   return pendingTransaction<PendingEditorOperation[]>("readonly", (store, resolve, reject) => {
-    const request = store.getAll();
+    const request = store.getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(
       (request.result as PendingEditorOperation[])
-        .filter((record) => record.storage_key.startsWith(prefix))
         .sort((left, right) => left.created_at - right.created_at || left.operation_id.localeCompare(right.operation_id)),
     );
   });
@@ -197,6 +198,7 @@ async function readPending(prefix: string): Promise<PendingEditorOperation[]> {
 
 async function putPending(records: PendingEditorOperation[]): Promise<void> {
   if (records.length === 0) return;
+  incrementEditorRuntimeMetric("indexeddb_writes");
   await pendingTransaction<void>("readwrite", (store, resolve, reject) => {
     for (const record of records) {
       const request = store.put(record);
@@ -208,6 +210,7 @@ async function putPending(records: PendingEditorOperation[]): Promise<void> {
 
 async function deletePending(records: PendingEditorOperation[]): Promise<void> {
   if (records.length === 0) return;
+  incrementEditorRuntimeMetric("indexeddb_writes");
   await pendingTransaction<void>("readwrite", (store, resolve, reject) => {
     for (const record of records) {
       const request = store.delete(record.storage_key);
@@ -219,6 +222,7 @@ async function deletePending(records: PendingEditorOperation[]): Promise<void> {
 
 async function replacePending(previous: PendingEditorOperation[], replacement: PendingEditorOperation[]): Promise<void> {
   if (previous.length === 0 && replacement.length === 0) return;
+  incrementEditorRuntimeMetric("indexeddb_writes");
   await pendingTransaction<void>("readwrite", (store, resolve, reject) => {
     const replacementKeys = new Set(replacement.map((record) => record.storage_key));
     for (const record of previous) {
@@ -407,6 +411,17 @@ export class EditorTextboxSync {
     this.unsubscribe = undefined;
   }
 
+  async shutdown(): Promise<void> {
+    if (this.stopped) return;
+    if (this.batchTimer !== undefined) window.clearTimeout(this.batchTimer);
+    this.batchTimer = undefined;
+    try {
+      await this.flush();
+    } finally {
+      this.stop();
+    }
+  }
+
   schedule(nextHTML: string, immediate = false): void {
     this.queueDocumentChange(nextHTML, immediate);
   }
@@ -494,6 +509,7 @@ export class EditorTextboxSync {
   }
 
   async recover(): Promise<void> {
+    incrementEditorRuntimeMetric("recovery_requests");
     if (this.recovery) {
       this.recoveryRequested = true;
       return this.recovery;
@@ -526,16 +542,28 @@ export class EditorTextboxSync {
       this.unsubscribe = undefined;
       return;
     }
-    if (this.pending.length > 0) await this.drain();
-    const finalSnapshot = await this.options.requestJSON<EditorTextboxSyncSnapshot>(this.path);
-    if (finalSnapshot.deleted) {
-      this.deleted = true;
-      this.options.onDeleted?.();
+    const hadPending = this.pending.length > 0;
+    if (hadPending) await this.drain();
+    if (!hadPending) {
+      const buffered = this.buffered.splice(0)
+        .filter((event) => event.resource_revision > this.revision)
+        .sort((left, right) => left.resource_revision - right.resource_revision);
+      for (const event of buffered) {
+        await this.applyCommittedCore({
+          revision: event.resource_revision,
+          operationID: event.operation_id,
+          clientID: event.client_id,
+          patch: event.patch,
+        }, false);
+      }
+      this.rebuildOptimistic();
+      if (!this.recoveryRequested) this.renderOptimistic("recovery", true);
+      this.options.onPendingChange?.(this.pending.length);
       return;
     }
-    this.revision = finalSnapshot.revision;
-    this.confirmedHTML = finalSnapshot.html;
-    this.optimisticHTML = finalSnapshot.html;
+    // Every drained commit acknowledges the resulting revision and canonical
+    // patch, so another full snapshot here would repeat the same network and
+    // database read. Buffered higher revisions are still applied below.
     const buffered = this.buffered.splice(0)
       .filter((event) => event.resource_revision > this.revision)
       .sort((left, right) => left.resource_revision - right.resource_revision);
@@ -566,6 +594,7 @@ export class EditorTextboxSync {
       if (!record) return;
       let commit: EditorTextboxSyncCommit;
       try {
+        incrementEditorRuntimeMetric("network_saves");
         commit = await this.options.requestJSON<EditorTextboxSyncCommit>(this.path, {
           method: "POST",
           body: JSON.stringify({

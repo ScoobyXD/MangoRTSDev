@@ -59,6 +59,8 @@ import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./use
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
 import { createRequestJSON } from "../api/requestJSON.js";
 import { useEditorTextboxSync } from "./useEditorTextboxSync.js";
+import { useMangoEditorDataFormat } from "./editorDataFormat.js";
+import type { MangoTiptapAnnotation } from "./tiptap/mangoTiptapAnnotations.js";
 import {
   createStandaloneImageClipboardHTML,
   findEditorImageFrame,
@@ -129,6 +131,11 @@ import {
   type TextBlockSelectionDraft,
   userAccentForName,
 } from "./NodeWorkspaceSurfaceShared";
+
+const MangoTiptapEditor = React.lazy(async () => {
+  const module = await import("./tiptap/MangoTiptapEditor.js");
+  return { default: module.MangoTiptapEditor };
+});
 type TimelineCellProps = {
   accent: string;
   muted: boolean;
@@ -752,7 +759,7 @@ function readImageDraftFromFrame(
   };
 }
 
-export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
+const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
   surfaceKind = "node",
   editable,
@@ -825,10 +832,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
   const [imageDraft, setImageDraft] = useState<TextBlockImageDraft | null>(null);
+  const imageSelected = imageDraft !== null;
   const [textHighlightRects, setTextHighlightRects] = useState<TextHighlightRect[]>([]);
   const [contentChangeHighlightRects, setContentChangeHighlightRects] = useState<TextHighlightRect[]>([]);
   const [contentChangeLabels, setContentChangeLabels] = useState<NodeContentChangeLabelLayout[]>([]);
   const [activeContentChangeID, setActiveContentChangeID] = useState("");
+  const [editorFocused, setEditorFocused] = useState(false);
   const refreshImageDraft = useCallback(() => {
     const editor = editorRef.current;
     const wrapper = wrapperRef.current;
@@ -841,6 +850,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     setImageDraft(readImageDraftFromFrame(blockID, frame, wrapper, editor));
   }, [blockID]);
   useEffect(() => {
+    if (!imageDraft) return undefined;
     const view = wrapperRef.current?.ownerDocument.defaultView;
     if (!view) return undefined;
     const refreshFloatingImageActions = () => refreshImageDraft();
@@ -850,7 +860,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       view.removeEventListener("scroll", refreshFloatingImageActions, true);
       view.removeEventListener("resize", refreshFloatingImageActions);
     };
-  }, [refreshImageDraft]);
+  }, [imageSelected, refreshImageDraft]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
@@ -866,9 +876,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       setContentChangeLabels((current) => current.length > 0 ? [] : current);
       return;
     }
-    const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages, pendingChatSelectionAnchor);
+    const hasChatAnnotations = chatMessages.some((message) => Boolean(message.selectionStart !== undefined || message.selectionQuote))
+      || Boolean(pendingChatSelectionAnchor);
+    const nextRects = hasChatAnnotations
+      ? buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages, pendingChatSelectionAnchor)
+      : [];
     setTextHighlightRects(nextRects);
-    const nextChangeVisuals = buildNodeContentChangeVisuals(editor, wrapper, contentChanges, activeContentChangeID);
+    const nextChangeVisuals = contentChanges.length > 0
+      ? buildNodeContentChangeVisuals(editor, wrapper, contentChanges, activeContentChangeID)
+      : { rects: [], labels: [] };
     setContentChangeHighlightRects(nextChangeVisuals.rects);
     setContentChangeLabels(nextChangeVisuals.labels);
   }, [activeChatAnchorMessageID, activeContentChangeID, chatMessages, contentChanges, pendingChatSelectionAnchor]);
@@ -910,12 +926,13 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [contentChanges, focusContentChangeID]);
 
   useEffect(() => {
+    if (chatMessages.length === 0 && contentChanges.length === 0 && !pendingChatSelectionAnchor && !imageSelected) return undefined;
     const frame = window.requestAnimationFrame(() => {
       refreshTextHighlights();
       refreshImageDraft();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [documentValue, documentScrollTop, refreshImageDraft, refreshTextHighlights]);
+  }, [chatMessages.length, contentChanges.length, documentValue, documentScrollTop, imageSelected, pendingChatSelectionAnchor, refreshImageDraft, refreshTextHighlights]);
 
   useEffect(() => {
     if (!chatNavigationRequest?.anchorMessageID) return;
@@ -950,6 +967,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [outlineStyle]);
 
   useEffect(() => {
+    if (outlineStyle !== "indent-guides") {
+      scheduleTextBlockIndentGuideUpdate("");
+      return;
+    }
     scheduleTextBlockIndentGuideUpdate(editorRef.current ? readEditorDocumentText(editorRef.current) : documentValue);
   }, [documentValue, scheduleTextBlockIndentGuideUpdate]);
 
@@ -1175,6 +1196,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
+    setEditorFocused(false);
     const deferred = deferredExternalDocumentRef.current;
     if (deferred?.targetKey === documentTargetKey) {
       if (userEditedDocumentRef.current) {
@@ -1251,6 +1273,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [readSelectionDraft]);
 
   useEffect(() => {
+    if (!editorFocused) return undefined;
     const editor = editorRef.current;
     if (!editor) return;
     const ownerDocument = editor.ownerDocument;
@@ -1269,9 +1292,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     };
     ownerDocument.addEventListener("selectionchange", onSelectionChange);
     return () => ownerDocument.removeEventListener("selectionchange", onSelectionChange);
-  }, [captureSelectionDraft]);
+  }, [captureSelectionDraft, editorFocused]);
 
   useEffect(() => {
+    if (!editorFocused) return undefined;
     const editor = editorRef.current;
     if (!editor) return;
     const ownerDocument = editor.ownerDocument;
@@ -1289,7 +1313,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       ownerDocument.removeEventListener("pointerup", onPointerUp, true);
       ownerDocument.removeEventListener("pointercancel", onPointerCancel, true);
     };
-  }, [captureSelectionDraft]);
+  }, [captureSelectionDraft, editorFocused]);
 
   return (
     <div
@@ -1389,6 +1413,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         scrollbarTrack={scrollbarTrack}
         {...documentSurfaceHandlers}
         onFocus={() => {
+          setEditorFocused(true);
           activateFormattingController();
           onFocus();
         }}
@@ -1666,6 +1691,137 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         floatingImageActionTarget,
       )}
     </div>
+  );
+};
+
+export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) => {
+  const request = useMemo(
+    () => props.attachmentRequestJSON ?? createRequestJSON(props.apiBase),
+    [props.apiBase, props.attachmentRequestJSON],
+  );
+  const gate = useMangoEditorDataFormat(props.apiBase, props.companyID, request);
+  const annotations = useMemo<MangoTiptapAnnotation[]>(() => [
+    ...props.contentChanges.flatMap((change) => change.end_offset > change.start_offset ? [{
+      id: change.change_id,
+      kind: "change" as const,
+      from: change.start_offset + 1,
+      to: change.end_offset + 1,
+      active: change.change_id === props.focusContentChangeID,
+    }] : []),
+    ...props.chatMessages.flatMap((message) => (
+      message.selectionStart !== undefined
+      && message.selectionEnd !== undefined
+      && message.selectionEnd > message.selectionStart
+    ) ? [{
+      id: message.id,
+      kind: "chat" as const,
+      from: message.selectionStart + 1,
+      to: message.selectionEnd + 1,
+      active: message.id === props.activeChatAnchorMessageID,
+    }] : []),
+  ], [
+    props.activeChatAnchorMessageID,
+    props.chatMessages,
+    props.contentChanges,
+    props.focusContentChangeID,
+  ]);
+  const target = useMemo(() => {
+    if (props.chatNavigationRequest) {
+      return { requestID: props.chatNavigationRequest.requestID, annotationID: props.chatNavigationRequest.anchorMessageID };
+    }
+    if (props.focusContentChangeID) {
+      return { requestID: 1, annotationID: props.focusContentChangeID };
+    }
+    return null;
+  }, [props.chatNavigationRequest, props.focusContentChangeID]);
+
+  if (gate.loading) {
+    return <div aria-label="Preparing editor data format" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT }} />;
+  }
+  if (gate.error || !gate.gate) {
+    return <div role="alert" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, padding: 12, color: "#b91c1c" }}>Unable to verify this workspace's editor format.</div>;
+  }
+  if (gate.gate.editor_format === "legacy_html") {
+    return <LegacyNodeTextBlockEditor {...props} />;
+  }
+
+  return (
+    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT }} />}>
+      <MangoTiptapEditor
+      key={`${props.companyID}:${props.surfaceKind}:${props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}:${props.blockID}`}
+      value={props.documentValue}
+      editable={props.editable}
+      ariaLabel={`${props.surfaceKind === "project" ? "Project" : "Node"} text box`}
+      style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, height: TEXT_BLOCK_MIN_HEIGHT, overflowY: "auto", color: props.surfaceText }}
+      companyID={props.companyID}
+      resourceType={props.surfaceKind === "project" ? "project" : "node"}
+      resourceID={props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}
+      documentID={props.blockID}
+      currentUserID={props.currentUserID}
+      requestJSON={request}
+      attachmentContext={props.attachmentResourceType && props.attachmentResourceID ? {
+        requestJSON: request,
+        apiBase: props.apiBase,
+        companyID: props.companyID,
+        resourceType: props.attachmentResourceType,
+        resourceID: props.attachmentResourceID,
+        informationID: props.blockID,
+        editorSurface: props.attachmentEditorSurface,
+      } : undefined}
+      mentionUsers={props.companyUsers}
+      annotations={annotations}
+      target={target}
+      formattingControllerRef={props.formattingControllerRef}
+      onFocus={props.onFocus}
+      onBlur={props.onBlur}
+      onConflict={() => props.onDocumentConflict?.()}
+      onError={() => props.onDocumentConflict?.()}
+      onAnnotationActivate={(annotation) => {
+        if (annotation.kind === "change") props.onChangeSeen(annotation.id);
+        if (annotation.kind === "chat") props.onChatHighlightActivate?.(annotation.id);
+      }}
+      onSelectionChatRequest={(selection) => props.onSelectionChatRequest({
+        blockID: props.blockID,
+        quote: selection.quote,
+        startOffset: Math.max(0, selection.from - 1),
+        endOffset: Math.max(0, selection.to - 1),
+        x: selection.x,
+        y: selection.y,
+      })}
+      onImageChatRequest={(image) => props.onImageChatRequest({
+        blockID: props.blockID,
+        dataURL: image.objectURL,
+        attachmentID: image.attributes.attachmentId,
+        filename: image.attributes.filename,
+        mimeType: image.attributes.mimeType || "application/octet-stream",
+        size: 0,
+        width: image.width,
+        height: image.height,
+        x: image.x,
+        y: image.y,
+        downloadX: image.x,
+        downloadY: image.y,
+      })}
+      onImageNodeRequest={(image) => props.onImageNodeRequest({
+        blockID: props.blockID,
+        dataURL: image.objectURL,
+        attachmentID: image.attributes.attachmentId,
+        filename: image.attributes.filename,
+        mimeType: image.attributes.mimeType || "application/octet-stream",
+        size: 0,
+        width: image.width,
+        height: image.height,
+        x: image.x,
+        y: image.y,
+        downloadX: image.x,
+        downloadY: image.y,
+      })}
+      onSelectionFontSizeChange={props.onSelectionFontSizeChange}
+      onSelectionInlineFormatChange={props.onSelectionInlineFormatChange}
+      onSelectionHighlightColorChange={props.onSelectionHighlightColorChange}
+      onSelectionTextAlignmentChange={props.onSelectionTextAlignmentChange}
+      />
+    </React.Suspense>
   );
 };
 
@@ -6737,6 +6893,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onSelectionHighlightColorChange={setReplyHighlightColor}
                 onSelectionTextAlignmentChange={setReplyTextAlignment}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
+                editorDataFormatContext={attachmentRequestJSON ? { apiBase, companyID, requestJSON: attachmentRequestJSON } : undefined}
+                jsonResourceType="email_draft"
+                jsonResourceID={replyAttachmentResourceID}
+                jsonDocumentID={replyTargetMessageID || messageID || "reply"}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
                   onError(message);

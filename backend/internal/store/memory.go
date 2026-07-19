@@ -89,6 +89,10 @@ type MemoryRepo struct {
 	realtimeOutboxErr              error
 	editorCollaborationDocuments   map[string]memoryEditorCollaborationDocument
 	editorCollaborationOperations  map[string][]memoryEditorCollaborationOperation
+	editorDataFormats              map[string]EditorDataFormatGate
+	editorJSONDocuments            map[string]memoryEditorJSONDocument
+	editorJSONOperations           map[string][]memoryEditorJSONOperation
+	editorJSONVersions             map[string][]EditorJSONVersion
 	effectiveAccessErr             error
 	workspaceReadVersions          map[string]int64
 	domainEventAppendErr           error
@@ -176,6 +180,10 @@ func NewMemoryRepo() *MemoryRepo {
 		realtimeOutbox:                 map[string]RealtimeOutboxEvent{},
 		editorCollaborationDocuments:   map[string]memoryEditorCollaborationDocument{},
 		editorCollaborationOperations:  map[string][]memoryEditorCollaborationOperation{},
+		editorDataFormats:              map[string]EditorDataFormatGate{},
+		editorJSONDocuments:            map[string]memoryEditorJSONDocument{},
+		editorJSONOperations:           map[string][]memoryEditorJSONOperation{},
+		editorJSONVersions:             map[string][]EditorJSONVersion{},
 		workspaceReadVersions:          map[string]int64{},
 		notifications:                  map[string]domain.Notification{},
 		recycleBin:                     map[string]memoryRecycleBinItem{},

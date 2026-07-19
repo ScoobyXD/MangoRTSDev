@@ -522,11 +522,18 @@ async function main() {
   run("Apply the rich HTML collaboration migration on the clean canonical schema", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
+  copyFileSync(resolve(backend, "db", "migrations", "20260718_tiptap_json_foundation.sql"), resolve(migrationDir, "20260718_tiptap_json_foundation.sql"));
+  run("Apply the inactive Tiptap JSON foundation migration on the clean canonical schema", migrateExe, [
+    "-mode", "migrate", "-migrations", migrationDir,
+  ], { cwd: backend, env: cleanEnv });
   run("Prove recorded migration rerun is idempotent", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260715%';"), "2");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260716%';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260718%';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from workspace_editor_formats;"), "0");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.tables where table_name in ('workspace_editor_formats','editor_json_documents','editor_json_operations','editor_json_versions');"), "4");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from pg_constraint where conname in ('editor_collaboration_documents_model_version_chk','editor_collaboration_operations_kind_chk');"), "0");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name='editor_collaboration_documents' and column_name='canonical_html';"), "1");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name='editor_collaboration_operations' and column_name in ('patch','requires_snapshot');"), "2");
@@ -564,7 +571,13 @@ async function main() {
   run("Migrate legacy structured state to authoritative projection rich HTML", migrateExe, [
     "-mode", "migrate", "-migrations", legacyMigrationDir,
   ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
+  copyFileSync(resolve(backend, "db", "migrations", "20260718_tiptap_json_foundation.sql"), resolve(legacyMigrationDir, "20260718_tiptap_json_foundation.sql"));
+  run("Add the inactive Tiptap JSON foundation without converting the legacy fixture", migrateExe, [
+    "-mode", "migrate", "-migrations", legacyMigrationDir,
+  ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select canonical_html from editor_collaboration_documents where company_id='" + COMPANY_A + "' and resource_id='" + NODE_A + "' and document_id='" + DOC_A + "';"), INITIAL_RICH_EDITOR_HTML);
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from workspace_editor_formats;"), "0");
+  assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from editor_json_documents;"), "0");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select (patch->>'start_utf8')||','||(patch->>'delete_utf8')||','||(patch->>'insert')||','||requires_snapshot::text from editor_collaboration_operations where operation_id='legacy-operation';"), "0,0,,true");
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from information_schema.columns where table_name in ('editor_collaboration_documents','editor_collaboration_operations') and column_name in ('model_version','snapshot_revision','snapshot_state','accumulated_delta_bytes','operation_kind','delta');"), "0");
 

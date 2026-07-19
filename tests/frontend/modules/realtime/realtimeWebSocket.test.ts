@@ -12,6 +12,7 @@ import {
   MangoRealtimeClient,
   parseRealtimeMessage,
   realtimeEditorScope,
+  realtimeEditorJSONScope,
   realtimePersonalMailboxScope,
   realtimeSharedMailboxScope,
   realtimeWebSocketURL,
@@ -150,6 +151,11 @@ test("allows only exact notification, mailbox, node-chat, board, and editor scop
   assert.equal(isSupportedRealtimeScope("communications:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("editor:node:node-1:document-1"), true);
   assert.equal(realtimeEditorScope("node", " node-1 ", " document-1 "), "editor:node:node-1:document-1");
+  assert.equal(
+    realtimeEditorJSONScope("email_draft", " personal:user:mail@example.test ", " body:main "),
+    "editor-json:email_draft:personal%3Auser%3Amail%40example.test:body%3Amain",
+  );
+  assert.equal(isSupportedRealtimeScope("editor-json:email_draft:personal%3Auser:body%3Amain"), true);
   assert.equal(isSupportedRealtimeScope("editor:node:node-1"), false);
   assert.equal(isSupportedRealtimeScope("editor:node:node-1:document-1:extra"), false);
   assert.equal(isSupportedRealtimeScope("board:"), false);
@@ -564,11 +570,12 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-  assert.equal(subscriptionSources.length, 6);
+  assert.equal(subscriptionSources.length, 7);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/NotificationRealtimeBridge.tsx",
     "modules/editor/EditorContent.tsx",
     "modules/editor/editorTextboxSync.ts",
+    "modules/editor/tiptap/MangoTiptapEditor.tsx",
     "modules/kanban/KanbanContent.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/HomePage.tsx",

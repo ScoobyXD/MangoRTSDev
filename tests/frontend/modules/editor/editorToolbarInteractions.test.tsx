@@ -97,6 +97,17 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     const highlightApplications: Array<`#${string}` | null> = [];
     let setToolbarHighlightContext: React.Dispatch<React.SetStateAction<`#${string}` | null>> = () => undefined;
     const noop = () => undefined;
+    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
+      assert.equal(path, "/v1/editor-data-format?company_id=company-1");
+      return {
+        company_id: "company-1",
+        editor_format: "legacy_html",
+        migration_state: "not_started",
+        document_schema_version: 1,
+        expected_document_count: 0,
+        converted_document_count: 0,
+      } as T;
+    };
     const ToolbarHarness = () => {
       const [toolbarHighlightColor, setToolbarHighlightColor] = React.useState<`#${string}` | null>(null);
       setToolbarHighlightContext = setToolbarHighlightColor;
@@ -141,8 +152,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         blockID="format-test"
         editable
         nodeID="node-1"
-        apiBase=""
+        apiBase="http://localhost"
         companyID="company-1"
+        attachmentRequestJSON={legacyFormatRequestJSON}
         currentUserID="user-1"
         companyUsers={[{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }]}
         documentValue="<!-- mango-editor-html-v1 -->seed"

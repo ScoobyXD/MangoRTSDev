@@ -72,6 +72,9 @@ import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
+import { useMangoEditorDataFormat } from "./editorDataFormat.js";
+import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
+import { serializeMangoTiptapDocument, type MangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 
 import {
   AttachedEmailOrganizerPane,
@@ -432,6 +435,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRegisterSaveController,
   onError,
 }) => {
+  const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
@@ -517,7 +521,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
-  const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID);
+  const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID) && Boolean(editorDataFormat.gate);
   const formattingControllerAvailable = editorTextCanEdit && blocks.some((block) => block.id === focusedTextBlockID);
   useEffect(() => {
     onFormattingControllerAvailabilityChange?.(formattingControllerAvailable);
@@ -1239,18 +1243,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
     if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block_metadata");
+    const format = editorDataFormat.gate?.editor_format;
+    if (!format) throw new Error("editor_data_format_not_ready");
+    const path = format === "tiptap_json"
+      ? `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`
+      : `/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
     const response = await requestJSON<{ projection_revision?: number }>(
-      `/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+      path,
       {
         method: "PATCH",
-        body: JSON.stringify(buildEditorTextBlockMetadataPayload(content)),
+        body: JSON.stringify(format === "tiptap_json"
+          ? { title: content.title, attachments: content.attachments ?? [] }
+          : buildEditorTextBlockMetadataPayload(content)),
       },
     );
     const revision = response?.projection_revision ?? 0;
     if (!Number.isInteger(revision) || revision <= baseRevision) throw new Error("invalid_projection_revision_ack");
     onProjectionMutation();
     return { revision };
-  }, [author.userID, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+  }, [author.userID, canEdit, companyID, editorDataFormat.gate?.editor_format, nodeID, onProjectionMutation, requestJSON]);
 
   const setTextBlockSaveInProgress = useCallback((blockID: string, saveInProgress: boolean) => {
     setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: saveInProgress } : block));
@@ -1490,9 +1501,24 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       for (const informationID of deletedInformationIDs) {
         try {
           if (informationID === blockID) {
-            await requestJSON<unknown>(`/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`, {
+            const format = editorDataFormat.gate?.editor_format;
+            if (!format) throw new Error("editor_data_format_not_ready");
+            const path = format === "tiptap_json"
+              ? `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`
+              : `/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
+            if (format === "tiptap_json") {
+              await flushMangoTiptapDocument({ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID });
+            }
+            const baseRevision = format === "tiptap_json"
+              ? (await requestJSON<{ revision: number }>(path)).revision
+              : undefined;
+            await requestJSON<unknown>(path, {
               method: "DELETE",
-              body: JSON.stringify({ operation_id: generateStableInformationID(), client_id: `node-delete:${author.userID}` }),
+              body: JSON.stringify({
+                operation_id: generateStableInformationID(),
+                client_id: `node-delete:${author.userID}`,
+                ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+              }),
             });
           } else {
             await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
@@ -1561,7 +1587,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setActiveChatBlockID((current) => current === blockID ? "" : current);
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
     onProjectionMutation();
-  }, [author.userID, canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
+  }, [author.userID, canEdit, chatMessages, companyID, editorDataFormat.gate?.editor_format, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
 
   const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
@@ -1871,20 +1897,49 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (typeof document === "undefined") return;
     const sourceBlock = blocks.find((block) => block.id === image.blockID);
     const sourceTitle = sourceBlock?.title.trim() || "Image";
-    const container = document.createElement("div");
     const maxWidth = 520;
     const width = Math.max(48, Math.min(image.width || 320, maxWidth));
     const ratio = image.width > 0 && image.height > 0 ? image.height / image.width : 0.75;
     const height = Math.max(36, Math.min(Math.round(width * ratio), 900));
-    container.appendChild(createEditorImageFrame(document, {
-      src: image.dataURL,
-      width,
-      height,
-      floatSide: "left",
-      marginLeft: 0,
-      marginTop: 4,
-    }));
-    const imageDocument = serializeEditorDocumentHTML(container);
+    let imageDocument = "";
+    if (image.attachmentID) {
+      const tiptapDocument: MangoTiptapDocument = {
+        format: "mango-tiptap-json",
+        schema_version: 1,
+        document: {
+          type: "doc",
+          content: [{
+            type: "mangoAttachmentImage",
+            attrs: {
+              attachmentId: image.attachmentID,
+              filename: image.filename || "Image",
+              mimeType: image.mimeType,
+              width: image.width,
+              height: image.height,
+              displayWidth: width,
+              displayHeight: height,
+              alignment: "center",
+              position: "break",
+              layout: "content",
+              alt: image.filename || "Image",
+              title: image.filename || "Image",
+            },
+          }],
+        },
+      };
+      imageDocument = serializeMangoTiptapDocument(tiptapDocument);
+    } else {
+      const container = document.createElement("div");
+      container.appendChild(createEditorImageFrame(document, {
+        src: image.dataURL,
+        width,
+        height,
+        floatSide: "left",
+        marginLeft: 0,
+        marginTop: 4,
+      }));
+      imageDocument = serializeEditorDocumentHTML(container);
+    }
     if (!imageDocument) return;
     try {
       await onCreateNodeFromImage({

@@ -29,6 +29,14 @@ Incremental migrations:
 backend/db/migrations/
 ```
 
+### Inactive Tiptap JSON storage contract (2026-07-18)
+
+`workspace_editor_formats` is the atomic company/workspace gate. Missing rows and new rows default to `legacy_html/not_started`. A row cannot become `tiptap_json/ready` unless schema version 1 is selected, the expected and converted counts match, validation/cutover timestamps exist, and the stored active JSON document count matches.
+
+`editor_json_documents` stores the canonical versioned JSONB envelope. `editor_json_operations` provides stable-operation idempotency and exact base revisions. `editor_json_versions` stores immutable accepted snapshots/deletes. The Go API validates the complete strict schema, authorizes the resource, limits documents to two MiB, rejects stale writes, and emits exact-scope realtime outbox events in the same transaction.
+
+These tables are intentionally empty for existing HTML data. The application does not backfill, parse stored HTML, dual-write document content, or apply migrations to a live database as part of the editor implementation. Email draft/signature metadata continues using its existing domain tables, but after JSON cutover their legacy body fields are preserved and hidden; canonical bodies live only in the JSON tables.
+
 Auth and membership tables were added in:
 
 ```text

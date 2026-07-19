@@ -50,6 +50,9 @@ func (r *MemoryRepo) GetEditorCollaborationSnapshot(ref EditorDocumentRef) (Edit
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.editorJSONFormatReadyLocked(ref.CompanyID) {
+		return EditorCollaborationSnapshot{}, ErrVersionConflict
+	}
 	if !r.editorResourceExistsLocked(ref) {
 		return EditorCollaborationSnapshot{}, ErrNotFound
 	}
@@ -79,6 +82,9 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.editorJSONFormatReadyLocked(input.Document.CompanyID) {
+		return EditorCollaborationCommit{}, ErrVersionConflict
+	}
 	if !r.editorResourceExistsLocked(input.Document) {
 		return EditorCollaborationCommit{}, ErrNotFound
 	}
@@ -263,6 +269,9 @@ func (r *MemoryRepo) UpdateEditorCollaborationMetadata(input EditorCollaboration
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.editorJSONFormatReadyLocked(input.Document.CompanyID) {
+		return EditorCollaborationMetadataCommit{}, ErrVersionConflict
+	}
 	if !r.editorResourceExistsLocked(input.Document) {
 		return EditorCollaborationMetadataCommit{}, ErrNotFound
 	}
@@ -277,6 +286,30 @@ func (r *MemoryRepo) UpdateEditorCollaborationMetadata(input EditorCollaboration
 	if err != nil {
 		return EditorCollaborationMetadataCommit{}, err
 	}
+	return r.updateEditorProjectionMetadataLocked(input, information)
+}
+
+func (r *MemoryRepo) UpdateEditorJSONMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error) {
+	input, err := NormalizeEditorCollaborationMetadata(input)
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.editorJSONFormatReadyLocked(input.Document.CompanyID) {
+		return EditorCollaborationMetadataCommit{}, ErrVersionConflict
+	}
+	if !r.editorResourceExistsLocked(input.Document) {
+		return EditorCollaborationMetadataCommit{}, ErrNotFound
+	}
+	information, err := editorProjectionInformationWithMetadata(input, "")
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	return r.updateEditorProjectionMetadataLocked(input, information)
+}
+
+func (r *MemoryRepo) updateEditorProjectionMetadataLocked(input EditorCollaborationMetadataInput, information string) (EditorCollaborationMetadataCommit, error) {
 	now := time.Now().UTC()
 	bucketKey := key(input.Document.CompanyID, input.Document.ResourceID)
 	var revision int64
@@ -344,6 +377,9 @@ func (r *MemoryRepo) DeleteEditorCollaborationDocument(input EditorCollaboration
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.editorJSONFormatReadyLocked(ref.CompanyID) {
+		return EditorCollaborationCommit{}, ErrVersionConflict
+	}
 	if !r.editorResourceExistsLocked(ref) {
 		return EditorCollaborationCommit{}, ErrNotFound
 	}

@@ -1,5 +1,6 @@
 import type { EmailAttachment, EmailMessage } from "../../modules/communications/communicationsApi.js";
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
+import { serializeRichEditorBodyForEmailDelivery } from "../../modules/editor/tiptap/mangoTiptapEmail.js";
 import { formatAddressList } from "./homeUtils.js";
 
 const MANGO_ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -181,7 +182,8 @@ export function buildForwardedEmailHTML(message: EmailMessage): string {
 }
 
 export function buildForwardedComposeBody(editorBody: string, sourceMessage: EmailMessage | null | undefined): string {
-  const authoredBody = editorBodyHasEmailContent(editorBody) ? serializeEditorBodyForEmailHTML(editorBody) : "";
+  const authoredBody = serializeRichEditorBodyForEmailDelivery(editorBody)
+    ?? (editorBodyHasEmailContent(editorBody) ? serializeEditorBodyForEmailHTML(editorBody) : "");
   if (!sourceMessage) return authoredBody;
   const forwardedBody = buildForwardedEmailHTML(sourceMessage);
   return authoredBody ? `${authoredBody}<br><br>${forwardedBody}` : forwardedBody;

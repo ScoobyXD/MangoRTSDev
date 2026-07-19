@@ -3,6 +3,16 @@
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
+## Gated JSON-Native Tiptap Implementation (2026-07-18)
+
+The repository now contains one reusable Tiptap/ProseMirror 3.28.0 editor core for Node, Project, standalone Logic Gate/Editor, email drafts/replies, and signatures. It is inactive for existing data because the company/workspace data-format gate defaults to `legacy_html/not_started`. The Tiptap chunk is lazy-loaded only after a complete JSON-ready gate is verified.
+
+`tiptap/mangoTiptapDocument.ts` defines strict schema version 1. Unknown structure, legacy HTML nodes, unsafe links, transient Blob/data URLs, and unsupported versions fail closed. `MangoTiptapEditor.tsx` owns lifecycle, native transactions/history/selection/commands, static sleeping render, mentions, tables, lists, annotations, deep links, attachments, and surface actions. `mangoTiptapSync.ts` owns exact IndexedDB pending work, bounded batching, retries, optimistic revision checks, idempotency, conflicts, and exact realtime recovery.
+
+Mango owns the frontend-backend textbox sync and every server responsibility. No Tiptap Cloud, Hocuspocus, Yjs provider, external Tiptap server, HTML compatibility adapter, dual-write, or per-document format fallback exists on this path. Outbound email HTML is a delivery projection from validated JSON and is never an editable or canonical stored document.
+
+The old editor remains authoritative until a future whole-workspace conversion validates every document and flips the atomic gate. Do not create JSON-only documents in a legacy production workspace.
+
 ## Unified Editor Direction (2026-07-08)
 - The rich editor must become a shared user-facing behavior source for node text boxes, Logic Gate text, project text boxes, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
 - Shared behavior means editing semantics: indentation, Delete/Backspace, copy/cut/paste, paste cleanup, lists, checklist, link creation, font size, bold, underline, table insertion where supported, selection behavior, keyboard routing, sanitization, and legacy plain-text loading.

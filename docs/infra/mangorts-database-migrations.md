@@ -28,6 +28,12 @@ Default mode is `migrate`. This is intentionally conservative for existing produ
 
 ## Source Of Truth Standard
 
+### 20260718 Tiptap JSON foundation
+
+`backend/db/migrations/20260718_tiptap_json_foundation.sql` adds the inactive workspace format gate and the JSON document, operation, and version tables. It does not insert gate rows, convert HTML, or flip a workspace. Apply it through the normal reviewed migration process before deploying code that reads the new gate; do not run it manually against production from an agent task.
+
+The later human-run conversion/cutover is separate: drain editor writes or enter a maintenance window, back up legacy HTML, insert/update the workspace gate to `converting`, convert every document, validate document/attachment/count parity, record validation, atomically set `tiptap_json/ready`, verify old-client rejection and all surfaces, then make the approved rollback/go-forward decision. Do not route individual new production documents to JSON during conversion.
+
 MangoRTS uses both migration history and a current schema snapshot:
 
 - `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.

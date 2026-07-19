@@ -1,0 +1,837 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Editor, type AnyExtension } from "@tiptap/core";
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
+import {
+  downloadMangoAttachment,
+  loadMangoAttachmentObjectURL,
+  uploadMangoAttachment,
+} from "../../attachments/attachmentApi";
+import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
+import type { MentionableCompanyUser } from "../editorMentions";
+import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
+import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
+import type {
+  EditorDocumentFormattingController,
+  EditorImageAttachmentContext,
+  EditorSelectionInlineFormatState,
+  EditorTextAlignment,
+} from "../useEditorDocumentSurfaceHandlers";
+import type { EditorHighlightColor } from "../richTextEditing";
+import {
+  EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
+  EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
+} from "../useEditorPreferences";
+import {
+  MangoTiptapAnnotations,
+  navigateMangoTiptapTarget,
+  updateMangoTiptapAnnotations,
+  type MangoTiptapAnnotation,
+} from "./mangoTiptapAnnotations.js";
+import {
+  createEmptyMangoTiptapDocument,
+  parseMangoTiptapDocument,
+  serializeMangoTiptapDocument,
+  validateMangoTiptapDocument,
+  type MangoTiptapDocument,
+} from "./mangoTiptapDocument.js";
+import {
+  createMangoTiptapExtensions,
+  MangoAttachmentImage,
+  type MangoAttachmentImageAttributes,
+} from "./mangoTiptapExtensions.js";
+import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
+import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
+import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType } from "./mangoTiptapSync.js";
+
+export type MangoTiptapFormattingController = EditorDocumentFormattingController & {
+  focus: () => void;
+  flush: () => string;
+};
+
+export type MangoTiptapTarget = {
+  requestID: number;
+  blockID?: string;
+  annotationID?: string;
+  position?: number;
+};
+
+export type MangoTiptapSelectionAction = {
+  from: number;
+  to: number;
+  quote: string;
+  x: number;
+  y: number;
+};
+
+export type MangoTiptapImageAction = {
+  attributes: MangoStaticAttachmentImageProps;
+  objectURL: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+};
+
+export type MangoTiptapEditorProps = {
+  value?: string;
+  editable?: boolean;
+  ariaLabel: string;
+  placeholder?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  companyID: string;
+  resourceType: MangoTiptapResourceType;
+  resourceID: string;
+  documentID: string;
+  currentUserID?: string;
+  requestJSON: <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
+  attachmentContext?: EditorImageAttachmentContext;
+  mentionUsers?: MentionableCompanyUser[];
+  annotations?: MangoTiptapAnnotation[];
+  target?: MangoTiptapTarget | null;
+  formattingControllerRef?:
+    | React.MutableRefObject<EditorDocumentFormattingController | null>
+    | React.MutableRefObject<MangoTiptapFormattingController | null>;
+  onChange?: (serialized: string) => void;
+  onFlush?: (serialized: string) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
+  onError?: (message: string) => void;
+  onAnnotationActivate?: (annotation: { id: string; kind: string }) => void;
+  onSelectionChatRequest?: (selection: MangoTiptapSelectionAction) => void;
+  onImageChatRequest?: (image: MangoTiptapImageAction) => void;
+  onImageNodeRequest?: (image: MangoTiptapImageAction) => void;
+  onSelectionFontSizeChange?: (fontSize: number) => void;
+  onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
+  onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
+};
+
+function initialDocument(value?: string): { document: MangoTiptapDocument; error?: string } {
+  if (!value?.trim()) return { document: createEmptyMangoTiptapDocument() };
+  const parsed = parseMangoTiptapDocument(value);
+  return parsed.valid ? { document: parsed.value } : { document: createEmptyMangoTiptapDocument(), error: parsed.error };
+}
+
+function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
+  return users.flatMap((user) => {
+    const userID = user.user_id?.trim();
+    if (!userID) return [];
+    return [{
+      userID,
+      name: user.display_name?.trim() || user.email?.trim() || "User",
+      email: user.email?.trim(),
+    }];
+  });
+}
+
+type AuthenticatedImageProps = {
+  attributes: MangoStaticAttachmentImageProps;
+  attachmentContext?: EditorImageAttachmentContext;
+  selected?: boolean;
+  editable?: boolean;
+  updateAttributes?: (attributes: Partial<MangoAttachmentImageAttributes>) => void;
+  deleteNode?: () => void;
+  onImageChatRequest?: (image: MangoTiptapImageAction) => void;
+  onImageNodeRequest?: (image: MangoTiptapImageAction) => void;
+};
+
+const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
+  attributes,
+  attachmentContext,
+  selected = false,
+  editable = false,
+  updateAttributes,
+  deleteNode,
+  onImageChatRequest,
+  onImageNodeRequest,
+}) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [eligible, setEligible] = useState(selected);
+  const [objectURL, setObjectURL] = useState("");
+  const [error, setError] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (selected) setEligible(true);
+    if (eligible) return undefined;
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") {
+      setEligible(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setEligible(true);
+    }, { rootMargin: "800px 0px" });
+    const release = trackEditorRuntimeResource("observers");
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      release();
+    };
+  }, [eligible, selected]);
+
+  useEffect(() => {
+    if (!eligible || !attachmentContext || !attributes.attachmentId) return undefined;
+    const controller = new AbortController();
+    let active = true;
+    incrementEditorRuntimeMetric("image_requests");
+    void loadMangoAttachmentObjectURL(
+      attachmentContext.apiBase,
+      attachmentContext.companyID,
+      attributes.attachmentId,
+      "display",
+      { signal: controller.signal },
+    ).then((url) => {
+      if (!active) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      setObjectURL(url);
+      setError("");
+    }).catch((cause) => {
+      if (controller.signal.aborted) return;
+      setError(cause instanceof Error ? cause.message : "Unable to load image");
+    });
+    return () => {
+      active = false;
+      controller.abort();
+      setObjectURL((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+    };
+  }, [attachmentContext?.apiBase, attachmentContext?.companyID, attributes.attachmentId, eligible]);
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  const beginResize = (event: React.PointerEvent) => {
+    if (!editable || !updateAttributes) return;
+    event.preventDefault();
+    resizeCleanupRef.current?.();
+    dragRef.current = {
+      startX: event.clientX,
+      startWidth: attributes.displayWidth || attributes.width || rootRef.current?.getBoundingClientRect().width || 200,
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!dragRef.current) return;
+      updateAttributes({ displayWidth: Math.max(80, Math.round(dragRef.current.startWidth + moveEvent.clientX - dragRef.current.startX)) });
+    };
+    const cleanup = () => {
+      dragRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      releaseListeners();
+      if (resizeCleanupRef.current === cleanup) resizeCleanupRef.current = null;
+    };
+    const onEnd = () => cleanup();
+    const releaseListeners = trackEditorRuntimeResource("listeners");
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd, { once: true });
+  };
+
+  const imageAction = (): MangoTiptapImageAction => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    return {
+      attributes,
+      objectURL,
+      width: Math.max(1, Math.round(rect?.width || attributes.displayWidth || attributes.width || 1)),
+      height: Math.max(1, Math.round(rect?.height || attributes.displayHeight || attributes.height || 1)),
+      x: Math.round(rect?.left || 0),
+      y: Math.round(rect?.bottom || 0) + 6,
+    };
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      data-mango-attachment-id={attributes.attachmentId}
+      data-selected={selected || undefined}
+      style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0" }}
+    >
+      {objectURL ? (
+        <img
+          src={objectURL}
+          alt={attributes.alt || attributes.filename}
+          title={attributes.title || attributes.filename}
+          draggable={false}
+          style={{
+            display: "block",
+            maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)",
+            width: attributes.displayWidth || attributes.width || undefined,
+            height: attributes.displayHeight || undefined,
+            objectFit: "contain",
+            borderRadius: 6,
+            outline: selected ? "2px solid #0ea5e9" : "none",
+          }}
+        />
+      ) : (
+        <span role={error ? "alert" : undefined}>{error || (eligible ? "Loading image…" : attributes.alt || attributes.filename || "Attached image")}</span>
+      )}
+      {selected && (
+        <div contentEditable={false} style={{ position: "absolute", right: 4, top: 4, display: "flex", gap: 4 }}>
+          <button type="button" onClick={() => {
+            if (!attachmentContext) return;
+            void downloadMangoAttachment({
+              apiBase: attachmentContext.apiBase,
+              companyID: attachmentContext.companyID,
+              attachmentID: attributes.attachmentId,
+              filename: attributes.filename,
+            }).catch((cause) => attachmentContext.onError?.(cause instanceof Error ? cause.message : "Unable to download image"));
+          }}>Download</button>
+          {objectURL && <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>}
+          {editable && onImageChatRequest && <button type="button" onClick={() => onImageChatRequest(imageAction())}>Comment</button>}
+          {editable && onImageNodeRequest && <button type="button" onClick={() => onImageNodeRequest(imageAction())}>Create Node</button>}
+          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "left" })}>Left</button>}
+          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "center" })}>Center</button>}
+          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "right" })}>Right</button>}
+          {editable && <button type="button" onClick={() => updateAttributes?.({ layout: attributes.layout === "wide" ? "content" : "wide" })}>{attributes.layout === "wide" ? "Content width" : "Wide"}</button>}
+          {editable && <button type="button" onPointerDown={beginResize}>Resize</button>}
+          {editable && <button type="button" onClick={deleteNode}>Delete</button>}
+        </div>
+      )}
+      {previewOpen && objectURL && (
+        <div
+          contentEditable={false}
+          role="dialog"
+          aria-label={`Preview ${attributes.filename || "image"}`}
+          onClick={() => setPreviewOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 2200, display: "grid", placeItems: "center", padding: 24, background: "rgba(15,23,42,.78)" }}
+        >
+          <img src={objectURL} alt={attributes.alt || attributes.filename} style={{ maxWidth: "95vw", maxHeight: "90vh", objectFit: "contain" }} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+function attachmentNodeViewExtension(
+  contextRef: React.MutableRefObject<EditorImageAttachmentContext | undefined>,
+  actionsRef: React.MutableRefObject<Pick<MangoTiptapEditorProps, "onImageChatRequest" | "onImageNodeRequest">>,
+): AnyExtension {
+  const ImageNodeView: React.FC<ReactNodeViewProps> = ({ node, selected, updateAttributes, deleteNode, editor }) => (
+    <NodeViewWrapper>
+      <MangoAuthenticatedImage
+        attributes={node.attrs as MangoStaticAttachmentImageProps}
+        attachmentContext={contextRef.current}
+        selected={selected}
+        editable={editor.isEditable}
+        updateAttributes={updateAttributes}
+        deleteNode={deleteNode}
+        onImageChatRequest={actionsRef.current.onImageChatRequest}
+        onImageNodeRequest={actionsRef.current.onImageNodeRequest}
+      />
+    </NodeViewWrapper>
+  );
+  return MangoAttachmentImage.extend({
+    addNodeView() {
+      return ReactNodeViewRenderer(ImageNodeView);
+    },
+  });
+}
+
+function selectionState(editor: Editor) {
+  const fontSizeValue = String(editor.getAttributes("textStyle").fontSize || "15").replace("px", "");
+  const alignment = editor.getAttributes("paragraph").textAlign || editor.getAttributes("heading").textAlign || "left";
+  return {
+    fontSize: Number(fontSizeValue) || 15,
+    highlightColor: (editor.getAttributes("highlight").color || null) as EditorHighlightColor | null,
+    textAlignment: (["left", "center", "right"].includes(alignment) ? alignment : "left") as EditorTextAlignment,
+    bold: editor.isActive("bold"),
+    underline: editor.isActive("underline"),
+    italic: editor.isActive("italic"),
+    strikethrough: editor.isActive("strike"),
+  };
+}
+
+export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
+  value,
+  editable = true,
+  ariaLabel,
+  placeholder,
+  className,
+  style,
+  companyID,
+  resourceType,
+  resourceID,
+  documentID,
+  requestJSON,
+  attachmentContext,
+  mentionUsers = [],
+  annotations = [],
+  target,
+  formattingControllerRef,
+  onChange,
+  onFlush,
+  onFocus,
+  onBlur,
+  onConflict,
+  onError,
+  onAnnotationActivate,
+  onSelectionChatRequest,
+  onImageChatRequest,
+  onImageNodeRequest,
+  onSelectionFontSizeChange,
+  onSelectionInlineFormatChange,
+  onSelectionHighlightColorChange,
+  onSelectionTextAlignmentChange,
+}) => {
+  const initial = useMemo(() => initialDocument(value), [value]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+  const syncRef = useRef<MangoTiptapSync | null>(null);
+  const syncStartedRef = useRef(false);
+  const syncPreparationRef = useRef<Promise<void> | null>(null);
+  const attachmentContextRef = useRef(attachmentContext);
+  const imageActionsRef = useRef({ onImageChatRequest, onImageNodeRequest });
+  const currentDocumentRef = useRef(initial.document);
+  const lifecycleRef = useRef(new MangoEditorLifecycle());
+  const [lifecycle, setLifecycle] = useState<MangoEditorLifecycleSnapshot>(lifecycleRef.current.getSnapshot());
+  const [document, setDocument] = useState(initial.document);
+  const [error, setError] = useState(initial.error ?? "");
+  const [selectionAction, setSelectionAction] = useState<MangoTiptapSelectionAction | null>(null);
+  const [tableActive, setTableActive] = useState(false);
+  const latestTargetRequestRef = useRef(0);
+  const callbacksRef = useRef({
+    onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onSelectionFontSizeChange, onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
+    onSelectionChatRequest,
+  });
+  callbacksRef.current = {
+    onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onSelectionFontSizeChange, onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
+    onSelectionChatRequest,
+  };
+  attachmentContextRef.current = attachmentContext;
+  imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
+  currentDocumentRef.current = document;
+
+  useEffect(() => lifecycleRef.current.subscribe(setLifecycle), []);
+
+  const deactivate = useCallback(async (): Promise<boolean> => {
+    if (!lifecycleRef.current.requestSleep()) return false;
+    const sync = syncRef.current;
+    syncRef.current = null;
+    syncStartedRef.current = false;
+    syncPreparationRef.current = null;
+    if (sync) await sync.shutdown();
+    if (lifecycleRef.current.getSnapshot().state === "safely-inactive") {
+      lifecycleRef.current.finishDeactivation();
+    }
+    return true;
+  }, []);
+
+  const updateSelectionState = useCallback((editor: Editor) => {
+    const state = selectionState(editor);
+    setTableActive(editor.isActive("table"));
+    callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
+    callbacksRef.current.onSelectionHighlightColorChange?.(state.highlightColor);
+    callbacksRef.current.onSelectionTextAlignmentChange?.(state.textAlignment);
+    callbacksRef.current.onSelectionInlineFormatChange?.({
+      bold: state.bold,
+      underline: state.underline,
+      italic: state.italic,
+      strikethrough: state.strikethrough,
+    });
+    const selection = editor.state.selection;
+    if (selection.empty || !callbacksRef.current.onSelectionChatRequest) {
+      setSelectionAction(null);
+      return;
+    }
+    const rootRect = rootRef.current?.getBoundingClientRect();
+    const coords = editor.view.coordsAtPos(selection.to);
+    setSelectionAction({
+      from: selection.from,
+      to: selection.to,
+      quote: editor.state.doc.textBetween(selection.from, selection.to, "\n", "\n"),
+      x: Math.max(4, Math.round(coords.left - (rootRect?.left || 0))),
+      y: Math.max(4, Math.round(coords.bottom - (rootRect?.top || 0) + 4)),
+    });
+  }, []);
+
+  const prepare = useCallback((): Promise<void> => {
+    if (syncPreparationRef.current) return syncPreparationRef.current;
+    const preparation = (async () => {
+      syncStartedRef.current = true;
+      const sync = new MangoTiptapSync({
+      companyID,
+      resourceType,
+      resourceID,
+      documentID,
+      requestJSON,
+      subscribeToCanonicalChange: (recover, localClientID) => {
+        const scope = realtimeEditorJSONScope(resourceType, resourceID, documentID);
+        return subscribeRealtimeScope(attachmentContext?.apiBase ?? "", companyID, scope, {
+          onEditorSnapshotRequired: (message) => {
+            if (message.client_id !== localClientID) recover();
+          },
+          onEditorDocumentDeleted: (message) => {
+            if (message.client_id !== localClientID) recover();
+          },
+          onRecover: recover,
+        });
+      },
+      onDocument: (canonical) => {
+        setDocument(canonical);
+        currentDocumentRef.current = canonical;
+        setError("");
+        if (editorRef.current) {
+          editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+        }
+      },
+      onPendingChange: (count) => {
+        lifecycleRef.current.setPendingCount(count);
+        if (count === 0 && !lifecycleRef.current.getSnapshot().nearViewport) {
+          void deactivate();
+        }
+      },
+      onConflict: (conflict) => {
+        setError("This text box changed elsewhere. Choose which version to keep before editing.");
+        callbacksRef.current.onConflict?.(conflict, (choice) => sync.resolveConflict(choice));
+      },
+      onError: (cause) => {
+        const message = cause instanceof Error ? cause.message : "Unable to save this text box";
+        setError(message);
+        callbacksRef.current.onError?.(message);
+      },
+      });
+      syncRef.current = sync;
+      try {
+        await sync.start();
+        lifecycleRef.current.finishPreparation();
+      } catch (cause) {
+        syncStartedRef.current = false;
+        syncPreparationRef.current = null;
+        const message = cause instanceof Error ? cause.message : "Unable to prepare this text box";
+        setError(message);
+        callbacksRef.current.onError?.(message);
+      }
+    })();
+    syncPreparationRef.current = preparation;
+    return preparation;
+  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, requestJSON, resourceID, resourceType]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      const near = entries.some((entry) => entry.isIntersecting);
+      lifecycleRef.current.setNearViewport(near);
+      if (near) void prepare();
+      else void deactivate();
+    }, { rootMargin: "600px 0px" });
+    const release = trackEditorRuntimeResource("observers");
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      release();
+    };
+  }, [prepare]);
+
+  useEffect(() => {
+    if (initial.error) void prepare();
+  }, [initial.error, prepare]);
+
+  const activate = useCallback(async () => {
+    if (lifecycle.state === "sleeping" || lifecycle.state === "safely-inactive" || lifecycle.state === "preparing") {
+      await prepare();
+      if (syncStartedRef.current) lifecycleRef.current.activate();
+    }
+  }, [lifecycle.state, prepare]);
+
+  useEffect(() => registerMangoTiptapFlusher({
+    companyID, resourceType, resourceID, documentID,
+  }, async () => {
+    await prepare();
+    await syncRef.current?.flush();
+  }), [companyID, documentID, prepare, resourceID, resourceType]);
+
+  const attachmentExtension = useMemo(
+    () => attachmentNodeViewExtension(attachmentContextRef, imageActionsRef),
+    [],
+  );
+  const handleImageFiles = useCallback((files: File[], position: number | null) => {
+    const context = attachmentContextRef.current;
+    if (!context) return;
+    void (async () => {
+      await context.prepareResource?.();
+      for (const file of files) {
+        const uploaded = await uploadMangoAttachment(context.requestJSON, {
+          companyID: context.companyID,
+          resourceType: context.resourceType,
+          resourceID: context.resourceID,
+          file,
+          sourceKind: "editor_paste",
+          relationshipKind: "inline_image",
+          informationID: context.informationID,
+          editorSurface: context.editorSurface,
+        });
+        const content = {
+          type: "mangoAttachmentImage",
+          attrs: {
+            attachmentId: uploaded.attachment.attachment_id,
+            filename: uploaded.attachment.original_filename,
+            mimeType: uploaded.attachment.mime_type,
+            width: uploaded.attachment.original_width ?? null,
+            height: uploaded.attachment.original_height ?? null,
+            displayWidth: uploaded.attachment.original_width ?? null,
+            displayHeight: uploaded.attachment.original_height ?? null,
+            alignment: "center",
+            position: "break",
+            layout: "content",
+            alt: uploaded.attachment.original_filename,
+            title: uploaded.attachment.original_filename,
+          },
+        };
+        if (position === null) editorRef.current?.chain().focus().insertContent(content).run();
+        else editorRef.current?.chain().focus().insertContentAt(position, content).run();
+      }
+    })().catch((cause) => {
+      const message = cause instanceof Error ? cause.message : "Unable to attach image";
+      context.onError?.(message);
+      callbacksRef.current.onError?.(message);
+    });
+  }, []);
+  const hasAttachmentContext = Boolean(attachmentContext);
+  const extensions = useMemo(() => createMangoTiptapExtensions({
+    editable,
+    attachmentImageExtension: attachmentExtension,
+    mentionUsers: normalizedMentionUsers(mentionUsers),
+    onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
+  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers]);
+
+  const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
+
+  useEffect(() => {
+    if (!isActive || editorRef.current) return undefined;
+    const releaseActive = trackEditorRuntimeResource("active_editors");
+    const editor = new Editor({
+      extensions,
+      content: currentDocumentRef.current.document,
+      editable,
+      enableContentCheck: true,
+      emitContentError: true,
+      editorProps: {
+        attributes: {
+          role: "textbox",
+          "aria-label": ariaLabel,
+          "aria-multiline": "true",
+          "data-placeholder": placeholder ?? "",
+          class: "mango-tiptap-prosemirror",
+        },
+        handleKeyDown: (_view, event) => {
+          if (event.key !== "Tab") return false;
+          const current = editorRef.current;
+          if (!current) return false;
+          if (current.isActive("table")) {
+            return event.shiftKey ? current.commands.goToPreviousCell() : current.commands.goToNextCell();
+          }
+          event.preventDefault();
+          return event.shiftKey ? formattingControllerRef?.current?.outdent() ?? false : formattingControllerRef?.current?.indent() ?? false;
+        },
+      },
+      onContentError: ({ error: contentError }) => {
+        setError(`The JSON document is invalid and was not opened: ${contentError.message}`);
+      },
+      onFocus: () => callbacksRef.current.onFocus?.(),
+      onBlur: () => {
+        callbacksRef.current.onBlur?.();
+        void syncRef.current?.flush().then(() => callbacksRef.current.onFlush?.(serializeMangoTiptapDocument(currentDocumentRef.current))).catch(() => undefined);
+      },
+      onSelectionUpdate: ({ editor: activeEditor }) => updateSelectionState(activeEditor),
+      onTransaction: ({ transaction }) => {
+        if (transaction.docChanged) incrementEditorRuntimeMetric("transactions");
+      },
+      onUpdate: ({ editor: activeEditor }) => {
+        const next: MangoTiptapDocument = {
+          format: "mango-tiptap-json",
+          schema_version: 1,
+          document: activeEditor.getJSON(),
+        };
+        const validation = validateMangoTiptapDocument(next);
+        if (!validation.valid) {
+          setError(validation.error);
+          callbacksRef.current.onError?.(validation.error);
+          return;
+        }
+        setDocument(validation.value);
+        currentDocumentRef.current = validation.value;
+        lifecycleRef.current.markDirty();
+        syncRef.current?.schedule(validation.value);
+        callbacksRef.current.onChange?.(serializeMangoTiptapDocument(validation.value));
+      },
+    });
+    editor.registerPlugin(MangoTiptapAnnotations);
+    updateMangoTiptapAnnotations(editor, annotations);
+    editorRef.current = editor;
+    const controller: MangoTiptapFormattingController = {
+      focus: () => { editor.commands.focus(); },
+      flush: () => {
+        const serialized = serializeMangoTiptapDocument(currentDocumentRef.current);
+        void syncRef.current?.flush();
+        callbacksRef.current.onFlush?.(serialized);
+        return serialized;
+      },
+      applyFontSizeValue: (fontSize) => editor.chain().focus().setFontSize(`${Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(fontSize)))}px`).run(),
+      adjustFontSize: (delta) => {
+        const next = selectionState(editor).fontSize + delta;
+        return editor.chain().focus().setFontSize(`${Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(next)))}px`).run();
+      },
+      toggleInlineFormat: (command) => {
+        if (command === "bold") return editor.chain().focus().toggleBold().run();
+        if (command === "italic") return editor.chain().focus().toggleItalic().run();
+        if (command === "underline") return editor.chain().focus().toggleUnderline().run();
+        return editor.chain().focus().toggleStrike().run();
+      },
+      applyHighlightColor: (color) => color
+        ? editor.chain().focus().setHighlight({ color }).run()
+        : editor.chain().focus().unsetHighlight().run(),
+      applyTextAlignment: (alignment) => editor.chain().focus().setTextAlign(alignment).run(),
+      insertLink: (href) => editor.chain().focus().extendMarkRange("link").setLink({ href }).run(),
+      insertList: (kind) => kind === "checklist"
+        ? editor.chain().focus().toggleTaskList().run()
+        : editor.chain().focus().toggleBulletList().run(),
+      toggleNumberedList: () => editor.chain().focus().toggleOrderedList().run(),
+      indent: () => {
+        if (editor.isActive("taskItem")) return editor.chain().focus().sinkListItem("taskItem").run();
+        if (editor.isActive("listItem")) return editor.chain().focus().sinkListItem("listItem").run();
+        const current = Number(editor.getAttributes("paragraph").indentLevel || editor.getAttributes("heading").indentLevel || 0);
+        return editor.chain().focus().updateAttributes(editor.isActive("heading") ? "heading" : "paragraph", { indentLevel: Math.min(12, current + 1) }).run();
+      },
+      outdent: () => {
+        if (editor.isActive("taskItem")) return editor.chain().focus().liftListItem("taskItem").run();
+        if (editor.isActive("listItem")) return editor.chain().focus().liftListItem("listItem").run();
+        const current = Number(editor.getAttributes("paragraph").indentLevel || editor.getAttributes("heading").indentLevel || 0);
+        return editor.chain().focus().updateAttributes(editor.isActive("heading") ? "heading" : "paragraph", { indentLevel: Math.max(0, current - 1) }).run();
+      },
+      insertTable: () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+      readFormatState: () => selectionState(editor),
+    };
+    if (formattingControllerRef) formattingControllerRef.current = controller;
+    updateSelectionState(editor);
+    return () => {
+      if (formattingControllerRef?.current === controller) formattingControllerRef.current = null;
+      editorRef.current = null;
+      editor.destroy();
+      releaseActive();
+    };
+  }, [
+    ariaLabel, editable, extensions, formattingControllerRef, isActive, placeholder, updateSelectionState,
+  ]);
+
+  useEffect(() => {
+    if (lifecycle.state !== "dirty") return undefined;
+    return trackEditorRuntimeResource("dirty_editors");
+  }, [lifecycle.state]);
+
+  useEffect(() => {
+    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, annotations);
+  }, [annotations]);
+
+  useEffect(() => {
+    if (!target || target.requestID === latestTargetRequestRef.current) return;
+    latestTargetRequestRef.current = target.requestID;
+    lifecycleRef.current.setTargeted(true);
+    let cancelled = false;
+    let frame = 0;
+    let attempts = 0;
+    void activate().then(() => {
+      if (cancelled) return;
+      const navigate = () => {
+        attempts += 1;
+        if (editorRef.current && navigateMangoTiptapTarget(editorRef.current, target)) {
+          lifecycleRef.current.setTargeted(false);
+          return;
+        }
+        if (attempts < 8) {
+          frame = window.requestAnimationFrame(navigate);
+          return;
+        }
+        lifecycleRef.current.setTargeted(false);
+        const message = "The requested editor location is no longer available.";
+        setError(message);
+        callbacksRef.current.onError?.(message);
+      };
+      frame = window.requestAnimationFrame(navigate);
+    });
+    return () => {
+      cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [activate, target]);
+
+  useEffect(() => () => {
+    if (formattingControllerRef) formattingControllerRef.current = null;
+    void syncRef.current?.shutdown();
+  }, [formattingControllerRef]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !onAnnotationActivate) return undefined;
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; kind?: string }>).detail;
+      if (detail?.id && detail.kind) onAnnotationActivate({ id: detail.id, kind: detail.kind });
+    };
+    root.addEventListener("mango:tiptap-annotation-activate", listener);
+    return () => root.removeEventListener("mango:tiptap-annotation-activate", listener);
+  }, [onAnnotationActivate]);
+
+  const renderStaticAttachment = useCallback((attributes: MangoStaticAttachmentImageProps) => (
+    <MangoAuthenticatedImage attributes={attributes} attachmentContext={attachmentContext} />
+  ), [attachmentContext]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={className}
+      style={{ position: "relative", minWidth: 0, minHeight: 0, ...style }}
+      data-mango-editor-format="tiptap_json"
+      data-mango-editor-state={lifecycle.state}
+      data-mango-editor-pinned={lifecycle.pinned || undefined}
+      onPointerDown={!isActive ? activate : undefined}
+      onFocusCapture={!isActive ? activate : undefined}
+      onDoubleClick={!isActive ? activate : undefined}
+    >
+      {isActive ? <EditorContent editor={editorRef.current} /> : (
+        <MangoTiptapStaticRenderer
+          value={document}
+          ariaLabel={ariaLabel}
+          style={{ minHeight: style?.minHeight ?? 80 }}
+          renderAttachmentImage={renderStaticAttachment}
+        />
+      )}
+      {error && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error}</div>}
+      {isActive && editable && tableActive && (
+        <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().addRowAfter().run()}>Add row</button>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteRow().run()}>Delete row</button>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().addColumnAfter().run()}>Add column</button>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteColumn().run()}>Delete column</button>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().toggleHeaderRow().run()}>Toggle header</button>
+          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteTable().run()}>Delete table</button>
+        </div>
+      )}
+      {isActive && editable && selectionAction && onSelectionChatRequest && (
+        <button
+          type="button"
+          aria-label="Comment on selection"
+          title="Comment on selection"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            onSelectionChatRequest(selectionAction);
+            setSelectionAction(null);
+          }}
+          style={{ position: "absolute", left: selectionAction.x, top: selectionAction.y, zIndex: 12, width: 30, height: 30, borderRadius: 8, border: "1px solid #7dd3fc", background: "#ffffff", color: "#0369a1", cursor: "pointer" }}
+        >
+          Chat
+        </button>
+      )}
+    </div>
+  );
+};

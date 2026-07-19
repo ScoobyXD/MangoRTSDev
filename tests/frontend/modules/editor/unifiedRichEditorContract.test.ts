@@ -412,7 +412,7 @@ test("the active node or project text block keeps its formatting controller curr
   assert.match(handoff, /formattingControllerRef\.current = formattingController/);
   assert.match(handoff, /const previousController = publishedFormattingControllerRef\.current/);
   assert.match(handoff, /formattingControllerWasActivatedRef\.current && formattingControllerRef\?\.current === previousController/);
-  assert.match(activeEditorSurface, /onFocus=\{\(\) => \{\s*activateFormattingController\(\)/);
+  assert.match(activeEditorSurface, /onFocus=\{\(\) => \{[\s\S]*activateFormattingController\(\)/);
   assert.match(workspaceAvailability, /const formattingControllerAvailable = editorTextCanEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
   assert.match(workspaceAvailability, /onFormattingControllerAvailabilityChange\?\.\(formattingControllerAvailable\)/);
   assert.match(nodeWorkspaceSurface, /const \[focusedTextBlockID, setFocusedTextBlockID\] = useState<string \| null>\(null\)/);
@@ -1462,7 +1462,8 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(previewModal.includes('data-mango-image-preview-download="true"'));
   assert.ok(previewModal.includes("UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE"));
   assert.ok(previewModal.includes("<AppModalPortal onRequestClose={onClose}>"));
-  assert.ok(nodeParts.includes("[documentValue, documentScrollTop, refreshImageDraft, refreshTextHighlights]"));
+  assert.ok(nodeParts.includes("if (chatMessages.length === 0 && contentChanges.length === 0 && !pendingChatSelectionAnchor && !imageSelected) return undefined;"));
+  assert.ok(nodeParts.includes("[chatMessages.length, contentChanges.length, documentValue, documentScrollTop, imageSelected, pendingChatSelectionAnchor, refreshImageDraft, refreshTextHighlights]"));
   assert.ok(imageActions.includes("frameRect.right + 8"));
   assert.ok(imageActions.includes("appViewportRect.right - IMAGE_ACTION_SURFACE_WIDTH"));
   assert.ok(editorImages.includes("payload[declaredImageType] = blobPromise"));

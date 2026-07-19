@@ -513,14 +513,39 @@ Completed in the bounded editor-mounting implementation on 2026-07-17.
 
 ### Step 2:
 
-Not started. Improve when the mechanisms inside a mounted row activate, make them lazy where appropriate, and delete or simplify unnecessary work. Step 1 made only the lifecycle changes required for safe mount/unmount.
+Implemented on 2026-07-18 and verified through the complete repository gate on 2026-07-19 01:11:26 -07:00.
+
+- Every gated Tiptap text box now moves through explicit sleeping/static, preparing/recovering, active, dirty/pending, and safely inactive states. Near-viewport preparation performs one exact recovery but returns to static JSON rendering; only focus, editing, or an exact target creates a Tiptap instance.
+- Dirty work and exact navigation targets pin their editor. Clean offscreen editors release their Tiptap instance, exact realtime subscription, timers, and sync machinery; dirty editors cannot sleep or unmount until their exact IndexedDB pending record is durable and async shutdown has completed its final drain. Node and Project deletion explicitly flush the still-mounted JSON editor before requesting the canonical revision or removing it from the UI.
+- The new JSON pending store is keyed by company, resource type, resource ID, and document ID and uses an exact IndexedDB `get`. The retained HTML sync now uses a bounded document-key range rather than a whole-store scan and skips the redundant final canonical request when revision evidence proves no pending work was drained.
+- Realtime subscribes to one encoded JSON document scope. Another scope cannot wake it, the local client's own notification does not cause a duplicate recovery, overlapping exact recoveries share their canonical request, and reconnect recovery is exact.
+- Failed JSON saves retry with bounded exponential delay while the durable local record remains. Exact base revisions surface a conflict instead of overwriting another accepted revision; conflict resolution is explicit and never attempts an automatic merge.
+- Selection/pointer listeners are active only for the focused old editor, floating-image scroll/resize work is active only for a selected image, annotation geometry is skipped when no annotations exist, and indentation scans are skipped when guides are disabled.
+- Images become eligible near the viewport. The old watchdog no longer eventually loads every mounted image. Authenticated Blob reuse, cancellation, object-URL cleanup, stable dimensions, and selected-image actions remain in place.
+- Runtime counters expose active and dirty editor instances, listeners, observers, recovery requests, exact IndexedDB reads/writes, image requests, Tiptap transactions, network saves, and conflicts. These are browser main-thread/resource counters; API/PostgreSQL costs remain separately measurable.
 
 ### Step 3:
 
-Not started. Replace expensive HTML/string editing work with Tiptap/ProseMirror's structured document model and transactions.
+Implemented behind the atomic workspace data-format gate on 2026-07-18. The gate defaults to `legacy_html/not_started`, so existing production data continues to use the current editor until Step 4 is separately executed.
+
+- Open-source Tiptap/ProseMirror 3.28.0 packages are pinned locally. Tiptap owns the JSON document, transactions, selection, commands, native history/undo, DOM synchronization, lists, tasks, tables, links, mentions, formatting, paste schema, and keyboard behavior.
+- One reusable Mango Tiptap core is selected coherently for Node, email-created Node, Project, standalone Logic Gate/Editor, email compose/reply/forward drafts, attached-email replies, and email signatures. Sleeping content uses a strict static JSON renderer rather than a live editor.
+- The versioned `mango-tiptap-json` schema rejects unknown nodes, marks, properties, invalid nesting, unsafe links, transient Blob/data URLs, wrong versions, and legacy HTML. The JSON path never parses stored HTML, emits a legacy editor document, dual-writes document content, or falls back by individual document.
+- Mango attachment images store stable attachment IDs and metadata only. The custom node view preserves authenticated loading, paste/drop upload, cancellation, Blob URL cleanup, preview, download, resize, alignment, width mode, deletion, selection chat, and create-Node behavior.
+- Comments, content changes, and chat selections use ProseMirror positions, transaction mappings, plugins, and decorations. Deep links activate and pin the exact block/annotation/position before navigation.
+- Mango owns the frontend-backend textbox sync, Go API, exact resource and mailbox permissions, IndexedDB recovery, PostgreSQL JSONB canonical documents and versions, optimistic revision checks, idempotent operations, durable realtime outbox notifications, exact subscriptions, and metadata projections. Tiptap Cloud, Hocuspocus, Yjs, a Tiptap document server, and every external Tiptap service are rejected.
+- Email draft/signature metadata writes carry the workspace format claim. Once a future workspace reaches JSON-ready, stale HTML clients are rejected, old HTML bodies remain untouched, and outbound email is generated only as a delivery projection from validated JSON.
+- The repository migration and canonical schema add the inactive gate and JSON document/operation/version contracts. No rows are backfilled, no existing PostgreSQL HTML is converted, and no live database migration is applied by this work.
+- Final verification passed `node scripts/run_all_tests.mjs`: the complete frontend feature suite, production TypeScript/Vite build, all Go packages, disposable real-PostgreSQL producer atomicity and retry tests, production-path browser/realtime tests, and infrastructure contracts all passed. The only build observation is Vite's non-blocking warning for the lazily loaded Tiptap chunk size.
 
 ### Step 4:
 
-Not started. Convert existing PostgreSQL rich HTML documents into validated Tiptap-compatible JSON only after Step 3 defines and validates the final document model.
+Not started. This must be a separately reviewed, whole-workspace conversion and cutover. It requires a write drain or maintenance window, backup, complete deterministic conversion, count/content/attachment validation, the one atomic gate flip, rejection of old clients, post-flip verification, a tested rollback decision, and eventual removal of the old editor. Newly created production documents must not enter JSON before that complete conversion.
 
-Last updated: 2026-07-17
+## Things to Do Later: Shelved Items
+
+- **Automatic concurrent simultaneous-edit merging:** shelved by product decision. The current JSON path protects data with exact revisions, durable pending work, idempotency, and a surfaced keep-local/use-canonical conflict. A future decision would require a proven merge model, position/change compatibility, undo semantics, reconnect behavior, server validation, load testing, and a migration plan. The risk is silent content corruption or surprising undo if those dependencies are incomplete. Yjs, CRDT, OT, Hocuspocus, Tiptap Cloud, and an external document server are not part of the current design.
+- **Existing PostgreSQL HTML-to-JSON conversion and atomic cutover:** Step 4 remains future work. The implementation is intentionally inactive for real data until every document in the workspace is converted and validated.
+- **Legacy editor deletion:** remove the old editor, HTML collaboration tables, and rollback-only data only after the approved cutover and rollback window have completed.
+
+Last updated: 2026-07-19 01:11:26 -07:00

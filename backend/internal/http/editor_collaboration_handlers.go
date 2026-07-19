@@ -40,6 +40,15 @@ func (s *Server) handleEditorCollaboration(w http.ResponseWriter, r *http.Reques
 		writeError(w, status, rejectCode)
 		return
 	}
+	gate, err := s.repo.GetEditorDataFormat(companyID)
+	if err != nil {
+		writeEditorJSONStoreError(w, err)
+		return
+	}
+	if gate.EditorFormat != store.EditorFormatLegacyHTML {
+		writeError(w, http.StatusConflict, "editor_format_mismatch")
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
