@@ -1,4 +1,4 @@
-Last updated: 2026-07-13
+Last updated: 2026-07-18
 
 # My Work Rules
 
@@ -76,6 +76,7 @@ MW49 - Right-clicking a My Work saved-view row exposes Edit, Rename, and Delete 
 MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
 MW51 - My Work Status grouping consumes the shared universal status contract also used by Updates and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify/Verification/Verified normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and Complete/Completed/Closed/Archived normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and the distinct No status group remain before Done.
 MW52 - The app-wide committed-title registry records the company/entity key and monotonic title-commit version; My Work consumes that shared state rather than maintaining a second registry. A matching Node rename updates current work-row titles, and a matching Logic Gate rename updates path/group labels. The app-lifetime coordinator patches existing My Work matrix caches immediately. A matrix request applies only title commits newer than the version captured when that request began, so a pre-commit in-flight result cannot restore an old label while a request begun after the commit remains authoritative canonical truth. Node-drop projection responses capture the shared title version before the request and merge only newer local Node or Logic Gate title commits while still applying assignment, priority, and other non-title fields, including for newly introduced rows. This does not create a My Work WebSocket subscription or trigger a canonical reload; other companies and unrelated resources remain unchanged.
+MW53 - Projects is the first fixed subview under My Work in the Key Views sidebar and no longer appears as a top-level Entities button. Selecting it opens the Project Management page. It is available to every user, cannot be dragged, renamed, edited, or deleted, and all user-created My Work saved views remain ordered below it.
 
 ## Projection Maintenance
 
@@ -147,13 +148,14 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31, MW37 through MW51
+- MW25 through MW31, MW37 through MW51, MW53
 
 Given:
 - A user changes My Work grouping settings.
 - Saved API-backed grouping settings include duplicates or malformed fields.
 - The user switches between saved My Work views and leaves/re-enters the My Work tab.
 - The user opens and closes My Work grouping settings from the My Work sidebar saved-view rows and scope menus.
+- The user selects the fixed Projects subview under My Work.
 - The user right-clicks a saved My Work view.
 - The user opens work rows and creates work from a priority/role cell.
 - The user right-clicks a My Work node.
@@ -170,6 +172,7 @@ Expected:
 - The selected saved view is restored when returning to My Work.
 - Malformed or duplicate settings are normalized.
 - The saved-view rows are shown under the My Work entry in the Key Views sidebar when they exist, and the floating grouping editor opens from + Add new or right-click Edit.
+- Projects is always the first subview under My Work, opens Project Management, has no edit/rename/delete or drag behavior, and user-created saved views stay below it; Projects is absent from the top-level Entities section.
 - Me, My Team, and All stay in the My Work header and do not share the saved grouping view row real estate.
 - Me, My Team, and All open on click and close on outside click or after a scope is selected.
 - The active saved view row is highlighted.

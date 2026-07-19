@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import {
   buildNestedGroups,
@@ -146,6 +148,26 @@ test("My Work project and logic gate groupings are normal removable grouping fie
   ]);
   assert.equal(savedGroupings[1].field, "project");
   assert.equal(savedGroupings[2].field, "logic_gate");
+});
+
+test("Projects is the fixed first My Work subview instead of an Entities navigation button", () => {
+  const appSidebar = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
+  const savedViewsSidebar = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeSavedViewsSidebar.tsx"), "utf8");
+  const myWorkSectionStart = appSidebar.indexOf('aria-label="Tower"');
+  const entitiesSectionStart = appSidebar.indexOf('aria-label="Entities"', myWorkSectionStart);
+  const myWorkSection = appSidebar.slice(myWorkSectionStart, entitiesSectionStart);
+  const entitiesSection = appSidebar.slice(entitiesSectionStart, appSidebar.indexOf("</section>", entitiesSectionStart));
+  const builtInViewStart = savedViewsSidebar.indexOf("{builtInView && (");
+  const customViewsStart = savedViewsSidebar.indexOf("{settings.map((item) =>", builtInViewStart);
+  const builtInViewMarkup = savedViewsSidebar.slice(builtInViewStart, customViewsStart);
+
+  assert.ok(myWorkSectionStart >= 0 && entitiesSectionStart > myWorkSectionStart);
+  assert.match(myWorkSection, /label: "Projects"[\s\S]*active: activePage === "project-management"[\s\S]*onSelect: \(\) => onPageSelect\("project-management"\)/);
+  assert.doesNotMatch(entitiesSection, /label="Projects"/);
+  assert.ok(builtInViewStart >= 0 && customViewsStart > builtInViewStart);
+  assert.match(builtInViewMarkup, /aria-current={builtInView\.active \? "page" : undefined}/);
+  assert.doesNotMatch(builtInViewMarkup, /draggable|View settings|Rename|Delete/);
+  assert.match(savedViewsSidebar, /savedViewRowShellStyle\(active && item\.setting_id === selectedSetting\.setting_id/);
 });
 
 test("My Work expanded group state is scoped to the matrix cell", () => {

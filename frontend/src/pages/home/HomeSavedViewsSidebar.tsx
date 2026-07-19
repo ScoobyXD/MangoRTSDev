@@ -49,6 +49,12 @@ type HomeSavedViewsSidebarSectionProps = {
   surface: HomeSavedViewsSurface;
   active: boolean;
   onSelectSurface: () => void;
+  builtInView?: {
+    label: string;
+    active: boolean;
+    onSelect: () => void;
+    onPreload?: () => void;
+  };
 };
 
 const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
@@ -66,6 +72,7 @@ export function HomeSavedViewsSidebarSection({
   surface,
   active,
   onSelectSurface,
+  builtInView,
 }: HomeSavedViewsSidebarSectionProps) {
   const storageUserID = currentUserID.trim() || "local";
   const fallbackSetting = useMemo(
@@ -532,15 +539,30 @@ export function HomeSavedViewsSidebarSection({
   ) : null;
 
   return (
-    <div ref={panelRef} style={savedViewPanelStyle(active)}>
+    <div ref={panelRef} style={savedViewPanelStyle(active || !!builtInView?.active)}>
       <div style={savedViewListStyle}>
+        {builtInView && (
+          <div style={builtInSavedViewRowShellStyle(builtInView.active)}>
+            <button
+              type="button"
+              aria-current={builtInView.active ? "page" : undefined}
+              style={savedViewRowButtonStyle}
+              onPointerEnter={builtInView.onPreload}
+              onFocus={builtInView.onPreload}
+              onPointerDown={builtInView.onPreload}
+              onClick={builtInView.onSelect}
+            >
+              <span style={savedViewNameStyle}>{builtInView.label}</span>
+            </button>
+          </div>
+        )}
         {settings.map((item) => {
           const dropPlacement = savedViewDropTarget?.settingID === item.setting_id ? savedViewDropTarget.placement : null;
           return (
           <div
             key={item.setting_id}
             draggable
-            style={savedViewRowShellStyle(item.setting_id === selectedSetting.setting_id, dropPlacement)}
+            style={savedViewRowShellStyle(active && item.setting_id === selectedSetting.setting_id, dropPlacement)}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData(HOME_SAVED_VIEW_DRAG_MIME, JSON.stringify({ surface, settingID: item.setting_id }));
@@ -790,6 +812,14 @@ function savedViewRowShellStyle(active: boolean, dropPlacement: SavedViewDropPla
     ].filter(Boolean).join(", "),
     cursor: "grab",
     overflow: "hidden",
+  };
+}
+
+function builtInSavedViewRowShellStyle(active: boolean): React.CSSProperties {
+  return {
+    ...savedViewRowShellStyle(active, null),
+    gridTemplateColumns: "minmax(0, 1fr)",
+    cursor: "pointer",
   };
 }
 
