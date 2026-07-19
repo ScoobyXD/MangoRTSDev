@@ -529,26 +529,26 @@ test("staged local input is persisted before a remote commit is applied", async 
   }
 });
 
-test("local input scheduled during recovery is not repainted by an older snapshot", async () => {
+test("local input scheduled during recovery is not repainted and version evidence avoids a redundant snapshot", async () => {
   const initial = "before recovery";
   const next = "edited during recovery";
   const dom = installEditorDOM(initial);
   try {
     const server = new HTMLPatchTestServer(initial);
     let snapshotReads = 0;
-    let releaseFinalSnapshot!: () => void;
-    const finalSnapshotBlocked = new Promise<void>((resolve) => { releaseFinalSnapshot = resolve; });
-    let finalSnapshotStarted = false;
+    let releaseSnapshot!: () => void;
+    const snapshotBlocked = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    let snapshotStarted = false;
     let visible = initial;
     const controller = new EditorTextboxSync(controllerOptions(server, "edit-during-recovery", {
       onHTML: (html) => { visible = html; },
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (init?.method) return server.commit(JSON.parse(String(init.body)) as CommitBody) as T;
         snapshotReads += 1;
-        if (snapshotReads === 2) {
-          finalSnapshotStarted = true;
+        if (snapshotReads === 1) {
+          snapshotStarted = true;
           const stale = server.currentSnapshot();
-          await finalSnapshotBlocked;
+          await snapshotBlocked;
           return stale as T;
         }
         return server.currentSnapshot() as T;
@@ -556,15 +556,18 @@ test("local input scheduled during recovery is not repainted by an older snapsho
     }));
 
     const recovery = controller.recover();
-    await eventually(() => finalSnapshotStarted, "recovery final snapshot read");
+    await eventually(() => snapshotStarted, "recovery snapshot read");
     visible = next;
     controller.schedule(next, true);
-    releaseFinalSnapshot();
+    releaseSnapshot();
 
     await recovery;
     await controller.flush();
     assert.equal(server.html, next);
     assert.equal(visible, next);
+    // The edit acknowledgement can request one exact recovery pass; there is
+    // no third, post-drain full snapshot read.
+    assert.equal(snapshotReads, 2);
     controller.stop();
   } finally {
     dom.restore();

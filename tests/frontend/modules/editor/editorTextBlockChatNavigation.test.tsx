@@ -152,6 +152,17 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
     const noop = () => undefined;
+    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
+      assert.equal(path, "/v1/editor-data-format?company_id=company-1");
+      return {
+        company_id: "company-1",
+        editor_format: "legacy_html",
+        migration_state: "not_started",
+        document_schema_version: 1,
+        expected_document_count: 0,
+        converted_document_count: 0,
+      } as T;
+    };
     const messages = [
       message({ id: "comment-alpha", selectionQuote: "alpha", selectionStart: 0, selectionEnd: 5, message: "Alpha note" }),
       message({ id: "comment-beta", selectionQuote: "beta", selectionStart: 6, selectionEnd: 10, message: "Beta note" }),
@@ -168,8 +179,9 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         blockID="block-1"
         editable
         nodeID="node-1"
-        apiBase=""
+        apiBase="http://localhost"
         companyID="company-1"
+        attachmentRequestJSON={legacyFormatRequestJSON}
         currentUserID="user-1"
         companyUsers={[]}
         documentValue="<!-- mango-editor-html-v1 -->alpha beta gamma"
@@ -199,6 +211,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     assert.ok(editorWrapper);
     editor.getBoundingClientRect = () => rect(0, 0, 400, 220);
     editorWrapper.getBoundingClientRect = () => rect(0, 0, 400, 220);
+    await act(async () => editor.focus());
     await flushFrames();
 
     const textNode = editor.firstChild;
@@ -252,8 +265,9 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         blockID="block-2"
         editable
         nodeID="node-1"
-        apiBase=""
+        apiBase="http://localhost"
         companyID="company-1"
+        attachmentRequestJSON={legacyFormatRequestJSON}
         currentUserID="user-1"
         companyUsers={[]}
         documentValue="<!-- mango-editor-html-v1 --><div>alpha</div><div>beta</div>"
@@ -311,8 +325,9 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       blockID: "block-nested",
       editable: true,
       nodeID: "node-1",
-      apiBase: "",
+      apiBase: "http://localhost",
       companyID: "company-1",
+      attachmentRequestJSON: legacyFormatRequestJSON,
       currentUserID: "user-1",
       companyUsers: [],
       documentValue: nestedDocument,

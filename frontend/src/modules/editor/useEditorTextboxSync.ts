@@ -57,9 +57,11 @@ export function useEditorTextboxSync(input: UseEditorTextboxSyncInput) {
     if (early) sync.schedule(early.html, early.immediate);
     return () => {
       callbacksRef.current.flushPendingLocalInput?.();
-      void sync.flush().catch((cause) => callbacksRef.current.onError?.(cause));
-      sync.stop();
-      if (syncRef.current === sync) syncRef.current = null;
+      void sync.shutdown()
+        .catch((cause) => callbacksRef.current.onError?.(cause))
+        .finally(() => {
+          if (syncRef.current === sync) syncRef.current = null;
+        });
     };
   }, [identity]);
 

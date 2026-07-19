@@ -32,7 +32,6 @@ export type UnifiedRichEditorFormattingController = EditorDocumentFormattingCont
   focus: () => void;
   flush: () => string;
 };
-
 type UnifiedRichEditorSurfaceProps = {
   value: string;
   editable?: boolean;
@@ -181,7 +180,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     pendingTypingCaretRef.current = null;
     lastAppliedValueRef.current = value;
     userEditedRef.current = false;
-    scheduleIndentGuideUpdate(readEditorDocumentText(editor));
+    if (outlineStyle === "indent-guides") scheduleIndentGuideUpdate(readEditorDocumentText(editor));
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
   }, [attachmentHydrationContextKey, eagerEditorImageHydration, scheduleIndentGuideUpdate, value]);
 
@@ -192,6 +191,10 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
 
   useEffect(() => {
     const editor = editorRef.current;
+    if (outlineStyle !== "indent-guides") {
+      scheduleIndentGuideUpdate("");
+      return;
+    }
     scheduleIndentGuideUpdate(editor ? readEditorDocumentText(editor) : value);
   }, [outlineStyle, scheduleIndentGuideUpdate, value]);
 

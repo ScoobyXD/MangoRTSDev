@@ -106,6 +106,13 @@ import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalR
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
+import { useMangoEditorDataFormat } from "./editorDataFormat";
+import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
+
+const MangoTiptapEditor = React.lazy(async () => {
+  const module = await import("./tiptap/MangoTiptapEditor.js");
+  return { default: module.MangoTiptapEditor };
+});
 
 
 function editorSnapshotScope(resourceType: "node" | "logic_gate", resourceID: string): string {
@@ -796,6 +803,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, []);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
 
   useEffect(() => {
     let cancelled = false;
@@ -1408,25 +1416,45 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!node) throw new Error("image_node_batch_create_missing_node");
     const informationID = generateStableInformationID();
     const operationID = generateStableInformationID();
-    await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
-      method: "POST",
-      body: JSON.stringify({
-        operation_id: operationID,
-        client_id: `editor-image-node:${currentUserID}`,
-        base_revision: 0,
-        patch: editorHTMLPatchForChange("", document),
-      }),
-    });
-    await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
-      method: "PATCH",
-      body: JSON.stringify(buildEditorTextBlockMetadataPayload({ title: blockTitle, document })),
-    });
+    if (editorDataFormat.gate?.editor_format === "tiptap_json") {
+      const parsed = parseMangoTiptapDocument(document);
+      if (!parsed.valid) throw new Error(`invalid_image_node_tiptap_document: ${parsed.error}`);
+      const path = `/v1/editor-json/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`;
+      await requestJSON<unknown>(path, {
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: operationID,
+          client_id: `editor-image-node:${currentUserID}`,
+          base_revision: 0,
+          schema_version: parsed.value.schema_version,
+          document: parsed.value,
+        }),
+      });
+      await requestJSON<unknown>(path, {
+        method: "PATCH",
+        body: JSON.stringify({ title: blockTitle, attachments: [] }),
+      });
+    } else {
+      await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: operationID,
+          client_id: `editor-image-node:${currentUserID}`,
+          base_revision: 0,
+          patch: editorHTMLPatchForChange("", document),
+        }),
+      });
+      await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "PATCH",
+        body: JSON.stringify(buildEditorTextBlockMetadataPayload({ title: blockTitle, document })),
+      });
+    }
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, currentUserID, editorDataFormat.gate?.editor_format, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
     if (!linkedEntityCanEdit) return;
@@ -1945,6 +1973,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         ? projections.find((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === cleanFocusInformationID)
         : undefined;
       const currentTextBox = activeTextBox ?? focusedTextBox ?? selectCurrentEditorTextProjection(projections);
+      if (!editorDataFormat.gate) return;
+      if (editorDataFormat.gate.editor_format === "tiptap_json") {
+        const informationID = currentTextBox?.information_id ?? "";
+        setDocumentInformationID(informationID);
+        documentInformationIDRef.current = informationID;
+        documentDraftRef.current = "";
+        persistedDocumentRef.current = "";
+        return;
+      }
       const localDocumentSaveActive = pendingSaveRef.current !== null || queuedSaveRef.current !== null || saveInFlightRef.current;
       if (!localDocumentSaveActive) applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
     } catch (cause) {
@@ -1958,7 +1995,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
       setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
     }
-  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, focusInformationID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, editorDataFormat.gate, focusInformationID, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     const nodeID = linkedEntityKind === "node" ? linkedNodeID.trim() : "";
@@ -2577,11 +2614,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     onSelectionTextAlignmentChange: setSelectionTextAlignment,
   });
   useEffect(() => {
+    if (editorDataFormat.gate?.editor_format === "tiptap_json") {
+      logicFormattingControllerRef.current = null;
+      return undefined;
+    }
     logicFormattingControllerRef.current = logicFormattingController;
     return () => {
       if (logicFormattingControllerRef.current === logicFormattingController) logicFormattingControllerRef.current = null;
     };
-  }, [logicFormattingController]);
+  }, [editorDataFormat.gate?.editor_format, logicFormattingController]);
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     editorSnapshotRefreshTokenRef.current += 1;
@@ -2890,7 +2931,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onError={setError}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind !== "node" && (
+        {hasLinkedDocument && linkedEntityKind !== "node" && editorDataFormat.gate?.editor_format === "legacy_html" && (
           <EditorDocumentSurface
             documentRef={editorDocumentRef}
             surfaceID="logic-gate-editor"
@@ -2912,7 +2953,34 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             {...documentSurfaceEventHandlers}
           />
         )}
-        {linkedEntityCanEdit && documentMentionMenu}
+        {hasLinkedDocument && linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationID && (
+          <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
+            <MangoTiptapEditor
+            key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
+            value={documentDraftRef.current}
+            editable={editorWriteEnabled}
+            ariaLabel="Logic Gate editor"
+            style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
+            companyID={companyID}
+            resourceType="logic_gate"
+            resourceID={linkedNodeID}
+            documentID={documentInformationID}
+            currentUserID={currentUserID}
+            requestJSON={requestJSON}
+            attachmentContext={editorImageAttachmentContext}
+            mentionUsers={companyUsers}
+            formattingControllerRef={logicFormattingControllerRef}
+            onChange={(next) => { documentDraftRef.current = next; }}
+            onFlush={(next) => { documentDraftRef.current = next; }}
+            onError={setError}
+            onSelectionFontSizeChange={updateSelectionFontSize}
+            onSelectionInlineFormatChange={updateSelectionInlineFormat}
+            onSelectionHighlightColorChange={setSelectionHighlightColor}
+            onSelectionTextAlignmentChange={setSelectionTextAlignment}
+            />
+          </React.Suspense>
+        )}
+        {linkedEntityCanEdit && editorDataFormat.gate?.editor_format === "legacy_html" && documentMentionMenu}
         {emptyMessage && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
             {emptyMessage}

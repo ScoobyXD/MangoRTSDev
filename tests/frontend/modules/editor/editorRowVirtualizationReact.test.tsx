@@ -300,6 +300,14 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   let committedEditorOperations = 0;
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
+    if (url.pathname === "/v1/editor-data-format") return jsonResponse({
+      company_id: COMPANY_ID,
+      editor_format: "legacy_html",
+      migration_state: "not_started",
+      document_schema_version: 1,
+      expected_document_count: 0,
+      converted_document_count: 0,
+    });
     if (url.pathname === `/v1/projects/${PROJECT_ID}`) return jsonResponse(projectView(projectProjectionItems));
     if (url.pathname === "/v1/me") {
       return jsonResponse({
@@ -369,6 +377,16 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const noop = () => undefined;
     const runtimeErrors: string[] = [];
     const nodeRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+      if (path.includes("/editor-data-format")) {
+        return {
+          company_id: COMPANY_ID,
+          editor_format: "legacy_html",
+          migration_state: "not_started",
+          document_schema_version: 1,
+          expected_document_count: 0,
+          converted_document_count: 0,
+        } as T;
+      }
       if (path.includes("/editor-collaboration/") && (init?.method ?? "GET") === "PATCH") {
         return { projection_revision: 2 } as T;
       }

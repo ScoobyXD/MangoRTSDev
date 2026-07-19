@@ -481,6 +481,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
+  const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
@@ -724,8 +725,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       const replyRowIndex = blocks.findIndex((block) => block.id === emailReplyBlockID);
       if (replyRowIndex >= 0) indices.add(replyRowIndex);
     }
+    for (const blockID of tiptapPinnedBlockIDs) {
+      const pinnedIndex = blocks.findIndex((block) => block.id === blockID);
+      if (pinnedIndex >= 0) indices.add(pinnedIndex);
+    }
     return Array.from(indices);
-  }, [activeChatBlockID, activeRowBlockID, blocks, emailOriginChatBlockID, emailReplyBlockID, focusedTextBlockID]);
+  }, [activeChatBlockID, activeRowBlockID, blocks, emailOriginChatBlockID, emailReplyBlockID, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const rowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -3134,7 +3139,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const blockEmails = nodeAttachedEmails;
           const chatIsActive = activeChatBlockID === chatBlockID;
           const chatIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
-          const editorPaneIsVisible = openEditorBlockIDs.has(block.id);
+          const editorPaneIsVisible = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
           const emailPaneIsVisible = false;
           const emailPaneIsMounted = false;
           const chatPaneIsVisible = chatIsVisible;
@@ -3466,6 +3471,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             }}
                             onBlur={() => undefined}
                             onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
+                            onPinChange={(pinned) => setTiptapPinnedBlockIDs((current) => {
+                              const has = current.has(block.id);
+                              if (has === pinned) return current;
+                              const next = new Set(current);
+                              if (pinned) next.add(block.id);
+                              else next.delete(block.id);
+                              return next;
+                            })}
                             onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
                             onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
                             onChangeSeen={onMarkChangeSeen}

@@ -15,6 +15,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ const (
 	realtimeChatScopePrefix            = "chat:node:"
 	realtimeBoardScopePrefix           = "board:"
 	realtimeEditorScopePrefix          = "editor:"
+	realtimeEditorJSONScopePrefix      = "editor-json:"
 )
 
 const (
@@ -422,6 +424,9 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 	if document, ok := realtimeEditorDocumentFromScope(companyID, scope); ok {
 		return s.authorizeRealtimeEntityScope(actor, companyID, document.ResourceType, document.ResourceID, store.EntityPermissionEdit)
 	}
+	if document, ok := realtimeEditorJSONDocumentFromScope(companyID, scope); ok {
+		return s.authorizeEditorJSONRealtime(actor, document)
+	}
 	if realtimeKnownScopePrefix(scope) {
 		return false, "invalid_scope", nil
 	}
@@ -498,6 +503,31 @@ func realtimeEditorDocumentFromScope(companyID, scope string) (store.EditorDocum
 	}
 	if realtimeEditorScope(ref) != scope {
 		return store.EditorDocumentRef{}, false
+	}
+	return ref, true
+}
+
+func realtimeEditorJSONDocumentFromScope(companyID, scope string) (store.EditorJSONDocumentRef, bool) {
+	scope = strings.TrimSpace(scope)
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, realtimeEditorJSONScopePrefix) {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(scope, realtimeEditorJSONScopePrefix), ":")
+	if len(parts) != 3 {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	for index := range parts {
+		decoded, err := url.QueryUnescape(parts[index])
+		if err != nil || strings.TrimSpace(decoded) == "" {
+			return store.EditorJSONDocumentRef{}, false
+		}
+		parts[index] = decoded
+	}
+	ref, err := store.NormalizeEditorJSONDocumentRef(store.EditorJSONDocumentRef{
+		CompanyID: companyID, ResourceType: parts[0], ResourceID: parts[1], DocumentID: parts[2],
+	})
+	if err != nil || store.EditorJSONRealtimeScope(ref) != scope {
+		return store.EditorJSONDocumentRef{}, false
 	}
 	return ref, true
 }
@@ -613,6 +643,7 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimeChatScopePrefix,
 		realtimeBoardScopePrefix,
 		realtimeEditorScopePrefix,
+		realtimeEditorJSONScopePrefix,
 	} {
 		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
 			return true
@@ -637,6 +668,9 @@ func realtimeScopeType(scope string) string {
 	}
 	if _, ok := realtimeEditorDocumentFromScope("00000000-0000-0000-0000-000000000000", scope); ok {
 		return "editor"
+	}
+	if _, ok := realtimeEditorJSONDocumentFromScope("00000000-0000-0000-0000-000000000000", scope); ok {
+		return "editor-json"
 	}
 	return ""
 }

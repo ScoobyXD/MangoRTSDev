@@ -3,6 +3,16 @@
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
+## Gated JSON-Native Tiptap Implementation (2026-07-18)
+
+The repository now contains one reusable Tiptap/ProseMirror 3.28.0 editor core for Node, Project, and standalone Logic Gate/Editor documents. It is inactive for existing data because the company/workspace data-format gate defaults to `legacy_html/not_started`. The Tiptap chunk is lazy-loaded only after a complete JSON-ready gate is verified.
+
+`tiptap/mangoTiptapDocument.ts` defines strict schema version 1. Unknown structure, legacy HTML nodes, unsafe links, transient Blob/data URLs, and unsupported versions fail closed. `MangoTiptapEditor.tsx` owns lifecycle, native transactions/history/selection/commands, static sleeping render, mentions, tables, lists, annotations, deep links, attachments, and surface actions. JSON-mode annotation fields are genuine ProseMirror positions and are mapped through transactions; legacy HTML surfaces retain their legacy text offsets. `mangoTiptapSync.ts` owns one exact IndexedDB pending record, quiet-period batching, retries, optimistic revision checks, idempotency, conflicts, and visible-only exact realtime recovery.
+
+Mango owns the frontend-backend textbox sync and every server responsibility. No Tiptap Cloud, Hocuspocus, Yjs provider, external Tiptap server, HTML compatibility adapter, dual-write, or per-document format fallback exists on this path. Email is deliberately outside this JSON path: compose, reply, forward, attached-email reply, drafts, signatures, display, recovery, and delivery remain on the existing rich-HTML editor and storage contracts.
+
+The old editor remains authoritative until a future whole-workspace conversion validates every document and flips the atomic gate. Do not create JSON-only documents in a legacy production workspace.
+
 ## Unified Editor Direction (2026-07-08)
 - The rich editor must become a shared user-facing behavior source for node text boxes, Logic Gate text, project text boxes, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
 - Shared behavior means editing semantics: indentation, Delete/Backspace, copy/cut/paste, paste cleanup, lists, checklist, link creation, font size, bold, underline, table insertion where supported, selection behavior, keyboard routing, sanitization, and legacy plain-text loading.

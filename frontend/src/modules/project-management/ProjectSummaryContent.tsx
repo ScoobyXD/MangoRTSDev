@@ -96,6 +96,8 @@ import {
   type TextBlockSelectionDraft,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
+import { useMangoEditorDataFormat } from "../editor/editorDataFormat.js";
+import { flushMangoTiptapDocument } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
@@ -255,6 +257,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const apiBase = readAuthConfig().apiBase;
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, attachmentRequestJSON);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const textBlocksScrollRef = useRef<HTMLDivElement | null>(null);
   const projectDocumentScrollMemoryRef = useRef(createEditorScrollMemory());
@@ -288,6 +291,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [summarySplitPct, setSummarySplitPct] = useState(58);
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
+  const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
@@ -663,8 +667,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const index = blocks.findIndex((block) => block.id === blockID);
       if (index >= 0) indices.add(index);
     }
+    for (const blockID of tiptapPinnedBlockIDs) {
+      const index = blocks.findIndex((block) => block.id === blockID);
+      if (index >= 0) indices.add(index);
+    }
     return Array.from(indices);
-  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID]);
+  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const projectRowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -737,10 +745,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const configuredScope = projectSaveScope;
     projectTextBlockSaveController.configure({
       saveBlock: async ({ blockID, content, sentVersion }) => {
+        const format = editorDataFormat.gate?.editor_format;
+        if (!format) throw new Error("editor_data_format_not_ready");
         const savedTimestamp = new Date().toISOString();
         await attachmentRequestJSON(
-          `/v1/editor-collaboration/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
-          { method: "PATCH", body: JSON.stringify(buildEditorTextBlockMetadataPayload(content)) },
+          `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(format === "tiptap_json"
+              ? { title: content.title, attachments: content.attachments ?? [] }
+              : buildEditorTextBlockMetadataPayload(content)),
+          },
         );
         if (projectSaveScopeRef.current !== configuredScope) return;
         const snapshot = projectTextBlockSaveController.getSnapshot(blockID);
@@ -758,7 +773,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         setError(saveError instanceof Error ? saveError.message : "Failed to save project text");
       },
     });
-  }, [attachmentRequestJSON, companyID, projectID, projectSaveScope, projectTextBlockSaveController]);
+  }, [attachmentRequestJSON, companyID, editorDataFormat.gate?.editor_format, projectID, projectSaveScope, projectTextBlockSaveController]);
 
   const updateProjectTextBlockContent = useCallback((
     blockID: string,
@@ -813,6 +828,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
 
   const addTextBlock = useCallback(() => {
+    if (!editorDataFormat.gate) {
+      setError("Editor data format is still loading.");
+      return;
+    }
     const id = generateStableInformationID();
     const initialContent: EditorTextBlockContent = {
       title: "Project Summary",
@@ -835,13 +854,26 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setOpenEmailBlockIDs((current) => new Set(current).add(id));
     setOpenChatBlockIDs((current) => new Set(current).add(id));
     projectTextBlockSaveController.startLatestContentSave(id);
-  }, [projectTextBlockSaveController]);
+  }, [editorDataFormat.gate, projectTextBlockSaveController]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
+    const format = editorDataFormat.gate?.editor_format;
+    if (!format) {
+      setError("Editor data format is still loading.");
+      return;
+    }
     const timer = projectTextBlockSaveTimersRef.current.get(blockID);
     if (timer !== undefined) {
       window.clearTimeout(timer);
       projectTextBlockSaveTimersRef.current.delete(blockID);
+    }
+    if (format === "tiptap_json") {
+      try {
+        await flushMangoTiptapDocument({ companyID, resourceType: "project", resourceID: projectID, documentID: blockID });
+      } catch (flushError) {
+        setError(flushError instanceof Error ? flushError.message : "Failed to save project text before deletion");
+        return;
+      }
     }
     await projectTextBlockSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
     const latestContent = projectTextBlockContentRef.current.get(blockID);
@@ -859,10 +891,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setAttachedEmails((current) => current.filter((email) => email.blockID !== blockID));
     setError("");
     try {
+      const editorPath = `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
+      const baseRevision = format === "tiptap_json"
+        ? (await attachmentRequestJSON<{ revision: number }>(editorPath)).revision
+        : undefined;
       await Promise.all([
-        attachmentRequestJSON(`/v1/editor-collaboration/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`, {
+        attachmentRequestJSON(editorPath, {
           method: "DELETE",
-          body: JSON.stringify({ operation_id: generateStableInformationID(), client_id: `project-delete:${currentUserID || "browser"}` }),
+          body: JSON.stringify({
+            operation_id: generateStableInformationID(),
+            client_id: `project-delete:${currentUserID || "browser"}`,
+            ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+          }),
         }),
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
       ]);
@@ -890,7 +930,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       });
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project text");
     }
-  }, [attachedEmails, attachmentRequestJSON, blocks, chatMessages, companyID, currentUserID, projectID, projectTextBlockSaveController]);
+  }, [attachedEmails, attachmentRequestJSON, blocks, chatMessages, companyID, currentUserID, editorDataFormat.gate?.editor_format, projectID, projectTextBlockSaveController]);
 
   const addTextBlockAttachments = useCallback(async (block: ProjectTextBlockDraft, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
@@ -1940,7 +1980,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 if (!block) return null;
                 const emailOpen = openEmailBlockIDs.has(block.id);
                 const emailMounted = emailOpen || emailReplyBlockID === block.id;
-                const editorOpen = openEditorBlockIDs.has(block.id);
+                const editorOpen = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
                 const chatOpen = openChatBlockIDs.has(block.id);
                 const bodyColumns = [
                   emailOpen ? `${projectSidePaneWidths.email}px` : "",
@@ -1968,7 +2008,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 setActiveRichTextBlockID("");
                                 projectFormattingControllerRef.current = null;
                               }
-                              setOpenEditorBlockIDs((current) => toggleSetValue(current, block.id));
+                              setOpenEditorBlockIDs((current) => {
+                                const next = new Set(current);
+                                if (editorOpen) next.delete(block.id);
+                                else next.add(block.id);
+                                return next;
+                              });
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
@@ -2070,6 +2115,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   window.setTimeout(refreshProjectSelectionFormat, 0);
                                 }}
                                 onBlur={() => undefined}
+                                onPinChange={(pinned) => setTiptapPinnedBlockIDs((current) => {
+                                  const has = current.has(block.id);
+                                  if (has === pinned) return current;
+                                  const next = new Set(current);
+                                  if (pinned) next.add(block.id);
+                                  else next.delete(block.id);
+                                  return next;
+                                })}
                                 onDocumentChange={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}

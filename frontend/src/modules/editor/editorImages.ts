@@ -1,3 +1,5 @@
+import { incrementEditorRuntimeMetric } from "./editorRuntimeMetrics.js";
+
 export const EDITOR_IMAGE_NODE_ATTRIBUTE = "data-mango-editor-image";
 export const EDITOR_IMAGE_ID_ATTRIBUTE = "data-mango-editor-image-id";
 export const EDITOR_IMAGE_WRAP_ATTRIBUTE = "data-mango-editor-image-wrap";
@@ -508,6 +510,7 @@ function startEditorAttachmentImageHydrationGeneration(
       const retryCount = retryCountByAttachmentID.get(attachmentID) ?? 0;
       const variant = retryCount === 0 ? "display" : "original";
       try {
+        incrementEditorRuntimeMetric("image_requests");
         pendingLoad = loadObjectURL(attachmentID, variant, { signal: controller.signal });
         const timeout = new Promise<never>((_resolve, reject) => {
           attemptTimer = setTimeout(() => {
@@ -577,7 +580,11 @@ function startEditorAttachmentImageHydrationGeneration(
       }
     }
     observerWatchdogTimer = setTimeout(() => {
-      for (const attachmentID of framesByAttachmentID.keys()) scheduleAttachment(attachmentID, 1);
+      for (const [attachmentID, attachmentFrames] of framesByAttachmentID) {
+        if (attachmentFrames.some((frame) => editorImageFrameIsNearHydrationRoot(root, frame))) {
+          scheduleAttachment(attachmentID, 1);
+        }
+      }
     }, EDITOR_ATTACHMENT_HYDRATION_OBSERVER_WATCHDOG_MS);
   } else {
     for (const attachmentID of framesByAttachmentID.keys()) scheduleAttachment(attachmentID, 0);

@@ -415,6 +415,69 @@ func (r *PostgresRepo) UpdateEditorCollaborationMetadata(input EditorCollaborati
 	return EditorCollaborationMetadataCommit{ProjectionRevision: revision, UpdatedTimestamp: now}, nil
 }
 
+func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error) {
+	input, err := NormalizeEditorCollaborationMetadata(input)
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	input.Document, err = normalizePostgresEditorDocumentRef(input.Document)
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	defer tx.Rollback()
+	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	if exists, queryErr := postgresEditorResourceExistsTx(ctx, tx, input.Document); queryErr != nil {
+		return EditorCollaborationMetadataCommit{}, queryErr
+	} else if !exists {
+		return EditorCollaborationMetadataCommit{}, ErrNotFound
+	}
+	information, err := editorProjectionInformationWithMetadata(input, "")
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	now := time.Now().UTC()
+	var revision int64
+	switch input.Document.ResourceType {
+	case EntityTypeNode:
+		err = tx.QueryRowContext(ctx, `
+			insert into node_projection_table (company_id, node_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp)
+			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, false, 1, $5, $5)
+			on conflict (company_id, node_id, information_id) do update set
+				information=excluded.information, is_deleted=false, revision=node_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
+			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
+	case EntityTypeLogicGate:
+		err = tx.QueryRowContext(ctx, `
+			insert into logic_gate_projection_table (company_id, logic_gate_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp)
+			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, false, 1, $5, $5)
+			on conflict (company_id, logic_gate_id, information_id) do update set
+				information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
+			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
+	case EntityTypeProject:
+		_, err = tx.ExecContext(ctx, `
+			insert into project_projection_table (company_id, project_id, information_id, type, information, created_timestamp, updated_timestamp)
+			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, $5, $5)
+			on conflict (company_id, project_id, information_id) do update set information=excluded.information, updated_timestamp=excluded.updated_timestamp`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now)
+		revision = 1
+	default:
+		return EditorCollaborationMetadataCommit{}, ErrInvalid
+	}
+	if err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return EditorCollaborationMetadataCommit{}, err
+	}
+	return EditorCollaborationMetadataCommit{ProjectionRevision: revision, UpdatedTimestamp: now}, nil
+}
+
 func (r *PostgresRepo) DeleteEditorCollaborationDocument(input EditorCollaborationDeleteInput) (EditorCollaborationCommit, error) {
 	ref, err := normalizePostgresEditorDocumentRef(input.Document)
 	if err != nil {

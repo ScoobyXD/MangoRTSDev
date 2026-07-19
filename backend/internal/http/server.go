@@ -315,6 +315,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
 	mux.HandleFunc("/v1/editor-collaboration/", s.handleEditorCollaboration)
+	mux.HandleFunc("/v1/editor-data-format", s.handleEditorDataFormat)
+	mux.HandleFunc("/v1/editor-json/", s.handleEditorJSON)
 	mux.HandleFunc("/v1/company-explorer/roots", s.handleCompanyExplorerRoots)
 	mux.HandleFunc("/v1/company-explorer/children", s.handleCompanyExplorerChildren)
 	mux.HandleFunc("/v1/company-explorer/search", s.handleCompanyExplorerSearch)

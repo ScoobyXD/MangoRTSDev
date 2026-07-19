@@ -68,6 +68,7 @@ type Repository interface {
 	NotificationRepository
 	RealtimeOutboxRepository
 	EditorCollaborationRepository
+	EditorJSONRepository
 	DomainEventRepository
 }
 
@@ -980,6 +981,15 @@ type EditorCollaborationRepository interface {
 	CommitEditorCollaborationOperation(input EditorCollaborationOperationInput) (EditorCollaborationCommit, error)
 	UpdateEditorCollaborationMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error)
 	DeleteEditorCollaborationDocument(input EditorCollaborationDeleteInput) (EditorCollaborationCommit, error)
+}
+
+type EditorJSONRepository interface {
+	GetEditorDataFormat(companyID string) (EditorDataFormatGate, error)
+	GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error)
+	CommitEditorJSONDocument(input EditorJSONCommitInput) (EditorJSONCommit, error)
+	DeleteEditorJSONDocument(input EditorJSONDeleteInput) (EditorJSONCommit, error)
+	ListEditorJSONVersions(ref EditorJSONDocumentRef, limit int) ([]EditorJSONVersion, error)
+	UpdateEditorJSONMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error)
 }
 
 type DeleteCompanyUserResult struct {
