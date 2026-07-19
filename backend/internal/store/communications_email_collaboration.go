@@ -272,6 +272,14 @@ func communicationsEmailAttachedProjectionPayload(informationID, collaborationID
 	return string(raw)
 }
 
+func communicationsEmailAttachedProjectionPayloadWithThread(informationID, collaborationID, emailThreadID string, input CommunicationsEmailCollaborationEnsureInput) string {
+	var payload map[string]any
+	_ = json.Unmarshal([]byte(communicationsEmailAttachedProjectionPayload(informationID, collaborationID, input)), &payload)
+	payload["email_thread_id"] = strings.TrimSpace(emailThreadID)
+	raw, _ := json.Marshal(payload)
+	return string(raw)
+}
+
 func emailMessageSnapshotHasRenderableContent(message domain.EmailMessageSnapshot) bool {
 	return strings.TrimSpace(message.Subject) != "" ||
 		strings.TrimSpace(message.Snippet) != "" ||
@@ -326,6 +334,9 @@ func mergeEmailMessageSnapshot(existing, incoming domain.EmailMessageSnapshot) d
 	}
 	if len(incoming.ReplyTo) > 0 {
 		merged.ReplyTo = incoming.ReplyTo
+	}
+	if len(incoming.Attachments) > 0 {
+		merged.Attachments = incoming.Attachments
 	}
 	if len(incoming.Folders) > 0 {
 		merged.Folders = incoming.Folders

@@ -135,6 +135,10 @@ type CommunicationsRepository interface {
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
+	UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
+	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
+	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
+	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
 	EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
 	ResolveCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationResolveInput) (domain.CommunicationsEmailCollaboration, error)
 	GetCommunicationsEmailCollaboration(companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error)
@@ -1775,6 +1779,9 @@ type CommunicationsTriageConversionInput struct {
 	LogicGateID        string
 	NodeID             string
 	NewLogicGateHeader string
+	EmailThreads       []CommunicationsEmailThreadUpsertInput
+	LinkedTextBlock    *NodeInformationInput
+	InitialChat        *NodeInformationInput
 	Status             string
 	ColumnID           string
 	Priority           *int
@@ -1782,21 +1789,25 @@ type CommunicationsTriageConversionInput struct {
 }
 
 type CommunicationsTriageConversionResult struct {
-	Target               CommunicationsTriageConversionTarget      `json:"target"`
-	LogicGate            domain.LogicGate                          `json:"logic_gate"`
-	CreatedLogicGate     bool                                      `json:"created_logic_gate,omitempty"`
-	Board                domain.KanbanBoard                        `json:"board"`
-	Cards                []domain.KanbanCard                       `json:"cards"`
-	Nodes                []domain.Node                             `json:"nodes"`
-	Assignments          []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
-	EmailPlacements      []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
-	EmailProvenance      []CommunicationsEmailConversionProvenance `json:"email_provenance,omitempty"`
-	FolderItems          []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
-	ExplorerV2Rows       []CompanyExplorerV2Row                    `json:"explorer_v2_rows,omitempty"`
-	ProjectRelationships []domain.ProjectRelationshipProjection    `json:"project_relationships,omitempty"`
-	DeletedMessageIDs    []string                                  `json:"deleted_message_ids"`
-	UnstarredMessageIDs  []string                                  `json:"unstarred_message_ids,omitempty"`
-	Events               []domain.DomainEvent                      `json:"-"`
+	Target                      CommunicationsTriageConversionTarget      `json:"target"`
+	LogicGate                   domain.LogicGate                          `json:"logic_gate"`
+	CreatedLogicGate            bool                                      `json:"created_logic_gate,omitempty"`
+	Board                       domain.KanbanBoard                        `json:"board"`
+	Cards                       []domain.KanbanCard                       `json:"cards"`
+	Nodes                       []domain.Node                             `json:"nodes"`
+	Assignments                 []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
+	EmailPlacements             []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
+	EmailProvenance             []CommunicationsEmailConversionProvenance `json:"email_provenance,omitempty"`
+	FolderItems                 []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
+	ExplorerV2Rows              []CompanyExplorerV2Row                    `json:"explorer_v2_rows,omitempty"`
+	AttachedEmailInformationIDs []string                                  `json:"attached_email_information_ids,omitempty"`
+	EmailThreadIDs              []string                                  `json:"email_thread_ids,omitempty"`
+	LinkedTextBlockID           string                                    `json:"linked_text_block_id,omitempty"`
+	InitialChatID               string                                    `json:"initial_chat_id,omitempty"`
+	ProjectRelationships        []domain.ProjectRelationshipProjection    `json:"project_relationships,omitempty"`
+	DeletedMessageIDs           []string                                  `json:"deleted_message_ids"`
+	UnstarredMessageIDs         []string                                  `json:"unstarred_message_ids,omitempty"`
+	Events                      []domain.DomainEvent                      `json:"-"`
 }
 
 type CommunicationsTriageRevertInput struct {

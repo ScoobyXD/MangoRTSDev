@@ -91,6 +91,7 @@ export type EditorAttachedEmail = {
   messageID: string;
   threadID?: string;
   sharedInboxID?: string;
+  emailThreadID?: string;
   accountEmail?: string;
   createdFromEmail?: boolean;
   subject: string;
@@ -199,6 +200,7 @@ export function buildEditorAttachedEmailPayload(input: {
   collaborationID?: string;
   messageID: string;
   threadID?: string;
+  emailThreadID?: string;
   sharedInboxID?: string;
   accountEmail?: string;
   createdFromEmail?: boolean;
@@ -214,6 +216,7 @@ export function buildEditorAttachedEmailPayload(input: {
     message_id: input.messageID,
     thread_id: input.threadID ?? "",
     shared_inbox_id: input.sharedInboxID?.trim() ?? "",
+  email_thread_id: input.emailThreadID?.trim() ?? "",
     account_email: input.accountEmail?.trim() ?? "",
     created_from_email: input.createdFromEmail === true,
     subject: input.subject,
@@ -398,6 +401,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   const sharedInboxID = stringValue(record, "shared_inbox_id");
   const accountEmail = stringValue(record, "account_email");
   const snippet = stringValue(record, "snippet");
+  const emailThreadID = stringValue(record, "email_thread_id");
   const from = stringValue(record, "from");
   return {
     id: item.information_id,
@@ -405,6 +409,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
     collaborationID: collaborationID || undefined,
     messageID,
     threadID: threadID || undefined,
+  emailThreadID: emailThreadID || undefined,
     sharedInboxID: sharedInboxID || undefined,
     accountEmail: accountEmail || undefined,
     createdFromEmail: record.created_from_email === true,

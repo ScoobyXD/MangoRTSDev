@@ -514,14 +514,8 @@ export class MangoRealtimeClient {
     this.activate();
     if (this.acceptedScopes.has(cleanScope)) {
       subscription.onAccepted?.({ type: "subscription.accepted", scope: cleanScope });
-      if (subscription.onRecover) {
-        this.recoveredAttemptID = 0;
-        this.setHealth("reconnecting");
-      }
     }
     if (firstForScope && this.socket?.readyState === WebSocket.OPEN) {
-      this.recoveredAttemptID = 0;
-      this.setHealth("reconnecting");
       this.sendSubscribe(cleanScope);
     }
     this.maybeFinishRecovery();
@@ -536,7 +530,6 @@ export class MangoRealtimeClient {
         return;
       }
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
-      this.recoveredAttemptID = 0;
       this.maybeFinishRecovery();
     };
   }

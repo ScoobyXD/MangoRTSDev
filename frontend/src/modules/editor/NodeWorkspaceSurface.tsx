@@ -89,7 +89,6 @@ import {
   type AttachmentUploadDropdownItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
-  DEFAULT_TEXT_BLOCK_TITLE,
   EMAIL_DRAG_MIME,
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
@@ -116,12 +115,13 @@ import {
   type TextBlockState,
 } from "./NodeWorkspaceSurfaceShared";
 import { prepareTextBlockImageFile } from "./nodeTextBlockImageFiles";
+import { createEmailLinkedNodeTextBlockContent, createOrdinaryNodeTextBlockContent } from "./nodeTextBlockCreation";
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "./editorMentions";
 
-const TEXT_TIMELINE_COLUMN_WIDTH_PX = 44;
-const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 40;
+const TEXT_TIMELINE_COLUMN_WIDTH_PX = 34;
+const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 34;
 const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
-const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
+const TEXT_CHAT_GRID_COLUMN_GAP_PX = 4;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
 const TEXT_BLOCK_RESIZE_MIN_WIDTH_PX = 160;
 const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
@@ -1304,7 +1304,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!editorTextCanEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
-    const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "", attachments: [] };
+    const initialContent = createOrdinaryNodeTextBlockContent();
     focusBlockIDRef.current = blockID;
     contentByBlockRef.current.set(blockID, initialContent);
     textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
@@ -1345,13 +1345,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
     const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
     const cleanQuote = quote.trim();
-    const initialContent: EditorTextBlockContent = {
+    const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
       document: cleanQuote && typeof document !== "undefined" ? createEmailSelectionDocument(document, cleanQuote) : "",
-      attachments: [],
-      emailMessageID: cleanMessageID,
-      emailAccent,
-    };
+      messageID: cleanMessageID,
+      accent: emailAccent,
+    });
     focusBlockIDRef.current = blockID;
     contentByBlockRef.current.set(blockID, initialContent);
     textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
@@ -1415,18 +1414,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) scheduleTextBlockSave(blockID, nextContent);
   }, [canEdit, scheduleTextBlockSave]);
 
-  useEffect(() => {
-    if (!editorTextCanEdit || !emailOriginAttachedEmail) return;
-    const primaryBlock = blocks[0];
-    if (!primaryBlock || primaryBlock.emailMessageID?.trim()) return;
-    updateTextBlockContent(primaryBlock.id, {
-      emailMessageID: emailOriginAttachedEmail.messageID,
-      emailAccent: editorEmailMessageAccent(emailOriginAttachedEmail.messageID, blocks.filter((block) => block.id !== primaryBlock.id).map((block) => block.emailAccent ?? "")),
-      title: primaryBlock.title === DEFAULT_TEXT_BLOCK_TITLE && emailOriginAttachedEmail.subject.trim()
-        ? `Email: ${emailOriginAttachedEmail.subject.trim()}`
-        : primaryBlock.title,
-    });
-  }, [blocks, editorTextCanEdit, emailOriginAttachedEmail, updateTextBlockContent]);
 
   useEffect(() => {
     if (!editorTextCanEdit) return;

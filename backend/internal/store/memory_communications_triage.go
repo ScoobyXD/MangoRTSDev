@@ -24,48 +24,80 @@ type communicationsEmailNodeLink struct {
 }
 
 type memoryCommunicationsTriageConversionSnapshot struct {
-	triageItems                   map[string]domain.CommunicationsTriageItem
-	logicGates                    map[string]domain.LogicGate
-	nodes                         map[string]domain.Node
-	nodeInfo                      map[string][]domain.NodeInformation
-	nodeText                      map[string]map[string]domain.NodeProjection
-	folders                       map[string]domain.CompanyExplorerFolder
-	folderItems                   map[string]domain.CompanyExplorerFolderItem
-	defaultFolderSeed             map[string]bool
-	nodeMapPositions              map[string]domain.NodeMapPosition
-	kanbanBoards                  map[string]domain.KanbanBoard
-	kanbanColumns                 map[string][]domain.KanbanColumn
-	kanbanCards                   map[string][]domain.KanbanCard
-	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
-	emailNodeLinks                map[string]communicationsEmailNodeLink
-	domainEvents                  map[string]domain.DomainEvent
-	projectRelationships          map[string]domain.ProjectRelationship
-	projectRelationshipProjection map[string]domain.ProjectRelationshipProjection
-	companyExplorerV2Entities     map[string]memoryCompanyExplorerV2Entity
-	companyExplorerV2Edges        map[string]memoryCompanyExplorerV2Edge
+	triageItems                    map[string]domain.CommunicationsTriageItem
+	logicGates                     map[string]domain.LogicGate
+	nodes                          map[string]domain.Node
+	nodeInfo                       map[string][]domain.NodeInformation
+	nodeText                       map[string]map[string]domain.NodeProjection
+	folders                        map[string]domain.CompanyExplorerFolder
+	folderItems                    map[string]domain.CompanyExplorerFolderItem
+	defaultFolderSeed              map[string]bool
+	nodeMapPositions               map[string]domain.NodeMapPosition
+	kanbanBoards                   map[string]domain.KanbanBoard
+	kanbanColumns                  map[string][]domain.KanbanColumn
+	kanbanCards                    map[string][]domain.KanbanCard
+	nodeLogicGateAssignments       map[string]domain.NodeLogicGateAssignment
+	emailNodeLinks                 map[string]communicationsEmailNodeLink
+	domainEvents                   map[string]domain.DomainEvent
+	projectRelationships           map[string]domain.ProjectRelationship
+	projectRelationshipProjection  map[string]domain.ProjectRelationshipProjection
+	companyExplorerV2Entities      map[string]memoryCompanyExplorerV2Entity
+	companyExplorerV2Edges         map[string]memoryCompanyExplorerV2Edge
+	emailThreads                   map[string]domain.CommunicationsEmailThread
+	emailThreadScopeIDs            map[string]string
+	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
+	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
+	entityPermissions              map[string]domain.EntityPermission
+	effectiveAccess                map[string]domain.EffectiveResourceAccess
+	nodeContentChanges             map[string]domain.NodeContentChange
+	nodeContentChangeSeen          map[string]time.Time
+	realtimeOutbox                 map[string]RealtimeOutboxEvent
+	realtimeOutboxSequence         int64
+	workspaceReadVersions          map[string]int64
+	gvicAssignments                map[string]domain.ResourceGVICAssignment
+	gvicEffectiveAssignments       map[string]domain.ResourceGVICEffectiveAssignment
+	gvicPolicyRevisions            map[string]int64
+	resourcePermissionRevisions    map[string]int64
+	resourcePolicySequence         int64
 }
 
 func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryCommunicationsTriageConversionSnapshot {
 	return memoryCommunicationsTriageConversionSnapshot{
-		triageItems:                   cloneMemoryMap(r.triageItems),
-		logicGates:                    cloneMemoryMap(r.logicGates),
-		nodes:                         cloneMemoryMap(r.nodes),
-		nodeInfo:                      cloneMemorySliceMap(r.nodeInfo),
-		nodeText:                      cloneMemoryNodeText(r.nodeText),
-		folders:                       cloneMemoryMap(r.folders),
-		folderItems:                   cloneMemoryMap(r.folderItems),
-		defaultFolderSeed:             cloneMemoryMap(r.defaultFolderSeed),
-		nodeMapPositions:              cloneMemoryMap(r.nodeMapPositions),
-		kanbanBoards:                  cloneMemoryMap(r.kanbanBoards),
-		kanbanColumns:                 cloneMemorySliceMap(r.kanbanColumns),
-		kanbanCards:                   cloneMemorySliceMap(r.kanbanCards),
-		nodeLogicGateAssignments:      cloneMemoryMap(r.nodeLogicGateAssignments),
-		emailNodeLinks:                cloneMemoryMap(r.emailNodeLinks),
-		domainEvents:                  cloneMemoryMap(r.domainEvents),
-		projectRelationships:          cloneMemoryMap(r.projectRelationships),
-		projectRelationshipProjection: cloneMemoryMap(r.projectRelationshipProjection),
-		companyExplorerV2Entities:     cloneMemoryMap(r.companyExplorerV2Entities),
-		companyExplorerV2Edges:        cloneMemoryMap(r.companyExplorerV2Edges),
+		triageItems:                    cloneMemoryMap(r.triageItems),
+		logicGates:                     cloneMemoryMap(r.logicGates),
+		nodes:                          cloneMemoryMap(r.nodes),
+		nodeInfo:                       cloneMemorySliceMap(r.nodeInfo),
+		nodeText:                       cloneMemoryNodeText(r.nodeText),
+		folders:                        cloneMemoryMap(r.folders),
+		folderItems:                    cloneMemoryMap(r.folderItems),
+		defaultFolderSeed:              cloneMemoryMap(r.defaultFolderSeed),
+		nodeMapPositions:               cloneMemoryMap(r.nodeMapPositions),
+		kanbanBoards:                   cloneMemoryMap(r.kanbanBoards),
+		kanbanColumns:                  cloneMemorySliceMap(r.kanbanColumns),
+		kanbanCards:                    cloneMemorySliceMap(r.kanbanCards),
+		nodeLogicGateAssignments:       cloneMemoryMap(r.nodeLogicGateAssignments),
+		emailNodeLinks:                 cloneMemoryMap(r.emailNodeLinks),
+		domainEvents:                   cloneMemoryMap(r.domainEvents),
+		projectRelationships:           cloneMemoryMap(r.projectRelationships),
+		projectRelationshipProjection:  cloneMemoryMap(r.projectRelationshipProjection),
+		companyExplorerV2Entities:      cloneMemoryMap(r.companyExplorerV2Entities),
+		companyExplorerV2Edges:         cloneMemoryMap(r.companyExplorerV2Edges),
+		emailThreads:                   cloneCommunicationsEmailThreadsMap(r.emailThreads),
+		emailThreadScopeIDs:            cloneMemoryMap(r.emailThreadScopeIDs),
+		nodeEmailThreads:               cloneMemoryMap(r.nodeEmailThreads),
+		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
+		entityPermissions:              cloneMemoryMap(r.entityPermissions),
+		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
+		nodeContentChanges:             cloneMemoryMap(r.nodeContentChanges),
+		nodeContentChangeSeen:          cloneMemoryMap(r.nodeContentChangeSeen),
+		realtimeOutbox:                 cloneMemoryMap(r.realtimeOutbox),
+		realtimeOutboxSequence:         r.realtimeOutboxSequence,
+		workspaceReadVersions:          cloneMemoryMap(r.workspaceReadVersions),
+		gvicAssignments:                cloneMemoryMap(r.gvicAssignments),
+		gvicEffectiveAssignments:       cloneMemoryMap(r.gvicEffectiveAssignments),
+		gvicPolicyRevisions:            cloneMemoryMap(r.gvicPolicyRevisions),
+		resourcePermissionRevisions:    cloneMemoryMap(r.resourcePermissionRevisions),
+		resourcePolicySequence:         r.resourcePolicySequence,
 	}
 }
 
@@ -89,6 +121,22 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.projectRelationshipProjection = snapshot.projectRelationshipProjection
 	r.companyExplorerV2Entities = snapshot.companyExplorerV2Entities
 	r.companyExplorerV2Edges = snapshot.companyExplorerV2Edges
+	r.emailThreads = snapshot.emailThreads
+	r.emailThreadScopeIDs = snapshot.emailThreadScopeIDs
+	r.nodeEmailThreads = snapshot.nodeEmailThreads
+	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
+	r.entityPermissions = snapshot.entityPermissions
+	r.effectiveAccess = snapshot.effectiveAccess
+	r.nodeContentChanges = snapshot.nodeContentChanges
+	r.nodeContentChangeSeen = snapshot.nodeContentChangeSeen
+	r.realtimeOutbox = snapshot.realtimeOutbox
+	r.realtimeOutboxSequence = snapshot.realtimeOutboxSequence
+	r.workspaceReadVersions = snapshot.workspaceReadVersions
+	r.gvicAssignments = snapshot.gvicAssignments
+	r.gvicEffectiveAssignments = snapshot.gvicEffectiveAssignments
+	r.gvicPolicyRevisions = snapshot.gvicPolicyRevisions
+	r.resourcePermissionRevisions = snapshot.resourcePermissionRevisions
+	r.resourcePolicySequence = snapshot.resourcePolicySequence
 }
 
 func (r *MemoryRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
@@ -283,7 +331,14 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
+		emailInput := input
+		emailInput.NodeID = nodeID
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -347,7 +402,12 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, false)
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
 		result.Nodes = append(result.Nodes, updatedNode)
@@ -359,6 +419,9 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 			NodeID:    input.NodeID,
 		})
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	if err := r.addCommunicationsConversionAtomicWritesLocked(input, &result); err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
 }
@@ -394,7 +457,14 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			Y:                120 + float64(index*28),
 			UpdatedTimestamp: now,
 		}
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
+		emailInput := input
+		emailInput.NodeID = nodeID
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -516,7 +586,12 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, messageID, input.NodeID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, false)
+		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
+		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
@@ -547,6 +622,9 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	if err := r.addCommunicationsConversionAtomicWritesLocked(input, &result); err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
 }
@@ -862,7 +940,11 @@ func (r *MemoryRepo) pendingKanbanColumnIDLocked(companyID, boardID string) stri
 }
 
 func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, now time.Time, createdFromEmail bool) {
-	information := attachedEmailProjectionInformation(message, sharedInboxID, accountEmail, now, createdFromEmail)
+	r.addEmailProjectionWithThreadLocked(companyID, nodeID, sharedInboxID, accountEmail, message, "", now, createdFromEmail)
+}
+
+func (r *MemoryRepo) addEmailProjectionWithThreadLocked(companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, now time.Time, createdFromEmail bool) string {
+	information := attachedEmailProjectionInformationWithThread(message, sharedInboxID, accountEmail, emailThreadID, now, createdFromEmail)
 	informationID := newUUIDv7String()
 	info := domain.NodeInformation{
 		CompanyID:        companyID,
@@ -887,9 +969,14 @@ func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID, sharedInboxID, 
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	return informationID
 }
 
 func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, sharedInboxID, accountEmail string, attachedAt time.Time, createdFromEmail bool) string {
+	return attachedEmailProjectionInformationWithThread(message, sharedInboxID, accountEmail, "", attachedAt, createdFromEmail)
+}
+
+func attachedEmailProjectionInformationWithThread(message domain.EmailMessageSnapshot, sharedInboxID, accountEmail, emailThreadID string, attachedAt time.Time, createdFromEmail bool) string {
 	var date *int64
 	if message.Date > 0 {
 		value := message.Date
@@ -898,6 +985,7 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, sha
 	payload := struct {
 		MessageID         string `json:"message_id"`
 		ThreadID          string `json:"thread_id"`
+		EmailThreadID     string `json:"email_thread_id,omitempty"`
 		SharedInboxID     string `json:"shared_inbox_id,omitempty"`
 		AccountEmail      string `json:"account_email,omitempty"`
 		Subject           string `json:"subject"`
@@ -909,6 +997,7 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, sha
 	}{
 		MessageID:         strings.TrimSpace(message.ID),
 		ThreadID:          strings.TrimSpace(message.ThreadID),
+		EmailThreadID:     strings.TrimSpace(emailThreadID),
 		SharedInboxID:     strings.TrimSpace(sharedInboxID),
 		AccountEmail:      strings.TrimSpace(accountEmail),
 		Subject:           emailNodeTitle(message),
@@ -950,6 +1039,7 @@ func normalizeEmailMessageSnapshot(message domain.EmailMessageSnapshot) domain.E
 	message.Cc = normalizeEmailAddressSnapshots(message.Cc)
 	message.Bcc = normalizeEmailAddressSnapshots(message.Bcc)
 	message.ReplyTo = normalizeEmailAddressSnapshots(message.ReplyTo)
+	message.Attachments = normalizeEmailAttachmentSnapshots(message.Attachments)
 	message.Folders = normalizeUniqueStrings(message.Folders, 100)
 	message.FolderIDs = normalizeUniqueStrings(message.FolderIDs, 100)
 	return message

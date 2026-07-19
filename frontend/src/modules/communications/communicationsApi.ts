@@ -491,9 +491,23 @@ export type EnsureCommunicationsEmailCollaborationInput = ResolveCommunicationsE
 
 export type CommunicationsEmailCollaborationThread = {
   collaboration_id: string;
+  email_thread_id?: string;
+  thread_id?: string;
+  messages: EmailMessage[];
+  hydration_status?: "partial" | "complete";
+  fetched_at?: string;
+  last_hydration_error?: string;
+  history_complete: boolean;
+};
+
+export type CommunicationsStoredEmailThread = {
+  email_thread_id: string;
   thread_id?: string;
   messages: EmailMessage[];
   history_complete: boolean;
+  hydration_status?: "partial" | "complete";
+  fetched_at?: string;
+  last_hydration_error?: string;
 };
 
 export type SendCommunicationsEmailCollaborationDraftResult = {
@@ -1006,12 +1020,36 @@ export async function getEmailCollaborationThread(companyID: string, collaborati
   );
   return {
     collaboration_id: payload.collaboration_id,
+    email_thread_id: payload.email_thread_id,
     thread_id: payload.thread_id,
+    hydration_status: payload.hydration_status,
+    fetched_at: payload.fetched_at,
+    last_hydration_error: payload.last_hydration_error,
     messages: (payload.messages ?? []).map((message) => ({
       ...cloneMessage(message),
       collaboration_id: cleanCollaborationID,
     })),
     history_complete: payload.history_complete === true,
+  };
+}
+
+export async function getNodeEmailThread(companyID: string, nodeID: string, emailThreadID: string): Promise<CommunicationsStoredEmailThread> {
+  const cleanCompanyID = companyID.trim();
+  const cleanNodeID = nodeID.trim();
+  const cleanEmailThreadID = emailThreadID.trim();
+  if (!cleanCompanyID || !cleanNodeID || !cleanEmailThreadID) throw new Error("node_email_thread_id_required");
+  const query = new URLSearchParams({ company_id: cleanCompanyID });
+  const payload = await apiFetchJSON<CommunicationsStoredEmailThread>(
+    `/v1/nodes/${encodeURIComponent(cleanNodeID)}/email-threads/${encodeURIComponent(cleanEmailThreadID)}?${query.toString()}`,
+  );
+  return {
+    email_thread_id: payload.email_thread_id,
+    thread_id: payload.thread_id,
+    messages: (payload.messages ?? []).map(cloneMessage),
+    history_complete: payload.history_complete === true,
+    hydration_status: payload.hydration_status,
+    fetched_at: payload.fetched_at,
+    last_hydration_error: payload.last_hydration_error,
   };
 }
 
@@ -1479,6 +1517,11 @@ export type CommunicationsTriageConversionResult = {
   project_relationships?: ProjectRelationshipProjection[];
   deleted_message_ids: string[];
   unstarred_message_ids?: string[];
+  attached_email_information_ids?: string[];
+  email_thread_ids?: string[];
+  linked_text_block_id?: string;
+  initial_chat_id?: string;
+
 };
 
 function communicationsTriageConversionTargetPayload(target: CommunicationsTriageConversionTarget): Record<string, unknown> {
@@ -1510,6 +1553,8 @@ export async function convertTriageMessagesToExplorerTarget(input: {
   priority?: number;
   columnID?: string;
   status?: string;
+  linkedTextBlock?: { type: string; information: string; informationID: string };
+  initialChat?: { type: string; information: string; informationID: string };
 }): Promise<CommunicationsTriageConversionResult> {
   const cleanSharedInboxID = input.sharedInboxID?.trim() ?? "";
   const cleanAccountEmail = cleanSharedInboxID ? "" : input.accountEmail?.trim().toLowerCase() ?? "";
@@ -1528,6 +1573,16 @@ export async function convertTriageMessagesToExplorerTarget(input: {
       priority: input.priority,
       column_id: cleanColumnID || undefined,
       status: cleanStatus || undefined,
+      linked_text_block: input.linkedTextBlock ? {
+        type: input.linkedTextBlock.type,
+        information: input.linkedTextBlock.information,
+        information_id: input.linkedTextBlock.informationID,
+      } : undefined,
+      initial_chat: input.initialChat ? {
+        type: input.initialChat.type,
+        information: input.initialChat.information,
+        information_id: input.initialChat.informationID,
+      } : undefined,
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);

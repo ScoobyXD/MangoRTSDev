@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"strings"
 	"sync"
+	"time"
 )
 
 const communicationsEmailCollaborationThreadHydrationWorkers = 4
@@ -157,4 +158,60 @@ func (s *Server) hydrateEmailCollaborationThreadMessages(ctx context.Context, co
 		return nil, firstErr
 	}
 	return messages, nil
+}
+
+func communicationsEmailThreadInputFromCollaboration(collaboration domain.CommunicationsEmailCollaboration, messages []domain.EmailMessageSnapshot, historyComplete bool, hydrationError string) store.CommunicationsEmailThreadUpsertInput {
+	input := store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: collaboration.CompanyID, AccountEmail: collaboration.AccountEmail,
+		ProviderThreadID: collaboration.ProviderThreadID, SelectedMessageID: collaboration.RootMessageID,
+		Messages: messages, HistoryComplete: historyComplete, FetchedAt: time.Now().UTC(),
+		LastHydrationError: hydrationError,
+	}
+	if input.SelectedMessageID == "" {
+		input.SelectedMessageID = collaboration.Message.ID
+	}
+	if collaboration.ScopeType == store.CommunicationsEmailCollaborationScopeShared {
+		input.SharedInboxID = collaboration.SharedInboxID
+	} else {
+		input.PersonalUserID = collaboration.PersonalUserID
+		input.PersonalAccountEmail = collaboration.PersonalAccountEmail
+	}
+	return input
+}
+
+func (s *Server) hydrateAndPersistCommunicationsEmailCollaborationThread(ctx context.Context, collaboration domain.CommunicationsEmailCollaboration, actorUserID string) (domain.CommunicationsEmailThread, bool) {
+	providerMessages, complete := s.loadCommunicationsEmailCollaborationThread(ctx, collaboration, actorUserID)
+	snapshots := make([]domain.EmailMessageSnapshot, 0, len(providerMessages))
+	for _, message := range providerMessages {
+		snapshots = append(snapshots, emailMessageSnapshotFromNylas(message))
+	}
+	hydrationError := ""
+	if !complete {
+		snapshots = []domain.EmailMessageSnapshot{collaboration.Message}
+		hydrationError = "provider_thread_temporarily_unavailable"
+	}
+	thread, err := s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromCollaboration(collaboration, snapshots, complete, hydrationError))
+	if err != nil {
+		return domain.CommunicationsEmailThread{}, false
+	}
+	return thread, complete
+}
+
+func (s *Server) scheduleCommunicationsEmailCollaborationThreadHydration(collaboration domain.CommunicationsEmailCollaboration, actorUserID string) {
+	if strings.TrimSpace(collaboration.ProviderThreadID) == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_, _ = s.hydrateAndPersistCommunicationsEmailCollaborationThread(ctx, collaboration, actorUserID)
+	}()
+}
+
+func storedEmailThreadMessages(thread domain.CommunicationsEmailThread) []domain.EmailMessageSnapshot {
+	messages := make([]domain.EmailMessageSnapshot, 0, len(thread.Messages))
+	for _, item := range thread.Messages {
+		messages = append(messages, item.Message)
+	}
+	return messages
 }

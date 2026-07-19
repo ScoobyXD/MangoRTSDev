@@ -326,6 +326,51 @@ test("triage conversion payload can target a specific Kanban column", async () =
   }
 });
 
+test("existing-node email import serializes linked text and chat in one conversion request", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({
+      target: { mode: "existing_node", node_id: "node-1" },
+      nodes: [],
+      deleted_message_ids: ["msg-1"],
+      attached_email_information_ids: ["attached-1"],
+      email_thread_ids: ["thread-1"],
+      linked_text_block_id: "text-1",
+      initial_chat_id: "chat-1",
+    }, 201);
+  };
+  try {
+    await convertTriageMessagesToExplorerTarget({
+      companyID: "company-1",
+      accountEmail: " OWNER@example.test ",
+      target: { mode: "existing_node", nodeID: "node-1" },
+      messageIDs: [" msg-1 "],
+      linkedTextBlock: { type: "Text box", informationID: "text-1", information: "{\"email_message_id\":\"msg-1\"}" },
+      initialChat: { type: "Text block chat", informationID: "chat-1", information: "{\"block_id\":\"text-1\"}" },
+    });
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/triage/convert?account_email=owner%40example.test",
+      method: "POST",
+      body: {
+        company_id: "company-1",
+        target: { mode: "existing_node", node_id: "node-1" },
+        message_ids: ["msg-1"],
+        linked_text_block: { type: "Text box", information: "{\"email_message_id\":\"msg-1\"}", information_id: "text-1" },
+        initial_chat: { type: "Text block chat", information: "{\"block_id\":\"text-1\"}", information_id: "chat-1" },
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("shared inbox helpers use communications shared inbox endpoints", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];

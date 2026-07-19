@@ -404,22 +404,83 @@ type EmailAddressSnapshot struct {
 	Email string `json:"email"`
 }
 
+// EmailAttachmentSnapshot is durable attachment metadata. Content is
+// intentionally absent: provider bytes and temporary download URLs must never
+// be copied into Mango's email message rows.
+type EmailAttachmentSnapshot struct {
+	ID                 string `json:"id,omitempty"`
+	AttachmentID       string `json:"attachment_id,omitempty"`
+	Filename           string `json:"filename"`
+	ContentType        string `json:"content_type,omitempty"`
+	ContentID          string `json:"content_id,omitempty"`
+	ContentDisposition string `json:"content_disposition,omitempty"`
+	IsInline           bool   `json:"is_inline,omitempty"`
+	Size               int64  `json:"size,omitempty"`
+}
+
 type EmailMessageSnapshot struct {
-	ID        string                 `json:"id"`
-	ThreadID  string                 `json:"thread_id,omitempty"`
-	Subject   string                 `json:"subject"`
-	Snippet   string                 `json:"snippet,omitempty"`
-	Body      string                 `json:"body,omitempty"`
-	Date      int64                  `json:"date,omitempty"`
-	Unread    bool                   `json:"unread"`
-	Starred   bool                   `json:"starred"`
-	From      []EmailAddressSnapshot `json:"from,omitempty"`
-	To        []EmailAddressSnapshot `json:"to,omitempty"`
-	Cc        []EmailAddressSnapshot `json:"cc,omitempty"`
-	Bcc       []EmailAddressSnapshot `json:"bcc,omitempty"`
-	ReplyTo   []EmailAddressSnapshot `json:"reply_to,omitempty"`
-	Folders   []string               `json:"folders,omitempty"`
-	FolderIDs []string               `json:"folder_ids,omitempty"`
+	ID          string                    `json:"id"`
+	ThreadID    string                    `json:"thread_id,omitempty"`
+	Subject     string                    `json:"subject"`
+	Snippet     string                    `json:"snippet,omitempty"`
+	Body        string                    `json:"body,omitempty"`
+	Date        int64                     `json:"date,omitempty"`
+	Unread      bool                      `json:"unread"`
+	Starred     bool                      `json:"starred"`
+	From        []EmailAddressSnapshot    `json:"from,omitempty"`
+	To          []EmailAddressSnapshot    `json:"to,omitempty"`
+	Cc          []EmailAddressSnapshot    `json:"cc,omitempty"`
+	Bcc         []EmailAddressSnapshot    `json:"bcc,omitempty"`
+	ReplyTo     []EmailAddressSnapshot    `json:"reply_to,omitempty"`
+	Attachments []EmailAttachmentSnapshot `json:"attachments,omitempty"`
+	Folders     []string                  `json:"folders,omitempty"`
+	FolderIDs   []string                  `json:"folder_ids,omitempty"`
+}
+
+// CommunicationsEmailThread is Mango's provider-independent, durable copy of
+// an imported mailbox thread. EmailThreadID and each message's Mango ID remain
+// stable while provider identifiers are retained only for mailbox-scoped
+// deduplication and refreshes.
+type CommunicationsEmailThread struct {
+	CompanyID             string                       `json:"company_id"`
+	EmailThreadID         string                       `json:"email_thread_id"`
+	ScopeType             string                       `json:"scope_type"`
+	PersonalUserID        string                       `json:"personal_user_id,omitempty"`
+	PersonalAccountEmail  string                       `json:"personal_account_email,omitempty"`
+	SharedInboxID         string                       `json:"shared_inbox_id,omitempty"`
+	AccountEmail          string                       `json:"account_email"`
+	ProviderThreadID      string                       `json:"provider_thread_id,omitempty"`
+	RootProviderMessageID string                       `json:"root_provider_message_id"`
+	HydrationStatus       string                       `json:"hydration_status"`
+	HistoryComplete       bool                         `json:"history_complete"`
+	FetchedAt             *time.Time                   `json:"fetched_at,omitempty"`
+	LastHydrationError    string                       `json:"last_hydration_error,omitempty"`
+	CreatedTimestamp      time.Time                    `json:"created_timestamp"`
+	UpdatedTimestamp      time.Time                    `json:"updated_timestamp"`
+	Messages              []CommunicationsEmailMessage `json:"messages"`
+}
+
+type CommunicationsEmailMessage struct {
+	CompanyID         string               `json:"company_id"`
+	EmailMessageID    string               `json:"email_message_id"`
+	EmailThreadID     string               `json:"email_thread_id"`
+	ProviderMessageID string               `json:"provider_message_id"`
+	ProviderThreadID  string               `json:"provider_thread_id,omitempty"`
+	MessageOrder      int                  `json:"message_order"`
+	Message           EmailMessageSnapshot `json:"message"`
+	CreatedTimestamp  time.Time            `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time            `json:"updated_timestamp"`
+}
+
+type CommunicationsNodeEmailThread struct {
+	CompanyID         string                    `json:"company_id"`
+	NodeID            string                    `json:"node_id"`
+	InformationID     string                    `json:"information_id"`
+	EmailThreadID     string                    `json:"email_thread_id"`
+	SelectedMessageID string                    `json:"selected_message_id"`
+	CreatedByUserID   string                    `json:"created_by_user_id,omitempty"`
+	CreatedTimestamp  time.Time                 `json:"created_timestamp"`
+	Thread            CommunicationsEmailThread `json:"thread"`
 }
 
 type CommunicationsMessageReadStatus struct {
@@ -531,6 +592,7 @@ type CommunicationsEmailCollaboration struct {
 	SharedInboxID              string                                        `json:"shared_inbox_id,omitempty"`
 	AccountEmail               string                                        `json:"account_email"`
 	ProviderThreadID           string                                        `json:"provider_thread_id,omitempty"`
+	EmailThreadID              string                                        `json:"email_thread_id,omitempty"`
 	RootMessageID              string                                        `json:"root_message_id"`
 	LatestMessageID            string                                        `json:"latest_message_id"`
 	Message                    EmailMessageSnapshot                          `json:"message"`

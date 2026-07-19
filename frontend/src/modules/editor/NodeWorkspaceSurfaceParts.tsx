@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
@@ -3991,7 +3991,16 @@ function createAttachedEmailFolderID(): string {
   return `folder:${Date.now()}:${Math.round(Math.random() * 1_000_000)}`;
 }
 
-async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string): Promise<EmailMessage[]> {
+async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string, nodeID: string): Promise<EmailMessage[]> {
+  const durableThreadID = email.emailThreadID?.trim() ?? "";
+  if (durableThreadID && nodeID.trim()) {
+    const durableThread = await getNodeEmailThread(companyID, nodeID, durableThreadID);
+    const primary = durableThread.messages.find((message) => message.id === email.messageID)
+      ?? durableThread.messages[0] ?? null;
+    return primary
+      ? mergeEmailThreadMessages(primary, durableThread.messages, primary.local_replies ?? [])
+      : [];
+  }
   const mailboxScope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
   const collaborationID = email.collaborationID?.trim() ?? "";
   if (collaborationID) {
@@ -4076,7 +4085,7 @@ const AttachedEmailThreadCard: React.FC<{
     setLoading(true);
     setLoadError("");
     setThreadMessages([]);
-    void loadAttachedEmailThreadPreview(email, companyID)
+    void loadAttachedEmailThreadPreview(email, companyID, nodeID)
       .then((messages) => {
         if (!cancelled) setThreadMessages(messages);
       })
@@ -4087,7 +4096,7 @@ const AttachedEmailThreadCard: React.FC<{
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, email]);
+  }, [companyID, email, nodeID]);
 
   useEffect(() => {
     const targetMessageID = initialFocusMessageID?.trim() ?? "";
@@ -4250,6 +4259,7 @@ const AttachedEmailThreadCard: React.FC<{
             <EmailConversationPane
               messageID={email.messageID}
               collaborationID={email.collaborationID}
+              emailThreadID={email.emailThreadID}
               nodeID={nodeID}
               apiBase={apiBase}
               companyID={companyID}
@@ -4980,6 +4990,7 @@ type EmailConversationPaneProps = {
   messageID: string;
   collaborationID?: string;
   nodeID?: string;
+  emailThreadID?: string;
   apiBase?: string;
   companyID: string;
   companyUsers?: MentionableCompanyUser[];
@@ -5757,6 +5768,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
   collaborationID,
   nodeID = "",
+  emailThreadID,
   apiBase = "",
   companyID,
   companyUsers = [],
@@ -5911,17 +5923,22 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     void (async () => {
+      const cleanEmailThreadID = emailThreadID?.trim() ?? "";
+      const storedThread = cleanEmailThreadID && nodeID.trim()
+        ? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID)
+        : null;
       const cleanCollaborationID = collaborationID?.trim() ?? "";
-      const collaborationThread = cleanCollaborationID
+      const collaborationThread = !storedThread && cleanCollaborationID
         ? await getEmailCollaborationThread(companyID, cleanCollaborationID)
         : null;
-      const payload = collaborationThread
-        ? collaborationThread.messages.find((item) => item.id === messageID) ?? collaborationThread.messages[0]
-        : await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
+      const immediateMessages = storedThread?.messages.length ? storedThread.messages : collaborationThread?.messages ?? [];
+      const payload = immediateMessages.find((item) => item.id === messageID)
+        ?? immediateMessages[0]
+        ?? await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
       if (!payload) throw new Error("email_collaboration_thread_unavailable");
       if (cancelled) return;
       setMessage(payload);
-      setThreadMessages(collaborationThread?.messages.length ? collaborationThread.messages : [payload]);
+      setThreadMessages(immediateMessages.length ? immediateMessages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setCcDraft("");
@@ -5929,7 +5946,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
 
-      if (collaborationThread) return;
+      if (storedThread || collaborationThread) return;
 
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
@@ -5978,7 +5995,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [collaborationID, companyID, mailboxScope, messageID]);
+  }, [collaborationID, companyID, emailThreadID, mailboxScope, messageID, nodeID]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;

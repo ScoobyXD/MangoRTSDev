@@ -412,6 +412,62 @@ test("application heartbeat stays non-green through subscription recovery and dr
   client.close();
 });
 
+
+test("adding a scope to a healthy socket does not create a global transport outage", async () => {
+  const sockets: HealthyScopeWebSocket[] = [];
+
+  class HealthyScopeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = HealthyScopeWebSocket.CONNECTING;
+    sent: string[] = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.readyState = HealthyScopeWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+      });
+    }
+
+    send(message: string): void { this.sent.push(message); }
+    close(): void {
+      this.readyState = HealthyScopeWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  const client = new MangoRealtimeClient("https://scope-health.example.test", "scope-health-company", {
+    WebSocketCtor: HealthyScopeWebSocket as unknown as typeof WebSocket,
+    getTicket: async () => undefined,
+    reconnectDelayMs: 60_000,
+  });
+  const statuses: RealtimeHealthStatus[] = [];
+  const unsubscribeHealth = client.subscribeHealth((snapshot) => { statuses.push(snapshot.status); });
+  const unsubscribeNotifications = client.subscribe("notifications:user:user-1");
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  const socket = sockets[0];
+  socket.onmessage?.({ data: JSON.stringify({ type: "heartbeat.confirmed", nonce: "healthy" }) });
+  socket.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  assert.equal(statuses[statuses.length - 1], "connected");
+
+  const unsubscribeChat = client.subscribe("chat:node:node-1");
+  assert.equal(statuses[statuses.length - 1], "connected");
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-1"), false);
+  assert.equal(JSON.parse(socket.sent[socket.sent.length - 1] ?? "{}").scope, "chat:node:node-1");
+
+  unsubscribeChat();
+  unsubscribeNotifications();
+  unsubscribeHealth();
+  client.close();
+});
 test("realtime ticket bootstrap bypasses its own degraded mutation gate", async () => {
   const originalFetch = globalThis.fetch;
   const sockets: FakeTicketWebSocket[] = [];

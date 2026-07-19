@@ -8,6 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
+	"time"
 )
 
 const postgresEmailCollaborationColumns = `
@@ -23,6 +24,7 @@ c.account_email,
 c.provider_thread_id,
 c.root_message_id,
 c.latest_message_id,
+coalesce(c.email_thread_id::text, ''),
 c.message_snapshot,
 coalesce(c.created_by_user_id::text, ''),
 c.created_timestamp,
@@ -44,6 +46,7 @@ func scanPostgresEmailCollaboration(row emailCollaborationRowScanner) (domain.Co
 		&item.CompanyID, &item.CollaborationID, &item.NodeID, &item.AttachedEmailInformationID,
 		&item.ScopeType, &item.PersonalUserID, &item.PersonalAccountEmail, &item.SharedInboxID,
 		&item.AccountEmail, &item.ProviderThreadID, &item.RootMessageID, &item.LatestMessageID,
+		&item.EmailThreadID,
 		&snapshot, &item.CreatedByUserID, &item.CreatedTimestamp, &item.UpdatedTimestamp,
 	)
 	if err != nil {
@@ -207,10 +210,33 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	if !member {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrPrincipalNotInCompany
 	}
+	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
+		CompanyID: input.CompanyID, PersonalUserID: scope.personalUserID,
+		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
+		AccountEmail: scope.accountEmail, ProviderThreadID: input.Message.ThreadID,
+		SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
+		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("persist_email_thread", err)
+	}
 	if existing, err := postgresEmailCollaborationLookupForEnsure(ctx, tx, input, scope); err == nil {
 		existing, err = reconcilePostgresEnsuredEmailCollaborationTx(ctx, tx, existing, input)
 		if err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("reconcile_existing", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+update communications_email_collaborations
+set email_thread_id=$3::uuid, updated_timestamp=now()
+where company_id=$1::uuid and collaboration_id=$2::uuid`, input.CompanyID, existing.CollaborationID, thread.EmailThreadID); err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("link_existing_thread", err)
+		}
+		if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, existing.NodeID, existing.AttachedEmailInformationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("link_existing_node_thread", err)
+		}
+		existing, err = postgresEmailCollaborationByID(ctx, tx, input.CompanyID, existing.CollaborationID, "")
+		if err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("reload_existing", err)
 		}
 		if err := tx.Commit(); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("commit_existing", err)
@@ -225,7 +251,7 @@ insert into nodes (company_id, node_id, name, priority, default_access, created_
 values ($1::uuid, $2::uuid, $3, $4, 'no_access', now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_node", err)
 	}
-	information := communicationsEmailAttachedProjectionPayload(informationID, collaborationID, input)
+	information := communicationsEmailAttachedProjectionPayloadWithThread(informationID, collaborationID, thread.EmailThreadID, input)
 	if _, err := tx.ExecContext(ctx, `
 insert into node_information (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, informationID, nodeID, information); err != nil {
@@ -247,15 +273,15 @@ values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, no
 insert into communications_email_collaborations (
   company_id, collaboration_id, node_id, attached_email_information_id,
   scope_type, personal_user_id, personal_account_email, shared_inbox_id, account_email,
-  provider_thread_id, root_message_id, latest_message_id, message_snapshot, created_by_user_id,
+  provider_thread_id, root_message_id, latest_message_id, email_thread_id, message_snapshot, created_by_user_id,
   created_timestamp, updated_timestamp
 ) values (
   $1::uuid, $2::uuid, $3::uuid, $4::uuid,
   $5, nullif($6, '')::uuid, nullif($7, ''), nullif($8, '')::uuid, $9,
-  $10, $11, $11, $12::jsonb, $13::uuid, now(), now()
+  $10, $11, $11, $12::uuid, $13::jsonb, $14::uuid, now(), now()
 )`, input.CompanyID, collaborationID, nodeID, informationID, scope.scopeType,
 		scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, scope.accountEmail,
-		input.Message.ThreadID, input.Message.ID, string(snapshot), input.CreatedByUserID); err != nil {
+		input.Message.ThreadID, input.Message.ID, thread.EmailThreadID, string(snapshot), input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_collaboration", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -263,6 +289,9 @@ insert into communications_email_collaboration_participants
   (company_id, collaboration_id, user_id, added_by_user_id, added_via_type, added_via_id, created_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, $3::uuid, 'creator', null, now())`, input.CompanyID, collaborationID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_creator_participant", err)
+	}
+	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("link_created_node_thread", err)
 	}
 	if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: input.CreatedByUserID, AccessLevel: EntityPermissionEdit}); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("grant_creator_access", err)
@@ -521,25 +550,41 @@ func (r *PostgresRepo) UpdateCommunicationsEmailCollaborationMessage(input Commu
 		return nil, err
 	}
 	defer tx.Rollback()
-	var collaborationID, existingSnapshotJSON string
-	err = tx.QueryRowContext(ctx, `
-select c.collaboration_id::text, c.message_snapshot::text
+	item, err := scanPostgresEmailCollaboration(tx.QueryRowContext(ctx, `
+select `+postgresEmailCollaborationColumns+`
 from communications_email_collaborations c
 where c.company_id=$1::uuid and c.scope_type=$2
   and (($2='personal' and c.personal_user_id=nullif($3, '')::uuid and c.personal_account_email=$4)
        or ($2='shared' and c.shared_inbox_id=nullif($5, '')::uuid))
   and ((nullif($7, '') is not null and c.provider_thread_id=$7) or c.root_message_id=$6 or c.latest_message_id=$6)
-for update`, companyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, message.ID, message.ThreadID).Scan(&collaborationID, &existingSnapshotJSON)
+for update`, companyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, message.ID, message.ThreadID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return []string{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var existing domain.EmailMessageSnapshot
-	if err := json.Unmarshal([]byte(existingSnapshotJSON), &existing); err != nil {
+	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
+		CompanyID: item.CompanyID, PersonalUserID: item.PersonalUserID,
+		PersonalAccountEmail: item.PersonalAccountEmail, SharedInboxID: item.SharedInboxID,
+		AccountEmail: item.AccountEmail, ProviderThreadID: item.ProviderThreadID,
+		SelectedMessageID: item.RootMessageID, Messages: []domain.EmailMessageSnapshot{message},
+		FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `
+update communications_email_collaborations
+set email_thread_id=$3::uuid, updated_timestamp=now()
+where company_id=$1::uuid and collaboration_id=$2::uuid`, item.CompanyID, item.CollaborationID, thread.EmailThreadID); err != nil {
+		return nil, err
+	}
+	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, item.CompanyID, item.NodeID, item.AttachedEmailInformationID, thread.EmailThreadID, item.RootMessageID, item.CreatedByUserID); err != nil {
+		return nil, err
+	}
+	existing := item.Message
+	collaborationID := item.CollaborationID
 	if shouldAdvanceEmailCollaborationMessage(existing, message) {
 		merged := mergeEmailMessageSnapshot(existing, message)
 		snapshot, err := json.Marshal(merged)

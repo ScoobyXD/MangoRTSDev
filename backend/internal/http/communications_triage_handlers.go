@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+type communicationsTriageAtomicNodeInformationRequest struct {
+	Type          string `json:"type"`
+	Information   string `json:"information"`
+	InformationID string `json:"information_id"`
+}
+
 func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -23,21 +29,29 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		CompanyID          string                                     `json:"company_id"`
-		SharedInboxID      string                                     `json:"shared_inbox_id"`
-		LogicGateID        string                                     `json:"logic_gate_id"`
-		NodeID             string                                     `json:"node_id"`
-		NewLogicGateHeader string                                     `json:"new_logic_gate_header"`
-		Target             store.CommunicationsTriageConversionTarget `json:"target"`
-		Status             string                                     `json:"status"`
-		ColumnID           string                                     `json:"column_id"`
-		Priority           *int                                       `json:"priority"`
-		MessageIDs         []string                                   `json:"message_ids"`
+		CompanyID          string                                            `json:"company_id"`
+		SharedInboxID      string                                            `json:"shared_inbox_id"`
+		LogicGateID        string                                            `json:"logic_gate_id"`
+		NodeID             string                                            `json:"node_id"`
+		NewLogicGateHeader string                                            `json:"new_logic_gate_header"`
+		Target             store.CommunicationsTriageConversionTarget        `json:"target"`
+		Status             string                                            `json:"status"`
+		ColumnID           string                                            `json:"column_id"`
+		Priority           *int                                              `json:"priority"`
+		MessageIDs         []string                                          `json:"message_ids"`
+		LinkedTextBlock    *communicationsTriageAtomicNodeInformationRequest `json:"linked_text_block"`
+		InitialChat        *communicationsTriageAtomicNodeInformationRequest `json:"initial_chat"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	for _, item := range []*communicationsTriageAtomicNodeInformationRequest{req.LinkedTextBlock, req.InitialChat} {
+		if item != nil && rejectDurableInlineFileBytes(w, "communications_triage_atomic_node_information", item.Information) {
+			return
+		}
+	}
+	nodeActorUserID, nodeActorLabel := nodeChangeActorPayload(r)
 	sharedInboxID := strings.TrimSpace(req.SharedInboxID)
 	connection, ok := s.requireCommunicationsConnection(w, r, actor, req.CompanyID, sharedInboxID, store.EntityPermissionEdit)
 	if !ok {
@@ -45,6 +59,16 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	permissionUserID := s.entityPermissionActorUserID(r, req.CompanyID)
+	toNodeInformationInput := func(item *communicationsTriageAtomicNodeInformationRequest) *store.NodeInformationInput {
+		if item == nil {
+			return nil
+		}
+		return &store.NodeInformationInput{
+			CompanyID: req.CompanyID, NodeID: req.Target.NodeID, Type: item.Type,
+			Information: item.Information, InformationID: item.InformationID,
+			ActorUserID: nodeActorUserID, ActorDisplayName: nodeActorLabel,
+		}
+	}
 	conversionInput, err := store.NormalizeCommunicationsTriageConversionInput(store.CommunicationsTriageConversionInput{
 		UserID:             connection.UserID,
 		CompanyID:          req.CompanyID,
@@ -62,6 +86,8 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		Priority:           req.Priority,
 		PrioritySet:        req.Priority != nil,
 		MessageIDs:         req.MessageIDs,
+		LinkedTextBlock:    toNodeInformationInput(req.LinkedTextBlock),
+		InitialChat:        toNodeInformationInput(req.InitialChat),
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "company_target_and_messages_required")
@@ -89,6 +115,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
+	hydrationCollaborations := make([]domain.CommunicationsEmailCollaboration, 0, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
@@ -96,7 +123,28 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 			return
 		}
 		sourceMessagesByID[messageID] = message
-		if _, err := s.repo.UpsertCommunicationsTriageItem(connection.UserID, emailMessageSnapshotFromNylas(message)); errors.Is(err, store.ErrInvalid) {
+		snapshot := emailMessageSnapshotFromNylas(message)
+		threadInput := store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: conversionInput.CompanyID, AccountEmail: connection.AccountEmail,
+			ProviderThreadID: snapshot.ThreadID, SelectedMessageID: snapshot.ID,
+			Messages: []domain.EmailMessageSnapshot{snapshot}, HistoryComplete: snapshot.ThreadID == "",
+			FetchedAt: time.Now().UTC(),
+		}
+		scopeType := store.CommunicationsEmailCollaborationScopePersonal
+		if sharedInboxID != "" {
+			threadInput.SharedInboxID = sharedInboxID
+			scopeType = store.CommunicationsEmailCollaborationScopeShared
+		} else {
+			threadInput.PersonalUserID = connection.UserID
+			threadInput.PersonalAccountEmail = connection.AccountEmail
+		}
+		conversionInput.EmailThreads = append(conversionInput.EmailThreads, threadInput)
+		hydrationCollaborations = append(hydrationCollaborations, domain.CommunicationsEmailCollaboration{
+			CompanyID: conversionInput.CompanyID, ScopeType: scopeType, PersonalUserID: threadInput.PersonalUserID,
+			PersonalAccountEmail: threadInput.PersonalAccountEmail, SharedInboxID: sharedInboxID, AccountEmail: connection.AccountEmail,
+			ProviderThreadID: snapshot.ThreadID, RootMessageID: snapshot.ID, Message: snapshot,
+		})
+		if _, err := s.repo.UpsertCommunicationsTriageItem(connection.UserID, snapshot); errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_triage_message")
 			return
 		} else if errors.Is(err, store.ErrNotFound) {
@@ -124,6 +172,9 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	result.UnstarredMessageIDs = s.unstarConvertedCommunicationsMessages(r.Context(), connection, sourceMessagesByID, conversionInput.MessageIDs)
 	s.publishCommittedWorkspaceEvents(result.Events)
+	for _, collaboration := range hydrationCollaborations {
+		s.scheduleCommunicationsEmailCollaborationThreadHydration(collaboration, actor.User.UserID)
+	}
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -413,22 +464,43 @@ func (s *Server) handleCommunicationsMyLogicGateByID(w http.ResponseWriter, r *h
 
 func emailMessageSnapshotFromNylas(message NylasMessage) domain.EmailMessageSnapshot {
 	return domain.EmailMessageSnapshot{
-		ID:        strings.TrimSpace(message.ID),
-		ThreadID:  strings.TrimSpace(message.ThreadID),
-		Subject:   strings.TrimSpace(message.Subject),
-		Snippet:   strings.TrimSpace(message.Snippet),
-		Body:      strings.TrimSpace(message.Body),
-		Date:      message.Date,
-		Unread:    message.Unread,
-		Starred:   message.Starred,
-		From:      emailAddressSnapshotsFromNylas(message.From),
-		To:        emailAddressSnapshotsFromNylas(message.To),
-		Cc:        emailAddressSnapshotsFromNylas(message.Cc),
-		Bcc:       emailAddressSnapshotsFromNylas(message.Bcc),
-		ReplyTo:   emailAddressSnapshotsFromNylas(message.ReplyTo),
-		Folders:   cleanStringList(message.Folders),
-		FolderIDs: cleanStringList(message.FolderIDs),
+		ID:          strings.TrimSpace(message.ID),
+		ThreadID:    strings.TrimSpace(message.ThreadID),
+		Subject:     strings.TrimSpace(message.Subject),
+		Snippet:     strings.TrimSpace(message.Snippet),
+		Body:        strings.TrimSpace(message.Body),
+		Date:        message.Date,
+		Unread:      message.Unread,
+		Starred:     message.Starred,
+		From:        emailAddressSnapshotsFromNylas(message.From),
+		To:          emailAddressSnapshotsFromNylas(message.To),
+		Cc:          emailAddressSnapshotsFromNylas(message.Cc),
+		Bcc:         emailAddressSnapshotsFromNylas(message.Bcc),
+		ReplyTo:     emailAddressSnapshotsFromNylas(message.ReplyTo),
+		Attachments: emailAttachmentSnapshotsFromNylas(message.Attachments),
+		Folders:     cleanStringList(message.Folders),
+		FolderIDs:   cleanStringList(message.FolderIDs),
 	}
+}
+
+func emailAttachmentSnapshotsFromNylas(attachments []NylasAttachment) []domain.EmailAttachmentSnapshot {
+	out := make([]domain.EmailAttachmentSnapshot, 0, len(attachments))
+	for _, attachment := range attachments {
+		id := strings.TrimSpace(attachment.ID)
+		attachmentID := strings.TrimSpace(attachment.AttachmentID)
+		filename := strings.TrimSpace(attachment.Filename)
+		if id == "" && attachmentID == "" && filename == "" {
+			continue
+		}
+		out = append(out, domain.EmailAttachmentSnapshot{
+			ID: id, AttachmentID: attachmentID, Filename: filename,
+			ContentType:        strings.TrimSpace(attachment.ContentType),
+			ContentID:          strings.TrimSpace(attachment.ContentID),
+			ContentDisposition: strings.TrimSpace(attachment.ContentDisposition),
+			IsInline:           attachment.IsInline, Size: attachment.Size,
+		})
+	}
+	return out
 }
 
 func emailAddressSnapshotsFromNylas(addresses []NylasEmailAddress) []domain.EmailAddressSnapshot {

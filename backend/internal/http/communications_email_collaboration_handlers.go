@@ -134,6 +134,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			status = http.StatusCreated
 			s.wakeRealtimeSpine()
 		}
+		s.scheduleCommunicationsEmailCollaborationThreadHydration(result.Collaboration, actor.User.UserID)
 		writeJSON(w, status, result)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -211,23 +212,36 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 		return
 	}
 	if len(parts) == 2 && parts[1] == "thread" {
-		providerMessages, historyComplete := s.loadCommunicationsEmailCollaborationThread(r.Context(), item, actor.User.UserID)
-		if historyComplete {
+		var thread domain.CommunicationsEmailThread
+		var loaded bool
+		if isTruthyQueryValue(r.URL.Query().Get("refresh")) {
+			thread, loaded = s.hydrateAndPersistCommunicationsEmailCollaborationThread(r.Context(), item, actor.User.UserID)
+		}
+		if !loaded && strings.TrimSpace(item.EmailThreadID) != "" {
+			var loadErr error
+			thread, loadErr = s.repo.GetCommunicationsEmailThread(companyID, item.EmailThreadID)
+			loaded = loadErr == nil
+		}
+		if loaded {
 			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-				"collaboration_id": item.CollaborationID,
-				"thread_id":        item.ProviderThreadID,
-				"messages":         providerMessages,
-				"history_complete": true,
+				"collaboration_id":     item.CollaborationID,
+				"email_thread_id":      thread.EmailThreadID,
+				"thread_id":            thread.ProviderThreadID,
+				"messages":             storedEmailThreadMessages(thread),
+				"history_complete":     thread.HistoryComplete,
+				"hydration_status":     thread.HydrationStatus,
+				"fetched_at":           thread.FetchedAt,
+				"last_hydration_error": thread.LastHydrationError,
 			})
 			return
 		}
-		// The durable latest snapshot remains available when the immutable
-		// source mailbox or provider cannot currently serve the full history.
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"collaboration_id": item.CollaborationID,
+			"email_thread_id":  item.EmailThreadID,
 			"thread_id":        item.ProviderThreadID,
 			"messages":         []domain.EmailMessageSnapshot{item.Message},
 			"history_complete": false,
+			"hydration_status": store.CommunicationsEmailThreadHydrationPartial,
 		})
 		return
 	}
