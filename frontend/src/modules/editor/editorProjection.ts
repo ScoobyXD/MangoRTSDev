@@ -22,12 +22,26 @@ const EMAIL_MESSAGE_ACCENTS = [
   "#22c55e",
   "#f97316",
   "#6366f1",
+  "#f43f5e",
+  "#06b6d4",
+  "#84cc16",
+  "#a855f7",
+  "#10b981",
+  "#ef4444",
+  "#eab308",
+  "#3b82f6",
 ] as const;
 
-export function editorEmailMessageAccent(messageID: string): string {
+export function editorEmailMessageAccent(messageID: string, unavailableAccents: Iterable<string> = []): string {
   let hash = 0;
   for (const char of messageID.trim()) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
-  return EMAIL_MESSAGE_ACCENTS[hash % EMAIL_MESSAGE_ACCENTS.length] ?? EMAIL_MESSAGE_ACCENTS[0];
+  const unavailable = new Set(Array.from(unavailableAccents, (value) => value.trim().toLowerCase()).filter(Boolean));
+  const startIndex = hash % EMAIL_MESSAGE_ACCENTS.length;
+  for (let offset = 0; offset < EMAIL_MESSAGE_ACCENTS.length; offset += 1) {
+    const candidate = EMAIL_MESSAGE_ACCENTS[(startIndex + offset) % EMAIL_MESSAGE_ACCENTS.length] ?? EMAIL_MESSAGE_ACCENTS[0];
+    if (!unavailable.has(candidate.toLowerCase())) return candidate;
+  }
+  return EMAIL_MESSAGE_ACCENTS[startIndex] ?? EMAIL_MESSAGE_ACCENTS[0];
 }
 
 export type EditorTextBlockProjection<T extends EditorProjectionItem = EditorProjectionItem> = T & {

@@ -5,6 +5,7 @@ import {
   buildEditorTextBlockMetadataPayload,
   buildEditorTextBlockChatPayload,
   canDeleteEditorTextBlockChatMessage,
+  editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CONTENT_PREFIX,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
@@ -28,6 +29,14 @@ test("text-block metadata payloads cannot carry a full document or attachment by
   assert.equal(payload.email_message_id, "message-9");
   assert.equal(payload.email_accent, "#0ea5e9");
 });
+test("linked email accents remain deterministic while avoiding colors already used by a node", () => {
+  const first = editorEmailMessageAccent("message-a");
+  assert.equal(editorEmailMessageAccent("message-a"), first);
+  const second = editorEmailMessageAccent("message-a", [first]);
+  assert.notEqual(second, first);
+  assert.match(second, /^#[0-9a-f]{6}$/i);
+});
+
 test("selects the newest text-box projection for the single editor document", () => {
   const selected = selectCurrentEditorTextProjection([
     { information_id: "older", type: "Text box", information: "old text", updated_timestamp: "2026-05-04T01:00:00.000Z" },

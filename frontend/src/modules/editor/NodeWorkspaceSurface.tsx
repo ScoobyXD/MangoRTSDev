@@ -118,8 +118,8 @@ import {
 import { prepareTextBlockImageFile } from "./nodeTextBlockImageFiles";
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "./editorMentions";
 
-const TEXT_TIMELINE_COLUMN_WIDTH_PX = 52;
-const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
+const TEXT_TIMELINE_COLUMN_WIDTH_PX = 44;
+const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 40;
 const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
 const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
@@ -475,6 +475,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
+  const [nodeEmailNavigationRequest, setNodeEmailNavigationRequest] = useState<{ messageID: string; requestID: number } | null>(null);
   const [closedEditorBlockIDs, setClosedEditorBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEditorBlockIDs));
   const [closedEmailBlockIDs, setClosedEmailBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEmailBlockIDs));
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
@@ -1340,7 +1341,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.messageID === cleanMessageID || email.id === cleanMessageID);
-    const emailAccent = editorEmailMessageAccent(cleanMessageID);
+    const existingMessageAccent = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID)?.emailAccent?.trim() ?? "";
+    const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
+    const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
     const cleanQuote = quote.trim();
     const initialContent: EditorTextBlockContent = {
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
@@ -1379,7 +1382,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID(blockID);
     textBlockProjectionSaveController.startLatestContentSave(blockID);
     return blockID;
-  }, [editorTextCanEdit, nodeAttachedEmails, textBlockProjectionSaveController]);
+  }, [blocks, editorTextCanEdit, nodeAttachedEmails, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
@@ -1418,12 +1421,38 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!primaryBlock || primaryBlock.emailMessageID?.trim()) return;
     updateTextBlockContent(primaryBlock.id, {
       emailMessageID: emailOriginAttachedEmail.messageID,
-      emailAccent: editorEmailMessageAccent(emailOriginAttachedEmail.messageID),
+      emailAccent: editorEmailMessageAccent(emailOriginAttachedEmail.messageID, blocks.filter((block) => block.id !== primaryBlock.id).map((block) => block.emailAccent ?? "")),
       title: primaryBlock.title === DEFAULT_TEXT_BLOCK_TITLE && emailOriginAttachedEmail.subject.trim()
         ? `Email: ${emailOriginAttachedEmail.subject.trim()}`
         : primaryBlock.title,
     });
   }, [blocks, editorTextCanEdit, emailOriginAttachedEmail, updateTextBlockContent]);
+
+  useEffect(() => {
+    if (!editorTextCanEdit) return;
+    const accentByMessageID = new Map<string, string>();
+    const usedAccents = new Set<string>();
+    const repairs: Array<{ blockID: string; accent: string }> = [];
+    for (const block of blocks.slice().reverse()) {
+      const messageID = block.emailMessageID?.trim() ?? "";
+      if (!messageID) continue;
+      const storedAccent = block.emailAccent?.trim() ?? "";
+      let assignedAccent = accentByMessageID.get(messageID) ?? "";
+      if (!assignedAccent) {
+        assignedAccent = storedAccent && !usedAccents.has(storedAccent.toLowerCase())
+          ? storedAccent
+          : editorEmailMessageAccent(messageID, usedAccents);
+        accentByMessageID.set(messageID, assignedAccent);
+        usedAccents.add(assignedAccent.toLowerCase());
+      }
+      if (storedAccent.toLowerCase() !== assignedAccent.toLowerCase()) {
+        repairs.push({ blockID: block.id, accent: assignedAccent });
+      }
+    }
+    for (const repair of repairs) {
+      updateTextBlockContent(repair.blockID, { emailAccent: repair.accent });
+    }
+  }, [blocks, editorTextCanEdit, updateTextBlockContent]);
 
   const appendTextBlockAttachments = useCallback((blockID: string, attachments: EditorChatAttachment[]) => {
     if (!canEdit || attachments.length === 0) return;
@@ -2237,6 +2266,51 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setNodeEmailModalMessageID(cleanMessageID);
   }, []);
 
+  const revealEmailTextBlock = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    const block = blocks.find((candidate) => candidate.emailMessageID?.trim() === cleanMessageID);
+    if (!block) return;
+    setNodeEmailNavigationRequest(null);
+    setActiveRowBlockID(block.id);
+    setOpenEditorBlockIDs((current) => new Set(current).add(block.id));
+    setClosedEditorBlockIDs((current) => {
+      if (!current.has(block.id)) return current;
+      const next = new Set(current);
+      next.delete(block.id);
+      return next;
+    });
+    setFocusedTextBlockID(block.id);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-node-text-box-row]") ?? [])
+          .find((element) => element.dataset.nodeTextBoxRow === block.id);
+        target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        target?.animate([
+          { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
+          { transform: "translateX(3px)", boxShadow: `0 0 0 4px ${block.emailAccent || accent}33` },
+          { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
+        ], { duration: 860, easing: "ease-out" });
+      });
+    });
+  }, [accent, blocks]);
+
+  const revealNodeEmailMessage = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID) return;
+    setNodeEmailNavigationRequest((current) => ({
+      messageID: cleanMessageID,
+      requestID: (current?.requestID ?? 0) + 1,
+    }));
+    setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
+    setClosedEmailBlockIDs((current) => {
+      if (!current.has(NODE_EMAIL_COLUMN_LAYOUT_ID)) return current;
+      const next = new Set(current);
+      next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      return next;
+    });
+    setFocusedTextBlockID("");
+  }, []);
+
   const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
     if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth, maxWidth);
@@ -3031,7 +3105,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               strokeColor={strokeColor}
               ruleColor={ruleColor}
               selectedMessageID={selectedEmailIDsByBlock[NODE_EMAIL_COLUMN_LAYOUT_ID] ?? ""}
-              focusMessageID={(activeNodeEmailChatMessage?.selectionSource === "email" ? activeNodeEmailChatMessage.selectionMessageID : undefined) || focusEmailMessageID}
+              focusMessageID={nodeEmailNavigationRequest?.messageID || (activeNodeEmailChatMessage?.selectionSource === "email" ? activeNodeEmailChatMessage.selectionMessageID : undefined) || focusEmailMessageID}
+              focusMessageRequestID={nodeEmailNavigationRequest?.requestID ?? focusRequestID ?? 0}
               activeEmailSelection={activeNodeEmailSelection}
               emailHighlightRemovalRequest={emailHighlightRemovalRequest}
               messageAccents={nodeEmailMessageAccents}
@@ -3046,6 +3121,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onEmailSelectionChatRequest={openEmailSelectionChat}
               onEmailSelectionTextBoxRequest={(messageID, quote) => { createEmailTextBlock(messageID, quote); }}
               onEmailMessageTextBoxRequest={(messageID) => { createEmailTextBlock(messageID); }}
+              onEmailMessageActivate={revealEmailTextBlock}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
               onError={onError}
             />
@@ -3193,6 +3269,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               }, chatBlockID)}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
               onError={onError}
+              onEmailMessageActivate={revealEmailTextBlock}
             />
           );
           const toggleChat = () => {
@@ -3319,7 +3396,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   className="mango-fixed-editor-row"
                   style={{ height: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", borderWidth: 1, borderStyle: "solid", borderColor: textBlockIsFocused ? "transparent" : blockEmailAccent || EDITOR_NEU_SOFT_BORDER, borderLeftWidth: blockEmailAccent ? 4 : 1, borderLeftColor: blockEmailAccent || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER), borderRadius: 14, background: blockEmailAccent ? `linear-gradient(135deg, ${blockEmailAccent}16, rgba(255,255,255,0.96))` : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
-                  <div style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockEmailAccent ? `linear-gradient(90deg, ${blockEmailAccent}30, ${blockEmailAccent}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                  <div
+                    title={block.emailMessageID ? "Show the linked email message" : undefined}
+                    onClick={(event) => {
+                      if (!block.emailMessageID) return;
+                      const target = event.target;
+                      if (target instanceof Element && target.closest("button, input, label, select, textarea, a, details, summary")) return;
+                      revealNodeEmailMessage(block.emailMessageID);
+                    }}
+                    style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockEmailAccent ? `linear-gradient(90deg, ${blockEmailAccent}30, ${blockEmailAccent}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", cursor: block.emailMessageID ? "pointer" : undefined }}
+                  >
                     <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${blockEmailAccent ? 112 : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
                         {blockEmailAccent && <span title="This text box is linked to an email message" style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 5, color: blockEmailAccent, fontSize: 10, fontWeight: 900 }}><MailIcon color={blockEmailAccent} />Linked email</span>}
@@ -3526,6 +3612,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   if (formattingControllerRef) formattingControllerRef.current = null;
                 }}
                 onError={onError}
+                onEmailMessageActivate={revealEmailTextBlock}
               />
             </div>
           </div>
