@@ -219,17 +219,17 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const overflowMenuRef = useRef<HTMLDivElement | null>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement | null>(null);
   const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
-  const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+  const tabFrameBackground = "linear-gradient(135deg, rgba(34, 211, 238, 0.88), rgba(56, 189, 248, 0.72))";
   const outlineMenuSurface = "linear-gradient(145deg, rgba(248, 251, 255, 0.98), rgba(230, 236, 246, 0.96))";
   const outlineRowSurface = "linear-gradient(145deg, rgba(250, 253, 255, 0.96), rgba(232, 238, 248, 0.9))";
-  const toolbarActiveBackground = "linear-gradient(105deg, rgba(87,238,255,0.98) 0%, rgba(92,211,255,0.98) 36%, rgba(159,128,255,0.98) 72%, rgba(218,190,255,0.98) 100%)";
-  const toolbarHoverBackground = "linear-gradient(105deg, rgba(226,253,255,0.98) 0%, rgba(178,239,255,0.98) 42%, rgba(229,211,255,0.98) 100%)";
-  const toolbarActiveShadow = "inset 0 0 0 2px rgba(34,211,238,0.96), inset 0 1px 0 rgba(255,255,255,0.90), 0 0 0 1px rgba(124,58,237,0.24), 0 0 14px rgba(34,211,238,0.46), 0 0 18px rgba(168,85,247,0.34)";
-  const toolbarHoverShadow = "inset 0 0 0 1px rgba(34,211,238,0.92), inset 0 1px 0 rgba(255,255,255,0.94), 0 0 11px rgba(34,211,238,0.34), 0 0 14px rgba(168,85,247,0.22)";
+  const toolbarSelectedBackground = "linear-gradient(105deg, rgba(224, 253, 255, 0.98) 0%, rgba(183, 242, 255, 0.98) 48%, rgba(216, 230, 251, 0.98) 100%)";
+  const toolbarHoverBackground = "linear-gradient(105deg, rgba(244, 254, 255, 0.98) 0%, rgba(225, 248, 255, 0.98) 50%, rgba(235, 242, 252, 0.98) 100%)";
+  const toolbarSelectedShadow = "inset 0 0 0 1px rgba(34, 211, 238, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.94), 0 1px 3px rgba(14, 116, 144, 0.14)";
+  const toolbarHoverShadow = "inset 0 0 0 1px rgba(34, 211, 238, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.94), 0 1px 3px rgba(14, 116, 144, 0.09)";
   const outlineRowHoverSurface = toolbarHoverBackground;
-  const outlineRowSelectedSurface = toolbarActiveBackground;
+  const outlineRowSelectedSurface = toolbarSelectedBackground;
   const tabHoverBackground = toolbarHoverBackground;
-  const tabSelectedBackgroundVibrant = toolbarActiveBackground;
+  const tabSelectedBackgroundSoft = toolbarSelectedBackground;
   const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
   const primaryTabs = visibleTabs.filter((tab) => EDITOR_PRIMARY_HEADER_TAB_IDS.includes(tab.id));
   const overflowTabs = visibleTabs.filter((tab) => EDITOR_OVERFLOW_HEADER_TAB_IDS.includes(tab.id));
@@ -287,7 +287,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     whiteSpace: "nowrap",
     border: `1px solid ${selected || hovered ? "transparent" : strokeColor}`,
     background: selected
-      ? `${tabSelectedBackgroundVibrant} padding-box, ${tabFrameBackground} border-box`
+      ? `${tabSelectedBackgroundSoft} padding-box, ${tabFrameBackground} border-box`
       : hovered
         ? `${tabHoverBackground} padding-box, ${tabFrameBackground} border-box`
         : tabBackground,
@@ -299,7 +299,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     borderRadius: 8,
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.54 : 1,
-    boxShadow: selected ? toolbarActiveShadow : hovered ? toolbarHoverShadow : "none",
+    boxShadow: selected ? toolbarSelectedShadow : hovered ? toolbarHoverShadow : "none",
     transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
   });
@@ -314,7 +314,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       border: 0,
       borderRight: options.withRightBorder === false ? 0 : formatControlDivider,
       background: active
-        ? toolbarActiveBackground
+        ? toolbarSelectedBackground
         : hovered ? formatControlHoverBackground : "transparent",
       color: active ? "#0f172a" : surfaceText,
       display: "grid",
@@ -324,7 +324,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       fontSize: options.fontSize ?? 12,
       fontWeight: 900,
       lineHeight: 1,
-      boxShadow: active ? toolbarActiveShadow : hovered ? toolbarHoverShadow : undefined,
+      boxShadow: active ? toolbarSelectedShadow : hovered ? toolbarHoverShadow : undefined,
       transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease",
     };
   };
@@ -869,7 +869,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               justifyContent: "center",
               gap: 5,
               padding: "0 8px",
-              boxShadow: overflowMenuOpen ? toolbarActiveShadow : hoveredTabID === "overflow" ? toolbarHoverShadow : "none",
+              boxShadow: overflowMenuOpen ? toolbarSelectedShadow : hoveredTabID === "overflow" ? toolbarHoverShadow : "none",
               transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease",
             }}
           >

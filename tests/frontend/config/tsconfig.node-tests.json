@@ -65,6 +65,7 @@
     "../pages/home/emailCollaborationChat.test.ts",
     "../../../frontend/src/pages/home/updatesSelection.ts",
     "../../../frontend/src/pages/home/updatesGrouping.ts",
+    "../../../frontend/src/pages/home/updatesLayout.ts",
     "../../../frontend/src/pages/home/updatesCurrentEntityLabels.ts",
     "../pages/home/updatesSelection.test.ts",
     "../pages/home/updatesGrouping.test.ts",

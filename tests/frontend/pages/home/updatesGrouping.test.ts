@@ -7,8 +7,16 @@ import {
   UPDATE_GROUPING_FIELDS,
   normalizeUpdateGroupingStack,
   resolveUpdatePriorityGroupOrder,
+  sortUpdateItemsNewestFirst,
   withBuiltInUpdateGroupingSetting,
 } from "../../../../frontend/src/pages/home/updatesGrouping.js";
+import {
+  UPDATES_NODE_PANEL_DEFAULT_MAIN_RATIO,
+  nudgeUpdatesNodePanelMainRatio,
+  normalizeUpdatesNodePanelMainRatio,
+  resolveUpdatesNodePanelMainRatio,
+  updatesNodePanelGridTemplate,
+} from "../../../../frontend/src/pages/home/updatesLayout.js";
 import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 import {
   collectAllUpdateGroupIDs,
@@ -75,6 +83,58 @@ test("the built-in Updates setting remains first without rewriting custom settin
   const settings = withBuiltInUpdateGroupingSetting(builtIn, [custom]);
   assert.deepEqual(settings.map((setting) => setting.setting_id), ["built-in", "custom"]);
   assert.deepEqual(settings[1], custom);
+});
+
+test("Updates rows are always sorted newest first within their rendered group", () => {
+  const rows = [
+    { id: "older", created: "2026-07-18T12:00:00Z" },
+    { id: "invalid", created: "not-a-timestamp" },
+    { id: "newest-b", created: "2026-07-20T12:00:00Z" },
+    { id: "newest-a", created: "2026-07-20T12:00:00Z" },
+  ];
+  assert.deepEqual(
+    sortUpdateItemsNewestFirst(rows, (row) => row.created, (row) => row.id).map((row) => row.id),
+    ["newest-a", "newest-b", "older", "invalid"],
+  );
+
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  assert.match(source, /function flattenUpdateRows[\s\S]*return sortUpdateRows\(rows\)/);
+  assert.match(source, /sortRows: sortUpdateRows/);
+  assert.match(source, /const sortedRows = sortUpdateRows\(group\.rows\)/);
+  assert.match(source, /return sortUpdateItemsNewestFirst\(/);
+});
+
+test("Updates node panel split clamps, nudges, and emits a two-pane grid", () => {
+  assert.equal(normalizeUpdatesNodePanelMainRatio(undefined), UPDATES_NODE_PANEL_DEFAULT_MAIN_RATIO);
+  assert.equal(normalizeUpdatesNodePanelMainRatio(0.05), 0.2);
+  assert.equal(normalizeUpdatesNodePanelMainRatio(0.95), 0.8);
+  assert.equal(nudgeUpdatesNodePanelMainRatio(0.55, -1), 0.525);
+  assert.ok(Math.abs(nudgeUpdatesNodePanelMainRatio(0.55, 1) - 0.575) < 0.000001);
+  assert.equal(resolveUpdatesNodePanelMainRatio({
+    pointerClientX: 610,
+    containerLeft: 100,
+    containerWidth: 1000,
+    paddingLeft: 10,
+    paddingRight: 10,
+  }), 0.5154639175257731);
+  assert.equal(resolveUpdatesNodePanelMainRatio({
+    pointerClientX: -500,
+    containerLeft: 100,
+    containerWidth: 1600,
+  }), 0.22641509433962265);
+  assert.equal(resolveUpdatesNodePanelMainRatio({
+    pointerClientX: 5000,
+    containerLeft: 100,
+    containerWidth: 1600,
+  }), 0.7358490566037736);
+  assert.equal(updatesNodePanelGridTemplate(0.6), "minmax(0, 0.6fr) 10px minmax(0, 0.4fr)");
+
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  assert.match(source, /role="separator"[\s\S]*aria-label="Resize Updates and node panels"/);
+  assert.match(source, /aria-orientation="vertical"/);
+  assert.match(source, /onPointerDown=\{startNodePanelResize\}[\s\S]*onPointerMove=\{moveNodePanelResize\}[\s\S]*onPointerUp=\{finishNodePanelResize\}/);
+  assert.match(source, /cursor: "col-resize"/);
+  assert.match(source, /storeUpdatesNodePanelMainRatio/);
 });
 
 test("GVIC and Priority group titles reuse their semantic raised surfaces", () => {
