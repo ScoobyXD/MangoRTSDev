@@ -1155,7 +1155,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const deepLinkProjectID = deepLink?.kind === "project" ? deepLink.projectID : "";
   useEffect(() => {
-    if (!deepLinkProjectID) return;
+    if (!deepLinkProjectID) {
+      if (initialPage === "project-management") setProjectManagementTarget(null);
+      return;
+    }
     routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
@@ -1165,7 +1168,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         ? current
         : { projectID: deepLinkProjectID, requestID: Date.now() }
     ));
-  }, [activatePrimaryPage, deepLinkProjectID]);
+  }, [activatePrimaryPage, deepLinkProjectID, initialPage]);
 
   const gvicDeepLink = deepLink?.kind === "gvic" ? deepLink : null;
   const gvicDeepLinkViewID: HomeKeyViewID | "" = gvicDeepLink?.viewID ?? "";

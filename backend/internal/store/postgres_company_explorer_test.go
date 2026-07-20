@@ -351,3 +351,28 @@ func TestPostgresRecycleSnapshotSkipsOptionalShapeDriftWithSavepoint(t *testing.
 		}
 	}
 }
+
+func TestPostgresRecycleRestoreOmitsGeneratedColumnsAndProjectScopeKeepsAssociations(t *testing.T) {
+	raw, err := os.ReadFile("postgres_recycle_bin.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_recycle_bin.go: %v", err)
+	}
+	source := string(raw)
+	restore := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresRestoreRecycleTableTx")), " "))
+	for _, want := range []string{"postgresrecyclerestorablecolumnstx", "overriding system value"} {
+		if !strings.Contains(restore, want) {
+			t.Fatalf("postgresRestoreRecycleTableTx missing %q", want)
+		}
+	}
+	if strings.Contains(restore, "select * from jsonb_populate_recordset") {
+		t.Fatalf("postgresRestoreRecycleTableTx must not insert generated columns from recycle payloads")
+	}
+	columns := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresRecycleRestorableColumnsTx")), " "))
+	if !strings.Contains(columns, "attgenerated = ''") {
+		t.Fatalf("postgresRecycleRestorableColumnsTx must omit generated columns")
+	}
+	expand := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresExpandCompanyExplorerRecycleScopeTx")), " "))
+	if strings.Contains(expand, "postgresaddprojectscopeitemstx") {
+		t.Fatalf("project relationships must not expand project delete scope")
+	}
+}

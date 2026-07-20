@@ -832,28 +832,6 @@ func (r *MemoryRepo) expandCompanyExplorerDeleteScopeLocked(companyID string, fo
 				}
 			}
 		}
-		for _, relationship := range r.projectRelationships {
-			if relationship.CompanyID != companyID || !projectIDs[relationship.ProjectID] {
-				continue
-			}
-			switch relationship.ResourceType {
-			case EntityTypeNode:
-				if !nodeIDs[relationship.ResourceID] {
-					nodeIDs[relationship.ResourceID] = true
-					changed = true
-				}
-			case EntityTypeLogicGate:
-				if !logicGateIDs[relationship.ResourceID] {
-					logicGateIDs[relationship.ResourceID] = true
-					changed = true
-				}
-			case EntityTypeProject:
-				if !projectIDs[relationship.ResourceID] {
-					projectIDs[relationship.ResourceID] = true
-					changed = true
-				}
-			}
-		}
 		for _, assignment := range r.nodeLogicGateAssignments {
 			if assignment.CompanyID != companyID || !logicGateIDs[assignment.LogicGateID] || nodeIDs[assignment.NodeID] {
 				continue

@@ -934,7 +934,8 @@ test("blocking editor and node overlays use the app modal layer above feature st
   const kanbanOverlay = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanOverlays.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   assert.match(kanbanOverlay, /useAppViewportAnchorRect\(boardRootRef\)/);
-  assert.match(projectSummary, /useAppViewportAnchorRect\(containerRef\)/);
+  assert.match(projectSummary, /surfaceID="project-relationships-inline-node"/);
+  assert.match(projectSummary, /relationshipNodePanelRowStyle\(depth\)/);
   assert.match(projectSummary, /<AppModalPortal onRequestClose=\{saving \? undefined : onClose\}>[\s\S]*disabled=\{saving\}[\s\S]*Save Assignments/);
   assert.match(kanbanOverlay, /data-mango-editor-overlay-backdrop=\{fullscreen \? "modal" : "modeless"\}/);
   assert.match(kanbanOverlay, /trapFocus=\{fullscreen\}/);
@@ -1344,7 +1345,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "updates-node-panel",
     "kanban-my-work-node-overlay",
     "project-critical-path-inline-node",
-    "project-relationships-node-panel",
+    "project-relationships-inline-node",
   ]);
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.body === "node-workspace"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.persistenceBoundary === "node-information-projection"));
@@ -1411,11 +1412,11 @@ test("node window adapters mount the shared unified node shell", () => {
 
   assert.match(projectSummary, /UnifiedNodeShell/);
   assert.match(projectSummary, /surfaceID="project-critical-path-inline-node"/);
-  assert.match(projectSummary, /surfaceID="project-relationships-node-panel"/);
-  assert.match(projectSummary, /id: "fullscreen"/);
-  assert.match(projectSummary, /pressed: fullscreen/);
-  assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
-  assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
+  assert.match(projectSummary, /surfaceID="project-relationships-inline-node"/);
+  assert.match(projectSummary, /aria-expanded=\{expanded\}/);
+  assert.match(projectSummary, /relationshipNodePanelRowStyle\(depth\)/);
+  assert.match(projectSummary, /event\.detail > 1/);
+  assert.doesNotMatch(projectSummary, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
   assert.match(projectSummary, /onNodeOpen\(selection\.nodeID\)/);
   assert.equal(NODE_EDITOR_STANDARD_VERTICAL_INSET_PX, 16);
   assert.match(homeParts, /NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX/);

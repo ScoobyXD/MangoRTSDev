@@ -1225,6 +1225,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         accent={accent}
         workspace={workspace}
         onBack={() => setActiveProjectID("")}
+        onProjectUpdated={(updatedProject) => setProjects((current) => current.map((item) => (
+          item.project_id === updatedProject.project_id ? updatedProject : item
+        )))}
         onNodeOpen={onNodeOpen}
         onLogicGateOpen={onLogicGateOpen}
         onOpenInNewTab={() => openAppPathInNewTab(buildProjectRoute(activeProjectID))}
