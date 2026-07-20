@@ -408,7 +408,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   useEffect(() => {
     const pendingNodeID = pendingFocusNodeIDRef.current;
     if (pendingNodeID) centerNodeInViewport(pendingNodeID);
-  }, [canvasSize.height, canvasSize.width, effectiveNodeSizes, nodePositions, nodes, allNodes, zoom]);
+  }, [canvasSize.height, canvasSize.width, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
   useEffect(() => {
     const onFocusRequested = (event: Event) => {
@@ -834,7 +834,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     viewportRef,
     nodes,
     nodePositions,
-    nodeSizes: effectiveNodeSizes,
     relationshipPathsRef: connectionPathsRef,
     zoom,
     pan,
@@ -1262,16 +1261,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         for (const id of unique) delete next[id];
         return next;
       });
-      setNodeSizes((previous) => {
-        const next = { ...previous };
-        for (const id of unique) delete next[id];
-        return next;
-      });
-      setMyTeraCards((previous) => {
-        const next = { ...previous };
-        for (const id of unique) delete next[id];
-        return next;
-      });
       const persisted = { ...lastPersistedNodePositionsRef.current };
       for (const id of unique) delete persisted[id];
       lastPersistedNodePositionsRef.current = persisted;
@@ -1369,7 +1358,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   }, [selectedNodeIDs, selectedNodeID]);
 
 
-  const getAnchorPoint = (nodeID: string, side: NodeDirection) => getLogicGateMapAnchorPoint({ nodeID, side, nodePositions, nodeSizes: effectiveNodeSizes });
+  const getAnchorPoint = (nodeID: string, side: NodeDirection) => getLogicGateMapAnchorPoint({ nodeID, side, nodePositions });
 
   const visibleNodeIDSet = useMemo(() => {
     const minX = (-pan.x) / zoom;
@@ -1380,16 +1369,15 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const visible = new Set<string>();
     for (const node of nodes) {
       const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
-      const size = effectiveNodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H };
-      const inView = position.x + size.w >= minX - pad && position.x <= maxX + pad && position.y + size.h >= minY - pad && position.y <= maxY + pad;
+      const inView = position.x + NODE_W >= minX - pad && position.x <= maxX + pad && position.y + NODE_H >= minY - pad && position.y <= maxY + pad;
       if (inView) visible.add(node.node_id);
     }
     return visible;
-  }, [nodes, nodePositions, effectiveNodeSizes, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
+  }, [nodes, nodePositions, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
 
   const relationshipRoutingGrid = useMemo(
-    () => buildLogicGateMapRelationshipRoutingGrid({ nodes, nodePositions, nodeSizes: effectiveNodeSizes, worldWidth: WORLD_W, worldHeight: WORLD_H }),
-    [WORLD_H, WORLD_W, effectiveNodeSizes, nodes, nodePositions],
+    () => buildLogicGateMapRelationshipRoutingGrid({ nodes, nodePositions, worldWidth: WORLD_W, worldHeight: WORLD_H }),
+    [WORLD_H, WORLD_W, nodes, nodePositions],
   );
 
   const routeOrthogonalPath = (
@@ -1407,7 +1395,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     sourceNodeID,
     targetNodeID,
     nodePositions,
-    nodeSizes: effectiveNodeSizes,
     routingGrid: relationshipRoutingGrid,
   });
 
@@ -1422,7 +1409,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     cursor,
     sourceNodeID,
     nodePositions,
-    nodeSizes: effectiveNodeSizes,
     routingGrid: relationshipRoutingGrid,
   });
 
@@ -1461,7 +1447,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         };
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
-  }, [relationships, nodeByID, nodePositions, effectiveNodeSizes, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
 
   useEffect(() => {
     connectionPathsRef.current = connectionPaths.map((path) => ({ id: path.id, points: path.points }));
@@ -1477,7 +1463,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         : relationshipDraft.sourceSide === "top" ? { x: from.x, y: from.y - lane }
           : { x: from.x, y: from.y + lane };
     return routeDraftPath(from, fromOut, relationshipDraft.cursor, relationshipDraft.sourceNodeID);
-  }, [relationshipDraft, nodePositions, effectiveNodeSizes, relationshipRoutingGrid]);
+  }, [relationshipDraft, nodePositions, relationshipRoutingGrid]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
@@ -1631,13 +1617,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
               nodeCardBorder={nodeCardBorder}
               nodeCardText={nodeCardText}
               selectionColor={SELECTION_CYAN}
-              panelMutedText={panelMutedText}
-              myTeraState={myTeraCards[node.node_id] ?? createDefaultMyTeraCardState()}
-              myTeraRoles={myTeraRoles}
-              relationshipCount={relationshipCountByNodeID[node.node_id] ?? 0}
-              onToggleMyTera={toggleMyTera}
-              onUpdateMyTera={updateMyTeraCard}
-              onMyTeraContentHeightChange={updateMyTeraPanelHeight}
               onSetCanvasActive={setCanvasActive}
               onSetContextMenu={setContextMenu}
               onSetNodeContextMenu={setNodeContextMenu}

@@ -1,7 +1,6 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from "react";
 import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
 import { NodeDirection, NodePosition, clamp, snapToGrid } from "./shared.js";
-import type { MyTeraCardState } from "./mapAppearancePersistence.js";
 
 export type NodeMapScreenPoint = { x: number; y: number };
 export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY: number };
@@ -106,7 +105,7 @@ export type NodeMapClipboardKind = "node" | "logic_gate";
 
 export type NodeMapClipboardPayload = {
   kind: NodeMapClipboardKind;
-  nodes: Array<{ oldID: string; title: string; x: number; y: number; w: number; h: number; myTera?: MyTeraCardState }>;
+  nodes: Array<{ oldID: string; title: string; x: number; y: number; w: number; h: number }>;
   relationships: Array<{
     oldID: string;
     nodeIDA: string;
@@ -129,7 +128,6 @@ export function buildNodeMapClipboardPayload<TNode extends { node_id: string; na
   nodePositions: Record<string, NodePosition>;
   nodeSizes: Record<string, { w: number; h: number }>;
   relationshipAnchors: Record<string, { from: NodeDirection; to: NodeDirection }>;
-  myTeraCards?: Record<string, MyTeraCardState>;
   selectedNodeID: string;
   selectedNodeIDs: Set<string>;
 }): NodeMapClipboardPayload | null {
@@ -150,12 +148,6 @@ export function buildNodeMapClipboardPayload<TNode extends { node_id: string; na
         y: snapToGrid(position.y),
         w: snapToGrid(size.w),
         h: snapToGrid(size.h),
-        ...(input.myTeraCards?.[node.node_id]
-          ? { myTera: {
-            ...input.myTeraCards[node.node_id],
-            relatedControls: [...input.myTeraCards[node.node_id]!.relatedControls],
-          } }
-          : {}),
       };
     });
   if (copiedNodes.length === 0) return null;
@@ -174,27 +166,6 @@ export function buildNodeMapClipboardPayload<TNode extends { node_id: string; na
 
   return { kind: input.kind, nodes: copiedNodes, relationships: copiedRelationships };
 }
-function parseClipboardMyTera(value: unknown): MyTeraCardState | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as Partial<MyTeraCardState>;
-  if (candidate.enabled !== true) return undefined;
-  const relatedControls = Array.isArray(candidate.relatedControls)
-    ? Array.from(new Set(candidate.relatedControls
-      .filter((control): control is string => typeof control === "string")
-      .map((control) => control.trim().slice(0, 64))
-      .filter(Boolean)))
-      .slice(0, 16)
-    : [];
-  const panelHeight = Number(candidate.panelHeight);
-  return {
-    enabled: true,
-    expanded: candidate.expanded === true,
-    rules: typeof candidate.rules === "string" ? candidate.rules.slice(0, 8000) : "",
-    exclusions: typeof candidate.exclusions === "string" ? candidate.exclusions.slice(0, 8000) : "",
-    relatedControls,
-    ...(Number.isFinite(panelHeight) ? { panelHeight: clamp(snapToGrid(panelHeight), 96, 9000) } : {}),
-  };
-}
 export function parseNodeMapClipboardPayload(raw: string | null | undefined): NodeMapClipboardPayload | null {
   if (!raw) return null;
   try {
@@ -209,7 +180,6 @@ export function parseNodeMapClipboardPayload(raw: string | null | undefined): No
         y: Number(node.y),
         w: Number(node.w),
         h: Number(node.h),
-        myTera: parseClipboardMyTera(node.myTera),
       }))
       .filter((node) => node.oldID && node.title && Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.w) && Number.isFinite(node.h));
     if (nodes.length === 0) return null;
@@ -251,7 +221,6 @@ export function computeNodeMapMultiSelectResult(input: {
   nodes: Array<{ node_id: string }>;
   nodePositions: Record<string, NodePosition>;
   relationshipPaths: NodeMapRelationshipPath[];
-  nodeSizes?: Record<string, { w: number; h: number }>;
   multiSelectBox: NodeMapMultiSelectBox;
   zoom: number;
   pan: { x: number; y: number };
@@ -268,10 +237,9 @@ export function computeNodeMapMultiSelectResult(input: {
     const position = input.nodePositions[node.node_id];
     if (!position) continue;
     const left = position.x * input.zoom + input.pan.x;
-    const size = input.nodeSizes?.[node.node_id] ?? { w: input.nodeWidth, h: input.nodeHeight };
     const top = position.y * input.zoom + input.pan.y;
-    const right = left + size.w * input.zoom;
-    const bottom = top + size.h * input.zoom;
+    const right = left + input.nodeWidth * input.zoom;
+    const bottom = top + input.nodeHeight * input.zoom;
     const overlaps = right >= minX && left <= maxX && bottom >= minY && top <= maxY;
     if (overlaps) selectedNodeIDs.add(node.node_id);
   }
@@ -392,7 +360,6 @@ export function useNodeMapMultiSelectControls(input: {
   nodePositions: Record<string, NodePosition>;
   relationshipPathsRef: MutableRefObject<NodeMapRelationshipPath[]>;
   zoom: number;
-  nodeSizes?: Record<string, { w: number; h: number }>;
   pan: { x: number; y: number };
   nodeWidth: number;
   nodeHeight: number;
@@ -432,7 +399,6 @@ export function useNodeMapMultiSelectControls(input: {
         nodePositions: input.nodePositions,
         relationshipPaths: input.relationshipPathsRef.current,
         multiSelectBox: activeBox,
-        nodeSizes: input.nodeSizes,
         zoom: input.zoom,
         pan: input.pan,
         nodeWidth: input.nodeWidth,
@@ -468,7 +434,6 @@ export function useNodeMapDragControls(input: {
   worldHeight: number;
   nodeWidth: number;
   nodeHeight: number;
-  nodeSizes?: Record<string, { w: number; h: number }>;
   setNodePositions: Dispatch<SetStateAction<Record<string, NodePosition>>>;
   setDragState: Dispatch<SetStateAction<NodeMapDragState | null>>;
   setSelectedNodeID?: Dispatch<SetStateAction<string>>;
@@ -478,6 +443,7 @@ export function useNodeMapDragControls(input: {
   useEffect(() => {
     if (!input.dragState) return;
     const onMove = (event: PointerEvent) => {
+  nodeSizes?: Record<string, { w: number; h: number }>;
       if (event.pointerId !== input.dragState?.pointerID || !input.viewportRef.current) return;
       const bounds = input.viewportRef.current.getBoundingClientRect();
       const mouseX = event.clientX - bounds.left;
@@ -487,7 +453,6 @@ export function useNodeMapDragControls(input: {
         for (const nodeID of input.dragState?.nodeIDs ?? []) {
           const offset = input.dragState?.offsets[nodeID];
           if (!offset) continue;
-          const size = input.nodeSizes?.[nodeID] ?? { w: input.nodeWidth, h: input.nodeHeight };
           const worldX = (mouseX - input.pan.x) / input.zoom - offset.x;
           const worldY = (mouseY - input.pan.y) / input.zoom - offset.y;
           next[nodeID] = {
@@ -500,6 +465,7 @@ export function useNodeMapDragControls(input: {
     };
     const onUp = (event: PointerEvent) => {
       if (event.pointerId !== input.dragState?.pointerID) return;
+          const size = input.nodeSizes?.[nodeID] ?? { w: input.nodeWidth, h: input.nodeHeight };
       if (input.dragState.clearSelectionOnClick && typeof input.dragState.startMouseX === "number" && typeof input.dragState.startMouseY === "number") {
         const isClick = shouldTreatNodeMapGestureAsClick({
           startMouseX: input.dragState.startMouseX,

@@ -12,31 +12,27 @@ export function getLogicGateMapAnchorPoint({
   nodeID,
   side,
   nodePositions,
-  nodeSizes,
   nodeWidth = NODE_W,
   nodeHeight = NODE_H,
 }: {
   nodeID: string;
   side: NodeDirection;
   nodePositions: Record<string, NodePosition>;
-  nodeSizes?: Record<string, { w: number; h: number }>;
   nodeWidth?: number;
   nodeHeight?: number;
 }): { x: number; y: number } | null {
   const pos = nodePositions[nodeID];
   if (!pos) return null;
-  const size = nodeSizes?.[nodeID] ?? { w: nodeWidth, h: nodeHeight };
-  if (side === "left") return { x: pos.x, y: pos.y + size.h / 2 };
-  if (side === "right") return { x: pos.x + size.w, y: pos.y + size.h / 2 };
-  if (side === "top") return { x: pos.x + size.w / 2, y: pos.y };
-  return { x: pos.x + size.w / 2, y: pos.y + size.h };
+  if (side === "left") return { x: pos.x, y: pos.y + nodeHeight / 2 };
+  if (side === "right") return { x: pos.x + nodeWidth, y: pos.y + nodeHeight / 2 };
+  if (side === "top") return { x: pos.x + nodeWidth / 2, y: pos.y };
+  return { x: pos.x + nodeWidth / 2, y: pos.y + nodeHeight };
 }
 
 export function buildLogicGateMapRelationshipRoutingGrid({
   nodes,
   nodePositions,
   worldWidth,
-  nodeSizes,
   worldHeight,
   nodeWidth = NODE_W,
   nodeHeight = NODE_H,
@@ -45,7 +41,6 @@ export function buildLogicGateMapRelationshipRoutingGrid({
   nodes: NodeRecord[];
   nodePositions: Record<string, NodePosition>;
   worldWidth: number;
-  nodeSizes?: Record<string, { w: number; h: number }>;
   worldHeight: number;
   nodeWidth?: number;
   nodeHeight?: number;
@@ -60,10 +55,9 @@ export function buildLogicGateMapRelationshipRoutingGrid({
     const pos = nodePositions[node.node_id];
     if (!pos) continue;
     const minX = Math.max(0, Math.floor((pos.x - margin) / step));
-    const size = nodeSizes?.[node.node_id] ?? { w: nodeWidth, h: nodeHeight };
-    const maxX = Math.min(cols - 1, Math.ceil((pos.x + size.w + margin) / step));
+    const maxX = Math.min(cols - 1, Math.ceil((pos.x + nodeWidth + margin) / step));
     const minY = Math.max(0, Math.floor((pos.y - margin) / step));
-    const maxY = Math.min(rows - 1, Math.ceil((pos.y + size.h + margin) / step));
+    const maxY = Math.min(rows - 1, Math.ceil((pos.y + nodeHeight + margin) / step));
     for (let gy = minY; gy <= maxY; gy += 1) {
       for (let gx = minX; gx <= maxX; gx += 1) {
         blocked[gy * cols + gx] = 1;
@@ -103,7 +97,6 @@ export function routeLogicGateMapOrthogonalPath({
   nodePositions,
   routingGrid,
   nodeWidth = NODE_W,
-  nodeSizes,
   nodeHeight = NODE_H,
 }: {
   from: { x: number; y: number };
@@ -115,7 +108,6 @@ export function routeLogicGateMapOrthogonalPath({
   nodePositions: Record<string, NodePosition>;
   routingGrid: LogicGateMapRoutingGrid;
   nodeWidth?: number;
-  nodeSizes?: Record<string, { w: number; h: number }>;
   nodeHeight?: number;
 }): { x: number; y: number }[] {
   const { step, cols, rows, blocked } = routingGrid;
@@ -129,15 +121,13 @@ export function routeLogicGateMapOrthogonalPath({
   const targetPos = nodePositions[targetNodeID];
 
   const isBlocked = (gx: number, gy: number) => {
-  const sourceSize = nodeSizes?.[sourceNodeID] ?? { w: nodeWidth, h: nodeHeight };
-  const targetSize = nodeSizes?.[targetNodeID] ?? { w: nodeWidth, h: nodeHeight };
     const idx = key(gx, gy);
     if (!blocked[idx]) return false;
     const worldX = gx * step;
     const worldY = gy * step;
-    const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + sourceSize.w + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + sourceSize.h + step;
+    const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + nodeWidth + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + nodeHeight + step;
     if (isInsideSource) return false;
-    const isInsideTarget = targetPos && worldX >= targetPos.x - step && worldX <= targetPos.x + targetSize.w + step && worldY >= targetPos.y - step && worldY <= targetPos.y + targetSize.h + step;
+    const isInsideTarget = targetPos && worldX >= targetPos.x - step && worldX <= targetPos.x + nodeWidth + step && worldY >= targetPos.y - step && worldY <= targetPos.y + nodeHeight + step;
     if (isInsideTarget) return false;
     return true;
   };
@@ -202,7 +192,6 @@ export function routeLogicGateMapDraftPath({
   routingGrid,
   nodeWidth = NODE_W,
   nodeHeight = NODE_H,
-  nodeSizes,
 }: {
   from: { x: number; y: number };
   fromOut: { x: number; y: number };
@@ -212,7 +201,6 @@ export function routeLogicGateMapDraftPath({
   routingGrid: LogicGateMapRoutingGrid;
   nodeWidth?: number;
   nodeHeight?: number;
-  nodeSizes?: Record<string, { w: number; h: number }>;
 }): { x: number; y: number }[] {
   const { step, cols, rows, blocked } = routingGrid;
   const toCell = (point: { x: number; y: number }) => ({
@@ -225,11 +213,10 @@ export function routeLogicGateMapDraftPath({
 
   const isBlocked = (gx: number, gy: number) => {
     const idx = key(gx, gy);
-  const sourceSize = nodeSizes?.[sourceNodeID] ?? { w: nodeWidth, h: nodeHeight };
     if (!blocked[idx]) return false;
     const worldX = gx * step;
     const worldY = gy * step;
-    const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + sourceSize.w + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + sourceSize.h + step;
+    const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + nodeWidth + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + nodeHeight + step;
     if (isInsideSource) return false;
     return true;
   };

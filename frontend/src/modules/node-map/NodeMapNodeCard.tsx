@@ -8,8 +8,6 @@ import {
 } from "./NodeMapControls";
 import { isLegalRelationshipSidePair } from "./relationshipProjection";
 import { buildNodeTitleCommentSegments, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
-import { NodeMyTeraPanel, type NodeMyTeraRole } from "./NodeMyTeraPanel";
-import type { MyTeraCardState } from "./mapAppearancePersistence";
 
 type NodeMapNodeCardProps = {
   node: NodeRecord;
@@ -33,13 +31,6 @@ type NodeMapNodeCardProps = {
   nodeCardBorder: string;
   nodeCardText: string;
   selectionColor: string;
-  panelMutedText: string;
-  myTeraState: MyTeraCardState;
-  myTeraRoles: NodeMyTeraRole[];
-  relationshipCount: number;
-  onToggleMyTera: (nodeID: string) => void;
-  onUpdateMyTera: (nodeID: string, next: MyTeraCardState) => void;
-  onMyTeraContentHeightChange: (nodeID: string, height: number) => void;
   inlineCommentThreads: NodeInlineCommentThread[];
   activeInlineCommentThreadID: string;
   inlineCommentDraft: NodeInlineCommentDraft | null;
@@ -96,13 +87,6 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   nodeCardBorder,
   nodeCardText,
   selectionColor,
-  panelMutedText,
-  myTeraState,
-  myTeraRoles,
-  relationshipCount,
-  onToggleMyTera,
-  onUpdateMyTera,
-  onMyTeraContentHeightChange,
   inlineCommentThreads,
   activeInlineCommentThreadID,
   inlineCommentDraft,
@@ -134,9 +118,6 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   const titleElementRef = useRef<HTMLDivElement | null>(null);
   const nodeInlineCommentDraft = inlineCommentDraft?.nodeID === node.node_id ? inlineCommentDraft : null;
   const titleSegments = useMemo(() => buildNodeTitleCommentSegments(nodeTitle, inlineCommentThreads), [inlineCommentThreads, nodeTitle]);
-  const myTeraExpanded = myTeraState.enabled && myTeraState.expanded;
-  const myTeraPanelHeight = myTeraExpanded ? Math.max(228, myTeraState.panelHeight ?? 228) : 0;
-  const titleStripHeight = myTeraExpanded ? Math.max(72, size.h - myTeraPanelHeight) : size.h;
 
   const readNodeTitleSelection = (): NodeInlineCommentDraft | null => {
     const cardElement = cardRef.current;
@@ -233,8 +214,6 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
     <div
       ref={cardRef}
       data-node-card="true"
-      data-mytera-enabled={myTeraState.enabled ? "true" : "false"}
-      data-mytera-expanded={myTeraExpanded ? "true" : "false"}
       style={{
         position: "absolute",
         left: position.x,
@@ -243,22 +222,17 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         height: size.h,
         borderRadius: 8,
         border: `1px solid ${isSelected ? selectionColor : nodeCardBorder}`,
-        background: myTeraExpanded
-          ? `linear-gradient(150deg, color-mix(in srgb, ${isSelected ? nodeCardSelectedBackground : nodeCardBackground} 84%, transparent), color-mix(in srgb, ${accent} 14%, transparent))`
-          : (isSelected ? nodeCardSelectedBackground : nodeCardBackground),
+        background: isSelected ? nodeCardSelectedBackground : nodeCardBackground,
         outline: isSelected ? `2px solid ${selectionColor}` : "none",
         outlineOffset: isSelected ? 1 : 0,
         display: "grid",
         gridTemplateRows: "1fr",
-        boxShadow: myTeraExpanded ? "0 18px 38px rgba(15,23,42,0.24), 0 3px 10px rgba(15,23,42,0.14)" : isSelected ? "0 0 0 3px rgba(100,116,139,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+        boxShadow: isSelected ? "0 0 0 3px rgba(100,116,139,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
         userSelect: "none",
         color: nodeCardText,
         cursor: isEditingTitle && canEdit ? "text" : canEdit ? (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab") : "default",
         zIndex: isPrimary ? 5 : 4,
         overflow: "visible",
-        isolation: "isolate",
-        transform: isSelected ? "rotate(-0.45deg)" : "none",
-        transformOrigin: "50% 82%",
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
@@ -323,68 +297,14 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         });
       }}
     >
-      {myTeraExpanded && (
-        <>
-          <div
-            data-mytera-layer="rear"
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              inset: 4,
-              borderRadius: 9,
-              border: `1px solid color-mix(in srgb, ${accent} 28%, transparent)`,
-              background: `color-mix(in srgb, ${accent} 7%, transparent)`,
-              transform: "translate(10px, 8px) rotate(1.1deg)",
-              pointerEvents: "none",
-              zIndex: -2,
-            }}
-          />
-          <div
-            data-mytera-layer="middle"
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              inset: 3,
-              borderRadius: 9,
-              border: `1px solid color-mix(in srgb, ${selectionColor} 23%, transparent)`,
-              background: `color-mix(in srgb, ${panelSurface} 38%, transparent)`,
-              transform: "translate(-7px, 5px) rotate(-0.75deg)",
-              pointerEvents: "none",
-              zIndex: -1,
-            }}
-          />
-          <div style={{ position: "absolute", inset: `0 0 ${titleStripHeight}px 0`, zIndex: 1 }}>
-            <NodeMyTeraPanel
-              entityLabel="Node property"
-              relationshipCount={relationshipCount}
-              roles={myTeraRoles}
-              value={myTeraState}
-              canEdit={canEdit}
-              accent={accent}
-              surface={panelSurface}
-              textColor={nodeCardText}
-              mutedTextColor={panelMutedText}
-              onChange={(next) => onUpdateMyTera(node.node_id, next)}
-              onContentHeightChange={(height) => onMyTeraContentHeightChange(node.node_id, height)}
-            />
-          </div>
-        </>
-      )}
       <div
         style={{
-          position: myTeraExpanded ? "absolute" : "relative",
-          bottom: myTeraExpanded ? 0 : undefined,
-          zIndex: 3,
           display: "grid",
           placeItems: "center",
           width: "100%",
           height: "100%",
           textAlign: "center",
           padding: "10px",
-          boxSizing: "border-box",
-          background: myTeraExpanded ? `color-mix(in srgb, ${isSelected ? nodeCardSelectedBackground : nodeCardBackground} 90%, transparent)` : "transparent",
-          borderTop: myTeraExpanded ? `1px solid color-mix(in srgb, ${accent} 26%, transparent)` : "none",
-          borderRadius: myTeraExpanded ? "0 0 7px 7px" : 7,
         }}
       >
         {/* Latency-obsession alignment: keep node-card render minimal.
@@ -445,42 +365,6 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
           renderReadOnlyTitle()
         )}
       </div>
-      {((canEdit && isPrimary) || myTeraState.enabled) && (
-        <button
-          type="button"
-          data-mytera-toggle="true"
-          aria-label={myTeraExpanded ? "Collapse MyTera" : (myTeraState.enabled ? "Expand MyTera" : "Add MyTera")}
-          aria-expanded={myTeraExpanded}
-          title={myTeraExpanded ? "Collapse MyTera" : (myTeraState.enabled ? "Expand MyTera" : "Add MyTera")}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleMyTera(node.node_id);
-          }}
-          style={{
-            position: "absolute",
-            right: 14,
-            bottom: Math.max(8, titleStripHeight - 14),
-            minWidth: 76,
-            height: 28,
-            padding: "0 10px",
-            borderRadius: 999,
-            border: `1px solid color-mix(in srgb, ${accent} 64%, transparent)`,
-            background: `color-mix(in srgb, ${panelSurface} 92%, transparent)`,
-            color: nodeCardText,
-            boxShadow: "0 5px 14px rgba(15,23,42,0.18)",
-            fontSize: 10.5,
-            fontWeight: 800,
-            cursor: "pointer",
-            zIndex: 7,
-          }}
-        >
-          {myTeraState.enabled ? `MyTera ${myTeraExpanded ? "▴" : "▾"}` : "+ MyTera"}
-        </button>
-      )}
       {nodeInlineCommentDraft && !isEditingTitle && (
         <button
           type="button"

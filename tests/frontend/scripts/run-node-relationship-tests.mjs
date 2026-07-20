@@ -55,8 +55,6 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gate-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeMapControls.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeFootprint.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapAppearancePersistence.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/deleteKeyboardRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapLayout.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapGridBackground.test.js"),
