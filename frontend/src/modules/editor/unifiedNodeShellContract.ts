@@ -7,7 +7,7 @@ export type UnifiedNodeShellSurfaceID =
   | "updates-node-panel"
   | "kanban-my-work-node-overlay"
   | "project-critical-path-inline-node"
-  | "project-relationships-node-panel";
+  | "project-relationships-inline-node";
 
 export type UnifiedNodeShellActionID =
   | "close"
@@ -88,11 +88,11 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     actions: ["close", "open-in-new-tab", "pin"],
   },
   {
-    id: "project-relationships-node-panel",
+    id: "project-relationships-inline-node",
     body: "node-workspace",
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "fullscreen", "open-in-new-tab", "pin"],
+    actions: ["close", "open-in-new-tab", "pin"],
   },
 ] as const;

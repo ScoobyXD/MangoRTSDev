@@ -1,10 +1,10 @@
-Last updated: 2026-07-12
+Last updated: 2026-07-20
 
 # Recycle Bin Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: owner stamping, user-scoped list/restore, admin-scoped list/permanent delete, restore behavior, and large batch recycle flows have backend coverage. Frontend select-all and admin grouping behavior is documented here but not yet mapped to an automated frontend test.
+- Business Logic Covered By Automated Tests: owner stamping, user-scoped list/restore, admin-scoped list/permanent delete, restore behavior, project-association preservation, generated-column-safe PostgreSQL restore, and large batch recycle flows have backend coverage. Frontend select-all and admin grouping behavior is documented here but not yet mapped to an automated frontend test.
 
 ## Business Logic
 
@@ -20,10 +20,10 @@ RB9 - A cross-user restore attempt returns not found and must not restore the un
 RB10 - Permanently deleting recycle-bin items requires at least one recycle-bin item ID.
 RB11 - Permanent delete is destructive purge and requires dev admin or company admin authority.
 RB12 - Non-admin permanent delete attempts return forbidden and must not remove recycle-bin rows.
-RB13 - Company Explorer target deletion creates recycle-bin rows before deleting the underlying folders, nodes, logic gates, projects, and related Kanban boards.
+RB13 - Company Explorer target deletion creates recycle-bin rows before deleting the underlying objects in that target's actual deletion scope. Deleting a project removes the project and its project-owned associations, critical-path rows, placement, information, and projection data, but it must not delete related nodes, Logic Gates, their node assignments, or their Kanban boards.
 RB14 - Recycle-bin rows preserve the deleted root object's kind, ID, label, folder kind when relevant, deleter user ID, deletion timestamp, restore payload, and contained-item summary.
-RB15 - Deleting a folder, project, or logic gate records contained objects so the UI can explain what will return with a restore.
-RB16 - Restoring one or more recycle-bin items merges their restore payloads and restores the underlying objects, relationships, placements, and related data captured at delete time.
+RB15 - Deleting a folder or logic gate records objects that are actually contained in its deletion scope so the UI can explain what will return with a restore. A project recycle item does not describe related nodes or Logic Gates as contained because those resources remain active.
+RB16 - Restoring one or more recycle-bin items merges their restore payloads and restores the underlying objects, relationships, placements, and related data captured at delete time. PostgreSQL restore inserts only writable stored columns; generated columns are omitted and recomputed by PostgreSQL so an affected historical payload remains restorable.
 RB17 - A successful restore removes the restored recycle-bin rows.
 RB18 - A successful restore updates canonical rows, independently required domain facts, and read versions for the restored targets; it does not publish a generic workspace browser event.
 RB19 - Permanent delete removes only the selected recycle-bin rows and their restore payloads; the deleted objects remain gone.
@@ -112,13 +112,16 @@ Business logic covered:
 - RB16
 
 Given:
-- A user deletes a folder, project, or logic gate with contained folders, projects, logic gates, nodes, or related Kanban boards.
+- A user deletes a folder or logic gate with contained resources.
+- A user deletes a project that is associated with existing nodes and Logic Gates.
 
 Expected:
 - The root deleted object gets one recycle-bin row owned by the deleting user.
 - The row records the root object's kind, ID, label, folder kind when relevant, deleter, and timestamp.
-- The row includes contained-item summary data for objects that will come back with restore.
+- Folder and Logic Gate rows include contained-item summary data only for objects that will come back with restore.
+- The project row does not list its related nodes or Logic Gates as contained, and those resources and their node-to-gate assignments remain available after project deletion.
 - Restore rebuilds the captured underlying objects and relationships.
+- Restore succeeds when a captured table has generated columns by restoring only writable stored columns and allowing PostgreSQL to recompute generated values.
 
 ### Scenario RB-S5: Selection And Bulk Actions
 

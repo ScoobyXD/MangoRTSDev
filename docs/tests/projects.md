@@ -1,4 +1,4 @@
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 # Projects Tests
 
@@ -18,7 +18,7 @@ P7 - Project edit access alone does not reveal node editor content; the selected
 P8 - Multiple node text boxes, emails, and chats remain scrollable inside the inline node window without changing critical-path row ordering.
 P9 - Node editor mutations made inside the inline node window follow the existing node editor update, attachment, chat, highlight, and intent behavior.
 P10 - Opening the selected node in the standalone node popup remains available from the inline node window.
-P11 - A fresh Project work-panel entry, or a history entry without a valid marker for that exact Project, opens with Critical Path selected before Logic Gates / Nodes.
+P11 - A fresh Project work-panel entry, or a history entry without a valid marker for that exact Project, opens with Logic Gates / Nodes selected in the left toggle position; Critical Path is the right toggle.
 P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
@@ -29,7 +29,7 @@ P18 - The project email picker is attach/select only and must not expose compose
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 P20 - Project text-box inline images and project text-block attachment arrays must follow `docs/tests/attachments.md`: durable project information/projection payloads store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
-P22 - In the Project Logic Gates / Nodes tab, double-clicking a node opens a Project-owned node-panel selection in the right-hand Logic Gates / Nodes region. The unified node editor replaces that region in place instead of opening the app/sidebar popup or replacing the Project page.
+P22 - In the Project Logic Gates / Nodes tab, clicking a node row expands that node's Project-owned unified node editor directly below the row. Clicking the same row again collapses it; the row does not open the app/sidebar popup or replace the Project page.
 P23 - Nodes opened in the Project Logic Gates / Nodes panel use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor. Project state owns only which node panel is open; it does not own node content persistence.
 P24 - Dropping a My Triage or mailbox-capable Shared Triage email onto a project relationship panel creates an email-derived standalone node relationship for that project.
 P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic Gate group inside a project creates an email-derived node/card in that Logic Gate and a node relationship in the project.
@@ -45,7 +45,7 @@ P34 - The project relationship grouper supports Logic Gate, Type, Status, Date A
 P35 - Group headers and resource rows indent by grouping depth. Disclosure toggles expansion without opening a resource; a visible Logic Gate grouping header remains the Logic Gate open/context-menu/drop target, suppresses its duplicate Logic Gate leaf, and remains visible when the gate has no nodes.
 P36 - Regrouping and collapsing are presentation-only: they do not mutate project relationships, every accessible node remains available when its branch is visible, and Shift/Ctrl/Command selection order follows the currently rendered visible node rows. A node whose Logic Gate relationship is not visible groups under No logic gate instead of exposing the hidden gate ID.
 P37 - The grouped-row view preserves the local node-panel and Logic Gate openers, node selection and context menus, critical-step/status/email-origin indicators, root project drops, and Logic Gate-targeted node/email drops.
-P38 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Turning fullscreen on expands the same live node editor across the browser viewport; turning it off restores that editor to the right-hand Logic Gates / Nodes region without resetting the Project grouping stack, collapse state, or selected node.
+P38 - The Project Logic Gates / Nodes inline node editor remains in the relationship list flow, preserves the Project grouping and collapse state, and exposes close/collapse, open-in-new-tab, and pin actions without becoming a fullscreen overlay.
 P39 - Opening a Logic Gate from the Project detail work panel records the exact canonical Project route, `/projects/{project_id}`, and the current Project work-panel tab on that return history entry before pushing `/logic-gates/{logic_gate_id}`. Changing the toggle updates that entry, so Browser Back and an unmodified Backspace pressed outside editable content return to that exact Project with its latest Critical Path or Logic Gates / Nodes selection. The marker is accepted only for its matching Project and does not change the fresh-entry default in P11; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
 P40 - Status grouping is shared by Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized workflow order is In Progress, Review, Pending, Requested, Backlog, Done. `Verify`, `Verification`, and `Verified` normalize to Review; Request/Requests normalize to Requested; Backlogs/Back Logs/Backlogged normalize to Backlog; completed/closed/archived aliases normalize to Done. Descending reverses the nonterminal recognized groups, while Done remains the final group in both directions. Unknown nonblank statuses sort after recognized nonterminal statuses; No status has a collision-proof group identity, is trailing, and remains before Done.
 P41 - Every Project text box has an independent exact collaboration scope, revision stream, snapshot, and durable operation queue. Normal document typing sends HTML-patch micro-batches only; title/attachment changes use the metadata PATCH and cannot overwrite the collaboration body.
@@ -53,7 +53,7 @@ P42 - Project reload/reconnect subscribes first, buffers committed events, valid
 P43 - Remote Project text-box operations apply live to the exact mounted document without echo-saving or a focus-time whole-document conflict. Selection is preserved by the shared hydration boundary; duplicates are ignored and gaps recover automatically through a full snapshot.
 P44 - Replies to email attached to a project text block use the project as attachment resource owner, retain the originating project information ID, and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer project text-block formatting controller so only the reply toolbar can format text.
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
-P46 - Project dialogs/previews and the Logic Gates / Nodes embedded node panel mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking dialogs/previews trap and restore focus; the embedded panel remains modeless while anchored and becomes a focus-trapping modal in fullscreen. Moving it into or out of fullscreen preserves its live editor and Project grouping/selection state.
+P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes inline editor remains in normal document flow beneath its selected row rather than mounting in that portal.
 
 ## Scenarios
 
@@ -197,12 +197,12 @@ Given:
 - The viewer can open the node.
 
 Expected:
-- Double-clicking the node row replaces the right-hand Logic Gates / Nodes region with that node's editor and leaves the Project page in place.
+- Clicking the node row expands that node's editor immediately below the row and leaves the Project page in place; clicking the row again collapses it.
 - The embedded node panel uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
 - Text boxes inside that window use the unified node editor semantics.
 - Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
 - Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.
-- The panel mounts in the shared body-level modal layer above Key Views/Explorer/Search Explorer. Activating fullscreen changes that same live panel to viewport geometry; activating it again restores the panel to the right-hand Project region without remounting the editor or resetting grouping/selection state.
+- The inline editor remains in the relationship list flow, keeps grouping and selection state intact, and does not mount a fullscreen overlay.
 
 ### Scenario P-S8: Email Drop Creates Project Node
 
@@ -282,7 +282,7 @@ Expected:
 - The default Logic Gate grouping shows each visible Logic Gate once as a group/resource row, retains the empty Logic Gate, and places the standalone node under No logic gate.
 - Reordering or changing grouping levels changes only the nesting and row order; removing every level produces a flat relationship list.
 - Collapsing a group hides only its descendants and updates Shift-selection order to the remaining visible node rows.
-- Double-click, context-menu, root-drop, and Logic Gate-drop behavior remains available on the corresponding rows.
+- Node row click-to-expand/collapse, context-menu, root-drop, and Logic Gate-drop behavior remains available on the corresponding rows.
 - Status ascending renders In Progress, Review, Pending, Requested, Backlog, then Done; legacy Verify and Backlogged values join Review and Backlog rather than creating duplicate groups.
 - Status descending reverses the nonterminal recognized statuses but keeps Done at the bottom.
 
@@ -300,7 +300,7 @@ Expected:
 - The canonical return entry records the exact Project and the Project work-panel tab from which the Logic Gate was opened.
 - Browser Back returns to the exact Project and restores Logic Gates / Nodes when that was the originating tab, instead of resetting to Critical Path.
 - Changing the toggle after returning updates that Project history entry, so a later history return does not restore a stale earlier selection.
-- A fresh Project entry or a marker belonging to another Project still opens on Critical Path.
+- A fresh Project entry or a marker belonging to another Project opens on Logic Gates / Nodes.
 - Unmodified Backspace outside editable content performs the same history-back action.
 - Backspace inside editable content edits text and never triggers Project navigation.
 

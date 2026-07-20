@@ -1,4 +1,4 @@
-Last updated: 2026-07-17
+Last updated: 2026-07-20
 
 # Unified Editor Tests
 
@@ -35,9 +35,9 @@ ED11 - Map and legacy map-specific editing behavior is outside the V1 unified ed
 ED12 - Any future change to unified editor semantics must update one shared behavior or formatting-controller test plus adapter/mount coverage proving each target surface receives the shared behavior.
 ED13 - The shared rich editor behavior source is `useEditorDocumentSurfaceHandlers`; the shared formatting-command source is `useEditorDocumentFormattingController`; and `EditorDocumentSurface` is the only reusable rich `contentEditable` host. Target adapters may preserve their own persistence/send callbacks, but must not render another rich editable DOM host or reimplement a local formatting controller.
 ED14 - Mail compose/reply, attached-email reply, and email signature editing must expose the shared editor format/outline toolbar controls for font size, bold, underline, italic, strikethrough, highlight color, left/center/right alignment, the outline-style dropdown, and table insertion where supported. Wrapper-specific controls may add commands, but must call the shared formatting controller instead of local DOM commands.
-ED15 - Nodes opened from Projects participate in the same unified editor contract in both project entry paths: the Critical Path inline node window and the Logic Gates / Nodes tab double-click opener. The Logic Gates / Nodes opener may route to the standard standalone node popup, but the node text boxes inside that popup must still use the shared node editor behavior rather than a project-local editor implementation.
+ED15 - Nodes opened from Projects participate in the same unified editor contract in both project entry paths: the Critical Path inline node window and the Logic Gates / Nodes click-to-expand inline editor. The node text boxes in both paths use the shared node editor behavior rather than a project-local implementation.
 ED16 - The Logic Gate editor text body is a unified editor surface.
-ED17 - Node editor text boxes are unified editor surfaces wherever a full node editor is opened, including Home, My Work, Updates, Kanban, Company Explorer/sidebar, minimized dock restore, Project critical-path inline node windows, and Project Logic Gates / Nodes double-click node popups.
+ED17 - Node editor text boxes are unified editor surfaces wherever a full node editor is opened, including Home, My Work, Updates, Kanban, Company Explorer/sidebar, minimized dock restore, Project critical-path inline node windows, and Project Logic Gates / Nodes inline node editors.
 ED18 - Project text boxes and project information editors are unified editor surfaces.
 ED19 - My Triage email compose and reply bodies are unified editor surfaces.
 ED20 - Shared Triage email compose and reply bodies are unified editor surfaces.
@@ -155,14 +155,14 @@ Business logic covered:
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, an attached-email reply body, and a personal/shared mailbox signature.
-- A user can open a node from a Project critical-path row and by double-clicking a node in the Project Logic Gates / Nodes tab.
+- A user can open a node from a Project critical-path row and expand a node by clicking its row in the Project Logic Gates / Nodes tab.
 - The implementation changes indentation, paste cleanup, list behavior, mention/entity boundaries, hyperlink creation, font size, inline formatting, highlight color, text alignment, table insertion, inline-image preview, the format toolbar, the outline-style dropdown, Delete/Backspace, copy/cut/paste, or keyboard routing.
 
 Expected:
 - The behavior change is made in the shared editor behavior source or shared formatting-controller hook.
 - Each target surface receives the same user-facing semantics.
 - The unified editor target inventory is Logic Gate editor text, node editor text boxes from every full node editor opener, project text boxes/information editors, My Triage compose/reply, Shared Triage compose/reply, attached-email reply bodies that send or draft real mail, and personal/shared mailbox signatures.
-- Project critical-path node text boxes and Project Logic Gates / Nodes standalone node-popup text boxes receive the same node editor semantics.
+- Project critical-path node text boxes and Project Logic Gates / Nodes inline node-editor text boxes receive the same node editor semantics.
 - No target surface keeps a separate local implementation that disagrees with the shared behavior.
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Every rich target mounts the one `EditorDocumentSurface` editable host and uses `useEditorDocumentFormattingController`.
@@ -1198,7 +1198,7 @@ Business logic covered:
 Given:
 - A Node, Logic Gate, or Project editor is open with the shared header.
 - Key Views, Explorer, or Search Explorer chrome creates its own local stacking context.
-- The user opens an image/attachment/email preview, permissions/assignment dialog, email picker, node popup, or expanded Kanban/Project node panel.
+- The user opens an image/attachment/email preview, permissions/assignment dialog, email picker, node popup, or expanded Kanban node panel.
 
 Expected:
 - The header primary area orders Editor, Permissions, shared Format controls, and Outline Styles/Automatic Numbering immediately before **More**, and Node/Logic Gate headers remain on one nonwrapping line at narrowed widths.
@@ -1208,8 +1208,9 @@ Expected:
 - Opening the menu moves focus to its first enabled action; Arrow Up/Down, Home, and End move among enabled actions; Escape closes it and restores focus to **More**.
 - The blocking surface mounts under the shared body-level modal layer and therefore paints and receives interaction above Key Views, Explorer, Search Explorer, and feature-local stacking contexts.
 - An inline-image preview mounts directly into its final dark overlay without an intermediate outline/geometry jump and exposes the standard compact glossy bright-red node close button with an uppercase white `X` and accessible name.
-- The topmost blocking modal traps Tab/Shift+Tab, closing restores prior focus, and existing accessible dialog naming plus Escape/backdrop close behavior remains intact; anchored editor panels may remain intentionally modeless until expanded/fullscreen.
-- Switching a Kanban or Project node panel into or out of fullscreen changes viewport geometry without remounting its live editor or losing its opener state.
+- The topmost blocking modal traps Tab/Shift+Tab, closing restores prior focus, and existing accessible dialog naming plus Escape/backdrop close behavior remains intact; anchored Kanban editor panels may remain intentionally modeless until fullscreen.
+- Switching a Kanban node panel into or out of fullscreen changes viewport geometry without remounting its live editor or losing its opener state.
+- The Project Logic Gates / Nodes editor remains inline beneath its selected row and does not enter the blocking modal layer.
 
 ### Scenario ED-S12: Highlight Click Reveals The Exact Chat Comment
 

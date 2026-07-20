@@ -70,8 +70,8 @@ describe("deepLinkRoutes", () => {
       },
     });
     assert.equal(projectWorkPanelTabFromHistoryState(state, "project-1"), "relationships");
-    assert.equal(projectWorkPanelTabFromHistoryState(state, "project-2"), "critical-path");
-    assert.equal(projectWorkPanelTabFromHistoryState({}, "project-1"), "critical-path");
+    assert.equal(projectWorkPanelTabFromHistoryState(state, "project-2"), "relationships");
+    assert.equal(projectWorkPanelTabFromHistoryState({}, "project-1"), "relationships");
   });
 
   it("writes the return tab onto the current Project history entry", () => {
@@ -108,6 +108,12 @@ describe("deepLinkRoutes", () => {
     assert.match(summary, /workPanelTab: "relationships"/);
     assert.match(summary, /workPanelTab: "critical-path"/);
     assert.match(appLayout, /if \(navigation\.replacePath\) onNavigate[\s\S]*replaceProjectWorkPanelHistoryState[\s\S]*onNavigate\(navigation\.pushPath\)/);
+    assert.ok(
+      summary.indexOf('selectRightPanelTab("relationships")') < summary.indexOf('selectRightPanelTab("critical-path")'),
+      "Logic Gates / Nodes must be the left-most Project work-panel tab",
+    );
+    assert.match(appLayout, /if \(!deepLinkProjectID\)[\s\S]*initialPage === "project-management"[\s\S]*setProjectManagementTarget\(null\)/);
+    assert.match(summary, /onProjectUpdated\?\.\(renamedProject\)/);
   });
 
   it("round-trips GVIC node routes with existing role and view IDs", () => {

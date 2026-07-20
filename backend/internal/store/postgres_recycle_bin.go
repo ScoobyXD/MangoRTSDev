@@ -316,15 +316,54 @@ func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName st
 	} else if !exists {
 		return nil
 	}
+	columns, err := postgresRecycleRestorableColumnsTx(ctx, tx, tableName)
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	columnList := strings.Join(columns, ", ")
 	query := fmt.Sprintf(`
-insert into %s
-select *
-from jsonb_populate_recordset(null::%s, coalesce($1::jsonb, '[]'::jsonb))
-on conflict do nothing`, tableName, tableName)
+insert into %s (%s) overriding system value
+select %s
+from jsonb_populate_recordset(null::%s, coalesce($1::jsonb, '[]'::jsonb)) restored_row
+on conflict do nothing`, tableName, columnList, columnList, tableName)
 	if _, err := tx.ExecContext(ctx, query, string(rows)); err != nil {
 		return err
 	}
 	return nil
+}
+
+func postgresRecycleRestorableColumnsTx(ctx context.Context, tx *sql.Tx, tableName string) ([]string, error) {
+	if !recycleSnapshotTables[tableName] {
+		return nil, ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select attname
+from pg_attribute
+where attrelid=to_regclass($1)
+  and attnum > 0
+  and not attisdropped
+  and attgenerated = ''
+order by attnum`, "public."+tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := make([]string, 0)
+	for rows.Next() {
+		var columnName string
+		if err := rows.Scan(&columnName); err != nil {
+			return nil, err
+		}
+		columns = append(columns, quotePostgresIdentifier(columnName))
+	}
+	return columns, rows.Err()
+}
+
+func quotePostgresIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func postgresTableExistsTx(ctx context.Context, tx *sql.Tx, tableName string) (bool, error) {
@@ -840,9 +879,6 @@ func postgresExpandCompanyExplorerRecycleScopeTx(ctx context.Context, tx *sql.Tx
 		if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, scope); err != nil {
 			return err
 		}
-		if err := postgresAddProjectScopeItemsTx(ctx, tx, companyID, scope); err != nil {
-			return err
-		}
 		if err := postgresAddLogicGateScopeItemsTx(ctx, tx, companyID, scope); err != nil {
 			return err
 		}
@@ -882,39 +918,6 @@ where company_id=$1::uuid
 			scope.ProjectIDs[itemID] = true
 		case "kanban":
 			scope.KanbanBoardIDs[itemID] = true
-		}
-	}
-	return rows.Err()
-}
-
-func postgresAddProjectScopeItemsTx(ctx context.Context, tx *sql.Tx, companyID string, scope *companyExplorerRecycleScope) error {
-	if scope == nil || len(scope.ProjectIDs) == 0 {
-		return nil
-	}
-	rows, err := tx.QueryContext(ctx, `
-select resource_type, resource_id::text
-from project_relationships
-where company_id=$1::uuid
-  and project_id = any(string_to_array($2, ',')::uuid[])`,
-		companyID, strings.Join(sortedMapKeys(scope.ProjectIDs), ","),
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var resourceType string
-		var resourceID string
-		if err := rows.Scan(&resourceType, &resourceID); err != nil {
-			return err
-		}
-		switch resourceType {
-		case EntityTypeNode:
-			scope.NodeIDs[resourceID] = true
-		case EntityTypeLogicGate:
-			scope.LogicGateIDs[resourceID] = true
-		case EntityTypeProject:
-			scope.ProjectIDs[resourceID] = true
 		}
 	}
 	return rows.Err()

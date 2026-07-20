@@ -119,14 +119,6 @@ func expandRecycleContainedMemoryScope(companyID string, scope *recycleContained
 				changed = true
 			}
 		}
-		for _, relationship := range snapshot.projectRelationships {
-			if relationship.CompanyID != companyID || !scope.ProjectIDs[relationship.ProjectID] {
-				continue
-			}
-			if recycleContainedScopeAdd(scope, relationship.ResourceType, relationship.ResourceID) {
-				changed = true
-			}
-		}
 		for _, assignment := range snapshot.nodeLogicGateAssignments {
 			if assignment.CompanyID != companyID || !scope.LogicGateIDs[assignment.LogicGateID] {
 				continue

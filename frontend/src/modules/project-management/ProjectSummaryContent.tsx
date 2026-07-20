@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { AppModalPortal, useAppViewportAnchorRect, type AppViewportAnchorRect } from "../../app/AppModalPortal.js";
+import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
 import {
   projectWorkPanelTabFromHistoryState,
@@ -60,11 +60,6 @@ import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
 import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
-import {
-  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
-  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
-  setNodeEditorFullscreenChromeActive,
-} from "../editor/nodeEditorFullscreenChrome.js";
 import type { EditorHighlightColor } from "../editor/richTextEditing.js";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
@@ -150,6 +145,7 @@ type ProjectSummaryContentProps = {
   refreshToken?: number;
   onBack: () => void;
   onNodeOpen?: (nodeID: string) => void;
+  onProjectUpdated?: (project: ProjectRecord) => void;
   onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onOpenInNewTab?: () => void;
   onCollapseToTab?: (target: { projectID: string; label: string }) => void;
@@ -248,6 +244,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   refreshToken = 0,
   onBack,
   onNodeOpen,
+  onProjectUpdated,
   onLogicGateOpen,
   onOpenInNewTab,
   onCollapseToTab,
@@ -262,7 +259,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const textBlocksScrollRef = useRef<HTMLDivElement | null>(null);
   const projectDocumentScrollMemoryRef = useRef(createEditorScrollMemory());
   const paneProjectIDRef = useRef("");
-  const relationshipsColumnRef = useRef<HTMLElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
   const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
   const relationshipGroupingSignatureRef = useRef("");
@@ -1453,20 +1449,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         status: project.status || "Active",
         health: normalizeProjectHealth(project.health),
       });
-      if (result.project) {
-        setProject(result.project);
-        setProjectTitleDraft(result.project.name || nextName);
-      } else {
-        setProject((current) => current ? { ...current, name: nextName } : current);
-        setProjectTitleDraft(nextName);
-      }
+      const renamedProject = result.project ?? { ...project, name: nextName };
+      setProject(renamedProject);
+      setProjectTitleDraft(renamedProject.name || nextName);
+      onProjectUpdated?.(renamedProject);
       setProjectTitleEditing(false);
     } catch (renameError) {
       setError(renameError instanceof Error ? renameError.message : "Failed to rename project");
       setProjectTitleDraft(project.name || "");
       setProjectTitleEditing(false);
     }
-  }, [companyID, project, projectID, projectTitleDraft]);
+  }, [companyID, onProjectUpdated, project, projectID, projectTitleDraft]);
 
   const moveRelationshipNodeToGate = useCallback(async (payload: ProjectRelationshipNodeDragPayload, targetLogicGateID: string, position: number) => {
     const nodeID = payload.nodeID.trim();
@@ -1695,30 +1688,38 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         const nodeID = (relationship.node_id || relationship.resource_id || "").trim();
         const referencedGateID = relationship.logic_gate_id?.trim() ?? "";
         const visibleGateID = referencedGateID && visibleProjectLogicGateByID.has(referencedGateID) ? referencedGateID : "";
+        const expanded = selectedRelationshipNodePanel?.projectID === projectID
+          && selectedRelationshipNodePanel.relationshipID === relationship.relationship_id
+          && selectedRelationshipNodePanel.nodeID === nodeID;
         return (
+          <React.Fragment key={relationship.relationship_id}>
           <button
-            key={relationship.relationship_id}
             type="button"
             role="row"
             data-project-relationship-row="true"
             draggable={Boolean(nodeID && visibleGateID)}
             style={relationshipNodeRowStyle(depth, hoveredRelationshipNodeID === relationship.relationship_id, selectedRelationshipNodeIDs.has(relationship.relationship_id))}
-            onClick={(event) => selectRelationshipNode(relationship.relationship_id, event)}
+            aria-expanded={expanded}
+            onClick={(event) => {
+              selectRelationshipNode(relationship.relationship_id, event);
+              if (!nodeID || event.shiftKey || event.ctrlKey || event.metaKey || event.detail > 1) return;
+              setRelationshipContextMenu(null);
+              setSelectedRelationshipNodePanel((current) => (
+                current?.projectID === projectID
+                && current.relationshipID === relationship.relationship_id
+                && current.nodeID === nodeID
+                  ? null
+                  : {
+                    projectID,
+                    relationshipID: relationship.relationship_id,
+                    nodeID,
+                    title: relationship.display_title.trim() || "Node",
+                  }
+              ));
+            }}
             onDragStart={(event) => startProjectRelationshipNodeDrag(event, relationship, visibleGateID)}
             onMouseEnter={() => setHoveredRelationshipNodeID(relationship.relationship_id)}
             onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === relationship.relationship_id ? "" : current)}
-            onDoubleClick={(event) => {
-              if (!nodeID) return;
-              event.preventDefault();
-              event.stopPropagation();
-              setRelationshipContextMenu(null);
-              setSelectedRelationshipNodePanel({
-                projectID,
-                relationshipID: relationship.relationship_id,
-                nodeID,
-                title: relationship.display_title.trim() || "Node",
-              });
-            }}
             onContextMenu={(event) => openRelationshipNodeContextMenu(event, relationship, visibleGateID)}
           >
             <span style={relationshipResourceIconStyle}><ExplorerRowIcon kind="node" /></span>
@@ -1733,6 +1734,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             <CriticalPulseBeacon visible={isCurrentCritical} compact />
             {relationship.status ? <span style={nodeStatusDotStyle(relationship.status)} /> : null}
           </button>
+          {expanded ? (
+            <div style={relationshipNodePanelRowStyle(depth)}>
+              <ProjectRelationshipNodePanel
+                key={`${projectID}:${nodeID}`}
+                accent={accent}
+                selection={selectedRelationshipNodePanel as ProjectRelationshipNodePanelSelection}
+                onNodeOpen={onNodeOpen}
+                onClose={() => setSelectedRelationshipNodePanel(null)}
+              />
+            </div>
+          ) : null}
+          </React.Fragment>
         );
       })}
     </div>
@@ -2205,18 +2218,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           </div>
         </section>
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
-        <aside ref={relationshipsColumnRef} style={relationshipsColumnStyle(summarySplitPct)}>
+        <aside style={relationshipsColumnStyle(summarySplitPct)}>
           <div style={projectWorkPanelToolbarStyle}>
             <div role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeRightPanelTab === "critical-path"}
-                style={rightPanelTabStyle(activeRightPanelTab === "critical-path")}
-                onClick={() => selectRightPanelTab("critical-path")}
-              >
-                Critical Path
-              </button>
               <button
                 type="button"
                 role="tab"
@@ -2225,6 +2229,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 onClick={() => selectRightPanelTab("relationships")}
               >
                 Logic Gates / Nodes
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeRightPanelTab === "critical-path"}
+                style={rightPanelTabStyle(activeRightPanelTab === "critical-path")}
+                onClick={() => selectRightPanelTab("critical-path")}
+              >
+                Critical Path
               </button>
             </div>
             {activeRightPanelTab === "relationships" ? (
@@ -2360,15 +2373,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               cancelLabel="No"
               onConfirm={(confirmationDisplayName) => void deleteRelationshipResource(relationshipDeleteConfirmation, confirmationDisplayName)}
               onCancel={() => setRelationshipDeleteConfirmation(null)}
-            />
-          ) : null}
-          {selectedRelationshipNodePanel?.projectID === projectID ? (
-            <ProjectRelationshipNodePanel
-              key={`${selectedRelationshipNodePanel.projectID}:${selectedRelationshipNodePanel.nodeID}`}
-              accent={accent}
-              selection={selectedRelationshipNodePanel}
-              containerRef={relationshipsColumnRef}
-              onClose={() => setSelectedRelationshipNodePanel(null)}
             />
           ) : null}
         </aside>
@@ -2860,42 +2864,32 @@ function ProjectCriticalPathNodeWindow({
 function ProjectRelationshipNodePanel({
   accent,
   selection,
-  containerRef,
   onClose,
+  onNodeOpen,
 }: {
   accent: string;
   selection: ProjectRelationshipNodePanelSelection;
   onClose: () => void;
-  containerRef: React.RefObject<HTMLElement | null>;
+  onNodeOpen?: (nodeID: string) => void;
 }) {
-  const [fullscreen, setFullscreen] = useState(false);
-  const containerRect = useAppViewportAnchorRect(containerRef);
-
-  useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
-
-
   return (
-    <AppModalPortal ownerDocument={containerRef.current?.ownerDocument} trapFocus={fullscreen} onRequestClose={onClose}>
-      <div data-mango-editor-overlay-backdrop={fullscreen ? "modal" : "modeless"} style={{ position: "fixed", inset: 0, zIndex: 1, background: fullscreen ? "rgba(15, 23, 42, 0.18)" : "transparent", pointerEvents: fullscreen ? "auto" : "none" }}>
-      <UnifiedNodeShell
-      className="project-relationships-node-panel"
-      surfaceID="project-relationships-node-panel"
+    <UnifiedNodeShell
+      className="project-relationships-node-panel project-critical-path-node-window"
+      surfaceID="project-relationships-inline-node"
       title={selection.title}
-      role="dialog"
-      ariaModal={fullscreen}
-      style={{ ...projectRelationshipNodePanelStyle(accent, fullscreen, containerRect), zIndex: 2, pointerEvents: "auto" }}
+      style={projectRelationshipNodePanelStyle(accent)}
       bodyStyle={projectRelationshipNodePanelBodyStyle}
       actionButtonStyle={criticalPathNodePreviewActionButtonStyle}
       closeButtonStyle={criticalPathNodePreviewActionButtonStyle}
       actions={[
         {
-          id: "fullscreen",
-          pressed: fullscreen,
-          onClick: () => setFullscreen((current) => !current),
-        },
-        {
           id: "open-in-new-tab",
-          onClick: () => openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID)),
+          title: onNodeOpen ? "Open node window" : "Open node in new browser tab",
+          ariaLabel: onNodeOpen ? "Open node window" : "Open node in new browser tab",
+          onClick: () => {
+            if (onNodeOpen) onNodeOpen(selection.nodeID);
+            else openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID));
+          },
         },
         {
           id: "pin",
@@ -2905,6 +2899,8 @@ function ProjectRelationshipNodePanel({
         },
         {
           id: "close",
+          title: "Collapse inline node window",
+          ariaLabel: "Collapse inline node window",
           onClick: onClose,
         },
       ]}
@@ -2919,9 +2915,7 @@ function ProjectRelationshipNodePanel({
         forcedEmptyMessage="Select a project node."
         compactLinkedDocumentHeader
       />
-      </UnifiedNodeShell>
-      </div>
-    </AppModalPortal>
+    </UnifiedNodeShell>
   );
 }
 
@@ -4093,39 +4087,29 @@ const criticalPathNodePreviewActionButtonStyle: React.CSSProperties = {
   boxShadow: EDITOR_NEU_SHADOW,
 };
 
-function projectRelationshipNodePanelStyle(
-  accent: string,
-  fullscreen: boolean,
-  containerRect: AppViewportAnchorRect | null,
-): React.CSSProperties {
+function relationshipNodePanelRowStyle(depth: number): React.CSSProperties {
+  const leftOffset = relationshipRowLeftOffset(depth);
   return {
-    position: "fixed",
-    zIndex: 1,
-    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : containerRect?.top ?? 0,
-    right: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : undefined,
-    bottom: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : undefined,
-    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : containerRect?.left ?? 0,
-    width: fullscreen ? undefined : containerRect?.width ?? 0,
-    height: fullscreen ? undefined : containerRect?.height ?? 0,
-    visibility: !fullscreen && !containerRect ? "hidden" : "visible",
+    width: `calc(100% - ${leftOffset}px)`,
     minWidth: 0,
-    minHeight: 0,
-    border: "1px solid transparent",
-    borderRadius: fullscreen ? 14 : 10,
-    background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, linear-gradient(135deg, rgba(255,255,255,0.95), ${accent}) border-box`,
-    color: PROJECT_SUMMARY_SURFACE_TEXT,
-    overflow: "hidden",
-    boxShadow: fullscreen
-      ? "0 24px 70px rgba(15, 23, 42, 0.28)"
-      : "8px 10px 22px rgba(174,174,192,0.18), -6px -6px 16px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)",
+    marginLeft: leftOffset,
+    padding: "8px 0 12px",
+    boxSizing: "border-box",
+  };
+}
+
+function projectRelationshipNodePanelStyle(accent: string): React.CSSProperties {
+  return {
+    ...criticalPathNodePreviewSurfaceStyle(accent),
+    width: "100%",
   };
 }
 
 const projectRelationshipNodePanelBodyStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 0,
+  minHeight: 360,
   width: "100%",
-  height: "100%",
+  height: "min(720px, calc(100dvh - 180px))",
   overflow: "hidden",
   background: EDITOR_NEU_PANEL_BACKGROUND,
 };

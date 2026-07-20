@@ -407,8 +407,21 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 	}
 	requireDeletedTarget(t, result.Targets, "folder", childFolder.EntityID)
 	requireDeletedTarget(t, result.Targets, EntityTypeProject, project.ProjectID)
-	requireDeletedTarget(t, result.Targets, EntityTypeLogicGate, logicGate.LogicGateID)
-	requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
+	for _, target := range result.Targets {
+		if target.Kind == EntityTypeLogicGate || target.Kind == EntityTypeNode {
+			t.Fatalf("folder delete unexpectedly expanded a contained project's associations: %+v", target)
+		}
+	}
+	if _, err := repo.GetLogicGate(companyID, logicGate.LogicGateID); err != nil {
+		t.Fatalf("GetLogicGate after folder/project delete: %v", err)
+	}
+	if _, err := repo.GetNode(companyID, node.NodeID); err != nil {
+		t.Fatalf("GetNode after folder/project delete: %v", err)
+	}
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
+	if err != nil || len(assignments) != 1 || assignments[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("node assignment after folder/project delete = %+v, err = %v", assignments, err)
+	}
 
 	items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 	if err != nil {
@@ -417,11 +430,14 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 	rootItem := requireRecycleItem(t, items, "folder", folder.EntityID)
 	requireContainedRecycleItem(t, rootItem.ContainedItems, "folder", childFolder.EntityID, "Child Folder")
 	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeProject, project.ProjectID, "Contained Project")
-	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeLogicGate, logicGate.LogicGateID, "Contained Gate")
-	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeNode, node.NodeID, "Contained Node")
+	for _, item := range rootItem.ContainedItems {
+		if item.Kind == EntityTypeLogicGate || item.Kind == EntityTypeNode {
+			t.Fatalf("folder recycle summary unexpectedly included project association %+v", item)
+		}
+	}
 }
 
-func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChildren(t *testing.T) {
+func TestMemoryCompanyExplorerDeletePreservesProjectAssociationsAndSummarizesLogicGateChildren(t *testing.T) {
 	t.Run("project", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		companyID := "11111111-1111-4111-8111-220000000005"
@@ -433,21 +449,49 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChild
 		if err != nil {
 			t.Fatalf("DeleteCompanyExplorerTargets project: %v", err)
 		}
-		requireDeletedTarget(t, result.Targets, EntityTypeLogicGate, logicGate.LogicGateID)
-		requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
-		if _, err := repo.GetLogicGate(companyID, logicGate.LogicGateID); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("GetLogicGate after project delete err = %v, want ErrNotFound", err)
+		requireDeletedTarget(t, result.Targets, EntityTypeProject, project.ProjectID)
+		for _, target := range result.Targets {
+			if target.Kind == EntityTypeLogicGate || target.Kind == EntityTypeNode {
+				t.Fatalf("project delete unexpectedly included associated resource %+v", target)
+			}
 		}
-		if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("GetNode after project delete err = %v, want ErrNotFound", err)
+		if _, err := repo.GetProject(companyID, project.ProjectID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetProject after delete err = %v, want ErrNotFound", err)
+		}
+		if _, err := repo.GetLogicGate(companyID, logicGate.LogicGateID); err != nil {
+			t.Fatalf("GetLogicGate after project delete: %v", err)
+		}
+		if _, err := repo.GetNode(companyID, node.NodeID); err != nil {
+			t.Fatalf("GetNode after project delete: %v", err)
+		}
+		assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
+		if err != nil {
+			t.Fatalf("ListNodeLogicGateAssignments after project delete: %v", err)
+		}
+		if len(assignments) != 1 || assignments[0].LogicGateID != logicGate.LogicGateID {
+			t.Fatalf("assignments after project delete = %+v, want preserved gate assignment", assignments)
 		}
 		items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 		if err != nil {
 			t.Fatalf("ListRecycleBinItems project: %v", err)
 		}
 		projectItem := requireRecycleItem(t, items, EntityTypeProject, project.ProjectID)
-		requireContainedRecycleItem(t, projectItem.ContainedItems, EntityTypeLogicGate, logicGate.LogicGateID, "Project Gate")
-		requireContainedRecycleItem(t, projectItem.ContainedItems, EntityTypeNode, node.NodeID, "Project Node")
+		if len(projectItem.ContainedItems) != 0 {
+			t.Fatalf("project recycle item contained resources = %+v, want associations excluded", projectItem.ContainedItems)
+		}
+		if _, err := repo.RestoreRecycleBinItems(companyID, deleterUserID, []string{projectItem.RecycleBinItemID}); err != nil {
+			t.Fatalf("RestoreRecycleBinItems project: %v", err)
+		}
+		if _, err := repo.GetProject(companyID, project.ProjectID); err != nil {
+			t.Fatalf("GetProject after restore: %v", err)
+		}
+		relationships, err := repo.ListProjectRelationshipProjections(companyID, project.ProjectID)
+		if err != nil {
+			t.Fatalf("ListProjectRelationshipProjections after restore: %v", err)
+		}
+		if len(relationships) != 1 || relationships[0].ResourceID != logicGate.LogicGateID {
+			t.Fatalf("relationships after project restore = %+v, want restored association", relationships)
+		}
 	})
 
 	t.Run("logic_gate", func(t *testing.T) {

@@ -11,7 +11,7 @@ type ProjectWorkPanelHistoryLike = {
 };
 
 const PROJECT_WORK_PANEL_HISTORY_STATE_KEY = "mangortsProjectWorkPanel";
-export const DEFAULT_PROJECT_WORK_PANEL_TAB: ProjectWorkPanelTab = "critical-path";
+export const DEFAULT_PROJECT_WORK_PANEL_TAB: ProjectWorkPanelTab = "relationships";
 
 function historyStateRecord(state: unknown): Record<string, unknown> {
   if (!state || typeof state !== "object" || Array.isArray(state)) return {};

@@ -373,3 +373,110 @@ func TestPostgresRealtimeOutboxRetryAndDuplicateCompletion(t *testing.T) {
 		t.Fatalf("duplicate publication completion must be idempotent: %v", err)
 	}
 }
+
+func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndGeneratedProjection(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Realtime recycle restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	user, err := repo.UpsertAuthUser("realtime-pg-recycle-user", "realtime-pg-recycle-user@example.test", "Realtime PG Recycle User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("realtime-pg-recycle-user", company.CompanyID, "company_admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: company.CompanyID, Name: "Independent resources", Status: "Active"})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("CreateProject result=%+v err=%v", projectResult, err)
+	}
+	project := *projectResult.Project
+	logicGate, err := repo.CreateLogicGate(company.CompanyID, "Independent gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(company.CompanyID, "Independent node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: company.CompanyID, ProjectID: project.ProjectID,
+		ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: company.CompanyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
+		Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db,
+		"select count(*) from kanban_board_projection where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
+		company.CompanyID, logicGate.LogicGateID, node.NodeID); got != 1 {
+		t.Fatalf("kanban projection rows before delete = %d, want 1", got)
+	}
+
+	deleted, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{
+		Kind: EntityTypeProject, ID: project.ProjectID,
+	}}, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireDeletedTarget(t, deleted.Targets, EntityTypeProject, project.ProjectID)
+	for _, target := range deleted.Targets {
+		if target.Kind == EntityTypeLogicGate || target.Kind == EntityTypeNode {
+			t.Fatalf("project delete included independent resource %+v", target)
+		}
+	}
+	if _, err := repo.GetLogicGate(company.CompanyID, logicGate.LogicGateID); err != nil {
+		t.Fatalf("GetLogicGate after project delete: %v", err)
+	}
+	if _, err := repo.GetNode(company.CompanyID, node.NodeID); err != nil {
+		t.Fatalf("GetNode after project delete: %v", err)
+	}
+	assignments, err := repo.ListNodeLogicGateAssignments(company.CompanyID, node.NodeID)
+	if err != nil || len(assignments) != 1 || assignments[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("assignment after project delete=%+v err=%v", assignments, err)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectItem := requireRecycleItem(t, recycleItems, EntityTypeProject, project.ProjectID)
+	if len(projectItem.ContainedItems) != 0 {
+		t.Fatalf("project recycle item contained independent resources: %+v", projectItem.ContainedItems)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{projectItem.RecycleBinItemID}); err != nil {
+		t.Fatalf("restore project: %v", err)
+	}
+
+	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{
+		Kind: EntityTypeLogicGate, ID: logicGate.LogicGateID,
+	}}, user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	recycleItems, err = repo.ListRecycleBinItems(company.CompanyID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicGateItem := requireRecycleItem(t, recycleItems, EntityTypeLogicGate, logicGate.LogicGateID)
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{logicGateItem.RecycleBinItemID}); err != nil {
+		t.Fatalf("restore Logic Gate payload containing generated projection columns: %v", err)
+	}
+	if _, err := repo.GetLogicGate(company.CompanyID, logicGate.LogicGateID); err != nil {
+		t.Fatalf("GetLogicGate after restore: %v", err)
+	}
+	if _, err := repo.GetNode(company.CompanyID, node.NodeID); err != nil {
+		t.Fatalf("GetNode after restore: %v", err)
+	}
+	if got := countPostgresRows(t, db,
+		"select count(*) from kanban_board_projection where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
+		company.CompanyID, logicGate.LogicGateID, node.NodeID); got != 1 {
+		t.Fatalf("kanban projection rows after restore = %d, want 1", got)
+	}
+}
