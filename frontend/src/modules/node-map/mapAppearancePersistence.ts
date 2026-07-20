@@ -91,8 +91,8 @@ export function restoreNodeSizes(
   const restored: Record<string, { w: number; h: number }> = Object.create(null);
   for (const [nodeID, size] of Object.entries(saved ?? {}).slice(0, 2000)) {
     if (!nodeID || !size || !Number.isFinite(size.w) || !Number.isFinite(size.h)) continue;
-    restored[nodeID] = {
     if (isReservedRecordKey(nodeID)) continue;
+    restored[nodeID] = {
       w: snapClamp(size.w!, 108, worldWidth),
       h: snapClamp(size.h!, 72, worldHeight),
     };
@@ -107,9 +107,9 @@ export function restoreMyTeraCardStates(
   const restored: MyTeraCardStateByNodeID = Object.create(null);
   for (const [nodeID, state] of Object.entries(saved ?? {}).slice(0, 2000)) {
     if (!nodeID || !state || typeof state !== "object") continue;
+    if (isReservedRecordKey(nodeID)) continue;
     const relatedControls = Array.isArray(state.relatedControls)
       ? Array.from(new Set(state.relatedControls
-    if (isReservedRecordKey(nodeID)) continue;
         .filter((value): value is string => typeof value === "string")
         .map((value) => value.trim().slice(0, 64))
         .filter(Boolean)))

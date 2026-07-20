@@ -6,6 +6,8 @@ import {
   resolveNodeMapPointerSelection,
 } from "../node-map/NodeMapControls";
 import { canStartRelationshipFromSide, isLegalRelationshipSidePair } from "./relationshipProjection";
+import { NodeMyTeraPanel, type NodeMyTeraRole } from "../node-map/NodeMyTeraPanel";
+import type { MyTeraCardState } from "../node-map/mapAppearancePersistence";
 
 const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
   { direction: "left", style: { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" } },
@@ -39,6 +41,13 @@ type LogicGateMapNodeCardProps = {
   nodeCardBorder: string;
   nodeCardText: string;
   selectionColor: string;
+  panelMutedText: string;
+  myTeraState: MyTeraCardState;
+  myTeraRoles: NodeMyTeraRole[];
+  relationshipCount: number;
+  onToggleMyTera: (nodeID: string) => void;
+  onUpdateMyTera: (nodeID: string, next: MyTeraCardState) => void;
+  onMyTeraContentHeightChange: (nodeID: string, height: number) => void;
   onSetCanvasActive: React.Dispatch<React.SetStateAction<boolean>>;
   onSetContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; worldX: number; worldY: number } | null>>;
   onSetNodeContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; nodeID: string } | null>>;
@@ -89,6 +98,13 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   nodeCardBorder,
   nodeCardText,
   selectionColor,
+  panelMutedText,
+  myTeraState,
+  myTeraRoles,
+  relationshipCount,
+  onToggleMyTera,
+  onUpdateMyTera,
+  onMyTeraContentHeightChange,
   onSetCanvasActive,
   onSetContextMenu,
   onSetNodeContextMenu,
@@ -114,10 +130,15 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const gateShadow = isSelected
     ? "drop-shadow(0 0 4px rgba(100,116,139,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
     : "drop-shadow(0 4px 12px rgba(0,0,0,0.12))";
+  const myTeraExpanded = myTeraState.enabled && myTeraState.expanded;
+  const myTeraPanelHeight = myTeraExpanded ? Math.max(228, myTeraState.panelHeight ?? 228) : 0;
+  const titleStripHeight = myTeraExpanded ? Math.max(72, size.h - myTeraPanelHeight) : size.h;
 
   return (
     <div
       data-node-card="true"
+      data-mytera-enabled={myTeraState.enabled ? "true" : "false"}
+      data-mytera-expanded={myTeraExpanded ? "true" : "false"}
       style={{
         position: "absolute",
         left: position.x,
@@ -135,6 +156,9 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         cursor: isEditingTitle && canEdit ? "text" : canEdit ? (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab") : "default",
         zIndex: isPrimary ? 5 : 4,
         overflow: "visible",
+        isolation: "isolate",
+        transform: isSelected ? "rotate(-0.45deg)" : "none",
+        transformOrigin: "48% 82%",
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
@@ -199,6 +223,38 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         });
       }}
     >
+      {myTeraExpanded && ([
+        { key: "rear", transform: "translate(10px, 8px) rotate(1.1deg)", opacity: 0.1 },
+        { key: "middle", transform: "translate(-7px, 5px) rotate(-0.75deg)", opacity: 0.07 },
+      ] as const).map((layer) => (
+        <svg
+          key={layer.key}
+          data-mytera-layer={layer.key}
+          aria-hidden="true"
+          viewBox={`0 0 ${AND_GATE_VIEWBOX_WIDTH} ${AND_GATE_VIEWBOX_HEIGHT}`}
+          preserveAspectRatio="none"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            overflow: "visible",
+            pointerEvents: "none",
+            zIndex: layer.key === "rear" ? -2 : -1,
+            transform: layer.transform,
+          }}
+        >
+          <path
+            d={AND_GATE_PATH}
+            fill={accent}
+            fillOpacity={layer.opacity}
+            stroke={accent}
+            strokeOpacity={0.28}
+            strokeWidth={1.4}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      ))}
       <svg
         aria-hidden="true"
         viewBox={`0 0 ${AND_GATE_VIEWBOX_WIDTH} ${AND_GATE_VIEWBOX_HEIGHT}`}
@@ -217,21 +273,44 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         <path
           d={AND_GATE_PATH}
           fill={gateFill}
+          fillOpacity={myTeraExpanded ? 0.78 : 1}
           stroke={gateStroke}
           strokeWidth={isSelected ? 2.4 : 1.4}
           vectorEffect="non-scaling-stroke"
         />
       </svg>
+      {myTeraExpanded && (
+        <div style={{ position: "absolute", inset: `0 12% ${titleStripHeight}px 0`, zIndex: 2 }}>
+          <NodeMyTeraPanel
+            entityLabel="Logic gate property"
+            relationshipCount={relationshipCount}
+            roles={myTeraRoles}
+            value={myTeraState}
+            canEdit={canEdit}
+            accent={accent}
+            surface={panelSurface}
+            textColor={nodeCardText}
+            mutedTextColor={panelMutedText}
+            onChange={(next) => onUpdateMyTera(node.node_id, next)}
+            onContentHeightChange={(height) => onMyTeraContentHeightChange(node.node_id, height)}
+          />
+        </div>
+      )}
       <div
         style={{
-          position: "relative",
-          zIndex: 1,
+          position: myTeraExpanded ? "absolute" : "relative",
+          bottom: myTeraExpanded ? 0 : undefined,
+          zIndex: 3,
           display: "grid",
           placeItems: "center",
           width: "100%",
           height: "100%",
           textAlign: "center",
           padding: "10px 22px 10px 10px",
+          boxSizing: "border-box",
+          background: myTeraExpanded ? `color-mix(in srgb, ${gateFill} 72%, transparent)` : "transparent",
+          borderTop: myTeraExpanded ? `1px solid color-mix(in srgb, ${accent} 24%, transparent)` : "none",
+          borderRadius: myTeraExpanded ? "0 42% 42% 0" : 0,
         }}
       >
         {/* Latency-obsession alignment: keep node-card render minimal.
@@ -311,6 +390,42 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
           </div>
         )}
       </div>
+      {((canEdit && isPrimary) || myTeraState.enabled) && (
+        <button
+          type="button"
+          data-mytera-toggle="true"
+          aria-label={myTeraExpanded ? "Collapse MyTera" : (myTeraState.enabled ? "Expand MyTera" : "Add MyTera")}
+          aria-expanded={myTeraExpanded}
+          title={myTeraExpanded ? "Collapse MyTera" : (myTeraState.enabled ? "Expand MyTera" : "Add MyTera")}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleMyTera(node.node_id);
+          }}
+          style={{
+            position: "absolute",
+            right: "16%",
+            bottom: Math.max(8, titleStripHeight - 14),
+            minWidth: 76,
+            height: 28,
+            padding: "0 10px",
+            borderRadius: 999,
+            border: `1px solid color-mix(in srgb, ${accent} 64%, transparent)`,
+            background: `color-mix(in srgb, ${panelSurface} 92%, transparent)`,
+            color: nodeCardText,
+            boxShadow: "0 5px 14px rgba(15,23,42,0.18)",
+            fontSize: 10.5,
+            fontWeight: 800,
+            cursor: "pointer",
+            zIndex: 7,
+          }}
+        >
+          {myTeraState.enabled ? `MyTera ${myTeraExpanded ? "▴" : "▾"}` : "+ MyTera"}
+        </button>
+      )}
       {isSelected && (
         <div style={{ position: "absolute", top: 8, left: 8, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92, zIndex: 2 }} />
       )}
