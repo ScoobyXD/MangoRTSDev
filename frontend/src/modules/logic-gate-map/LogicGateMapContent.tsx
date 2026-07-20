@@ -16,8 +16,6 @@ import { LogicGateMapNodeCard } from "./LogicGateMapNodeCard";
 import { LogicGateMapRelationshipHitLines } from "./LogicGateMapRelationshipHitLines";
 import { RelationshipColorLegend } from "../node-map/RelationshipColorLegend";
 import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, routeLogicGateMapDraftPath, routeLogicGateMapOrthogonalPath } from "./logicGateMapRouting";
-import { createDefaultMyTeraCardState, effectiveMyTeraCardSize, type MyTeraCardState, type MyTeraCardStateByNodeID } from "../node-map/mapAppearancePersistence";
-import { resizeNodeFootprint } from "../node-map/nodeFootprint";
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -53,7 +51,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `${LOGIC_GATE_MAP_STATE_KEY_PREFIX}:${companyID}:${mapScope}`;
   const fallbackMapStateKey = `${LOGIC_GATE_MAP_STATE_KEY_PREFIX}:${companyID}:last-opened-map`;
-  const mapAppearanceStateKey = `logic-gate-map-appearance-v1:${companyID}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -68,7 +65,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
-  const [myTeraCards, setMyTeraCards] = useState<MyTeraCardStateByNodeID>({});
   const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const allNodesRef = useRef<NodeRecord[]>([]);
@@ -169,88 +165,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
-  const effectiveNodeSizes = useMemo(() => {
-    const next: Record<string, { w: number; h: number }> = {};
-    const nodeIDs = new Set([
-      ...nodes.map((node) => node.node_id),
-      ...Object.keys(nodePositions),
-      ...Object.keys(nodeSizes),
-      ...Object.keys(myTeraCards),
-    ]);
-    for (const nodeID of nodeIDs) {
-      const baseSize = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
-      next[nodeID] = effectiveMyTeraCardSize(baseSize, myTeraCards[nodeID]);
-    }
-    return next;
-  }, [myTeraCards, nodePositions, nodeSizes, nodes]);
-
-  const myTeraRoles = useMemo(() => ([
-    { id: "input", label: "Input", color: relationshipRoleColors.input },
-    { id: "output", label: "Output", color: relationshipRoleColors.output },
-  ]), [relationshipRoleColors]);
-
-  const relationshipCountByNodeID = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const relationship of relationships) {
-      counts[relationship.node_id_a] = (counts[relationship.node_id_a] ?? 0) + 1;
-      counts[relationship.node_id_b] = (counts[relationship.node_id_b] ?? 0) + 1;
-    }
-    return counts;
-  }, [relationships]);
-
-  const applyEffectiveFootprint = useCallback((
-    nodeID: string,
-    nextSize: { w: number; h: number },
-    nextPosition?: NodePosition,
-  ) => {
-    const layout = resizeNodeFootprint({
-      nodeID,
-      nextSize,
-      nextPosition,
-      positions: nodePositions,
-      sizes: effectiveNodeSizes,
-      defaultSize: { w: NODE_W, h: NODE_H },
-      worldWidth: WORLD_W,
-      worldHeight: WORLD_H,
-      gap: MINI_GRID * 2,
-      verticalAnchor: nextPosition ? "top" : "bottom",
-    });
-    setNodePositions(layout.positions);
-  }, [WORLD_H, WORLD_W, effectiveNodeSizes, nodePositions]);
-
-  const toggleMyTera = useCallback((nodeID: string) => {
-    const current = myTeraCards[nodeID] ?? createDefaultMyTeraCardState();
-    const next: MyTeraCardState = {
-      ...current,
-      enabled: true,
-      expanded: !current.enabled || !current.expanded,
-    };
-    const baseSize = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
-    applyEffectiveFootprint(nodeID, effectiveMyTeraCardSize(baseSize, next));
-    setMyTeraCards((previous) => ({ ...previous, [nodeID]: next }));
-  }, [applyEffectiveFootprint, myTeraCards, nodeSizes]);
-
-  const updateMyTeraCard = useCallback((nodeID: string, next: MyTeraCardState) => {
-    setMyTeraCards((previous) => ({ ...previous, [nodeID]: { ...next, enabled: true } }));
-  }, []);
-
-  const updateMyTeraPanelHeight = useCallback((nodeID: string, contentHeight: number) => {
-    const current = myTeraCards[nodeID];
-    if (!current?.enabled || !current.expanded) return;
-    const panelHeight = Math.max(228, snapToGrid(contentHeight + 8));
-    if (current.panelHeight === panelHeight) return;
-    const next = { ...current, panelHeight };
-    const baseSize = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
-    applyEffectiveFootprint(nodeID, effectiveMyTeraCardSize(baseSize, next));
-    setMyTeraCards((previous) => ({ ...previous, [nodeID]: next }));
-  }, [applyEffectiveFootprint, myTeraCards, nodeSizes]);
 
   const centerNodeInViewport = (nodeID: string): boolean => {
     const position = nodePositions[nodeID];
     const isVisible = nodes.some((node) => node.node_id === nodeID);
     const isKnown = isVisible || allNodes.some((node) => node.node_id === nodeID);
     if (!nodeID || !isKnown || !isVisible || !position) return false;
-    const size = effectiveNodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
+    const size = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
     pendingFocusNodeIDRef.current = "";
     setSelectedRelationshipIDs(new Set());
     setSelectedNodeID(nodeID);
@@ -420,7 +341,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     };
     window.addEventListener(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, onFocusRequested);
     return () => window.removeEventListener(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, onFocusRequested);
-  }, [canvasSize.height, canvasSize.width, effectiveNodeSizes, mapScope, nodePositions, nodes, allNodes, zoom]);
+  }, [canvasSize.height, canvasSize.width, mapScope, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
   // Shared API request helper for logic-gate CRUD, details, and relationship operations.
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -430,15 +351,12 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     mapStateKey,
     fallbackMapStateKey,
     restoredViewport,
-    mapAppearanceStateKey,
     zoom,
     pan,
     selectedNodeID,
     nodePositions,
     nodes,
     relationshipColorsEnabled,
-    nodeSizes,
-    myTeraCards,
     relationshipRoleColors,
     worldWidth: WORLD_W,
     worldHeight: WORLD_H,
@@ -453,8 +371,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setSelectedNodeIDs,
     setNodePositions,
     setRelationshipColorsEnabled,
-    setNodeSizes,
-    setMyTeraCards,
     setRelationshipRoleColors,
     layoutPersistenceReadyRef,
     lastPersistedNodePositionsRef,
@@ -572,10 +488,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       event.preventDefault();
       const dx = (event.clientX - nodeResizeState.startMouseX) / zoom;
       const dy = (event.clientY - nodeResizeState.startMouseY) / zoom;
-      const myTera = myTeraCards[nodeResizeState.nodeID];
-      const panelHeight = myTera?.enabled && myTera.expanded ? Math.max(228, myTera.panelHeight ?? 228) : 0;
-      const minW = panelHeight > 0 ? 300 : 112;
-      const minH = 74 + panelHeight;
+      const minW = 112;
+      const minH = 74;
       let nextW = nodeResizeState.startW;
       let nextH = nodeResizeState.startH;
       let nextX = nodeResizeState.startX;
@@ -590,29 +504,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         nextH = Math.max(minH, nodeResizeState.startH - dy);
         nextY = nodeResizeState.startY + (nodeResizeState.startH - nextH);
       }
-      const nextEffectiveSize = { w: snapToGrid(nextW), h: snapToGrid(nextH) };
-      const nextPosition = {
-        x: clamp(snapToGrid(nextX), 0, WORLD_W - nextEffectiveSize.w),
-        y: clamp(snapToGrid(nextY), 0, WORLD_H - nextEffectiveSize.h),
-      };
-      const layout = resizeNodeFootprint({
-        nodeID: nodeResizeState.nodeID,
-        nextSize: nextEffectiveSize,
-        nextPosition,
-        positions: nodePositions,
-        sizes: effectiveNodeSizes,
-        defaultSize: { w: NODE_W, h: NODE_H },
-        worldWidth: WORLD_W,
-        worldHeight: WORLD_H,
-        gap: MINI_GRID * 2,
-        verticalAnchor: "top",
-      });
-      const nextBaseSize = {
-        w: nextEffectiveSize.w,
-        h: snapToGrid(Math.max(74, nextEffectiveSize.h - panelHeight)),
-      };
-      setNodeSizes((previous) => ({ ...previous, [nodeResizeState.nodeID]: nextBaseSize }));
-      setNodePositions(layout.positions);
+      setNodeSizes((previous) => ({ ...previous, [nodeResizeState.nodeID]: { w: snapToGrid(nextW), h: snapToGrid(nextH) } }));
+      setNodePositions((previous) => ({ ...previous, [nodeResizeState.nodeID]: { x: clamp(snapToGrid(nextX), 0, WORLD_W - NODE_W), y: clamp(snapToGrid(nextY), 0, WORLD_H - NODE_H) } }));
     };
     const onUp = (event: PointerEvent) => {
       if (event.pointerId !== nodeResizeState.pointerID) return;
@@ -624,7 +517,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [WORLD_H, WORLD_W, effectiveNodeSizes, myTeraCards, nodePositions, nodeResizeState, zoom]);
+  }, [nodeResizeState, zoom]);
 
   useEffect(() => {
     const resize = () => {
@@ -718,7 +611,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     worldHeight: WORLD_H,
     nodeWidth: NODE_W,
     nodeHeight: NODE_H,
-    nodeSizes: effectiveNodeSizes,
     setNodePositions,
     setDragState,
     setSelectedNodeID,
@@ -1600,7 +1492,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
               canEdit={canEditResourceAccess(node)}
               editableNodeIDs={editableNodeIDs}
               position={nodePositions[node.node_id] ?? { x: 120, y: 120 }}
-              size={effectiveNodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H }}
+              size={nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H }}
               selectedNodeID={selectedNodeID}
               selectedNodeIDs={selectedNodeIDs}
               editingNodeTitleNodeID={editingNodeTitleNodeID}

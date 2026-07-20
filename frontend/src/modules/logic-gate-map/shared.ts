@@ -1,5 +1,4 @@
 import type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor, ResourceAccessFields, ResourceAccessLevel } from "../node-map/shared.js";
-import type { MyTeraCardStateByNodeID } from "../node-map/mapAppearancePersistence.js";
 import {
   INFO_TYPES,
   MINI_GRID,
@@ -172,8 +171,6 @@ export type NodeMapState = {
   // Legacy cache slot. New browser-cache writes keep this empty because shared
   // map geometry is owned by the map-layout API/database, not localStorage.
   nodePositions: Record<string, NodePosition>;
-  nodeSizes?: Record<string, { w: number; h: number }>;
-  myTeraCards?: MyTeraCardStateByNodeID;
   relationshipColorsEnabled?: boolean;
   relationshipRoleColors?: { input: string; output: string };
 };
