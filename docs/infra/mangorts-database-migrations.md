@@ -34,6 +34,10 @@ Default mode is `migrate`. This is intentionally conservative for existing produ
 
 The later human-run conversion/cutover is separate: drain editor writes or enter a maintenance window, back up legacy HTML, insert/update the workspace gate to `converting`, convert every document, validate document/attachment/count parity, record validation, atomically set `tiptap_json/ready`, verify old-client rejection and all surfaces, then make the approved rollback/go-forward decision. Do not route individual new production documents to JSON during conversion.
 
+### 20260719 Tiptap annotation positions
+
+`backend/db/migrations/20260719_zz_tiptap_annotation_positions.sql` adds bounded JSONB annotation-position arrays to the inactive canonical document, stable-operation, and immutable-version tables. Positions are accepted atomically with their document revision so mapped comment/change/chat/highlight ranges do not revert after reload. Apply this migration through the normal reviewed deployment process before enabling code that commits JSON editor documents. It does not convert HTML, insert gate rows, flip a workspace, or touch email HTML storage.
+
 MangoRTS uses both migration history and a current schema snapshot:
 
 - `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.

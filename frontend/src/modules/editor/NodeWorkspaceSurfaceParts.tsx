@@ -353,6 +353,9 @@ type NodeTextBlockEditorProps = {
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
   onDocumentConflict?: () => void;
+  onDocumentError?: (message: string) => void;
+  onRecoveryStorageError?: (message: string) => void;
+  onRecoveryStorageRecovered?: () => void;
   onChangeSeen: (changeID: string) => void;
   onChatHighlightActivate?: (messageID: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
@@ -1770,6 +1773,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         from: pending.startOffset,
         to: pending.endOffset,
         active: true,
+        durable: false as const,
       }] : [];
     })(),
   ], [
@@ -1829,7 +1833,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       onConflict={() => props.onDocumentConflict?.()}
-      onError={() => props.onDocumentConflict?.()}
+      onError={(message) => props.onDocumentError?.(message)}
+      onRecoveryStorageError={(message) => props.onRecoveryStorageError?.(message)}
+      onRecoveryStorageRecovered={() => props.onRecoveryStorageRecovered?.()}
       onAnnotationActivate={(annotation) => {
         if (annotation.kind === "change") props.onChangeSeen(annotation.id);
         if (annotation.kind === "chat") props.onChatHighlightActivate?.(annotation.id);

@@ -23,10 +23,14 @@ import {
 } from "../useEditorPreferences";
 import {
   MangoTiptapAnnotations,
+  durableMangoTiptapAnnotations,
+  mangoTiptapAnnotationsEqual,
+  mergeMangoTiptapAnnotationPositions,
   navigateMangoTiptapTarget,
   readMappedMangoTiptapAnnotations,
   updateMangoTiptapAnnotations,
   type MangoTiptapAnnotation,
+  type MangoTiptapPersistedAnnotation,
 } from "./mangoTiptapAnnotations.js";
 import {
   createEmptyMangoTiptapDocument,
@@ -99,6 +103,8 @@ export type MangoTiptapEditorProps = {
   onBlur?: () => void;
   onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
   onError?: (message: string) => void;
+  onRecoveryStorageError?: (message: string) => void;
+  onRecoveryStorageRecovered?: () => void;
   onAnnotationActivate?: (annotation: { id: string; kind: string }) => void;
   onSelectionChatRequest?: (selection: MangoTiptapSelectionAction) => void;
   onImageChatRequest?: (image: MangoTiptapImageAction) => void;
@@ -431,6 +437,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onBlur,
   onConflict,
   onError,
+  onRecoveryStorageError,
+  onRecoveryStorageRecovered,
   onAnnotationActivate,
   onSelectionChatRequest,
   onImageChatRequest,
@@ -442,7 +450,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onLifecycleChange,
   onAnnotationsChange,
 }) => {
-  const initial = useMemo(() => initialDocument(value), [value]);
+  const initialRef = useRef<ReturnType<typeof initialDocument> | null>(null);
+  if (!initialRef.current) initialRef.current = initialDocument(value);
+  const initial = initialRef.current;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const syncRef = useRef<MangoTiptapSync | null>(null);
@@ -452,11 +462,18 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const attachmentContextRef = useRef(attachmentContext);
   const imageActionsRef = useRef({ onImageChatRequest, onImageNodeRequest });
   const currentDocumentRef = useRef(initial.document);
-  const currentSerializedRef = useRef(serializeMangoTiptapDocument(initial.document));
+  const currentSerializedRef = useRef("");
+  if (!currentSerializedRef.current) {
+    currentSerializedRef.current = serializeMangoTiptapDocument(initial.document);
+  }
+  const ownerAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
+  const mappedAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
+  const persistedAnnotationsRef = useRef<readonly MangoTiptapPersistedAnnotation[]>([]);
   const lifecycleRef = useRef(new MangoEditorLifecycle());
   const [lifecycle, setLifecycle] = useState<MangoEditorLifecycleSnapshot>(lifecycleRef.current.getSnapshot());
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
+  const [recoveryStorageError, setRecoveryStorageError] = useState("");
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [pendingConflict, setPendingConflict] = useState<{
     conflict: MangoTiptapConflict;
@@ -469,12 +486,14 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
   });
   callbacksRef.current = {
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
@@ -482,9 +501,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   attachmentContextRef.current = attachmentContext;
   imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
   currentDocumentRef.current = document;
+  ownerAnnotationsRef.current = annotations;
 
   useEffect(() => lifecycleRef.current.subscribe((snapshot) => {
-    setLifecycle(snapshot);
+    setLifecycle((current) => current.state === snapshot.state && current.pinned === snapshot.pinned
+      && current.pendingCount === snapshot.pendingCount && current.targeted === snapshot.targeted
+      && current.nearViewport === snapshot.nearViewport ? current : snapshot);
     callbacksRef.current.onLifecycleChange?.(snapshot);
   }), []);
 
@@ -529,6 +551,16 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     });
   }, []);
 
+  const publishAnnotationPositions = useCallback((persisted: readonly MangoTiptapPersistedAnnotation[]) => {
+    persistedAnnotationsRef.current = [...persisted];
+    const merged = mergeMangoTiptapAnnotationPositions(ownerAnnotationsRef.current, persisted);
+    const changed = !mangoTiptapAnnotationsEqual(mappedAnnotationsRef.current, merged);
+    mappedAnnotationsRef.current = merged;
+    setRenderedAnnotations((current) => mangoTiptapAnnotationsEqual(current, merged) ? current : merged);
+    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
+    if (changed) callbacksRef.current.onAnnotationsChange?.(merged);
+  }, []);
+
   const prepare = useCallback((): Promise<void> => {
     if (syncPreparationRef.current) return syncPreparationRef.current;
     const preparation = (async () => {
@@ -553,26 +585,32 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       }),
       onDocument: (canonical) => {
         const serialized = serializeMangoTiptapDocument(canonical);
-        setDocument(canonical);
-        currentDocumentRef.current = canonical;
-        currentSerializedRef.current = serialized;
-        setError("");
-        callbacksRef.current.onChange?.(serialized);
-        if (editorRef.current) {
-          editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+        if (serialized !== currentSerializedRef.current) {
+          setDocument(canonical);
+          currentDocumentRef.current = canonical;
+          currentSerializedRef.current = serialized;
+          callbacksRef.current.onChange?.(serialized);
+          if (editorRef.current) {
+            editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+          }
         }
+        setError("");
       },
+      onAnnotations: (canonicalAnnotations) => publishAnnotationPositions(canonicalAnnotations),
       onPendingChange: (count) => {
         lifecycleRef.current.setPendingCount(count);
         if (count === 0 && !lifecycleRef.current.getSnapshot().nearViewport) {
           void deactivate();
         }
       },
-      onSnapshot: (snapshot, serialized) => {
-        setDocument(snapshot);
-        currentDocumentRef.current = snapshot;
-        currentSerializedRef.current = serialized;
-        callbacksRef.current.onChange?.(serialized);
+      onSnapshot: (snapshot, serialized, snapshotAnnotations) => {
+        if (serialized !== currentSerializedRef.current) {
+          setDocument(snapshot);
+          currentDocumentRef.current = snapshot;
+          currentSerializedRef.current = serialized;
+          callbacksRef.current.onChange?.(serialized);
+        }
+        publishAnnotationPositions(snapshotAnnotations);
       },
       onConflict: (conflict) => {
         setError("This text box changed elsewhere. Choose which version to keep before editing.");
@@ -599,6 +637,14 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         setError(message);
         callbacksRef.current.onError?.(message);
       },
+      onRecoveryStorageError: (message) => {
+        setRecoveryStorageError(message);
+        callbacksRef.current.onRecoveryStorageError?.(message);
+      },
+      onRecoveryStorageRecovered: () => {
+        setRecoveryStorageError("");
+        callbacksRef.current.onRecoveryStorageRecovered?.();
+      },
       });
       syncRef.current = sync;
       try {
@@ -615,7 +661,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })();
     syncPreparationRef.current = preparation;
     return preparation;
-  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, requestJSON, resourceID, resourceType, subscribeToCanonicalChange]);
+  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -793,9 +839,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onTransaction: ({ editor: transactionEditor, transaction }) => {
         if (!transaction.docChanged) return;
         incrementEditorRuntimeMetric("transactions");
-        const mapped = readMappedMangoTiptapAnnotations(transactionEditor);
-        setRenderedAnnotations(mapped);
-        callbacksRef.current.onAnnotationsChange?.(mapped);
+        mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
       },
       onUpdate: ({ editor: activeEditor }) => {
         lifecycleRef.current.markDirty();
@@ -803,11 +847,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           format: "mango-tiptap-json",
           schema_version: 1,
           document: activeEditor.getJSON(),
-        }));
+        }), false, () => durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)));
       },
     });
     editor.registerPlugin(MangoTiptapAnnotations);
-    updateMangoTiptapAnnotations(editor, annotations);
+    updateMangoTiptapAnnotations(editor, mappedAnnotationsRef.current);
     editorRef.current = editor;
     setActiveEditor(editor);
     const controller: MangoTiptapFormattingController = {
@@ -871,8 +915,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, [lifecycle.state]);
 
   useEffect(() => {
-    setRenderedAnnotations(annotations);
-    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, annotations);
+    const positionSource = editorRef.current
+      ? durableMangoTiptapAnnotations(mappedAnnotationsRef.current)
+      : persistedAnnotationsRef.current;
+    const merged = mergeMangoTiptapAnnotationPositions(annotations, positionSource);
+    mappedAnnotationsRef.current = merged;
+    setRenderedAnnotations((current) => mangoTiptapAnnotationsEqual(current, merged) ? current : merged);
+    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
   }, [annotations]);
 
   useEffect(() => {
@@ -954,7 +1003,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           <button type="button" disabled={resolvingConflict} onClick={() => void pendingConflict.resolve("keep-local").catch(() => undefined)}>Keep my version</button>
           <button type="button" disabled={resolvingConflict} onClick={() => void pendingConflict.resolve("use-canonical").catch(() => undefined)}>Use saved version</button>
         </div>
-      ) : error && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error}</div>}
+      ) : (error || recoveryStorageError) && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error || recoveryStorageError}</div>}
       {isActive && editable && tableActive && (
         <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>
           <button type="button" onClick={() => editorRef.current?.chain().focus().addRowAfter().run()}>Add row</button>

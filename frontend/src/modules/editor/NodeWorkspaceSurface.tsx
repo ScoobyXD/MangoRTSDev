@@ -3481,6 +3481,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             })}
                             onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
                             onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
+                            onDocumentError={onError}
+                            onRecoveryStorageError={onError}
+                            onRecoveryStorageRecovered={() => onError("")}
                             onChangeSeen={onMarkChangeSeen}
                             onChatHighlightActivate={revealChatMessage}
                             onSelectionChatRequest={(selection) => openSelectionChat(selection, chatBlockID)}

@@ -13,6 +13,7 @@ export class MangoEditorLifecycle {
   private pendingCount = 0;
   private targeted = false;
   private nearViewport = false;
+  private lastPublished: MangoEditorLifecycleSnapshot | undefined;
   private readonly listeners = new Set<(snapshot: MangoEditorLifecycleSnapshot) => void>();
 
   getSnapshot(): MangoEditorLifecycleSnapshot {
@@ -85,6 +86,11 @@ export class MangoEditorLifecycle {
 
   private publish(): void {
     const next = this.getSnapshot();
+    const previous = this.lastPublished;
+    if (previous && previous.state === next.state && previous.pinned === next.pinned
+      && previous.pendingCount === next.pendingCount && previous.targeted === next.targeted
+      && previous.nearViewport === next.nearViewport) return;
+    this.lastPublished = next;
     this.listeners.forEach((listener) => listener(next));
   }
 }

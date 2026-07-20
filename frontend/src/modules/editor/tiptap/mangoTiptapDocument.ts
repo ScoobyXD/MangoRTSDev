@@ -1,3 +1,4 @@
+import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 import type { JSONContent } from "@tiptap/core";
 
 export const MANGO_TIPTAP_FORMAT = "mango-tiptap-json" as const;
@@ -222,7 +223,7 @@ export function createEmptyMangoTiptapDocument(): MangoTiptapDocument {
   };
 }
 
-export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidationResult {
+function validateMangoTiptapDocumentStructure(value: unknown): MangoTiptapValidationResult {
   if (!isRecord(value)) return { valid: false, error: "document envelope must be an object" };
   for (const key of Object.keys(value)) {
     if (!["format", "schema_version", "document"].includes(key)) return { valid: false, error: `document envelope contains unsupported property ${key}` };
@@ -232,11 +233,17 @@ export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidati
   if (!isRecord(value.document) || value.document.type !== "doc") return { valid: false, error: "document root must be doc" };
   const nodeError = validateNode(value.document, "document", 0, { value: 0 });
   if (nodeError) return { valid: false, error: nodeError };
-  const encoded = JSON.stringify(value);
+  return { valid: true, value: value as MangoTiptapDocument };
+}
+
+export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidationResult {
+  const result = validateMangoTiptapDocumentStructure(value);
+  if (!result.valid) return result;
+  const encoded = JSON.stringify(result.value);
   if (new TextEncoder().encode(encoded).byteLength > MANGO_TIPTAP_MAX_DOCUMENT_BYTES) {
     return { valid: false, error: "document exceeds the two MiB limit" };
   }
-  return { valid: true, value: value as MangoTiptapDocument };
+  return result;
 }
 
 export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidationResult {
@@ -249,7 +256,12 @@ export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidat
 }
 
 export function serializeMangoTiptapDocument(value: MangoTiptapDocument): string {
-  const result = validateMangoTiptapDocument(value);
+  incrementEditorRuntimeMetric("full_document_serializations");
+  const result = validateMangoTiptapDocumentStructure(value);
   if (!result.valid) throw new Error(result.error);
-  return JSON.stringify(result.value);
+  const serialized = JSON.stringify(result.value);
+  if (new TextEncoder().encode(serialized).byteLength > MANGO_TIPTAP_MAX_DOCUMENT_BYTES) {
+    throw new Error("document exceeds the two MiB limit");
+  }
+  return serialized;
 }

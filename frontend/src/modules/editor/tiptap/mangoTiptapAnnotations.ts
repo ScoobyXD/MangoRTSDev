@@ -10,7 +10,42 @@ export type MangoTiptapAnnotation = {
   from: number;
   to: number;
   active?: boolean;
+  durable?: false;
 };
+
+export type MangoTiptapPersistedAnnotation = Pick<MangoTiptapAnnotation, "id" | "kind" | "from" | "to">;
+
+export function durableMangoTiptapAnnotations(
+  annotations: readonly MangoTiptapAnnotation[],
+): MangoTiptapPersistedAnnotation[] {
+  return annotations.flatMap((annotation) => annotation.durable === false
+    ? []
+    : [{ id: annotation.id, kind: annotation.kind, from: annotation.from, to: annotation.to }]);
+}
+
+export function mergeMangoTiptapAnnotationPositions(
+  annotations: readonly MangoTiptapAnnotation[],
+  persisted: readonly MangoTiptapPersistedAnnotation[] | undefined,
+): MangoTiptapAnnotation[] {
+  if (!persisted?.length) return [...annotations];
+  const positions = new Map(persisted.map((annotation) => [`${annotation.kind}:${annotation.id}`, annotation]));
+  return annotations.map((annotation) => {
+    const position = positions.get(`${annotation.kind}:${annotation.id}`);
+    return position ? { ...annotation, from: position.from, to: position.to } : annotation;
+  });
+}
+
+export function mangoTiptapAnnotationsEqual(
+  left: readonly MangoTiptapAnnotation[],
+  right: readonly MangoTiptapAnnotation[],
+): boolean {
+  return left.length === right.length && left.every((annotation, index) => {
+    const other = right[index];
+    return Boolean(other) && annotation.id === other.id && annotation.kind === other.kind
+      && annotation.from === other.from && annotation.to === other.to
+      && annotation.active === other.active && annotation.durable === other.durable;
+  });
+}
 
 type AnnotationPluginState = {
   annotations: MangoTiptapAnnotation[];

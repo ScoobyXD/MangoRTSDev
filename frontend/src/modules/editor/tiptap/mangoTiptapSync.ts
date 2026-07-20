@@ -1,4 +1,5 @@
 import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
+import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import {
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
@@ -16,6 +17,7 @@ export type MangoTiptapSnapshot = {
   revision: number;
   schema_version: number;
   document: MangoTiptapDocument;
+  annotations?: MangoTiptapPersistedAnnotation[];
   deleted?: boolean;
 };
 
@@ -29,7 +31,9 @@ type PendingCommit = {
   client_id: string;
   base_revision: number;
   document: MangoTiptapDocument;
+  annotations: MangoTiptapPersistedAnnotation[];
   created_at: number;
+  attempted: boolean;
 };
 
 type PendingDocumentRecord = {
@@ -49,10 +53,13 @@ export type MangoTiptapSyncOptions = {
   requestJSON: MangoTiptapRequest;
   initialRevision?: number;
   onDocument: (document: MangoTiptapDocument, source: "canonical" | "recovery") => void;
-  onSnapshot?: (document: MangoTiptapDocument, serialized: string) => void;
+  onAnnotations?: (annotations: readonly MangoTiptapPersistedAnnotation[], source: "canonical" | "recovery") => void;
+  onSnapshot?: (document: MangoTiptapDocument, serialized: string, annotations: readonly MangoTiptapPersistedAnnotation[]) => void;
   onPendingChange?: (pendingCount: number) => void;
   onConflict?: (conflict: MangoTiptapConflict) => void;
   onError?: (cause: unknown) => void;
+  onRecoveryStorageError?: (message: string) => void;
+  onRecoveryStorageRecovered?: () => void;
   subscribeToCanonicalChange?: (recover: () => void, clientID: string) => () => void;
   batchMs?: number;
   maxBatchMs?: number;
@@ -152,10 +159,12 @@ export class MangoTiptapSync {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private retryAttempt = 0;
   private snapshotProvider: (() => MangoTiptapDocument) | undefined;
+  private annotationProvider: (() => readonly MangoTiptapPersistedAnnotation[]) | undefined;
   private unsubscribe: (() => void) | undefined;
   private realtimeVisible = false;
   private stopped = false;
   private conflicted = false;
+  private recoveryStorageFailed = false;
 
   constructor(private readonly options: MangoTiptapSyncOptions) {
     this.storageKey = mangoTiptapPendingStorageKey(options);
@@ -183,42 +192,54 @@ export class MangoTiptapSync {
     }, this.clientID);
   }
 
-  schedule(document: MangoTiptapDocument | (() => MangoTiptapDocument), immediate = false): void {
+  schedule(
+    document: MangoTiptapDocument | (() => MangoTiptapDocument),
+    immediate = false,
+    annotations?: () => readonly MangoTiptapPersistedAnnotation[],
+  ): void {
     if (this.stopped || this.conflicted) return;
     this.snapshotProvider = typeof document === "function" ? document : () => document;
+    this.annotationProvider = annotations;
     this.armDrain(immediate);
   }
 
   private captureScheduledSnapshot(): Promise<void> {
     const provider = this.snapshotProvider;
+    const annotationProvider = this.annotationProvider;
     this.snapshotProvider = undefined;
+    this.annotationProvider = undefined;
     if (!provider) return this.persistence;
     let serialized: string;
+    let pendingDocument: MangoTiptapDocument;
+    let annotations: MangoTiptapPersistedAnnotation[];
     try {
-      serialized = serializeMangoTiptapDocument(provider());
-      incrementEditorRuntimeMetric("full_document_serializations");
+      pendingDocument = provider();
+      serialized = serializeMangoTiptapDocument(pendingDocument);
+      annotations = [...(annotationProvider?.() ?? [])];
     } catch (cause) {
       this.options.onError?.(cause);
       return this.persistence;
     }
-    const pendingDocument = JSON.parse(serialized) as MangoTiptapDocument;
-    this.options.onSnapshot?.(pendingDocument, serialized);
-    this.persistence = this.persistence.then(async () => {
+    this.options.onSnapshot?.(pendingDocument, serialized, annotations);
+    this.persistence = this.persistence.catch(() => undefined).then(async () => {
       const last = this.pending[this.pending.length - 1];
-      if (last && this.drainPromise === undefined) {
+      if (last && !last.attempted) {
         last.document = pendingDocument;
+        last.annotations = annotations;
       } else {
         this.pending.push({
           operation_id: stableID(),
           client_id: this.clientID,
           base_revision: this.revision + this.pending.length,
           document: pendingDocument,
+          annotations,
           created_at: Date.now(),
+          attempted: this.pending.length === 0 && this.drainPromise === undefined,
         });
       }
-      await this.persistPending();
       this.options.onPendingChange?.(this.pending.length);
-    }).catch((cause) => this.options.onError?.(cause));
+      await this.persistPendingBestEffort();
+    });
     return this.persistence;
   }
 
@@ -261,26 +282,42 @@ export class MangoTiptapSync {
   private async performRecovery(): Promise<void> {
     incrementEditorRuntimeMetric("recovery_requests");
     await this.captureScheduledSnapshot();
+    let recoveryStorageAvailable = true;
     const [record, canonical] = await Promise.all([
-      readExactMangoTiptapPending(this.storageKey),
+      readExactMangoTiptapPending(this.storageKey).then((record) => {
+        this.reportRecoveryStorageRecovered();
+        return record;
+      }).catch((cause) => {
+        recoveryStorageAvailable = false;
+        this.reportRecoveryStorageFailure(cause);
+        return null;
+      }),
       this.options.requestJSON<MangoTiptapSnapshot>(this.path),
     ]);
     const validation = parseMangoTiptapDocument(JSON.stringify(canonical.document));
     if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
     this.revision = canonical.revision;
-    this.pending = record?.commits ?? [];
+    if (recoveryStorageAvailable) {
+      this.pending = (record?.commits ?? []).map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
+    } else {
+      // Storage failure must not erase an in-memory operation that still needs its
+      // canonical backend acknowledgement during an active browser session.
+      this.pending = this.pending.map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
+    }
     this.options.onPendingChange?.(this.pending.length);
     if (canonical.deleted) {
       this.pending = [];
-      await this.persistPending();
+      this.options.onPendingChange?.(0);
+      await this.persistPendingBestEffort();
       this.options.onDocument(validation.value, "canonical");
+      this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
       return;
     }
-    if (this.pending.length > 0 && this.pending[0].base_revision !== canonical.revision) {
-      this.raiseConflict(this.pending[this.pending.length - 1]?.document ?? validation.value, { ...canonical, document: validation.value });
-      return;
-    }
-    this.options.onDocument(this.pending[this.pending.length - 1]?.document ?? validation.value, this.pending.length ? "recovery" : "canonical");
+    const recovered = this.pending[this.pending.length - 1];
+    this.options.onDocument(recovered?.document ?? validation.value, recovered ? "recovery" : "canonical");
+    this.options.onAnnotations?.(recovered?.annotations ?? canonical.annotations ?? [], recovered ? "recovery" : "canonical");
+    // Replay the exact stable operation before interpreting a revision mismatch. The
+    // backend deduplicates an already-accepted operation ID before its base check.
     if (this.pending.length > 0) await this.drain();
   }
 
@@ -288,26 +325,31 @@ export class MangoTiptapSync {
     const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
     const validation = parseMangoTiptapDocument(JSON.stringify(canonical.document));
     if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
-    const local = this.pending[this.pending.length - 1]?.document;
+    const localCommit = this.pending[this.pending.length - 1];
     this.revision = canonical.revision;
     this.pending = [];
     this.conflicted = false;
-    if (choice === "keep-local" && local) {
+    if (choice === "keep-local" && localCommit) {
       this.pending.push({
         operation_id: stableID(),
         client_id: this.clientID,
         base_revision: canonical.revision,
-        document: local,
+        document: localCommit.document,
+        annotations: localCommit.annotations ?? [],
         created_at: Date.now(),
+        attempted: true,
       });
-      await this.persistPending();
-      this.options.onDocument(local, "recovery");
+      this.options.onPendingChange?.(1);
+      await this.persistPendingBestEffort();
+      this.options.onDocument(localCommit.document, "recovery");
+      this.options.onAnnotations?.(localCommit.annotations ?? [], "recovery");
       await this.drain();
       return;
     }
-    await this.persistPending();
     this.options.onPendingChange?.(0);
+    await this.persistPendingBestEffort();
     this.options.onDocument(validation.value, "canonical");
+    this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
   }
 
   private async persistPending(): Promise<void> {
@@ -319,6 +361,31 @@ export class MangoTiptapSync {
       document_id: this.options.documentID,
       commits: this.pending,
     });
+  }
+
+  private async persistPendingBestEffort(): Promise<boolean> {
+    try {
+      await this.persistPending();
+      if (this.pending.length > 0) this.reportRecoveryStorageRecovered();
+      return true;
+    } catch (cause) {
+      this.reportRecoveryStorageFailure(cause);
+      return false;
+    }
+  }
+
+  private reportRecoveryStorageFailure(cause: unknown): void {
+    this.recoveryStorageFailed = true;
+    const detail = cause instanceof Error && cause.message.trim() ? cause.message.trim() : String(cause || "unavailable");
+    this.options.onRecoveryStorageError?.(
+      `Browser recovery storage failed: ${detail}. Changes will still be sent to Mango, but this browser cannot safely recover them after a refresh until storage works.`,
+    );
+  }
+
+  private reportRecoveryStorageRecovered(): void {
+    if (!this.recoveryStorageFailed) return;
+    this.recoveryStorageFailed = false;
+    this.options.onRecoveryStorageRecovered?.();
   }
 
   private armDrain(immediate: boolean): void {
@@ -345,6 +412,10 @@ export class MangoTiptapSync {
       while (this.pending.length > 0 && !this.conflicted) {
         const commit = this.pending[0];
         try {
+          if (!commit.attempted) {
+            commit.attempted = true;
+            await this.persistPendingBestEffort();
+          }
           incrementEditorRuntimeMetric("network_saves");
           const response = await this.options.requestJSON<MangoTiptapSnapshot & { deduplicated?: boolean }>(this.path, {
             method: "POST",
@@ -354,6 +425,7 @@ export class MangoTiptapSync {
               base_revision: commit.base_revision,
               schema_version: commit.document.schema_version,
               document: commit.document,
+              annotations: commit.annotations ?? [],
             },
           });
           const validation = parseMangoTiptapDocument(JSON.stringify(response.document));
@@ -361,9 +433,12 @@ export class MangoTiptapSync {
           this.revision = response.revision;
           this.retryAttempt = 0;
           this.pending.shift();
-          this.pending.forEach((next, index) => { next.base_revision = this.revision + index; });
-          await this.persistPending();
+          this.pending.forEach((next, index) => { if (!next.attempted) next.base_revision = this.revision + index; });
+          // The server acknowledgement is canonical even when local browser storage
+          // cleanup fails. Release virtualization pins before best-effort cleanup.
           this.options.onPendingChange?.(this.pending.length);
+          this.options.onAnnotations?.(response.annotations ?? commit.annotations ?? [], "canonical");
+          await this.persistPendingBestEffort();
         } catch (cause) {
           if (isConflict(cause)) {
             const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);

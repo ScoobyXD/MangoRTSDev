@@ -52,6 +52,24 @@ function structuredDocument(): MangoTiptapDocument {
   };
 }
 
+function largeStructuredDocument(): MangoTiptapDocument {
+  const base = structuredDocument();
+  return {
+    ...base,
+    document: {
+      ...base.document,
+      content: [
+        ...(base.document.content ?? []),
+        ...Array.from({ length: 400 }, (_, index) => ({
+          type: "paragraph",
+          attrs: { blockId: `large-paragraph-${index}`, indentLevel: 0 },
+          content: [{ type: "text", text: `Large deterministic paragraph ${index} ${"x".repeat(80)}` }],
+        })),
+      ],
+    },
+  };
+}
+
 function structuredAnnotations(document: MangoTiptapDocument): MangoTiptapAnnotation[] {
   const editor = new MangoTiptapEditorEngine({
     extensions: createMangoTiptapExtensions({ editable: false }),
@@ -163,7 +181,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("IntersectionObserver", TestIntersectionObserver, restores);
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
 
-  const value = structuredDocument();
+  const value = largeStructuredDocument();
   const annotations = structuredAnnotations(value);
   const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
   const lifecyclePins: boolean[] = [];
@@ -171,14 +189,20 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let canonicalReads = 0;
   let canonicalRevision = 0;
   let canonicalDocument = value;
+  let canonicalAnnotations = annotations.map(({ id, kind, from, to }) => ({ id, kind, from, to }));
   let postStarted = false;
   let releasePost: (() => void) | undefined;
   let subscriptions = 0;
   let unsubscriptions = 0;
+  let subscriptionRecover: (() => void | Promise<void>) | undefined;
+  let conflictCallbacks = 0;
+  const documentErrors: string[] = [];
+  const storageErrors: string[] = [];
+  let storageRecoveries = 0;
   const requestJSON = async <T,>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
     if (init?.method !== "POST") {
       canonicalReads += 1;
-      return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument } as T;
+      return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
     }
     postStarted = true;
     await new Promise<void>((resolve) => { releasePost = resolve; });
@@ -186,16 +210,22 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     canonicalDocument = init.json && typeof init.json === "object" && "document" in init.json
       ? (init.json as { document: MangoTiptapDocument }).document
       : canonicalDocument;
-    return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument } as T;
+    canonicalAnnotations = init.json && typeof init.json === "object" && "annotations" in init.json
+      ? (init.json as { annotations: typeof canonicalAnnotations }).annotations
+      : canonicalAnnotations;
+    return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
   };
 
   let mountedRoot: { unmount(): void } | null = null;
+  let pageHostRoot: { unmount(): void } | null = null;
   let setHostVisible: React.Dispatch<React.SetStateAction<boolean>> = () => undefined;
   resetEditorRuntimeMetricsForTests();
   try {
-    const [{ createRoot }, { MangoTiptapEditor }] = await Promise.all([
+    const [{ createRoot }, { MangoTiptapEditor }, { NodeTextBlockEditor }, { LogicGateTiptapEditorSurface }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"),
+      import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
+      import("../../../../frontend/src/modules/editor/LogicGateTiptapEditorSurface.tsx"),
     ]);
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
@@ -216,13 +246,18 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           resourceID="node-1"
           documentID="document-1"
           requestJSON={requestJSON}
-          subscribeToCanonicalChange={() => {
+          subscribeToCanonicalChange={(recover) => {
+            subscriptionRecover = recover;
             subscriptions += 1;
             return () => { unsubscriptions += 1; };
           }}
           annotations={annotations}
           formattingControllerRef={controllerRef}
           onChange={(next) => changes.push(next)}
+          onConflict={() => { conflictCallbacks += 1; }}
+          onError={(message) => documentErrors.push(message)}
+          onRecoveryStorageError={(message) => storageErrors.push(message)}
+          onRecoveryStorageRecovered={() => { storageRecoveries += 1; }}
           onLifecycleChange={(snapshot) => {
             lifecyclePins.push(snapshot.pinned);
             setPinned(snapshot.pinned);
@@ -269,7 +304,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const pendingKey = mangoTiptapPendingStorageKey({
       companyID: "company-1", resourceType: "node", resourceID: "node-1", documentID: "document-1",
     });
-    assert.ok(await readExactMangoTiptapPending(pendingKey));
+    const pendingRecord = await readExactMangoTiptapPending(pendingKey);
+    assert.ok(pendingRecord);
+    assert.deepEqual(pendingRecord.commits[0]?.annotations, canonicalAnnotations, "mapped positions share the exact pending save batch");
 
     exactObserver.trigger(false);
     assert.equal(unsubscriptions, 1, "offscreen dirty editor releases the exact realtime scope immediately");
@@ -289,17 +326,141 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const remountedEditorRoot = container.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
     assert.ok(remountedEditorRoot);
     await waitFor(() => remountedEditorRoot.dataset.mangoEditorState === "sleeping", "re-entered row should finish its near-viewport canonical recovery");
+    for (const annotation of canonicalAnnotations) {
+      assert.ok(remountedEditorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `persisted ${annotation.kind} position should survive remount`);
+    }
     const reentryExactObserver = observers.filter((observer) => observer.rootMargin === "0px").at(-1);
     assert.ok(reentryExactObserver);
     reentryExactObserver.trigger(true);
     await waitFor(() => subscriptions === 2 && canonicalReads > readsBeforeReentry + 1, "visible re-entry should create one new exact scope and refresh after subscribing");
 
+    const pageHostContainer = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(pageHostContainer);
+    const pageHostPaths: string[] = [];
+    const pageHostDocument = structuredDocument();
+    const pageHostRequest = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      pageHostPaths.push(path);
+      if (path.startsWith("/v1/editor-data-format")) {
+        return {
+          company_id: "company-hosts",
+          editor_format: "tiptap_json",
+          migration_state: "ready",
+          document_schema_version: 1,
+          expected_document_count: 3,
+          converted_document_count: 3,
+        } as T;
+      }
+      if (init?.method === "POST") {
+        const body = init.json as { document: MangoTiptapDocument; annotations?: typeof canonicalAnnotations };
+        return { revision: 1, schema_version: 1, document: body.document, annotations: body.annotations ?? [] } as T;
+      }
+      return { revision: 0, schema_version: 1, document: pageHostDocument, annotations: [] } as T;
+    };
+    const noop = () => undefined;
+    const pageHostBaseProps = {
+      editable: true,
+      apiBase: "https://page-hosts.test",
+      companyID: "company-hosts",
+      currentUserID: "user-hosts",
+      companyUsers: [],
+      documentValue: JSON.stringify(pageHostDocument),
+      contentChanges: [],
+      chatMessages: [],
+      activeChatAnchorMessageID: "",
+      chatNavigationRequest: null,
+      surfaceText: "#111827",
+      accent: "#7c3aed",
+      outlineStyle: "automatic-outline-numbering" as const,
+      indentGuideColor: "#94a3b8",
+      scrollbarTrack: "#e2e8f0",
+      onFocus: noop,
+      onBlur: noop,
+      onDocumentChange: noop,
+      onDocumentFlush: noop,
+      onChangeSeen: noop,
+      onSelectionChatRequest: noop,
+      onImageChatRequest: noop,
+      onImageNodeRequest: noop,
+      attachmentRequestJSON: pageHostRequest,
+    };
+    const pageRoot = createRoot(pageHostContainer);
+    pageHostRoot = pageRoot;
+    await act(async () => {
+      pageRoot.render(
+        <>
+          <NodeTextBlockEditor {...pageHostBaseProps} surfaceKind="node" nodeID="node-host" blockID="node-document" />
+          <NodeTextBlockEditor
+            {...pageHostBaseProps}
+            surfaceKind="project"
+            nodeID="project-host"
+            attachmentResourceID="project-host"
+            blockID="project-document"
+          />
+          <React.Suspense fallback={<div aria-label="Loading Logic Gate JSON host" />}>
+            <LogicGateTiptapEditorSurface
+              value={JSON.stringify(pageHostDocument)}
+              editable
+              companyID="company-hosts"
+              resourceID="logic-gate-host"
+              documentID="logic-gate-document"
+              currentUserID="user-hosts"
+              requestJSON={pageHostRequest}
+            />
+          </React.Suspense>
+        </>,
+      );
+    });
+    await waitFor(
+      () => pageHostContainer.querySelectorAll('[data-mango-editor-format="tiptap_json"]').length === 3,
+      "the real Node, Project, and Logic Gate JSON host adapters should all mount Tiptap",
+    );
+    assert.ok(pageHostContainer.querySelector('[aria-label="Node text box"]'));
+    assert.ok(pageHostContainer.querySelector('[aria-label="Project text box"]'));
+    assert.ok(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]'));
+    await waitFor(
+      () => pageHostPaths.some((path) => path.includes("/v1/editor-json/node/node-host/documents/node-document"))
+        && pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document"))
+        && pageHostPaths.some((path) => path.includes("/v1/editor-json/logic_gate/logic-gate-host/documents/logic-gate-document")),
+      "each production host adapter should address its own JSON resource type",
+    );
+    await act(async () => pageRoot.unmount());
+    pageHostRoot = null;
+    pageHostContainer.remove();
+
+    await act(async () => {
+      remountedEditorRoot.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
+    });
+    await waitFor(() => controllerRef.current !== null, "remounted visible document should activate again");
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, writable: true, value: undefined });
+    postStarted = false;
+    releasePost = undefined;
+    await act(async () => { assert.equal(controllerRef.current?.indent(), true); });
+    await waitFor(
+      () => (remountedEditorRoot.querySelector('[role="alert"]')?.textContent ?? "").includes("Browser recovery storage failed:"),
+      "unavailable IndexedDB should produce a visible recovery-safety error",
+    );
+    await waitFor(() => postStarted, "storage failure must not prevent the canonical backend save");
+    assert.equal(remountedEditorRoot.dataset.mangoEditorPinned, "true");
+    releasePost?.();
+    await waitFor(() => remountedEditorRoot.dataset.mangoEditorPinned !== "true", "backend acknowledgement should unpin despite IndexedDB failure");
+    assert.equal(conflictCallbacks, 0, "a storage failure must not surface as a document conflict");
+    assert.deepEqual(documentErrors, []);
+    assert.ok(storageErrors.some((message) => message.startsWith("Browser recovery storage failed:")));
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, writable: true, value: fakeIndexedDB });
+    reentryExactObserver.trigger(false);
+    reentryExactObserver.trigger(true);
+    await act(async () => { await subscriptionRecover?.(); });
+    await waitFor(() => storageRecoveries === 1, "a later successful recovery read should clear the storage warning");
+    await waitFor(() => !remountedEditorRoot.querySelector('[role="alert"]'), "the recovered storage warning should disappear");
+    assert.equal(conflictCallbacks, 0);
+
     await act(async () => root.unmount());
     mountedRoot = null;
     assert.equal(subscriptions, 2);
-    assert.equal(unsubscriptions, 2, "unmount cleanup releases only the active re-entry subscription");
+    assert.equal(unsubscriptions, 2, "unmount cleanup releases the active visible subscription");
   } finally {
     releasePost?.();
+    if (pageHostRoot) await act(async () => pageHostRoot?.unmount());
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     dom.window.close();
     for (const restore of restores.reverse()) restore();

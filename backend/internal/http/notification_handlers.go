@@ -709,6 +709,10 @@ func (s *Server) mentionNotificationEventAlreadyRecorded(companyID, idempotencyK
 }
 
 func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityType, entityID, informationID, infoType, information string) {
+	s.recordMentionNotificationsWithIdempotencyScope(r, companyID, entityType, entityID, informationID, infoType, information, "")
+}
+
+func (s *Server) recordMentionNotificationsWithIdempotencyScope(r *http.Request, companyID, entityType, entityID, informationID, infoType, information, idempotencyScope string) {
 	companyID = strings.TrimSpace(companyID)
 	entityType = strings.TrimSpace(entityType)
 	entityID = strings.TrimSpace(entityID)
@@ -741,6 +745,11 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 		streamID = "logic_gate:" + entityID
 		idempotencyEntityKey = "logic-gate"
 		payloadResourceKey = "logic_gate_id"
+	case store.EntityTypeProject:
+		eventType = store.ProjectMentionCreatedEventType
+		streamID = "project:" + entityID
+		idempotencyEntityKey = "project"
+		payloadResourceKey = "project_id"
 	default:
 		return
 	}
@@ -760,6 +769,9 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 			mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
 			comment := editorMentionCommentPreviewForOccurrence(infoType, information, mentionKind, userID, occurrenceIndex, mentionableUsers)
 			idempotencyKey := "mention:" + mentionKind + ":" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + strconv.Itoa(occurrenceIndex+1)
+			if idempotencyScope = strings.TrimSpace(idempotencyScope); idempotencyScope != "" {
+				idempotencyKey += ":" + idempotencyScope
+			}
 			alreadyRecorded, err := s.mentionNotificationEventAlreadyRecorded(companyID, idempotencyKey)
 			if err != nil {
 				log.Printf("failed to check mention notification idempotency company_id=%s entity_type=%s entity_id=%s information_id=%s user_id=%s mention_kind=%s: %v", companyID, entityType, entityID, informationID, userID, mentionKind, err)

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
+import { IDBKeyRange, IDBObjectStore, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import { JSDOM } from "jsdom";
 
 import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/editorLifecycle.js";
@@ -196,6 +196,140 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
   }
 });
 
+test("real insert/delete transactions persist moved comment, change, and chat positions across remount", async () => {
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    Node: globalThis.Node,
+    Element: globalThis.Element,
+    HTMLElement: globalThis.HTMLElement,
+    MutationObserver: globalThis.MutationObserver,
+    requestAnimationFrame: globalThis.requestAnimationFrame,
+    cancelAnimationFrame: globalThis.cancelAnimationFrame,
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  const dom = new JSDOM("<!doctype html><div id=\"first\"></div><div id=\"second\"></div><div id=\"third\"></div>", { url: "https://mango.test/" });
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  Object.defineProperty(globalThis, "Node", { configurable: true, value: domGlobals.Node });
+  Object.defineProperty(globalThis, "Element", { configurable: true, value: domGlobals.Element });
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
+  Object.defineProperty(globalThis, "MutationObserver", { configurable: true, value: domGlobals.MutationObserver });
+  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: (handle: number) => clearTimeout(handle) });
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+
+  const initial: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: "mapped-paragraph", textAlign: "left", indentLevel: 0 },
+        content: [{ type: "text", text: "alpha beta gamma delta epsilon" }],
+      }],
+    },
+  };
+  const initialAnnotations = [
+    { id: "comment-move", kind: "comment" as const, from: 7, to: 11 },
+    { id: "change-move", kind: "change" as const, from: 12, to: 17 },
+    { id: "chat-move", kind: "chat" as const, from: 18, to: 23 },
+  ];
+  let canonical = initial;
+  let canonicalAnnotations = [...initialAnnotations];
+  let revision = 0;
+  const syncOptions = {
+    companyID: "company-annotation-edit", resourceType: "node" as const,
+    resourceID: "resource-annotation-edit", documentID: "document-annotation-edit",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+      const body = init.json as { document: MangoTiptapDocument; annotations: typeof canonicalAnnotations };
+      revision += 1;
+      canonical = body.document;
+      canonicalAnnotations = body.annotations;
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    },
+    onDocument: () => undefined,
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  };
+  const sync = new MangoTiptapSync(syncOptions);
+  const makeEditor = (elementID: string, value: MangoTiptapDocument, annotations: typeof initialAnnotations) => {
+    const editor = new MangoTiptapEditorEngine({
+      element: dom.window.document.querySelector<HTMLElement>(`#${elementID}`),
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: value.document,
+      enableContentCheck: true,
+    });
+    editor.registerPlugin(MangoTiptapAnnotations);
+    updateMangoTiptapAnnotations(editor, annotations);
+    return editor;
+  };
+  let first: MangoTiptapEditorEngine | undefined;
+  let second: MangoTiptapEditorEngine | undefined;
+  let third: MangoTiptapEditorEngine | undefined;
+  try {
+    await sync.start();
+    first = makeEditor("first", initial, initialAnnotations);
+    assert.equal(first.commands.insertContentAt(1, "PREFIX "), true);
+    const insertedAnnotations = [...readMappedMangoTiptapAnnotations(first)].map(({ id, kind, from, to }) => ({ id, kind, from, to }));
+    for (let index = 0; index < initialAnnotations.length; index += 1) {
+      assert.equal(insertedAnnotations[index].from, initialAnnotations[index].from + 7);
+      assert.equal(insertedAnnotations[index].to, initialAnnotations[index].to + 7);
+    }
+    const insertedDocument: MangoTiptapDocument = { format: "mango-tiptap-json", schema_version: 1, document: first.getJSON() };
+    sync.schedule(insertedDocument, false, () => insertedAnnotations);
+    await sync.flush();
+    first.destroy();
+    first = undefined;
+
+    second = makeEditor("second", canonical, canonicalAnnotations);
+    const expectedHighlightedText = new Map([
+      ["comment-move", "beta"],
+      ["change-move", "gamma"],
+      ["chat-move", "delta"],
+    ]);
+    for (const [id, expectedText] of expectedHighlightedText) {
+      const highlight = dom.window.document.querySelector<HTMLElement>(`#second [data-mango-annotation-id="${id}"]`);
+      assert.equal(highlight?.textContent, expectedText, `${id} should remount over the moved text`);
+    }
+
+    const movedComment = readMappedMangoTiptapAnnotations(second).find((annotation) => annotation.id === "comment-move");
+    assert.ok(movedComment);
+    assert.equal(second.commands.deleteRange({ from: movedComment!.from - 1, to: movedComment!.to + 1 }), true);
+    const afterDeleteAnnotations = [...readMappedMangoTiptapAnnotations(second)].map(({ id, kind, from, to }) => ({ id, kind, from, to }));
+    assert.equal(afterDeleteAnnotations.some((annotation) => annotation.id === "comment-move"), false, "deleting across a highlight removes that annotation");
+    assert.equal(afterDeleteAnnotations.some((annotation) => annotation.id === "change-move"), true);
+    assert.equal(afterDeleteAnnotations.some((annotation) => annotation.id === "chat-move"), true);
+    const afterDeleteDocument: MangoTiptapDocument = { format: "mango-tiptap-json", schema_version: 1, document: second.getJSON() };
+    sync.schedule(afterDeleteDocument, false, () => afterDeleteAnnotations);
+    await sync.flush();
+    second.destroy();
+    second = undefined;
+
+    third = makeEditor("third", canonical, canonicalAnnotations as typeof initialAnnotations);
+    assert.equal(dom.window.document.querySelector('#third [data-mango-annotation-id="comment-move"]'), null);
+    assert.equal(dom.window.document.querySelector<HTMLElement>('#third [data-mango-annotation-id="change-move"]')?.textContent, "gamma");
+    assert.equal(dom.window.document.querySelector<HTMLElement>('#third [data-mango-annotation-id="chat-move"]')?.textContent, "delta");
+    assert.equal(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(syncOptions)), null);
+  } finally {
+    first?.destroy();
+    second?.destroy();
+    third?.destroy();
+    await sync.shutdown();
+    dom.window.close();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
 test("workspace format gate is one coherent cached decision and rejects partial JSON readiness", async () => {
   clearMangoEditorDataFormatCacheForTests();
   let requests = 0;
@@ -286,6 +420,352 @@ test("Tiptap sync durably records one exact document before network completion",
   }
 });
 
+test("lost acknowledgement recovery replays the stable operation before conflict detection", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const original = createEmptyMangoTiptapDocument();
+  const edited = richDocument("accepted despite a lost response");
+  const annotations = [
+    { id: "comment-1", kind: "comment" as const, from: 3, to: 9 },
+    { id: "change-1", kind: "change" as const, from: 10, to: 14 },
+    { id: "chat-1", kind: "chat" as const, from: 15, to: 19 },
+  ];
+  let revision = 0;
+  let canonical = original;
+  let canonicalAnnotations = [] as typeof annotations;
+  let acceptedOperationID = "";
+  let loseFirstAcknowledgement = true;
+  let conflicts = 0;
+  const request = async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (init?.method !== "POST") {
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    }
+    const body = init.json as {
+      operation_id: string;
+      base_revision: number;
+      document: MangoTiptapDocument;
+      annotations: typeof annotations;
+    };
+    if (body.operation_id === acceptedOperationID) {
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations, deduplicated: true } as T;
+    }
+    assert.equal(body.base_revision, revision);
+    acceptedOperationID = body.operation_id;
+    revision += 1;
+    canonical = body.document;
+    canonicalAnnotations = body.annotations;
+    if (loseFirstAcknowledgement) {
+      loseFirstAcknowledgement = false;
+      throw new Error("connection closed after commit");
+    }
+    return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+  };
+  const options = {
+    companyID: "company-lost-ack", resourceType: "node" as const,
+    resourceID: "resource-lost-ack", documentID: "document-lost-ack", requestJSON: request,
+    onDocument: () => undefined, onConflict: () => { conflicts += 1; }, batchMs: 60_000, maxBatchMs: 60_000,
+  };
+  const first = new MangoTiptapSync(options);
+  const second = new MangoTiptapSync({ ...options, onAnnotations: (next) => { canonicalAnnotations = [...next] as typeof annotations; } });
+  try {
+    await first.start();
+    first.schedule(edited, false, () => annotations);
+    await assert.rejects(() => first.flush(), /connection closed/);
+    assert.equal(revision, 1, "the server accepted the operation before its response was lost");
+    assert.ok(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(options)));
+
+    await second.start();
+    assert.equal(conflicts, 0, "replaying an accepted stable operation is an acknowledgement, not a conflict");
+    assert.equal(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(options)), null);
+    assert.deepEqual(canonicalAnnotations, annotations);
+  } finally {
+    await second.shutdown();
+    await first.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("an attempted lost-ack operation stays immutable while later typing becomes a new operation", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const initial = createEmptyMangoTiptapDocument();
+  const operationADocument = richDocument("operation A accepted before its acknowledgement was lost");
+  const operationBDocument = richDocument("later text saved by operation B");
+  const operationAAnnotations = [{ id: "comment-a", kind: "comment" as const, from: 2, to: 8 }];
+  const operationBAnnotations = [{ id: "comment-a", kind: "comment" as const, from: 7, to: 13 }];
+  const acceptedPayloads = new Map<string, string>();
+  const requestAttempts: Array<{ operationID: string; payload: string }> = [];
+  const acceptedOperationIDs: string[] = [];
+  let revision = 0;
+  let canonical = initial;
+  let canonicalAnnotations = [] as typeof operationAAnnotations;
+  let firstAcceptedOperationID = "";
+  let loseFirstAcknowledgement = true;
+  let conflicts = 0;
+  const lifecycle = new MangoEditorLifecycle();
+  lifecycle.activate();
+  lifecycle.markDirty();
+  const request = async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (init?.method !== "POST") {
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    }
+    const body = init.json as {
+      operation_id: string;
+      base_revision: number;
+      document: MangoTiptapDocument;
+      annotations: typeof operationAAnnotations;
+    };
+    const payload = JSON.stringify(body);
+    requestAttempts.push({ operationID: body.operation_id, payload });
+    const acceptedPayload = acceptedPayloads.get(body.operation_id);
+    if (acceptedPayload !== undefined) {
+      assert.equal(payload, acceptedPayload, "a retry must preserve every stable-operation payload field");
+      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations, deduplicated: true } as T;
+    }
+    assert.equal(body.base_revision, revision);
+    acceptedPayloads.set(body.operation_id, payload);
+    acceptedOperationIDs.push(body.operation_id);
+    revision += 1;
+    canonical = body.document;
+    canonicalAnnotations = body.annotations;
+    if (loseFirstAcknowledgement) {
+      loseFirstAcknowledgement = false;
+      firstAcceptedOperationID = body.operation_id;
+      throw new Error("operation A response was lost after commit");
+    }
+    return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+  };
+  const options = {
+    companyID: "company-lost-ack-later-typing", resourceType: "node" as const,
+    resourceID: "resource-lost-ack-later-typing", documentID: "document-lost-ack-later-typing",
+    requestJSON: request,
+    onDocument: () => undefined,
+    onConflict: () => { conflicts += 1; },
+    onPendingChange: (count: number) => lifecycle.setPendingCount(count),
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  };
+  const sync = new MangoTiptapSync(options);
+  const storageKey = mangoTiptapPendingStorageKey(options);
+  try {
+    await sync.start();
+    sync.schedule(operationADocument, false, () => operationAAnnotations);
+    await assert.rejects(() => sync.flush(), /response was lost/);
+    const pendingAfterA = await readExactMangoTiptapPending(storageKey);
+    assert.equal(pendingAfterA?.commits.length, 1);
+    assert.equal(pendingAfterA?.commits[0]?.attempted, true);
+    assert.equal(pendingAfterA?.commits[0]?.operation_id, firstAcceptedOperationID);
+    assert.deepEqual(pendingAfterA?.commits[0]?.document, operationADocument);
+
+    sync.schedule(operationBDocument, false, () => operationBAnnotations);
+    await sync.flush();
+
+    assert.equal(conflicts, 0);
+    assert.equal(revision, 2);
+    assert.deepEqual(canonical, operationBDocument);
+    assert.deepEqual(canonicalAnnotations, operationBAnnotations);
+    assert.equal(acceptedOperationIDs.length, 2);
+    assert.notEqual(acceptedOperationIDs[0], acceptedOperationIDs[1], "later typing must receive a new operation ID");
+    const operationAAttempts = requestAttempts.filter((attempt) => attempt.operationID === firstAcceptedOperationID);
+    assert.equal(operationAAttempts.length, 2);
+    assert.equal(operationAAttempts[0].payload, operationAAttempts[1].payload);
+    assert.equal(await readExactMangoTiptapPending(storageKey), null);
+    assert.equal(lifecycle.getSnapshot().pendingCount, 0);
+    assert.equal(lifecycle.getSnapshot().pinned, false);
+  } finally {
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+test("IndexedDB failure is explicit while server acknowledgement still releases pending work", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  delete (globalThis as Record<string, unknown>).indexedDB;
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const pendingCounts: number[] = [];
+  const storageErrors: string[] = [];
+  let revision = 0;
+  const edited = richDocument("saved without browser recovery storage");
+  const sync = new MangoTiptapSync({
+    companyID: "company-idb-failure", resourceType: "logic_gate",
+    resourceID: "resource-idb-failure", documentID: "document-idb-failure",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      revision += 1;
+      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+    },
+    onDocument: () => undefined,
+    onPendingChange: (count) => pendingCounts.push(count),
+    onRecoveryStorageError: (message) => storageErrors.push(message),
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+  try {
+    await sync.start();
+    sync.schedule(edited);
+    await sync.recover();
+    assert.equal(revision, 1, "canonical backend save still succeeds");
+    assert.ok(storageErrors.some((message) => message.startsWith("Browser recovery storage failed:")));
+    assert.ok(pendingCounts.includes(1));
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0, "backend acknowledgement releases the dirty-row pin despite storage cleanup failure");
+  } finally {
+    await sync.shutdown();
+    if (previous.indexedDB === undefined) delete (globalThis as Record<string, unknown>).indexedDB;
+    else Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: previous.indexedDB });
+    if (previous.sessionStorage === undefined) delete (globalThis as Record<string, unknown>).sessionStorage;
+    else Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previous.sessionStorage });
+  }
+});
+
+test("IndexedDB quota write failure is visible and does not block acknowledgement unpin", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const originalPut = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function quotaFailure(): IDBRequest<IDBValidKey> {
+    throw new DOMException("The pending document exceeds this browser quota", "QuotaExceededError");
+  };
+  const pendingCounts: number[] = [];
+  const storageErrors: string[] = [];
+  let storageRecoveries = 0;
+  let conflicts = 0;
+  let revision = 0;
+  const edited = richDocument("saved after quota failure");
+  const sync = new MangoTiptapSync({
+    companyID: "company-idb-quota", resourceType: "project",
+    resourceID: "resource-idb-quota", documentID: "document-idb-quota",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      revision += 1;
+      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+    },
+    onDocument: () => undefined,
+    onPendingChange: (count) => pendingCounts.push(count),
+    onRecoveryStorageError: (message) => storageErrors.push(message),
+    onRecoveryStorageRecovered: () => { storageRecoveries += 1; },
+    onConflict: () => { conflicts += 1; },
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+  try {
+    await sync.start();
+    sync.schedule(edited);
+    await sync.flush();
+    assert.equal(revision, 1);
+    assert.ok(storageErrors.some((message) => message.includes("pending document exceeds this browser quota")));
+    assert.ok(pendingCounts.includes(1));
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0);
+    assert.equal(conflicts, 0, "a storage failure is not a document conflict");
+    IDBObjectStore.prototype.put = originalPut;
+    await sync.recover();
+    assert.equal(storageRecoveries, 1, "a later successful recovery read clears the storage warning");
+    assert.equal(conflicts, 0);
+  } finally {
+    IDBObjectStore.prototype.put = originalPut;
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("IndexedDB cleanup failure after acknowledgement unpins and clears after storage recovers", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const originalDelete = IDBObjectStore.prototype.delete;
+  const pendingCounts: number[] = [];
+  const storageErrors: string[] = [];
+  let storageRecoveries = 0;
+  let conflicts = 0;
+  let revision = 0;
+  let canonical = createEmptyMangoTiptapDocument();
+  let acceptedOperationID = "";
+  const edited = richDocument("backend acknowledged before IndexedDB cleanup failed");
+  const options = {
+    companyID: "company-idb-cleanup", resourceType: "node" as const,
+    resourceID: "resource-idb-cleanup", documentID: "document-idb-cleanup",
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      if (init?.method !== "POST") return { revision, schema_version: 1, document: canonical, annotations: [] } as T;
+      const body = init.json as { operation_id: string; document: MangoTiptapDocument };
+      if (body.operation_id === acceptedOperationID) {
+        return { revision, schema_version: 1, document: canonical, annotations: [], deduplicated: true } as T;
+      }
+      acceptedOperationID = body.operation_id;
+      revision += 1;
+      canonical = body.document;
+      return { revision, schema_version: 1, document: canonical, annotations: [] } as T;
+    },
+    onDocument: () => undefined,
+    onPendingChange: (count: number) => pendingCounts.push(count),
+    onRecoveryStorageError: (message: string) => storageErrors.push(message),
+    onRecoveryStorageRecovered: () => { storageRecoveries += 1; },
+    onConflict: () => { conflicts += 1; },
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  };
+  const sync = new MangoTiptapSync(options);
+  const storageKey = mangoTiptapPendingStorageKey(options);
+  try {
+    await sync.start();
+    IDBObjectStore.prototype.delete = function cleanupFailure(): IDBRequest<undefined> {
+      throw new DOMException("The acknowledged pending record could not be removed", "UnknownError");
+    };
+    sync.schedule(edited);
+    await sync.flush();
+    assert.equal(revision, 1);
+    assert.deepEqual(canonical, edited);
+    assert.ok(storageErrors.some((message) => message.includes("acknowledged pending record could not be removed")));
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0, "server acknowledgement releases pin ownership before cleanup");
+    assert.equal(conflicts, 0);
+    assert.ok(await readExactMangoTiptapPending(storageKey), "the stale recovery record remains available for exact replay");
+
+    IDBObjectStore.prototype.delete = originalDelete;
+    await sync.recover();
+    assert.equal(storageRecoveries, 1);
+    assert.equal(conflicts, 0);
+    assert.equal(await readExactMangoTiptapPending(storageKey), null);
+    assert.equal(pendingCounts[pendingCounts.length - 1], 0);
+  } finally {
+    IDBObjectStore.prototype.delete = originalDelete;
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
 test("non-email document surfaces share the gate and email stays on the HTML editor", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
