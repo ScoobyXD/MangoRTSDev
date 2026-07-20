@@ -1359,6 +1359,14 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "pin",
     "delete",
   ]);
+  assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "project-relationships-inline-node")?.actions, [
+    "close",
+    "fullscreen",
+    "minimize",
+    "open-in-new-tab",
+    "pin",
+    "delete",
+  ]);
 });
 
 test("node window adapters mount the shared unified node shell", () => {
@@ -1370,6 +1378,12 @@ test("node window adapters mount the shared unified node shell", () => {
   const updatesView = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const unifiedShell = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedNodeShell.tsx"), "utf8");
+  const projectRelationshipsPanel = sourceSliceBetween(
+    projectSummary,
+    "function ProjectRelationshipNodePanel(",
+    "function CriticalPulseBeacon(",
+    "Project relationship node panel",
+  );
 
   assert.match(unifiedShell, /data-mango-unified-node-shell/);
   assert.match(unifiedShell, /data-mango-unified-node-shell-body="node-workspace"/);
@@ -1416,8 +1430,14 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(projectSummary, /aria-expanded=\{expanded\}/);
   assert.match(projectSummary, /relationshipNodePanelRowStyle\(\)/);
   assert.match(projectSummary, /event\.detail > 1/);
-  assert.doesNotMatch(projectSummary, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
-  assert.match(projectSummary, /onNodeOpen\(selection\.nodeID\)/);
+  assert.match(projectRelationshipsPanel, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(projectRelationshipsPanel, /<AppModalPortal trapFocus onRequestClose=\{\(\) => setFullscreen\(false\)\}>/);
+  assert.match(projectRelationshipsPanel, /id: "delete"/);
+  assert.match(projectRelationshipsPanel, /id: "fullscreen"/);
+  assert.match(projectRelationshipsPanel, /id: "minimize"/);
+  assert.match(projectRelationshipsPanel, /openAppPathInNewTab\(buildContextualNodeRoute\(selection\.nodeID\)\)/);
+  assert.match(projectRelationshipsPanel, /requestAppDockTab\(\{ kind: "node", entityID: selection\.nodeID, label: selection\.title \}\)/);
+  assert.match(projectRelationshipsPanel, /onRequestDelete\(event\)/);
   assert.equal(NODE_EDITOR_STANDARD_VERTICAL_INSET_PX, 16);
   assert.match(homeParts, /NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX/);
   assert.match(appSidebar, /NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX/);
