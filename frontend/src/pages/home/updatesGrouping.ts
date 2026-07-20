@@ -49,3 +49,17 @@ export function normalizeUpdateGroupingStack(value: unknown): UpdateGroupingSett
 export function withBuiltInUpdateGroupingSetting<T extends { setting_id: string }>(builtIn: T, custom: readonly T[]): T[] {
   return [builtIn, ...custom.filter((setting) => setting.setting_id !== builtIn.setting_id)];
 }
+
+export function sortUpdateItemsNewestFirst<T>(
+  items: readonly T[],
+  getTimestamp: (item: T) => string,
+  getTieBreaker: (item: T) => string,
+): T[] {
+  return [...items].sort((left, right) => {
+    const leftTime = Date.parse(getTimestamp(left));
+    const rightTime = Date.parse(getTimestamp(right));
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
+    if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1;
+    return getTieBreaker(left).localeCompare(getTieBreaker(right), undefined, { numeric: true, sensitivity: "base" });
+  });
+}

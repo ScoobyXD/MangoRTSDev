@@ -613,9 +613,13 @@ button, input, textarea, select {
 [data-mango-editor-format-control]:focus-visible,
 [data-mango-editor-header-overflow-trigger]:focus-visible,
 [data-mango-editor-header-overflow-action]:focus-visible {
-  outline: 2px solid rgba(34, 211, 238, 0.96);
+  outline: 2px solid rgba(34, 211, 238, 0.78);
   outline-offset: 2px;
-  filter: drop-shadow(0 0 5px rgba(168, 85, 247, 0.38));
+  filter: drop-shadow(0 1px 2px rgba(14, 116, 144, 0.2));
+}
+
+[data-mango-updates-node-resizer]:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.82);
 }
 
 .mango-editor-hover-highlight:hover,

@@ -275,7 +275,8 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(boldButton.style.background, "transparent");
     await act(async () => Simulate.mouseEnter(boldButton));
     assert.match(boldButton.style.background, /linear-gradient\(105deg/);
-    assert.match(boldButton.style.boxShadow, /34,\s*211,\s*238/);
+    assert.match(boldButton.style.background, /244,\s*254,\s*255/);
+    assert.doesNotMatch(boldButton.style.boxShadow, /168,\s*85,\s*247/);
     await act(async () => Simulate.mouseLeave(boldButton));
     assert.equal(boldButton.style.background, "transparent");
     const fontSizeInput = container.querySelector<HTMLInputElement>('input[aria-label="Font size value"]');
@@ -356,7 +357,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await act(async () => Simulate.mouseLeave(activeHighlightButton));
     assert.equal(activeHighlightButton.getAttribute("aria-pressed"), "true");
     assert.match(activeHighlightButton.style.background, /linear-gradient\(105deg/);
+    assert.match(activeHighlightButton.style.background, /224,\s*253,\s*255/);
     assert.match(activeHighlightButton.style.boxShadow, /34,\s*211,\s*238/);
+    assert.doesNotMatch(activeHighlightButton.style.boxShadow, /168,\s*85,\s*247/);
     assert.ok(
       Array.from(editorRoot.querySelectorAll('[data-mango-editor-highlight="#fed7aa"]')).some((element) => element.textContent?.includes("X")),
       editorRoot.innerHTML,

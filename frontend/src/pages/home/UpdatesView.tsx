@@ -40,6 +40,7 @@ import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
   resolveUpdatePriorityGroupOrder,
+  sortUpdateItemsNewestFirst,
   withBuiltInUpdateGroupingSetting,
   type UpdateGroupingDirection,
   type UpdateGroupingField,
@@ -51,6 +52,13 @@ import {
   resolveUpdateLogicGateID,
   type UpdateLogicGateDetails,
 } from "./updatesCurrentEntityLabels";
+import {
+  UPDATES_NODE_PANEL_DEFAULT_MAIN_RATIO,
+  nudgeUpdatesNodePanelMainRatio,
+  normalizeUpdatesNodePanelMainRatio,
+  resolveUpdatesNodePanelMainRatio,
+  updatesNodePanelGridTemplate,
+} from "./updatesLayout";
 
 type UpdatesEditorContentComponent = React.FC<{
   accent: string;
@@ -150,6 +158,7 @@ const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; ti
 ];
 
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
+const UPDATES_NODE_PANEL_SPLIT_STORAGE_KEY = "mangorts.updates.nodePanelSplit.v1";
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
@@ -187,8 +196,13 @@ export function UpdatesView({
   const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
   const [contextMenu, setContextMenu] = useState<UpdateContextMenuState | null>(null);
   const [activeNodePanel, setActiveNodePanel] = useState<UpdatesNodePanelState | null>(null);
+  const [nodePanelMainRatio, setNodePanelMainRatio] = useState(() => readUpdatesNodePanelMainRatio(companyID, currentUserID));
+  const [nodePanelResizeActive, setNodePanelResizeActive] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const updatesListRef = useRef<HTMLDivElement | null>(null);
+  const updatesShellRef = useRef<HTMLElement | null>(null);
+  const nodePanelMainRatioRef = useRef(nodePanelMainRatio);
+  const nodePanelResizePointerRef = useRef<number | null>(null);
   const notificationRefreshTimerRef = useRef<number | null>(null);
   const canonicalLoadInFlightRef = useRef(false);
   const notificationReloadQueuedRef = useRef(false);
@@ -261,6 +275,11 @@ export function UpdatesView({
     setContextMenu(null);
     setActiveNodePanel(null);
   }, [companyID]);
+  useEffect(() => {
+    const nextRatio = readUpdatesNodePanelMainRatio(companyID, currentUserID);
+    nodePanelMainRatioRef.current = nextRatio;
+    setNodePanelMainRatio(nextRatio);
+  }, [companyID, currentUserID]);
 
   useEffect(() => {
     setSelectedNotificationKey("");
@@ -708,10 +727,65 @@ export function UpdatesView({
     if (group.resource_type === "project") onOpenProject(resourceID, group.label);
   }, [onOpenLogicGate, onOpenProject, openNodePanelByResource, resolveLogicGateDetails]);
 
+  const resizeNodePanelAtClientX = useCallback((clientX: number) => {
+    const shell = updatesShellRef.current;
+    if (!shell) return;
+    const bounds = shell.getBoundingClientRect();
+    const computedStyle = window.getComputedStyle(shell);
+    const nextRatio = resolveUpdatesNodePanelMainRatio({
+      pointerClientX: clientX,
+      containerLeft: bounds.left,
+      containerWidth: bounds.width,
+      paddingLeft: Number.parseFloat(computedStyle.paddingLeft) || 0,
+      paddingRight: Number.parseFloat(computedStyle.paddingRight) || 0,
+    });
+    nodePanelMainRatioRef.current = nextRatio;
+    setNodePanelMainRatio(nextRatio);
+  }, []);
+
+  const startNodePanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    nodePanelResizePointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setNodePanelResizeActive(true);
+    resizeNodePanelAtClientX(event.clientX);
+  }, [resizeNodePanelAtClientX]);
+
+  const moveNodePanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (nodePanelResizePointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    resizeNodePanelAtClientX(event.clientX);
+  }, [resizeNodePanelAtClientX]);
+
+  const finishNodePanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (nodePanelResizePointerRef.current !== event.pointerId) return;
+    resizeNodePanelAtClientX(event.clientX);
+    nodePanelResizePointerRef.current = null;
+    setNodePanelResizeActive(false);
+    storeUpdatesNodePanelMainRatio(companyID, currentUserID, nodePanelMainRatioRef.current);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }, [companyID, currentUserID, resizeNodePanelAtClientX]);
+
+  const cancelNodePanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (nodePanelResizePointerRef.current !== event.pointerId) return;
+    nodePanelResizePointerRef.current = null;
+    setNodePanelResizeActive(false);
+    storeUpdatesNodePanelMainRatio(companyID, currentUserID, nodePanelMainRatioRef.current);
+  }, [companyID, currentUserID]);
+
+  const handleNodePanelResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const nextRatio = nudgeUpdatesNodePanelMainRatio(nodePanelMainRatioRef.current, event.key === "ArrowLeft" ? -1 : 1);
+    nodePanelMainRatioRef.current = nextRatio;
+    setNodePanelMainRatio(nextRatio);
+    storeUpdatesNodePanelMainRatio(companyID, currentUserID, nextRatio);
+  }, [companyID, currentUserID]);
+
   const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
 
   return (
-    <section style={updatesShellStyle(Boolean(activeNodePanel))}>
+    <section ref={updatesShellRef} style={updatesShellStyle(Boolean(activeNodePanel), nodePanelMainRatio)}>
       <div style={updatesMainPaneStyle}>
         <div style={updatesHeaderStyle}>
           <div style={updatesTitleStackStyle}>
@@ -781,12 +855,34 @@ export function UpdatesView({
         </div>
       </div>
       {activeNodePanel && (
-        <UpdatesNodePanel
-          panel={activeNodePanel}
-          resolveNodeDetails={resolveNodeDetails}
-          resolveUserLabel={resolveUserLabel}
-          onClose={() => setActiveNodePanel(null)}
-        />
+        <>
+          <div
+            role="separator"
+            aria-label="Resize Updates and node panels"
+            aria-orientation="vertical"
+            aria-valuemin={20}
+            aria-valuemax={80}
+            aria-valuenow={Math.round(nodePanelMainRatio * 100)}
+            aria-valuetext={`${Math.round(nodePanelMainRatio * 100)}% Updates width`}
+            tabIndex={0}
+            data-mango-updates-node-resizer="true"
+            style={updatesNodePanelResizeHandleStyle(nodePanelResizeActive)}
+            onPointerDown={startNodePanelResize}
+            onPointerMove={moveNodePanelResize}
+            onPointerUp={finishNodePanelResize}
+            onPointerCancel={cancelNodePanelResize}
+            onLostPointerCapture={cancelNodePanelResize}
+            onKeyDown={handleNodePanelResizeKeyDown}
+          >
+            <span aria-hidden="true" style={updatesNodePanelResizeGripStyle(nodePanelResizeActive)} />
+          </div>
+          <UpdatesNodePanel
+            panel={activeNodePanel}
+            resolveNodeDetails={resolveNodeDetails}
+            resolveUserLabel={resolveUserLabel}
+            onClose={() => setActiveNodePanel(null)}
+          />
+        </>
       )}
       {contextMenu && (
         <UpdateContextMenu
@@ -1639,16 +1735,38 @@ function updateGroupResourceFromValue(field: UpdateDisplayGroupingField, key: st
 }
 
 function sortUpdateRows(rows: UpdateFeedRow[]): UpdateFeedRow[] {
-  return [...rows].sort((left, right) => {
-    const leftTime = Date.parse(left.item.created_timestamp);
-    const rightTime = Date.parse(right.item.created_timestamp);
-    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0)
-      || left.item.title.localeCompare(right.item.title, undefined, { numeric: true, sensitivity: "base" })
-      || left.rowKey.localeCompare(right.rowKey);
-  });
+  return sortUpdateItemsNewestFirst(
+    rows,
+    (row) => row.item.created_timestamp,
+    (row) => `${row.item.title}\u0000${row.rowKey}`,
+  );
 }
 
+function updatesNodePanelSplitStorageKey(companyID: string, userID: string): string {
+  const cleanCompanyID = companyID.trim();
+  const cleanUserID = userID.trim();
+  return cleanCompanyID && cleanUserID
+    ? `${UPDATES_NODE_PANEL_SPLIT_STORAGE_KEY}:${cleanCompanyID}:${cleanUserID}`
+    : UPDATES_NODE_PANEL_SPLIT_STORAGE_KEY;
+}
+
+function readUpdatesNodePanelMainRatio(companyID: string, userID: string): number {
+  try {
+    return normalizeUpdatesNodePanelMainRatio(localStorage.getItem(updatesNodePanelSplitStorageKey(companyID, userID)));
+  } catch {
+    return UPDATES_NODE_PANEL_DEFAULT_MAIN_RATIO;
+  }
+}
+
+function storeUpdatesNodePanelMainRatio(companyID: string, userID: string, ratio: number): void {
+  try {
+    localStorage.setItem(updatesNodePanelSplitStorageKey(companyID, userID), String(normalizeUpdatesNodePanelMainRatio(ratio)));
+  } catch {
+    // Local storage can be unavailable in private or restricted browser contexts.
+  }
+}
 function updatesSelectedViewStorageKey(companyID: string, userID: string): string {
+
   const cleanCompanyID = companyID.trim();
   const cleanUserID = userID.trim();
   return cleanCompanyID && cleanUserID
@@ -1765,18 +1883,48 @@ function savedViewErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
 
-function updatesShellStyle(panelOpen: boolean): React.CSSProperties {
+function updatesShellStyle(panelOpen: boolean, nodePanelMainRatio: number): React.CSSProperties {
   return {
     minWidth: 0,
     minHeight: 0,
     height: "100%",
     display: "grid",
-    gridTemplateColumns: panelOpen ? "minmax(720px, 840px) minmax(520px, 1fr)" : "minmax(0, 1fr)",
-    gap: panelOpen ? 12 : 0,
+    gridTemplateColumns: panelOpen ? updatesNodePanelGridTemplate(nodePanelMainRatio) : "minmax(0, 1fr)",
+    gap: 0,
     padding: "10px 14px 14px",
     background: "radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.16), transparent 34%), radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 30%), linear-gradient(135deg, rgba(240, 253, 250, 0.94), rgba(255, 247, 237, 0.78) 48%, rgba(248, 250, 252, 0.96))",
     color: "#111827",
     overflow: "hidden",
+  };
+}
+function updatesNodePanelResizeHandleStyle(active: boolean): React.CSSProperties {
+
+  return {
+    position: "relative",
+    zIndex: 6,
+    minWidth: 0,
+    minHeight: 0,
+    height: "100%",
+    display: "grid",
+    placeItems: "center",
+    border: 0,
+    background: active ? "rgba(34, 211, 238, 0.08)" : "transparent",
+    cursor: "col-resize",
+    touchAction: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    outlineOffset: -2,
+  };
+}
+
+function updatesNodePanelResizeGripStyle(active: boolean): React.CSSProperties {
+  return {
+    width: active ? 3 : 2,
+    height: "100%",
+    borderRadius: 2,
+    background: active ? "rgba(6, 182, 212, 0.88)" : "rgba(15, 23, 42, 0.16)",
+    boxShadow: active ? "0 0 0 1px rgba(255, 255, 255, 0.72), 0 0 8px rgba(6, 182, 212, 0.22)" : "none",
+    pointerEvents: "none",
   };
 }
 
