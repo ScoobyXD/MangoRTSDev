@@ -267,6 +267,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const projectTextBlockContentRef = useRef(new Map<string, EditorTextBlockContent>());
   const projectTextBlockContentRevisionRef = useRef(0);
   const projectLoadRequestRef = useRef(0);
+  const relationshipPickerRequestRef = useRef(0);
   const projectSaveScopeRef = useRef("");
   const handledProjectFocusRequestRef = useRef("");
   const { accounts } = useCompanyAccounts(companyID);
@@ -313,6 +314,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
   const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
+  const [relationshipPickerOpen, setRelationshipPickerOpen] = useState(false);
+  const [relationshipPickerQuery, setRelationshipPickerQuery] = useState("");
+  const [relationshipPickerResults, setRelationshipPickerResults] = useState<CompanyExplorerSearchResult[]>([]);
+  const [relationshipPickerLoading, setRelationshipPickerLoading] = useState(false);
+  const [relationshipPickerError, setRelationshipPickerError] = useState("");
+  const [relationshipPickerAddingKey, setRelationshipPickerAddingKey] = useState("");
   const [relationshipGroupings, setRelationshipGroupings] = useState<ProjectRelationshipGroupingSetting[]>(() => (
     DEFAULT_PROJECT_RELATIONSHIP_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
@@ -343,10 +350,42 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectTextAlignment, setProjectTextAlignment] = useState<EditorTextAlignment>("left");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
+  const relationshipPickerSearchText = relationshipPickerQuery.trim();
+  const relationshipPickerRows = useMemo(() => (
+    buildCompanyExplorerSearchTreeRows(relationshipPickerResults)
+      .filter((row) => (
+        row.syntheticKind === "search_result"
+        && (row.kind === "node" || row.kind === "logic_gate")
+        && (row.nodeID || row.logicGateID || row.resourceID)
+      ))
+  ), [relationshipPickerResults]);
+  const existingRelationshipKeys = useMemo(() => new Set(
+    relationships.map((relationship) => `${relationship.resource_type}:${relationship.resource_id}`),
+  ), [relationships]);
+
+  const openRelationshipPicker = useCallback(() => {
+    setRelationshipPickerOpen(true);
+    setRelationshipPickerQuery("");
+    setRelationshipPickerResults([]);
+    setRelationshipPickerError("");
+    setRelationshipPickerLoading(false);
+    setRelationshipPickerAddingKey("");
+  }, []);
+
+  const closeRelationshipPicker = useCallback(() => {
+    relationshipPickerRequestRef.current += 1;
+    setRelationshipPickerOpen(false);
+    setRelationshipPickerQuery("");
+    setRelationshipPickerResults([]);
+    setRelationshipPickerError("");
+    setRelationshipPickerLoading(false);
+    setRelationshipPickerAddingKey("");
+  }, []);
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setRelationships((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
     setCriticalPath((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
+    setRelationshipPickerResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
     setSelectedCriticalPathNode((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setSelectedRelationshipNodePanel((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setRelationshipContextMenu((current) => {
@@ -355,6 +394,47 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       return relationship === current.relationship ? current : { ...current, relationship };
     });
   }), [companyID]);
+
+  useEffect(() => {
+    if (!relationshipPickerOpen || !relationshipPickerSearchText) {
+      setRelationshipPickerResults([]);
+      setRelationshipPickerLoading(false);
+      setRelationshipPickerError("");
+      return undefined;
+    }
+    const requestID = relationshipPickerRequestRef.current + 1;
+    relationshipPickerRequestRef.current = requestID;
+    let cancelled = false;
+    setRelationshipPickerLoading(true);
+    setRelationshipPickerError("");
+    const titleVersionAtStart = readCommittedEntityTitleVersion();
+    void fetchCompanyExplorerSearchResults(
+      apiBase,
+      companyID,
+      relationshipPickerSearchText,
+      30,
+      ["node", "logic_gate"],
+    )
+      .then((payload) => {
+        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
+        setRelationshipPickerResults(foldCommittedEntityTitlesSince(
+          payload.results ?? [], companyID, titleVersionAtStart,
+          reconcileCompanyExplorerSearchResultTitles,
+        ));
+      })
+      .catch((searchError) => {
+        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
+        setRelationshipPickerResults([]);
+        setRelationshipPickerError(searchError instanceof Error ? searchError.message : "Failed to search Nodes and Logic Gates");
+      })
+      .finally(() => {
+        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
+        setRelationshipPickerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, companyID, relationshipPickerOpen, relationshipPickerSearchText]);
 
   projectSaveScopeRef.current = projectSaveScope;
   const projectTextBlockSaveController = useMemo<TextBlockProjectionSaveController<EditorTextBlockContent>>(
@@ -385,6 +465,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 
   useEffect(() => {
     projectLoadRequestRef.current += 1;
+    relationshipPickerRequestRef.current += 1;
+    setRelationshipPickerOpen(false);
+    setRelationshipPickerQuery("");
+    setRelationshipPickerResults([]);
+    setRelationshipPickerLoading(false);
+    setRelationshipPickerError("");
+    setRelationshipPickerAddingKey("");
     projectTextBlockContentRef.current.clear();
     projectTextBlockContentRevisionRef.current = 0;
     setSavingID("");
@@ -1190,6 +1277,27 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject, projectID, relationships]);
 
+  const addRelationshipFromPicker = useCallback(async (target: ProjectRelationshipDropTarget) => {
+    const resourceID = target.resourceID.trim();
+    if (!resourceID) return;
+    const key = `${target.resourceType}:${resourceID}`;
+    setRelationshipPickerAddingKey(key);
+    setRelationshipPickerError("");
+    try {
+      const targets = expandLogicGateRelationshipTargets([{ ...target, resourceID }], workspace);
+      const ensured = await addRelationshipTargets(targets);
+      if (ensured.some((relationship) => (
+        relationship.resource_type === target.resourceType && relationship.resource_id === resourceID
+      ))) {
+        closeRelationshipPicker();
+      } else {
+        setRelationshipPickerError(`Failed to add ${target.resourceType === "logic_gate" ? "Logic Gate" : "Node"} to this Project`);
+      }
+    } finally {
+      setRelationshipPickerAddingKey("");
+    }
+  }, [addRelationshipTargets, closeRelationshipPicker, workspace]);
+
   const convertTriageMessagesToProject = useCallback(async (
     drag: ReturnType<typeof readTriageMessageDrag>,
     logicGateID = "",
@@ -1735,7 +1843,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             {relationship.status ? <span style={nodeStatusDotStyle(relationship.status)} /> : null}
           </button>
           {expanded ? (
-            <div style={relationshipNodePanelRowStyle(depth)}>
+            <div style={relationshipNodePanelRowStyle()}>
               <ProjectRelationshipNodePanel
                 key={`${projectID}:${nodeID}`}
                 accent={accent}
@@ -2241,17 +2349,46 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               </button>
             </div>
             {activeRightPanelTab === "relationships" ? (
-              <UniversalGroupingControls
-                groupings={relationshipGroupings}
-                fieldOptions={PROJECT_RELATIONSHIP_GROUPING_FIELDS}
-                onChange={updateRelationshipGroupings}
-                buttonLabel="Group"
-                popoverLabel="Project relationship grouping"
-                emptyLabel="Relationships are shown as a flat list"
-                accent={accent}
-              />
+              <div style={projectWorkPanelActionsStyle}>
+                <button
+                  type="button"
+                  aria-label="Add Node or Logic Gate"
+                  aria-expanded={relationshipPickerOpen}
+                  aria-controls="project-relationship-picker"
+                  style={projectRelationshipAddButtonStyle(accent, relationshipPickerOpen)}
+                  onClick={relationshipPickerOpen ? closeRelationshipPicker : openRelationshipPicker}
+                >
+                  <span aria-hidden="true" style={projectRelationshipAddIconStyle}>+</span>
+                  Add
+                </button>
+                <UniversalGroupingControls
+                  groupings={relationshipGroupings}
+                  fieldOptions={PROJECT_RELATIONSHIP_GROUPING_FIELDS}
+                  onChange={updateRelationshipGroupings}
+                  buttonLabel="Group"
+                  popoverLabel="Project relationship grouping"
+                  emptyLabel="Relationships are shown as a flat list"
+                  accent={accent}
+                />
+              </div>
             ) : null}
           </div>
+          {activeRightPanelTab === "relationships" && relationshipPickerOpen ? (
+            <div id="project-relationship-picker" style={projectRelationshipPickerFrameStyle}>
+              <ProjectRelationshipSearchPicker
+                accent={accent}
+                query={relationshipPickerQuery}
+                rows={relationshipPickerRows}
+                loading={relationshipPickerLoading}
+                error={relationshipPickerError}
+                existingRelationshipKeys={existingRelationshipKeys}
+                addingKey={relationshipPickerAddingKey}
+                onQueryChange={setRelationshipPickerQuery}
+                onCancel={closeRelationshipPicker}
+                onSelectTarget={(target) => void addRelationshipFromPicker(target)}
+              />
+            </div>
+          ) : null}
           {activeRightPanelTab === "relationships" ? (
           <div
             className="kanban-board-scroll"
@@ -2707,6 +2844,99 @@ function CriticalPathTable({
             Add Step
           </button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ProjectRelationshipSearchPicker({
+  accent,
+  query,
+  rows,
+  loading,
+  error,
+  existingRelationshipKeys,
+  addingKey,
+  onQueryChange,
+  onCancel,
+  onSelectTarget,
+}: {
+  accent: string;
+  query: string;
+  rows: ExplorerTreeNode[];
+  loading: boolean;
+  error: string;
+  existingRelationshipKeys: Set<string>;
+  addingKey: string;
+  onQueryChange: (value: string) => void;
+  onCancel: () => void;
+  onSelectTarget: (target: ProjectRelationshipDropTarget) => void;
+}) {
+  const hasQuery = query.trim().length > 0;
+  return (
+    <div style={projectRelationshipPickerSurfaceStyle}>
+      <div style={criticalPathNodePickerSearchRowStyle}>
+        <CompanyExplorerSearchBox
+          value={query}
+          onChange={onQueryChange}
+          onEscape={onCancel}
+          placeholder="Search Explorer Nodes and Logic Gates"
+          ariaLabel="Search Explorer Nodes and Logic Gates"
+          autoFocus
+          style={criticalPathNodePickerSearchBoxStyle}
+        />
+        <button type="button" style={criticalPathNodePickerCancelButtonStyle} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <div role="listbox" aria-label="Node and Logic Gate search results" style={criticalPathNodePickerResultsStyle}>
+        {!hasQuery ? (
+          <div style={criticalPathNodePickerEmptyStyle}>Search for a Node or Logic Gate in Company Explorer</div>
+        ) : loading ? (
+          <div style={criticalPathNodePickerEmptyStyle}>Searching...</div>
+        ) : error ? (
+          <div style={criticalPathNodePickerErrorStyle}>{error}</div>
+        ) : rows.length === 0 ? (
+          <div style={criticalPathNodePickerEmptyStyle}>No Node or Logic Gate matches</div>
+        ) : (
+          rows.map((row) => {
+            const resourceType = row.kind === "logic_gate" ? "logic_gate" : row.kind === "node" ? "node" : null;
+            const resourceID = resourceType === "logic_gate"
+              ? row.logicGateID?.trim() || row.resourceID?.trim() || ""
+              : row.nodeID?.trim() || row.resourceID?.trim() || "";
+            if (!resourceType || !resourceID) return null;
+            const key = `${resourceType}:${resourceID}`;
+            const alreadyAdded = existingRelationshipKeys.has(key);
+            const adding = addingKey === key;
+            const resourceLabel = resourceType === "logic_gate" ? "Logic Gate" : "Node";
+            return (
+              <button
+                key={row.id}
+                type="button"
+                role="option"
+                aria-selected="false"
+                disabled={alreadyAdded || Boolean(addingKey)}
+                style={projectRelationshipPickerResultButtonStyle(alreadyAdded || Boolean(addingKey))}
+                onClick={() => onSelectTarget({ resourceType, resourceID })}
+              >
+                <span style={criticalPathNodePickerResultIconStyle(accent)}>
+                  <ExplorerRowIcon kind={resourceType} />
+                </span>
+                <span style={criticalPathNodePickerResultTextStyle}>
+                  <span style={criticalPathNodePickerResultTitleStyle}>{row.label}</span>
+                  <span style={criticalPathNodePickerResultPathStyle}>
+                    {resourceLabel}{row.folderLabel ? ` · ${row.folderLabel}` : ""}
+                  </span>
+                </span>
+                {alreadyAdded || adding ? (
+                  <span style={projectRelationshipPickerResultStatusStyle}>
+                    {alreadyAdded ? "Added" : "Adding..."}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -3656,6 +3886,46 @@ const projectWorkPanelToolbarStyle: React.CSSProperties = {
   padding: "4px 0",
 };
 
+const projectWorkPanelActionsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 8,
+};
+
+function projectRelationshipAddButtonStyle(accent: string, active: boolean): React.CSSProperties {
+  return {
+    minHeight: 30,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    border: `1px solid ${active ? accent : "rgba(91, 141, 239, 0.34)"}`,
+    borderRadius: 9,
+    background: active ? "rgba(239, 246, 255, 0.96)" : "#ffffff",
+    color: active ? accent : "#1d4ed8",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 11,
+    fontWeight: 900,
+    padding: "0 10px",
+    boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.78)",
+  };
+}
+
+const projectRelationshipAddIconStyle: React.CSSProperties = {
+  fontSize: 18,
+  fontWeight: 700,
+  lineHeight: 1,
+};
+
+const projectRelationshipPickerFrameStyle: React.CSSProperties = {
+  minWidth: 0,
+  flexShrink: 0,
+  padding: "0 2px 8px",
+  boxSizing: "border-box",
+};
+
 const columnTitleStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 850,
@@ -3946,6 +4216,11 @@ const criticalPathNodePickerSurfaceStyle: React.CSSProperties = {
   boxShadow: "9px 10px 22px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255,255,255,0.78)",
 };
 
+const projectRelationshipPickerSurfaceStyle: React.CSSProperties = {
+  ...criticalPathNodePickerSurfaceStyle,
+  borderRadius: 10,
+};
+
 const criticalPathNodePickerSearchRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
@@ -4012,6 +4287,22 @@ const criticalPathNodePickerResultButtonStyle: React.CSSProperties = {
   padding: "7px 9px",
   textAlign: "left",
   boxShadow: "2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)",
+};
+
+function projectRelationshipPickerResultButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    ...criticalPathNodePickerResultButtonStyle,
+    gridTemplateColumns: "24px minmax(0, 1fr) auto",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.68 : 1,
+  };
+}
+
+const projectRelationshipPickerResultStatusStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 900,
+  whiteSpace: "nowrap",
 };
 
 function criticalPathNodePickerResultIconStyle(accent: string): React.CSSProperties {
@@ -4087,12 +4378,11 @@ const criticalPathNodePreviewActionButtonStyle: React.CSSProperties = {
   boxShadow: EDITOR_NEU_SHADOW,
 };
 
-function relationshipNodePanelRowStyle(depth: number): React.CSSProperties {
-  const leftOffset = relationshipRowLeftOffset(depth);
+function relationshipNodePanelRowStyle(): React.CSSProperties {
   return {
-    width: `calc(100% - ${leftOffset}px)`,
+    width: "100%",
     minWidth: 0,
-    marginLeft: leftOffset,
+    marginLeft: 0,
     padding: "8px 0 12px",
     boxSizing: "border-box",
   };

@@ -54,6 +54,8 @@ P43 - Remote Project text-box operations apply live to the exact mounted documen
 P44 - Replies to email attached to a project text block use the project as attachment resource owner, retain the originating project information ID, and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer project text-block formatting controller so only the reply toolbar can format text.
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
 P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes inline editor remains in normal document flow beneath its selected row rather than mounting in that portal.
+P47 - Expanding a node in Logic Gates / Nodes removes the row-depth indentation from the editor surface so the editor spans the full relationship-panel width while the collapsed relationship row keeps its normal grouping indentation.
+P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes and Logic Gates. Choosing a result creates or reuses the project relationship, selecting a Logic Gate includes its known child nodes just like an Explorer drop, and resources already related to the Project are marked as added and disabled.
 
 ## Scenarios
 
@@ -191,6 +193,8 @@ Business logic covered:
 - P23
 - P38
 - P46
+- P47
+- P48
 
 Given:
 - A project has at least one related Logic Gate and at least one related node visible in the Logic Gates / Nodes tab.
@@ -198,6 +202,8 @@ Given:
 
 Expected:
 - Clicking the node row expands that node's editor immediately below the row and leaves the Project page in place; clicking the row again collapses it.
+- The expanded node editor fills the relationship-panel width without inheriting the collapsed row's group-depth indentation.
+- **Add** opens an elevated Company Explorer search limited to Nodes and Logic Gates. Selecting an available result attaches it to the Project, selecting a Logic Gate includes its known child nodes, and an already-related result remains marked and disabled.
 - The embedded node panel uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
 - Text boxes inside that window use the unified node editor semantics.
 - Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.

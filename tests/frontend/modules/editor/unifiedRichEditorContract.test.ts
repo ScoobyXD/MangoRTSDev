@@ -935,7 +935,7 @@ test("blocking editor and node overlays use the app modal layer above feature st
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   assert.match(kanbanOverlay, /useAppViewportAnchorRect\(boardRootRef\)/);
   assert.match(projectSummary, /surfaceID="project-relationships-inline-node"/);
-  assert.match(projectSummary, /relationshipNodePanelRowStyle\(depth\)/);
+  assert.match(projectSummary, /relationshipNodePanelRowStyle\(\)/);
   assert.match(projectSummary, /<AppModalPortal onRequestClose=\{saving \? undefined : onClose\}>[\s\S]*disabled=\{saving\}[\s\S]*Save Assignments/);
   assert.match(kanbanOverlay, /data-mango-editor-overlay-backdrop=\{fullscreen \? "modal" : "modeless"\}/);
   assert.match(kanbanOverlay, /trapFocus=\{fullscreen\}/);
@@ -1414,7 +1414,7 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(projectSummary, /surfaceID="project-critical-path-inline-node"/);
   assert.match(projectSummary, /surfaceID="project-relationships-inline-node"/);
   assert.match(projectSummary, /aria-expanded=\{expanded\}/);
-  assert.match(projectSummary, /relationshipNodePanelRowStyle\(depth\)/);
+  assert.match(projectSummary, /relationshipNodePanelRowStyle\(\)/);
   assert.match(projectSummary, /event\.detail > 1/);
   assert.doesNotMatch(projectSummary, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
   assert.match(projectSummary, /onNodeOpen\(selection\.nodeID\)/);
