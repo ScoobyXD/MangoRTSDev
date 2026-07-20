@@ -1,68 +1,94 @@
-# Email Nodes Prototype
+# Email Nodes
 
-Status: implemented prototype on 2026-07-16
+Status: implemented and clarified on 2026-07-20
 
 ## Product outcome
 
-An email conversation can become a real Mango Node from either My Triage or Shared Triage. The user comments on an exact reply, optionally after highlighting text. The first submit asks for priority, then creates one email-derived Node and saves the comment only after the backend acknowledges it. Triage and the Node show the same chat records; there is no copied or synchronized second conversation.
+An email or email thread is imported into one Node-wide email column. The email column is separate real estate from every text box. Users explicitly create text boxes from individual email messages or selections, and each text box owns its directly attached chat. Mango stores the email-message-to-text-box link and matching color so the association survives closing the Node, reloading the page, and opening the Node again.
 
-## User journey
+## Workspace composition
 
-1. Open a conversation in My Triage or Shared Triage.
-2. On an exact reply, choose **Comment**, or highlight text and use the existing chat action.
-3. Type the comment and press Enter. Mango opens the existing priority choices (1 through 5).
-4. Choose priority. Mango validates the exact mailbox and provider message/thread, creates or reuses the Node, assigns the creator Generated GVIC, and then commits the first chat message.
-5. After acknowledgement, the comment appears in the triage rail. The reply and triage row show a Node indicator.
-6. Open the indicator to navigate to the existing Node. The left email pane opens at that reply; a stored quote is activated in the same thread, the middle contains the normal editor/text boxes, and the right contains the same chat.
+- The Node-wide email column contains every attached email source. A source can be a one-message email or a complete chronological thread.
+- Multiple attached sources appear as tabs inside that one email column. The thread is never copied into a text box.
+- Text boxes form the normal Node text-box sequence, using the existing creation-time ordering.
+- A text box row contains only its text editor and its directly attached chat pane.
+- The Node-wide email column, a text box editor, and that text box's chat are independently toggleable. Any one, any pair, or all three can be visible at the same time.
+- An email-linked text box has a durable accent and a “Linked email” marker. Activating it reveals the exact source message in the separate email column.
+- Activating a source email message reveals the text boxes linked to that exact message.
 
-## Business rules
+## Email-to-node workflows
 
-- Identity is company plus exact personal account or shared inbox plus provider thread ID, with exact message ID fallback. Repeated or concurrent creates reuse one Node.
-- The Node represents the whole provider conversation, not a copied single reply. A one-message conversation simply has one message.
-- Priority is mandatory for first-comment creation. Invalid or missing priority is rejected before provider reads or durable creation.
-- The creator is the direct Generated GVIC owner. The Node starts with no Logic Gate and is placed once in Unfiled/Nodes.
-- The first comment, later comments, replies, attachments, @mentions, urgent !mentions, links, and existing version-reference text all use the normal Node `Text block chat` model and shared ChatPane.
-- A root comment stores the target provider message ID. When text is highlighted it also stores the trimmed quote and offsets. Node text selections additionally store the originating text-box ID.
-- Mentioned same-company users become durable Node-chat participants through the existing atomic chat/participant write. Existing Node mention/comment events drive Updates.
-- A mention never adds a provider recipient, never changes To/Cc/Bcc, never subscribes the person to provider delivery, and never makes the person an email participant.
-- Collaboration default access remains `no_access`. Creator and accepted mention participants receive direct edit grants. Generic permission replacement remains blocked, so a company role or folder policy cannot leak the source thread.
-- Authorized participants may read the complete source thread through the collaboration adapter even without source-mailbox credentials. Nonparticipants cannot discover or read it by guessing Node, collaboration, message, draft, or attachment IDs.
-- The canonical source `Attached email` projection cannot be overwritten or deleted. The Node itself remains protected from generic deletion while the collaboration owns it.
-- Normal Node work behavior is available after creation: title, text boxes, saved versions, GVIC/account changes, Project relationships, and later Logic Gate/Kanban assignment.
-- Every primary-email-origin Node uses the three-column layout, including Nodes created through existing email drag/conversion paths: email left, editor middle, chat right.
-- Every later Logic Gate/Kanban/Project projection of an email-origin Node preserves `created_from_email=true` and uses the established email icon. Immediate mutation responses preserve the flag as well as canonical reads.
-- Additional attached email sources use the existing attachment identity/reference path and appear as browser-style tabs in the left pane. Switching a tab changes the visible full thread without copying provider bodies or bytes.
+### Create a node from an email
 
-## What is shared and what is per text box
+1. The user chooses **Create node for this email** and selects priority.
+2. Mango validates the exact personal account or shared inbox plus provider message/thread.
+3. Mango creates or reuses the collaboration Node and one canonical Node-wide `Attached email` projection.
+4. If the chat composer is empty, Mango creates no text box. The Node opens with the email column ready, and the user creates text boxes from the desired messages.
+5. If the user wrote a chat first, Mango creates or reuses a text box linked to that exact email message, then saves the chat directly against that text box.
 
-- Node-wide: source email tabs, the canonical Triage/email conversation in the primary right pane, participant access, priority, GVIC, work relationships, and the Node identity.
-- Per text box: editor document, title, structured collaboration revision, save state, and the existing per-text-box chat context on additional text-box rows.
-- A selection from the primary middle editor can be written into the canonical email chat with `selection_block_id`, so navigation returns to that editor. Additional text boxes keep their normal block chat instead of being silently merged into the Triage conversation.
-- An email selection comment is written into that same chat with provider message ID, quote, and offsets. Navigation returns to the exact reply/quote in the active email tab.
+### Create a text box from a message
+
+- The user activates the message or highlights a selection in the Node-wide email column and chooses the text-box action.
+- Mango creates a normal `Text box` projection with `email_message_id` and `email_accent`.
+- Each linked text box references exactly one email message. Repeated explicit actions may create multiple text boxes from the same message; each remains an independent text box and chat.
+- The accent is persisted in the text-box projection. It is not inferred from transient component state or browser layout storage.
+- The text box is inserted into the normal creation-time sequence. It does not contain an email viewer or duplicate email body.
+
+### Chat from My Triage or Shared Triage
+
+- Chat submission first resolves the existing same-mailbox collaboration by thread/message identity.
+- Mango creates or reuses a text box linked to the exact message being discussed.
+- Every new `Text block chat` projection stores the real text-box ID in `block_id`.
+- The triage chat and the chat beside that text box read the same projection; there is no copied or synchronized second conversation.
+- A root email chat stores the provider message ID. A highlighted selection also stores the quote and offsets.
+- Attachments added from the triage chat are linked to the same real text-box ID.
+
+### Import into an existing Node
+
+- Import attaches the durable email/thread once in the Node-wide email column.
+- The explicit import action may also create the requested email-linked text box and optional initial chat.
+- The linked text box stores the selected message ID and accent, and its chat stores that text-box ID.
+- Importing a reply does not copy provider bodies into the text box.
+
+## Persistence and compatibility
+
+- The canonical source `Attached email` projection owns the email/thread reference and cannot be overwritten or deleted through generic Node information operations.
+- `Text box` projections own editor content plus `email_message_id` and `email_accent`.
+- `Text block chat` projections own chat and point directly to a `Text box` through `block_id`.
+- The frontend restores the association and color from durable projections after unmount, reload, and navigation.
+- Older chat records that used an Attached-email information ID remain readable beside the linked text box. This is read compatibility only: new chats and attachments are never written to an Attached-email ID.
+- Repeated or concurrent collaboration creation reuses one Node using company, exact mailbox, and provider thread/message identity.
+
+## Permissions and normal Node behavior
+
+- Priority is mandatory when a new email collaboration Node must be created.
+- The creator receives direct Generated GVIC ownership. The Node starts in Unfiled/Nodes with no Logic Gate.
+- Collaboration default access remains `no_access`; accepted chat participants receive the existing direct grants.
+- Normal Node title, versions, accounts, Projects, Logic Gates, Kanban, and additional text-box behavior remains available.
+- Email-origin work projections preserve `created_from_email=true` and the established email icon.
+- Email bodies remain subject to the existing sanitized, sandboxed rendering boundary. Provider credentials, temporary URLs, attachment bytes, and presigned URLs are not stored in Node projections.
 
 ## Implementation decisions
 
-- Reused `communications_email_collaborations`, the canonical `Attached email` projection, `Text block chat`, `ChatPane`, Node information endpoints, atomic mention participant writes, existing Updates events, existing provider-thread loader, existing attachment references, normal Node saved versions/work relationships, and established email-card icon fields.
-- Added mandatory `priority` to collaboration ensure. Memory and PostgreSQL creation set Node priority and direct creator Generated GVIC in the same creation transaction.
-- Marked the canonical attached-email payload `created_from_email=true`; Kanban, Logic Gate work, and Project projections recognize collaboration-backed Nodes as email origin.
-- Relaxed the old protected-shell exclusions for ordinary Node work paths while retaining canonical email, collaboration permission, Explorer placement, and delete safety.
-- The frontend waits for the chat POST before adding the message to visible history or clearing the composer.
-- The Triage row/reply Node indicator opens the existing Node and carries the clicked provider message ID. The Node expands/scrolls the reply and activates the matching anchored chat when present.
+- Collaboration ensure creates the Node and canonical `Attached email` projection only. It deliberately does not create a `Text box`.
+- The frontend suppresses its normal automatic blank-text-box behavior when a newly opened Node already contains attached email.
+- Explicit message/selection actions use the existing conversion endpoint to create linked text boxes.
+- Triage chat uses the shared ChatPane and waits for the backend chat acknowledgement before clearing the composer.
+- The Node retains one global email pane. Per-text-box email panes and email toggle buttons are not part of the layout.
 
-## Prototype limitations and follow-ups
+## Verification contract
 
-- **Create Shared Draft** still uses its existing explicit path and currently supplies priority 3 when it must lazily ensure a collaboration. The mandatory selector is implemented for first-comment creation; a future shared-draft design can add its own explicit priority chooser.
-- The Node chat header shows compact durable authors/direct mention history. Triage retains the richer immutable direct-user/group-provenance roster; the Node header does not yet reproduce the full group-history popover.
-- Unfiled/Nodes placement is intentionally collaboration-owned and cannot be moved or removed independently, even though the Node can participate in Projects, Logic Gates, and Kanban.
-- Existing version-reference text behavior is reused unchanged; this prototype does not add a new parser or UI for version syntax.
-- No live database was changed. The repository already contains the required collaboration, participant, Node, projection, permission, GVIC, work, and attachment tables, so this prototype requires no new migration or human schema rollout.
+Focused automated coverage must prove:
 
-## Verification
+- collaboration creation persists one canonical Attached email and zero automatic text boxes;
+- empty **Create node** opens the email-only Node;
+- explicit email actions persist `email_message_id` and `email_accent`;
+- accents and associations round-trip through projection parsing;
+- a text-box row exposes editor/chat only and never mounts its own email viewer;
+- new triage chats and chat attachments use the linked text-box ID;
+- direct text-box chat wins when both direct and legacy Attached-email chat records exist;
+- legacy Attached-email chat remains readable without becoming a new write destination;
+- My Triage and Shared Triage use the same persistence path; and
+- the frontend build, backend tests, and full repository verification gate pass.
 
-Focused automated coverage includes:
-
-- collaboration create/reuse, full thread identity, provider-truth validation, and invalid/missing priority before provider reads;
-- creator priority and Generated GVIC, normal Node work paths, canonical email protection, Unfiled placement, and email-origin Logic Gate cards;
-- atomic mention participation, authorization, attachment privacy, and shared chat information writes;
-- frontend priority payloads, no false optimistic saved chat, exact reply Node marker/focus, source tabs, three-column origin layout, projection parsing, and text-box/email selection context;
-- frontend production build plus the repository full verification gate recorded in the implementation commit handoff.
+No live database is changed by this implementation. No new migration or human schema rollout is required for this correction.

@@ -3,6 +3,14 @@ import type {
   CompanyUser,
   CompanyUserGroup,
 } from "../../modules/communications/communicationsApi.js";
+import {
+  listEditorTextBlockProjections,
+  parseEditorTextBlockChats,
+  parseEditorTextBlockContent,
+  type EditorProjectionItem,
+  type EditorTextBlockChatMessage,
+} from "../../modules/editor/editorProjection.js";
+
 
 export type EmailCollaborationRosterPrincipal = {
   kind: "user" | "group";
@@ -43,6 +51,46 @@ export function emailCollaborationChatSessionVisible(current: EmailCollaboration
   return emailCollaborationChatSessionMounted(current, key) && current?.visible === true;
 }
 
+export type EmailCollaborationChatPlacement = {
+  blockID: string;
+  messages: EditorTextBlockChatMessage[];
+};
+
+/**
+ * Resolves one email message to its real text-box chat. The Attached email
+ * projection is only a legacy read fallback; it is never returned as the
+ * destination for a new chat.
+ */
+export function resolveEmailCollaborationChatPlacement(
+  projections: EditorProjectionItem[],
+  emailMessageID: string,
+  legacyAttachedEmailInformationID = "",
+): EmailCollaborationChatPlacement {
+  const cleanMessageID = emailMessageID.trim();
+  const chats = parseEditorTextBlockChats(projections);
+  const linkedTextBlocks = listEditorTextBlockProjections(projections).filter((projection) => (
+    parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === cleanMessageID
+  ));
+  const textBlockWithChat = linkedTextBlocks.find((projection) => (
+    chats.some((chat) => chat.blockID === projection.information_id)
+  ));
+  const linkedTextBlock = textBlockWithChat ?? linkedTextBlocks[0];
+  if (linkedTextBlock) {
+    const directMessages = chats.filter((chat) => chat.blockID === linkedTextBlock.information_id);
+    if (directMessages.length > 0) {
+      return { blockID: linkedTextBlock.information_id, messages: directMessages };
+    }
+  }
+
+  const legacyBlockID = legacyAttachedEmailInformationID.trim();
+  const legacyMessages = legacyBlockID
+    ? chats.filter((chat) => chat.blockID === legacyBlockID)
+    : [];
+  return {
+    blockID: linkedTextBlock?.information_id ?? "",
+    messages: legacyMessages,
+  };
+}
 function cleanID(value: string | undefined): string {
   return value?.trim() ?? "";
 }

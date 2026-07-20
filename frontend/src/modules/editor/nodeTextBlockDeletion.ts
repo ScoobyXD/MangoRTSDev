@@ -10,6 +10,7 @@ export type InitialTextBlockCreationState = {
   editorSequence: number;
   loadedTextBlockCount: number;
   renderedTextBlockCount: number;
+  suppressAutomaticCreation?: boolean;
 };
 
 export function shouldCreateInitialTextBlock(state: InitialTextBlockCreationState): boolean {
@@ -18,7 +19,8 @@ export function shouldCreateInitialTextBlock(state: InitialTextBlockCreationStat
     && Boolean(state.nodeID.trim())
     && state.editorSequence === 0
     && state.loadedTextBlockCount === 0
-    && state.renderedTextBlockCount === 0;
+    && state.renderedTextBlockCount === 0
+    && state.suppressAutomaticCreation !== true;
 }
 
 export function projectionIDsForTextBlockDeletion(

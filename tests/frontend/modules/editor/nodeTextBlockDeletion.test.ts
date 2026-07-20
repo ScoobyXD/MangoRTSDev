@@ -19,6 +19,7 @@ test("initial text-box creation does not replace a deleted last box after reload
   assert.equal(shouldCreateInitialTextBlock(base), true);
   assert.equal(shouldCreateInitialTextBlock({ ...base, editorSequence: 1 }), false);
   assert.equal(shouldCreateInitialTextBlock({ ...base, loadedTextBlockCount: 1 }), false);
+  assert.equal(shouldCreateInitialTextBlock({ ...base, suppressAutomaticCreation: true }), false);
 });
 
 test("text-box deletion targets only the block and its chat projections", () => {
