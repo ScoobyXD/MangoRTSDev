@@ -138,9 +138,13 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /Import into existing node/);
   assert.match(surface, /convertTriageMessagesToExplorerTarget/);
   assert.match(surface, /parseEditorAttachedEmails/);
+  assert.match(surface, /const saveCurrentDraftToCollaboration = React\.useCallback/);
+  assert.match(surface, /const created = await ensureCollaboration\(priorityOverride\);[\s\S]{0,120}await saveCurrentDraftToCollaboration\(created\)/);
+  assert.match(surface, /blockID: activeBlockID,[\s\S]{0,500}selectionMessageID: !replyTargetID \? \(selection\?\.messageID \?\? message\.id\)/);
+  assert.match(surface, /setMessages\([\s\S]{0,300}setDraft\(""\)/);
 });
 
-test("email-created nodes reuse canonical chat data with one node email column", () => {
+test("email-created nodes reuse canonical chat data with independently toggleable email, text, and chat panes", () => {
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
@@ -151,10 +155,13 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
-  assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);
+  assert.match(nodeSurface, /data-node-text-box-columns="email-editor-chat"/);
   assert.match(nodeSurface, /blockID=\{block\.id\}[\s\S]*blockID=\{chatBlockID\}/);
   assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
   assert.match(nodeSurface, /tabbed=\{false\}/);
+  assert.match(nodeSurface, /aria-label="Toggle email column"/);
+  assert.match(nodeSurface, /const emailPaneIsVisible = openEmailBlockIDs\.has\(block\.id\)/);
+  assert.match(nodeSurface, /id === NODE_EMAIL_COLUMN_LAYOUT_ID \|\| blockIDs\.has\(id\)/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
   assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
   assert.match(projection, /selection_block_id: input\.selectionBlockID/);

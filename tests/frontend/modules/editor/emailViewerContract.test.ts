@@ -80,6 +80,11 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
   assert.match(nodeSurface, /Show the linked email message/);
+  assert.match(nodeSurface, /data-node-text-box-columns="email-editor-chat"/);
+  assert.match(nodeSurface, /aria-label="Toggle email column"/);
+  assert.match(nodeSurface, /selectedEmailIDsByBlock\[block\.id\] \?\? linkedEmailMessageID/);
+  assert.match(nodeSurface, /emailMessageID: messageID,[\s\S]{0,120}emailAccent: editorEmailMessageAccent/);
+  assert.doesNotMatch(nodeSurface, /const emailPaneIsVisible = false/);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
   assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(emailMessageID, existingEmailAccents\)/);
 });

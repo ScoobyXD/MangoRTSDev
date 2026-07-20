@@ -245,7 +245,7 @@ where company_id=$1::uuid and collaboration_id=$2::uuid`, input.CompanyID, exist
 	} else if !errors.Is(err, ErrNotFound) {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("lookup_existing", err)
 	}
-	nodeID, informationID, collaborationID := newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
+	nodeID, informationID, textBlockID, collaborationID := newUUIDv7String(), newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
 	if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, priority, default_access, created_timestamp)
 values ($1::uuid, $2::uuid, $3, $4, 'no_access', now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
@@ -261,6 +261,17 @@ values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, no
 insert into node_projection_table (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, nodeID, informationID, information); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_attached_email_projection", err)
+	}
+	textBlockInformation := communicationsEmailLinkedTextBlockPayload(input)
+	if _, err := tx.ExecContext(ctx, `
+insert into node_information (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, now(), now())`, input.CompanyID, textBlockID, nodeID, textBlockInformation); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_linked_text_block_history", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+insert into node_projection_table (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, now(), now())`, input.CompanyID, nodeID, textBlockID, textBlockInformation); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("insert_linked_text_block_projection", err)
 	}
 	if _, _, err := placeEmailCollaborationNodeInDefaultFolderTx(ctx, tx, input.CompanyID, nodeID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("place_explorer_node", err)
