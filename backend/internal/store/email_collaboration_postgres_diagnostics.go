@@ -96,7 +96,8 @@ func IsEmailCollaborationStorageNotReady(err error) bool {
 		return true
 	case "22P02":
 		stage := EmailCollaborationEnsureErrorStage(err)
-		return stage == "insert_attached_email_history" || stage == "insert_attached_email_projection"
+		return stage == "insert_attached_email_history" || stage == "insert_attached_email_projection" ||
+			stage == "insert_linked_text_block_history" || stage == "insert_linked_text_block_projection"
 	default:
 		return false
 	}

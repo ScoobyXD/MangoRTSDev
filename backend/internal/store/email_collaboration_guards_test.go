@@ -1,8 +1,10 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +23,33 @@ func TestMemoryEmailCollaborationNodeUsesNormalWorkSemanticsAndProtectsCanonical
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
 	collaboration := created.Collaboration
-
+	projections, err := repo.ListNodeProjections(companyID, collaboration.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections after collaboration creation: %v", err)
+	}
+	linkedTextBlocks := 0
+	for _, projection := range projections {
+		if projection.Type != "Text box" {
+			continue
+		}
+		linkedTextBlocks++
+		if !strings.HasPrefix(projection.Information, editorCollaborationTextBlockPrefix) {
+			t.Fatalf("linked text block payload = %q, want canonical editor payload", projection.Information)
+		}
+		var payload struct {
+			EmailMessageID string `json:"email_message_id"`
+			EmailAccent    string `json:"email_accent"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(projection.Information, editorCollaborationTextBlockPrefix)), &payload); err != nil {
+			t.Fatalf("decode linked text block: %v", err)
+		}
+		if payload.EmailMessageID != "email-node-message" || !validEditorEmailAccent(payload.EmailAccent) {
+			t.Fatalf("linked text block association = %+v", payload)
+		}
+	}
+	if linkedTextBlocks != 1 {
+		t.Fatalf("linked text blocks = %d, want 1", linkedTextBlocks)
+	}
 	reused, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, CreatedByUserID: creator.UserID, Priority: &priority,

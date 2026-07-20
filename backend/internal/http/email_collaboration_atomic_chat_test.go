@@ -27,6 +27,11 @@ func TestEmailCollaborationInformationMentionCommitsAtomically(t *testing.T) {
 	}
 	collaboration := created.Collaboration
 	handler := NewServerWithOptions(repo, ServerOptions{}).Routes()
+	initialDetails, err := repo.GetNodeDetails(companyID, collaboration.NodeID)
+	if err != nil {
+		t.Fatalf("initial collaboration details: %v", err)
+	}
+	initialInformationCount := initialDetails.InformationCount
 
 	invalidChatID := store.NewUUIDv7String()
 	invalidInformation, _ := json.Marshal(map[string]any{
@@ -45,7 +50,7 @@ func TestEmailCollaborationInformationMentionCommitsAtomically(t *testing.T) {
 		t.Fatalf("invalid mention status = %d body=%s, want 400", invalidRec.Code, invalidRec.Body.String())
 	}
 	details, err := repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil || details.InformationCount != 1 {
+	if err != nil || details.InformationCount != initialInformationCount {
 		t.Fatalf("invalid mention committed history: %+v err=%v", details, err)
 	}
 	projections, err := repo.ListNodeProjections(companyID, collaboration.NodeID)
@@ -70,7 +75,7 @@ func TestEmailCollaborationInformationMentionCommitsAtomically(t *testing.T) {
 		t.Fatalf("valid mention did not snapshot participant: %v", err)
 	}
 	details, err = repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil || details.InformationCount != 2 {
+	if err != nil || details.InformationCount != initialInformationCount+1 {
 		t.Fatalf("valid mention history = %+v err=%v", details, err)
 	}
 	projections, err = repo.ListNodeProjections(companyID, collaboration.NodeID)

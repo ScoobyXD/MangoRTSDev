@@ -74,6 +74,8 @@ func TestEmailCollaborationInvalidEnumValueIsStorageDriftOnlyAtAttachedEmailStag
 	}{
 		{stage: "insert_attached_email_history", want: true},
 		{stage: "insert_attached_email_projection", want: true},
+		{stage: "insert_linked_text_block_history", want: true},
+		{stage: "insert_linked_text_block_projection", want: true},
 		{stage: "check_creator_membership", want: false},
 		{stage: "insert_collaboration", want: false},
 	}
@@ -113,6 +115,8 @@ func TestPostgresEmailCollaborationCreationSkipsBroadProjectionSync(t *testing.T
 		"insert_node",
 		"insert_attached_email_history",
 		"insert_attached_email_projection",
+		"insert_linked_text_block_history",
+		"insert_linked_text_block_projection",
 		"place_explorer_node",
 		"insert_collaboration",
 		"insert_creator_participant",

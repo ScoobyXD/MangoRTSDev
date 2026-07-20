@@ -251,6 +251,37 @@ func communicationsEmailCollaborationTitle(message domain.EmailMessageSnapshot) 
 	return title
 }
 
+var communicationsEmailMessageAccents = [...]string{
+	"#0ea5e9", "#14b8a6", "#8b5cf6", "#f59e0b",
+	"#ec4899", "#22c55e", "#f97316", "#6366f1",
+	"#f43f5e", "#06b6d4", "#84cc16", "#a855f7",
+	"#10b981", "#ef4444", "#eab308", "#3b82f6",
+}
+
+func communicationsEmailMessageAccent(messageID string) string {
+	var hash uint32
+	for _, char := range strings.TrimSpace(messageID) {
+		hash = (hash * 31) + uint32(char)
+	}
+	return communicationsEmailMessageAccents[int(hash%uint32(len(communicationsEmailMessageAccents)))]
+}
+
+// communicationsEmailLinkedTextBlockPayload creates the durable text-box side
+// of an email collaboration. The message id and accent are stored in the text
+// box itself so the email/text/chat association survives refreshes and can be
+// rendered by clients that did not create the collaboration.
+func communicationsEmailLinkedTextBlockPayload(input CommunicationsEmailCollaborationEnsureInput) string {
+	payload := map[string]any{
+		"title":            "Email: " + communicationsEmailCollaborationTitle(input.Message),
+		"document":         "",
+		"attachments":      []any{},
+		"email_message_id": input.Message.ID,
+		"email_accent":     communicationsEmailMessageAccent(input.Message.ID),
+	}
+	raw, _ := json.Marshal(payload)
+	return editorCollaborationTextBlockPrefix + string(raw)
+}
+
 func communicationsEmailAttachedProjectionPayload(informationID, collaborationID string, input CommunicationsEmailCollaborationEnsureInput) string {
 	payload := map[string]any{
 		"block_id":           informationID,
