@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
+import { requestAppDockTab } from "../../app/appDockTabs.js";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
 import {
   projectWorkPanelTabFromHistoryState,
@@ -60,6 +61,11 @@ import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
 import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  setNodeEditorFullscreenChromeActive,
+} from "../editor/nodeEditorFullscreenChrome.js";
 import type { EditorHighlightColor } from "../editor/richTextEditing.js";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
@@ -1534,6 +1540,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       }
       setSelectedRelationshipNodeIDs(new Set());
       setSelectionAnchorRelationshipNodeID("");
+      setSelectedRelationshipNodePanel((current) => (current && resourceIDs.includes(current.nodeID) ? null : current));
       await loadProject({ showLoading: false });
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : `Failed to delete ${isLogicGate ? "logic gate" : "node"}`);
@@ -1848,7 +1855,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 key={`${projectID}:${nodeID}`}
                 accent={accent}
                 selection={selectedRelationshipNodePanel as ProjectRelationshipNodePanelSelection}
-                onNodeOpen={onNodeOpen}
+                onRequestDelete={(event) => setRelationshipDeleteConfirmation({
+                  isLogicGate: false,
+                  resourceIDs: [nodeID],
+                  label: "node",
+                  position: confirmMenuPositionFromElement(event.currentTarget),
+                })}
                 onClose={() => setSelectedRelationshipNodePanel(null)}
               />
             </div>
@@ -3095,37 +3107,66 @@ function ProjectRelationshipNodePanel({
   accent,
   selection,
   onClose,
-  onNodeOpen,
+  onRequestDelete,
 }: {
   accent: string;
   selection: ProjectRelationshipNodePanelSelection;
   onClose: () => void;
-  onNodeOpen?: (nodeID: string) => void;
+  onRequestDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
-  return (
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
+
+  const shell = (
     <UnifiedNodeShell
       className="project-relationships-node-panel project-critical-path-node-window"
       surfaceID="project-relationships-inline-node"
       title={selection.title}
-      style={projectRelationshipNodePanelStyle(accent)}
-      bodyStyle={projectRelationshipNodePanelBodyStyle}
+      role={fullscreen ? "dialog" : "group"}
+      ariaModal={fullscreen}
+      style={projectRelationshipNodePanelStyle(accent, fullscreen)}
+      bodyStyle={projectRelationshipNodePanelBodyStyle(fullscreen)}
       actionButtonStyle={criticalPathNodePreviewActionButtonStyle}
       closeButtonStyle={criticalPathNodePreviewActionButtonStyle}
       actions={[
         {
-          id: "open-in-new-tab",
-          title: onNodeOpen ? "Open node window" : "Open node in new browser tab",
-          ariaLabel: onNodeOpen ? "Open node window" : "Open node in new browser tab",
-          onClick: () => {
-            if (onNodeOpen) onNodeOpen(selection.nodeID);
-            else openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID));
+          id: "delete",
+          title: "Move node to Recycle Bin",
+          ariaLabel: "Move node to Recycle Bin",
+          danger: true,
+          onClick: (event) => {
+            setFullscreen(false);
+            onRequestDelete(event);
           },
+        },
+        {
+          id: "open-in-new-tab",
+          title: "Open node in new browser tab",
+          ariaLabel: "Open node in new browser tab",
+          onClick: () => openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID)),
         },
         {
           id: "pin",
           title: "Pin node to Pinned",
           ariaLabel: "Pin node to Pinned",
           onClick: () => requestAppSidebarPin({ kind: "node", id: selection.nodeID, name: selection.title }),
+        },
+        {
+          id: "fullscreen",
+          title: fullscreen ? "Exit full screen" : "Go full screen",
+          ariaLabel: fullscreen ? "Exit full screen" : "Go full screen",
+          pressed: fullscreen,
+          onClick: () => setFullscreen((current) => !current),
+        },
+        {
+          id: "minimize",
+          title: "Minimize node",
+          ariaLabel: "Minimize node",
+          onClick: () => {
+            requestAppDockTab({ kind: "node", entityID: selection.nodeID, label: selection.title });
+            onClose();
+          },
         },
         {
           id: "close",
@@ -3146,6 +3187,22 @@ function ProjectRelationshipNodePanel({
         compactLinkedDocumentHeader
       />
     </UnifiedNodeShell>
+  );
+
+  if (!fullscreen) return shell;
+
+  return (
+    <AppModalPortal trapFocus onRequestClose={() => setFullscreen(false)}>
+      <div
+        data-mango-project-relationship-node-fullscreen="true"
+        style={projectRelationshipNodeFullscreenBackdropStyle}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setFullscreen(false);
+        }}
+      >
+        {shell}
+      </div>
+    </AppModalPortal>
   );
 }
 
@@ -4388,21 +4445,41 @@ function relationshipNodePanelRowStyle(): React.CSSProperties {
   };
 }
 
-function projectRelationshipNodePanelStyle(accent: string): React.CSSProperties {
+const projectRelationshipNodeFullscreenBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1,
+  background: "rgba(15, 23, 42, 0.18)",
+  pointerEvents: "auto",
+};
+
+function projectRelationshipNodePanelStyle(accent: string, fullscreen: boolean): React.CSSProperties {
   return {
     ...criticalPathNodePreviewSurfaceStyle(accent),
-    width: "100%",
+    position: fullscreen ? "fixed" : "relative",
+    zIndex: fullscreen ? 2 : undefined,
+    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : undefined,
+    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : undefined,
+    width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : "100%",
+    height: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : undefined,
+    maxWidth: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : undefined,
+    maxHeight: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : undefined,
+    minWidth: 0,
+    minHeight: fullscreen ? 0 : undefined,
+    borderRadius: fullscreen ? 14 : 10,
   };
 }
 
-const projectRelationshipNodePanelBodyStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 360,
-  width: "100%",
-  height: "min(720px, calc(100dvh - 180px))",
-  overflow: "hidden",
-  background: EDITOR_NEU_PANEL_BACKGROUND,
-};
+function projectRelationshipNodePanelBodyStyle(fullscreen: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: fullscreen ? 0 : 360,
+    width: "100%",
+    height: fullscreen ? "100%" : "min(720px, calc(100dvh - 180px))",
+    overflow: "hidden",
+    background: EDITOR_NEU_PANEL_BACKGROUND,
+  };
+}
 
 function criticalPathResourceIconStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
   return {

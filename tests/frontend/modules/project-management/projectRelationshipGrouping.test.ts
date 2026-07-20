@@ -282,6 +282,13 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.doesNotMatch(source, /onDoubleClick=\{\(\) => nodeID && onNodeOpen\?\.\(nodeID\)\}/);
   assert.match(source, /onNodeOpen=\{onNodeOpen\}/);
   assert.doesNotMatch(source, /useAppViewportAnchorRect\(containerRef\)/);
-  assert.doesNotMatch(source, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(source, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(source, /data-mango-project-relationship-node-fullscreen="true"/);
+  assert.match(source, /projectRelationshipNodePanelStyle\(accent, fullscreen\)/);
+  assert.match(source, /requestAppDockTab\(\{ kind: "node", entityID: selection\.nodeID, label: selection\.title \}\)/);
+  assert.match(source, /openAppPathInNewTab\(buildContextualNodeRoute\(selection\.nodeID\)\)/);
+  assert.match(source, /title: "Move node to Recycle Bin"/);
+  assert.match(source, /onRequestDelete\(event\)/);
+  assert.match(source, /resourceIDs: \[nodeID\]/);
   assert.doesNotMatch(source, /gateGroupStyle|logicGateCardHeaderStyle|repeat\(4, minmax\(170px/);
 });
