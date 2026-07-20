@@ -2126,6 +2126,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onDocumentChange={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}
+                                onDocumentError={setError}
+                                onRecoveryStorageError={setError}
+                                onRecoveryStorageRecovered={() => setError("")}
                                 onChangeSeen={() => undefined}
                                 onChatHighlightActivate={(messageID) => {
                                   setFocusedTextBlockID(block.id);

@@ -716,3 +716,495 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     dom.window.close();
   }
 });
+
+test("real Node, Project, and Logic Gate page hosts load JSON editors and preserve the unified HTML email column", { timeout: 20_000 }, async () => {
+  const hostCompanyID = "json-page-host-company";
+  const hostNodeID = "json-page-host-node";
+  const hostProjectID = "json-page-host-project";
+  const hostLogicGateID = "json-page-host-logic-gate";
+  const hostNodeDocumentID = "json-node-document";
+  const hostProjectDocumentID = "json-project-document";
+  const hostLogicDocumentID = "json-logic-document";
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"node-json-root\"></div><div id=\"project-json-root\"></div><div id=\"logic-json-root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  const restores: Restore[] = [];
+  const browserGlobals = [
+    "window", "document", "navigator", "self", "Node", "NodeFilter", "Element", "HTMLElement",
+    "HTMLDivElement", "HTMLSpanElement", "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement",
+    "HTMLUListElement", "HTMLAnchorElement", "HTMLBRElement", "HTMLTableElement", "HTMLTableRowElement",
+    "HTMLTableCellElement", "HTMLButtonElement", "HTMLInputElement", "HTMLSelectElement", "DocumentFragment",
+    "DOMParser", "DOMException", "Event", "EventTarget", "MouseEvent", "KeyboardEvent", "FocusEvent", "InputEvent",
+    "CustomEvent", "MutationObserver", "Range",
+  ] as const;
+  for (const name of browserGlobals) {
+    const value = name === "window" || name === "self"
+      ? dom.window
+      : name === "document"
+        ? dom.window.document
+        : (dom.window as unknown as Record<string, unknown>)[name];
+    installGlobal(name, value, restores);
+  }
+  installGlobal("PointerEvent", dom.window.MouseEvent, restores);
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("localStorage", dom.window.localStorage, restores);
+  installGlobal("sessionStorage", dom.window.sessionStorage, restores);
+  installGlobal("indexedDB", fakeIndexedDB, restores);
+  installGlobal("IDBKeyRange", IDBKeyRange, restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  dom.window.sessionStorage.setItem("mangorts:active-company-id-v1", hostCompanyID);
+  dom.window.localStorage.setItem("mangorts:active-company-id-v1", hostCompanyID);
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => undefined });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => undefined });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => undefined });
+  Object.defineProperty(dom.window, "matchMedia", {
+    configurable: true,
+    value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+  });
+
+  let nextFrameID = 0;
+  const frameTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  const requestFrame = (callback: FrameRequestCallback) => {
+    const frameID = nextFrameID += 1;
+    frameTimers.set(frameID, setTimeout(() => {
+      frameTimers.delete(frameID);
+      callback(Date.now());
+    }, 0));
+    return frameID;
+  };
+  const cancelFrame = (frameID: number) => {
+    const timer = frameTimers.get(frameID);
+    if (timer) clearTimeout(timer);
+    frameTimers.delete(frameID);
+  };
+  dom.window.requestAnimationFrame = requestFrame;
+  dom.window.cancelAnimationFrame = cancelFrame;
+  installGlobal("requestAnimationFrame", requestFrame, restores);
+  installGlobal("cancelAnimationFrame", cancelFrame, restores);
+
+  class HostResizeObserver {
+    observe() { return undefined; }
+    unobserve() { return undefined; }
+    disconnect() { return undefined; }
+  }
+  const exactObservers: HostIntersectionObserver[] = [];
+  class HostIntersectionObserver {
+    readonly root = null;
+    readonly rootMargin: string;
+    readonly thresholds = [0];
+    private targets = new Set<Element>();
+    constructor(private readonly callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+      this.rootMargin = options?.rootMargin ?? "0px";
+      if (this.rootMargin === "0px") exactObservers.push(this);
+    }
+    observe(target: Element) {
+      this.targets.add(target);
+      this.emit(target, this.rootMargin !== "0px");
+    }
+    unobserve(target: Element) { this.targets.delete(target); }
+    disconnect() { this.targets.clear(); }
+    takeRecords() { return []; }
+    trigger(visible: boolean) {
+      for (const target of this.targets) this.emit(target, visible);
+    }
+    private emit(target: Element, visible: boolean) {
+      this.callback([{
+        target,
+        isIntersecting: visible,
+        intersectionRatio: visible ? 1 : 0,
+        boundingClientRect: target.getBoundingClientRect(),
+        intersectionRect: target.getBoundingClientRect(),
+        rootBounds: null,
+        time: Date.now(),
+      } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+    }
+  }
+  installGlobal("ResizeObserver", HostResizeObserver, restores);
+  installGlobal("IntersectionObserver", HostIntersectionObserver, restores);
+  Object.defineProperty(dom.window, "ResizeObserver", { configurable: true, value: HostResizeObserver });
+  Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: HostIntersectionObserver });
+
+  const websocketScopes: string[] = [];
+  const sockets: HostWebSocket[] = [];
+  class HostWebSocket extends dom.window.EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    readonly CONNECTING = 0;
+    readonly OPEN = 1;
+    readonly CLOSING = 2;
+    readonly CLOSED = 3;
+    readyState = HostWebSocket.CONNECTING;
+    binaryType: BinaryType = "blob";
+    bufferedAmount = 0;
+    extensions = "";
+    protocol = "";
+    url: string;
+    readonly scopes = new Set<string>();
+    onclose: ((event: CloseEvent) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onopen: ((event: Event) => void) | null = null;
+    constructor(url: string | URL) {
+      super();
+      this.url = String(url);
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.readyState = HostWebSocket.OPEN;
+        this.onopen?.(new dom.window.Event("open"));
+      });
+    }
+    close() {
+      this.readyState = HostWebSocket.CLOSED;
+      this.onclose?.(new dom.window.CloseEvent("close"));
+    }
+    send(value: string | ArrayBufferLike | Blob | ArrayBufferView) {
+      if (typeof value !== "string") return;
+      const payload = JSON.parse(value) as { type?: string; scope?: string };
+      if (payload.type === "subscribe" && payload.scope) {
+        websocketScopes.push(payload.scope);
+        this.scopes.add(payload.scope);
+      }
+    }
+    emitSnapshotRequired(resourceType: "node" | "project" | "logic_gate", resourceID: string, documentID: string, revision: number) {
+      const scope = `editor-json:${resourceType}:${resourceID}:${documentID}`;
+      this.onmessage?.(new dom.window.MessageEvent("message", { data: JSON.stringify({
+        type: "editor.snapshot.required",
+        company_id: hostCompanyID,
+        scope,
+        event_id: `event-${revision}`,
+        resource_type: resourceType,
+        resource_id: resourceID,
+        document_id: documentID,
+        resource_revision: revision,
+        operation_id: `operation-${revision}`,
+        client_id: "remote-client",
+      }) }));
+    }
+  }
+  installGlobal("WebSocket", HostWebSocket, restores);
+
+  const tiptapDocument = (text: string) => ({
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: `block-${text.toLowerCase().replace(/[^a-z]+/g, "-")}`, textAlign: "left", indentLevel: 0 },
+        content: [{ type: "text", text }],
+      }],
+    },
+  });
+  type Canonical = { revision: number; schema_version: number; document: ReturnType<typeof tiptapDocument>; annotations: Array<{ id: string; kind: "comment" | "change" | "chat"; from: number; to: number }> };
+  const canonicalDocuments = new Map<string, Canonical>([
+    [hostNodeDocumentID, { revision: 1, schema_version: 1, document: tiptapDocument("Node JSON text"), annotations: [{ id: "node-page-change", kind: "change", from: 1, to: 5 }] }],
+    [hostProjectDocumentID, { revision: 1, schema_version: 1, document: tiptapDocument("Project JSON text"), annotations: [{ id: "json-project-chat", kind: "chat", from: 1, to: 8 }] }],
+    [hostLogicDocumentID, { revision: 1, schema_version: 1, document: tiptapDocument("Logic JSON text"), annotations: [] }],
+  ]);
+  const textProjectionInformation = (title: string, documentID: string) => TEXT_BLOCK_PREFIX + JSON.stringify({
+    title,
+    document: JSON.stringify(canonicalDocuments.get(documentID)?.document),
+    attachments: [],
+  });
+  const now = "2026-07-20T12:00:00.000Z";
+  const nodeProjection: NodeProjectionItem = {
+    company_id: hostCompanyID,
+    node_id: hostNodeID,
+    information_id: hostNodeDocumentID,
+    type: "Text box",
+    information: textProjectionInformation("Node JSON block", hostNodeDocumentID),
+    revision: 1,
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+  const nodeUnseenChanges = [{
+    company_id: hostCompanyID,
+    change_id: "node-page-change",
+    node_id: hostNodeID,
+    information_id: hostNodeDocumentID,
+    change_type: "addition" as const,
+    text: "Node",
+    start_offset: 1,
+    end_offset: 5,
+    actor_user_id: "remote-user",
+    actor_display_name: "Remote User",
+    created_timestamp: now,
+  }];
+  const attachedEmail: NodeProjectionItem = {
+    company_id: hostCompanyID,
+    node_id: hostNodeID,
+    information_id: "json-host-email",
+    type: "Attached email",
+    information: buildEditorAttachedEmailPayload({
+      blockID: hostNodeDocumentID,
+      messageID: "durable-html-message",
+      threadID: "durable-html-thread",
+      emailThreadID: "durable-provider-independent-thread",
+      subject: "HTML email stays outside Tiptap",
+      snippet: "<p><em>Rich HTML snapshot</em></p>",
+      from: "sender@example.test",
+      attachedTimestamp: now,
+    }),
+    revision: 1,
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+  const projectProjection: ProjectProjection = {
+    company_id: hostCompanyID,
+    project_id: hostProjectID,
+    information_id: hostProjectDocumentID,
+    type: "Text box",
+    information: textProjectionInformation("Project JSON block", hostProjectDocumentID),
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+  const projectChatProjection: ProjectProjection = {
+    company_id: hostCompanyID,
+    project_id: hostProjectID,
+    information_id: "json-project-chat",
+    type: "Text block chat",
+    information: buildEditorTextBlockChatPayload({
+      blockID: hostProjectDocumentID,
+      selectionStart: 1,
+      selectionEnd: 8,
+      authorID: "remote-user",
+      authorName: "Remote User",
+      message: "Project anchored chat",
+      createdTimestamp: now,
+    }),
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+  const logicProjection = {
+    company_id: hostCompanyID,
+    logic_gate_id: hostLogicGateID,
+    information_id: hostLogicDocumentID,
+    type: "Text box",
+    information: JSON.stringify(canonicalDocuments.get(hostLogicDocumentID)?.document),
+    revision: 1,
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+  const requestedPaths: string[] = [];
+  let ticketRequests = 0;
+  const route = (pathname: string, method: string, body: unknown): unknown => {
+    requestedPaths.push(`${method} ${pathname}`);
+    if (pathname === "/v1/editor-data-format") return {
+      company_id: hostCompanyID,
+      editor_format: "tiptap_json",
+      migration_state: "ready",
+      document_schema_version: 1,
+      expected_document_count: 3,
+      converted_document_count: 3,
+    };
+    if (pathname.startsWith("/v1/editor-json/")) {
+      const documentID = decodeURIComponent(pathname.split("/documents/")[1] ?? "");
+      const current = canonicalDocuments.get(documentID);
+      assert.ok(current, `unexpected JSON document ${documentID}`);
+      if (method === "POST") {
+        const commit = body as { document: Canonical["document"]; annotations?: Canonical["annotations"] };
+        const next = { ...current, revision: current.revision + 1, document: commit.document, annotations: commit.annotations ?? [] };
+        canonicalDocuments.set(documentID, next);
+        return next;
+      }
+      return current;
+    }
+    if (pathname === `/v1/projects/${hostProjectID}`) return projectView([projectProjection, projectChatProjection]);
+    if (pathname === `/v2/logic-gates/${hostLogicGateID}/view`) return {
+      company_id: hostCompanyID,
+      logic_gate_id: hostLogicGateID,
+      logic_gate: {
+        company_id: hostCompanyID,
+        logic_gate_id: hostLogicGateID,
+        header: "JSON Logic Gate",
+        can_edit: true,
+        effective_access_level: "write",
+        gvic_assignments: [],
+        created_timestamp: now,
+        updated_timestamp: now,
+      },
+      information: [logicProjection],
+      projections: [logicProjection],
+      relationships: [],
+      information_count: 1,
+      relationships_count: 0,
+      can_edit: true,
+      effective_access_level: "write",
+      editor_sequence: 1,
+    };
+    if (pathname === "/v1/me") return {
+      user: { user_id: "json-page-user", email: "json@example.test", display_name: "JSON Page User" },
+      memberships: [],
+      is_dev_admin: false,
+    };
+    if (pathname === "/v1/realtime/ticket") {
+      ticketRequests += 1;
+      return { expires_at: "2026-07-20T13:00:00.000Z" };
+    }
+    if (pathname.endsWith("/users")) return { users: [] };
+    if (pathname.endsWith("/user-groups")) return { groups: [], members: [] };
+    if (pathname.includes("save-versions")) return { versions: [] };
+    if (pathname.includes("content-changes")) return { changes: [] };
+    if (pathname.includes("/gvic")) return { gvic_assignments: [] };
+    if (pathname.includes("attachments")) return { attachments: [] };
+    if (pathname.includes("relationships")) return { relationships: [] };
+    if (pathname.includes("accounts")) return { accounts: [] };
+    return { projects: [], logic_gates: [], results: [], information: [], projections: [] };
+  };
+  const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input), dom.window.location.href);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const body = typeof init?.body === "string" && init.body ? JSON.parse(init.body) : undefined;
+    return jsonResponse(route(url.pathname, method, body));
+  };
+  installGlobal("fetch", fetchImplementation, restores);
+  dom.window.fetch = fetchImplementation;
+  const nodeRequestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    const url = new URL(path, dom.window.location.href);
+    return route(url.pathname, (init?.method ?? "GET").toUpperCase(), init?.json) as T;
+  };
+  const waitFor = async (condition: () => boolean, message: string, attempts = 120) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    assert.fail(message);
+  };
+
+  let nodeRoot: { render(value: React.ReactNode): void; unmount(): void } | null = null;
+  let projectRoot: { render(value: React.ReactNode): void; unmount(): void } | null = null;
+  let logicRoot: { render(value: React.ReactNode): void; unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { NodeWorkspaceSurface }, { ProjectSummaryContent }, { EditorContent }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/editor/NodeWorkspaceSurface.tsx"),
+      import("../../../../frontend/src/modules/project-management/ProjectSummaryContent.tsx"),
+      import("../../../../frontend/src/modules/editor/EditorContent.tsx"),
+    ]);
+    const noop = () => undefined;
+    const nodeContainer = dom.window.document.getElementById("node-json-root");
+    const projectContainer = dom.window.document.getElementById("project-json-root");
+    const logicContainer = dom.window.document.getElementById("logic-json-root");
+    assert.ok(nodeContainer && projectContainer && logicContainer);
+    nodeRoot = createRoot(nodeContainer);
+    projectRoot = createRoot(projectContainer);
+    logicRoot = createRoot(logicContainer);
+    await act(async () => {
+      nodeRoot?.render(<NodeWorkspaceSurface
+        apiBase="http://localhost"
+        companyID={hostCompanyID}
+        scope={`node:${hostNodeID}`}
+        nodeID={hostNodeID}
+        canEdit
+        nodePriorityDraft="3"
+        assignedLogicGateIDs={[]}
+        projections={[nodeProjection, attachedEmail]}
+        unseenChanges={nodeUnseenChanges}
+        companyUsers={[]}
+        projectionsLoaded
+        editorSequence={1}
+        topPx={0}
+        accent="#7c3aed"
+        surfaceText="#172033"
+        panelBackground="#ffffff"
+        strokeColor="#dbeafe"
+        ruleColor="#cbd5e1"
+        scrollbarAccent="#7c3aed"
+        scrollbarTrack="#e2e8f0"
+        outlineStyle="automatic-outline-numbering"
+        requestJSON={nodeRequestJSON}
+        onProjectionMutation={noop}
+        onMarkChangeSeen={noop}
+        onMarkAllChangesSeen={noop}
+        onCreateNodeFromImage={async () => undefined}
+        onAssignToLogicGate={async () => undefined}
+        onRequireNodePriorityForLogicGateAssignment={noop}
+        onError={noop}
+      />);
+      projectRoot?.render(<ProjectSummaryContent
+        projectID={hostProjectID}
+        accent="#7c3aed"
+        onBack={noop}
+        workspace={{ nodeFolders: [], nodeFolderItems: [], nodes: [], logicGateFolders: [], logicGateFolderItems: [], logicGates: [] }}
+      />);
+      logicRoot?.render(<EditorContent
+        accent="#7c3aed"
+        forcedEntityKind="logic_gate"
+        forcedEntityID={hostLogicGateID}
+        forcedLabel="JSON Logic Gate"
+      />);
+    });
+
+    await waitFor(
+      () => nodeContainer.querySelectorAll('[data-mango-editor-format="tiptap_json"]').length === 1
+        && projectContainer.querySelectorAll('[data-mango-editor-format="tiptap_json"]').length === 1
+        && logicContainer.querySelectorAll('[data-mango-editor-format="tiptap_json"]').length === 1,
+      "all three actual page hosts should mount their JSON editor path",
+    );
+    const nodeEditor = nodeContainer.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
+    const projectEditor = projectContainer.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
+    const logicEditor = logicContainer.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
+    assert.ok(nodeEditor && projectEditor && logicEditor);
+    await waitFor(
+      () => [nodeEditor, projectEditor, logicEditor].every((editor) => editor.dataset.mangoEditorState === "sleeping"),
+      "offscreen page-host editors should prepare a sleeping static renderer",
+    );
+    assert.equal(websocketScopes.filter((scope) => scope.startsWith("editor-json:")).length, 0, "near-viewport preparation must not subscribe any offscreen JSON editor");
+    await waitFor(
+      () => Boolean(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]'))
+        && Boolean(projectEditor.querySelector('[data-mango-annotation-id="json-project-chat"]')),
+      "sleeping Node and Project page hosts should merge backend positions into their real change/chat owners",
+    );
+    assert.equal(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]')?.textContent, "Node");
+    assert.equal(projectEditor.querySelector('[data-mango-annotation-id="json-project-chat"]')?.textContent, "Project");
+    assert.match(logicEditor.textContent ?? "", /Logic JSON text/);
+    assert.ok(requestedPaths.some((path) => path.includes(`/v1/editor-json/node/${hostNodeID}/documents/${hostNodeDocumentID}`)));
+    assert.ok(requestedPaths.some((path) => path.includes(`/v1/editor-json/project/${hostProjectID}/documents/${hostProjectDocumentID}`)));
+    assert.ok(requestedPaths.some((path) => path.includes(`/v1/editor-json/logic_gate/${hostLogicGateID}/documents/${hostLogicDocumentID}`)));
+
+    const emailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
+    assert.ok(emailColumn, "the Node host should retain one unified email column in JSON mode");
+    assert.match(emailColumn.textContent ?? "", /HTML email stays outside Tiptap/);
+    assert.equal(emailColumn.querySelector('[data-mango-editor-format="tiptap_json"]'), null, "email display must not enter the Tiptap path");
+    assert.ok(nodeContainer.querySelector('button[aria-label="Toggle node email column"]'));
+    assert.equal(nodeContainer.querySelector('[data-node-text-box-row] button[aria-label="Toggle email column"]'), null, "per-row email panes remain removed");
+
+    for (const observer of exactObservers) observer.trigger(true);
+    await waitFor(
+      () => ticketRequests > 0
+        && websocketScopes.some((scope) => scope === `editor-json:node:${hostNodeID}:${hostNodeDocumentID}`)
+        && websocketScopes.some((scope) => scope === `editor-json:project:${hostProjectID}:${hostProjectDocumentID}`)
+        && websocketScopes.some((scope) => scope === `editor-json:logic_gate:${hostLogicGateID}:${hostLogicDocumentID}`),
+      "only exact visible page-host editors should subscribe to their JSON scopes",
+    );
+    assert.equal(nodeEditor.dataset.mangoEditorState, "sleeping", "visibility alone keeps the page-host editor static until focus");
+
+    canonicalDocuments.set(hostNodeDocumentID, {
+      revision: 2,
+      schema_version: 1,
+      document: tiptapDocument("Live Node JSON text"),
+      annotations: [{ id: "node-page-change", kind: "change", from: 1, to: 5 }],
+    });
+    const nodeSocket = sockets.find((socket) => socket.scopes.has(`editor-json:node:${hostNodeID}:${hostNodeDocumentID}`));
+    assert.ok(nodeSocket);
+    nodeSocket.emitSnapshotRequired("node", hostNodeID, hostNodeDocumentID, 2);
+    await waitFor(
+      () => (nodeEditor.textContent ?? "").includes("Live Node JSON text")
+        && nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]')?.textContent === "Live",
+      "a visible sleeping page-host renderer should receive live document and highlight updates",
+    );
+
+    for (const observer of exactObservers) observer.trigger(false);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  } finally {
+    if (nodeRoot) await act(async () => { nodeRoot?.unmount(); });
+    if (projectRoot) await act(async () => { projectRoot?.unmount(); });
+    if (logicRoot) await act(async () => { logicRoot?.unmount(); });
+    for (const timer of frameTimers.values()) clearTimeout(timer);
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});

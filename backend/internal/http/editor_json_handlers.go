@@ -13,17 +13,20 @@ import (
 
 const editorJSONRoutePrefix = "/v1/editor-json/"
 
-func mangoTiptapMentionNotificationHTML(raw json.RawMessage) string {
+type mangoTiptapMentionOccurrence struct {
+	UserID string
+	Label  string
+	Kind   string
+}
+
+func mangoTiptapMentionOccurrences(raw json.RawMessage) []mangoTiptapMentionOccurrence {
 	var envelope struct {
-		Document struct {
-			Type    string `json:"type"`
-			Content []any  `json:"content"`
-		} `json:"document"`
+		Document any `json:"document"`
 	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Document.Type != "doc" {
-		return ""
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
 	}
-	var output strings.Builder
+	result := make([]mangoTiptapMentionOccurrence, 0)
 	var visit func(any)
 	visit = func(value any) {
 		node, ok := value.(map[string]any)
@@ -35,29 +38,54 @@ func mangoTiptapMentionNotificationHTML(raw json.RawMessage) string {
 			userID, _ := attrs["userId"].(string)
 			label, _ := attrs["label"].(string)
 			kind, _ := attrs["kind"].(string)
+			userID = strings.TrimSpace(userID)
+			label = strings.TrimSpace(label)
+			kind = strings.TrimSpace(kind)
 			if kind == "normal" {
 				kind = "regular"
 			}
-			output.WriteString(`<span data-mango-mention="true" data-mango-mention-user-id="`)
-			output.WriteString(html.EscapeString(userID))
-			output.WriteString(`" data-mango-mention-kind="`)
-			output.WriteString(html.EscapeString(kind))
-			output.WriteString(`">`)
-			output.WriteString(html.EscapeString(label))
-			output.WriteString(`</span>`)
-		}
-		if text, ok := node["text"].(string); ok {
-			output.WriteString(html.EscapeString(text))
+			if userID != "" && label != "" && (kind == "regular" || kind == "urgent") {
+				result = append(result, mangoTiptapMentionOccurrence{UserID: userID, Label: label, Kind: kind})
+			}
 		}
 		if content, ok := node["content"].([]any); ok {
 			for _, child := range content {
 				visit(child)
 			}
-			output.WriteByte(' ')
 		}
 	}
-	visit(map[string]any{"type": envelope.Document.Type, "content": envelope.Document.Content})
-	return strings.TrimSpace(output.String())
+	visit(envelope.Document)
+	return result
+}
+
+func mangoTiptapAddedMentionNotificationHTML(before, after json.RawMessage) string {
+	remaining := map[string]int{}
+	for _, mention := range mangoTiptapMentionOccurrences(before) {
+		remaining[mention.Kind+"\x00"+mention.UserID]++
+	}
+	added := make([]mangoTiptapMentionOccurrence, 0)
+	for _, mention := range mangoTiptapMentionOccurrences(after) {
+		key := mention.Kind + "\x00" + mention.UserID
+		if remaining[key] > 0 {
+			remaining[key]--
+			continue
+		}
+		added = append(added, mention)
+	}
+	var output strings.Builder
+	for _, mention := range added {
+		if output.Len() > 0 {
+			output.WriteByte(' ')
+		}
+		output.WriteString(`<span data-mango-mention="true" data-mango-mention-user-id="`)
+		output.WriteString(html.EscapeString(mention.UserID))
+		output.WriteString(`" data-mango-mention-kind="`)
+		output.WriteString(html.EscapeString(mention.Kind))
+		output.WriteString(`">`)
+		output.WriteString(html.EscapeString(mention.Label))
+		output.WriteString(`</span>`)
+	}
+	return output.String()
 }
 
 func (s *Server) handleEditorDataFormat(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +235,11 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
+		beforeCommit, err := s.repo.GetEditorJSONSnapshot(ref)
+		if err != nil {
+			writeEditorJSONStoreError(w, err)
+			return
+		}
 		commit, err := s.repo.CommitEditorJSONDocument(store.EditorJSONCommitInput{
 			Document: ref, OperationID: request.OperationID, ClientID: request.ClientID,
 			ActorUserID: actor.User.UserID, BaseRevision: request.BaseRevision,
@@ -217,8 +250,13 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeEditorJSONStoreError(w, err)
 			return
 		}
-		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeLogicGate {
-			s.recordMentionNotifications(r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", mangoTiptapMentionNotificationHTML(commit.JSONDocument))
+		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate {
+			addedMentions := mangoTiptapAddedMentionNotificationHTML(beforeCommit.JSONDocument, commit.JSONDocument)
+			if addedMentions != "" {
+				s.recordMentionNotificationsWithIdempotencyScope(
+					r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", addedMentions, "editor-json:"+commit.OperationID,
+				)
+			}
 		}
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, commit)
@@ -269,9 +307,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeEditorJSONStoreError(w, err)
 			return
 		}
-		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeLogicGate {
-			s.recordMentionNotifications(r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", mangoTiptapMentionNotificationHTML(commit.JSONDocument))
-		}
+
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, commit)
 	default:

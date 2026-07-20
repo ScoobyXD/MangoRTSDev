@@ -396,6 +396,20 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			}); err != nil {
 				return nil, err
 			}
+		case "project":
+			project, err := s.Repo.GetProject(event.CompanyID, event.EntityID)
+			if err != nil {
+				return nil, err
+			}
+			entityTitle = strings.TrimSpace(project.Name)
+			if entityTitle == "" {
+				entityTitle = "a project"
+			}
+			if err := addEffectiveRecipientSubset(store.EntityTypeProject, project.ProjectID, mentionedUserIDs, func(string) notificationRecipientMeta {
+				return notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther}
+			}); err != nil {
+				return nil, err
+			}
 		default:
 			return []store.NotificationCreateInput{}, nil
 		}
@@ -510,6 +524,16 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		}
 		entityType = store.EntityTypeLogicGate
 		entityID = payloadString(payload, "logic_gate_id")
+		if entityID == "" {
+			entityID = payloadString(payload, "entity_id")
+		}
+	case store.ProjectMentionCreatedEventType:
+		notificationType = domain.NotificationEventMentionCreated
+		if payloadString(payload, "mention_kind") == "urgent" {
+			notificationType = domain.NotificationEventUrgentMentionCreated
+		}
+		entityType = store.EntityTypeProject
+		entityID = payloadString(payload, "project_id")
 		if entityID == "" {
 			entityID = payloadString(payload, "entity_id")
 		}

@@ -115,13 +115,21 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 	}
 }
 
-func TestEditorJSONHTTPOnlyCreatesUpdatesForNormalAndUrgentMentions(t *testing.T) {
+func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "85858585-8585-4585-8585-858585858585"
 	repo.EnsureCompany(companyID, "JSON mention editor")
 	actor := mustRealtimeAuthUser(t, repo, companyID, "json-mention-actor", domain.RoleCompanyAdmin)
 	mentioned := mustRealtimeAuthUser(t, repo, companyID, "json-mention-target", domain.RoleCompanyUser)
 	node, err := repo.CreateNode(companyID, "JSON mention node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectResult, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "JSON mention project", ActorUserID: actor.UserID})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("project=%+v err=%v", projectResult, err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "JSON mention logic gate")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,19 +142,32 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNormalAndUrgentMentions(t *testing.T
 	const token = "json-mention-token"
 	server := newRealtimeAuthServerForTest(repo, token, actor)
 	defer server.Close()
-	path := "/v1/editor-json/node/" + node.NodeID + "/documents/86868686-8686-4686-8686-868686868686?company_id=" + companyID
-	post := func(operationID string, baseRevision int, content []any) *httptest.ResponseRecorder {
-		t.Helper()
-		document := map[string]any{
+
+	document := func(content []any) map[string]any {
+		return map[string]any{
 			"format": "mango-tiptap-json", "schema_version": 1,
 			"document": map[string]any{
-				"type":    "doc",
-				"content": []any{map[string]any{"type": "paragraph", "content": content}},
+				"type": "doc", "content": []any{map[string]any{"type": "paragraph", "content": content}},
 			},
 		}
+	}
+	mentionContent := func(kind string, suffix ...string) []any {
+		content := []any{
+			map[string]any{"type": "text", "text": "Please review "},
+			map[string]any{"type": "mention", "attrs": map[string]any{
+				"userId": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind,
+			}},
+		}
+		if len(suffix) > 0 && suffix[0] != "" {
+			content = append(content, map[string]any{"type": "text", "text": suffix[0]})
+		}
+		return content
+	}
+	post := func(path, operationID string, baseRevision int, content []any) *httptest.ResponseRecorder {
+		t.Helper()
 		body, _ := json.Marshal(map[string]any{
 			"operation_id": operationID, "client_id": "json-mention-client",
-			"base_revision": baseRevision, "schema_version": 1, "document": document,
+			"base_revision": baseRevision, "schema_version": 1, "document": document(content),
 			"annotations": []any{},
 		})
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
@@ -155,47 +176,130 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNormalAndUrgentMentions(t *testing.T
 		server.Routes().ServeHTTP(response, request)
 		return response
 	}
+	deleteDocument := func(path, operationID string, baseRevision int) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"operation_id": operationID, "client_id": "json-mention-client", "base_revision": baseRevision,
+		})
+		request := httptest.NewRequest(http.MethodDelete, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, request)
+		return response
+	}
+	waitNotifications := func(want int) []domain.Notification {
+		t.Helper()
+		var items []domain.Notification
+		for attempts := 0; attempts < 100; attempts++ {
+			items, err = repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 50})
+			if err != nil || len(items) >= want {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if err != nil || len(items) != want {
+			t.Fatalf("notifications want=%d items=%+v err=%v", want, items, err)
+		}
+		return items
+	}
 
-	if response := post("plain-operation", 0, []any{map[string]any{"type": "text", "text": "ordinary typing"}}); response.Code != http.StatusOK {
+	nodePath := "/v1/editor-json/node/" + node.NodeID + "/documents/86868686-8686-4686-8686-868686868686?company_id=" + companyID
+	if response := post(nodePath, "plain-operation", 0, []any{map[string]any{"type": "text", "text": "ordinary typing"}}); response.Code != http.StatusOK {
 		t.Fatalf("plain status=%d body=%s", response.Code, response.Body.String())
 	}
-	items, err := repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 10})
-	if err != nil || len(items) != 0 {
-		t.Fatalf("ordinary edit notifications=%+v err=%v", items, err)
-	}
+	waitNotifications(0)
 
-	mentionContent := func(kind string) []any {
-		return []any{
-			map[string]any{"type": "text", "text": "Please review "},
-			map[string]any{"type": "mention", "attrs": map[string]any{
-				"userId": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind,
-			}},
-		}
+	regular := mentionContent("normal")
+	if response := post(nodePath, "regular-operation", 1, regular); response.Code != http.StatusOK {
+		t.Fatalf("regular status=%d body=%s", response.Code, response.Body.String())
 	}
-	if response := post("regular-operation", 1, mentionContent("normal")); response.Code != http.StatusOK {
-		t.Fatalf("regular mention status=%d body=%s", response.Code, response.Body.String())
+	items := waitNotifications(1)
+	if items[0].Type != domain.NotificationEventMentionCreated || items[0].EntityType != store.EntityTypeNode {
+		t.Fatalf("regular notification=%+v", items[0])
 	}
-	if response := post("urgent-operation", 2, mentionContent("urgent")); response.Code != http.StatusOK {
+	if response := post(nodePath, "regular-operation", 1, regular); response.Code != http.StatusOK {
+		t.Fatalf("regular retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(1)
+	if response := post(nodePath, "unrelated-operation", 2, mentionContent("normal", " with unrelated text")); response.Code != http.StatusOK {
+		t.Fatalf("unrelated edit status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(1)
+	if response := post(nodePath, "remove-operation", 3, []any{map[string]any{"type": "text", "text": "mention removed"}}); response.Code != http.StatusOK {
+		t.Fatalf("remove mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(1)
+	if response := post(nodePath, "readd-operation", 4, regular); response.Code != http.StatusOK {
+		t.Fatalf("re-add mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(2)
+	regularAndUrgent := append(append([]any{}, regular...), mentionContent("urgent")...)
+	if response := post(nodePath, "urgent-operation", 5, regularAndUrgent); response.Code != http.StatusOK {
 		t.Fatalf("urgent mention status=%d body=%s", response.Code, response.Body.String())
 	}
-	for attempts := 0; attempts < 100; attempts++ {
-		items, err = repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 10})
-		if err != nil || len(items) >= 2 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err != nil || len(items) != 2 {
-		t.Fatalf("mention notifications=%+v err=%v", items, err)
-	}
-	seen := map[string]bool{}
+	items = waitNotifications(3)
+	seenTypes := map[string]int{}
 	for _, item := range items {
-		seen[item.Type] = true
+		seenTypes[item.Type]++
 	}
-	if !seen["mention.created"] || !seen["mention.urgent_created"] {
-		t.Fatalf("mention notification types=%v", seen)
+	if seenTypes[domain.NotificationEventMentionCreated] != 2 || seenTypes[domain.NotificationEventUrgentMentionCreated] != 1 {
+		t.Fatalf("notification types=%v", seenTypes)
+	}
+	if response := post(nodePath, "delete-mentioned-text", 6, []any{map[string]any{"type": "text", "text": "all mentions deleted"}}); response.Code != http.StatusOK {
+		t.Fatalf("delete mentioned text status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(3)
+	if response := deleteDocument(nodePath, "delete-node-document", 7); response.Code != http.StatusOK {
+		t.Fatalf("delete document status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(3)
+
+	seedDocumentID := "87878787-8787-4787-8787-878787878787"
+	seedRaw, _ := json.Marshal(document(mentionContent("normal")))
+	if _, err := repo.CommitEditorJSONDocument(store.EditorJSONCommitInput{
+		Document:    store.EditorJSONDocumentRef{CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID, DocumentID: seedDocumentID},
+		OperationID: "direct-seed-operation", ClientID: "direct-seed-client", ActorUserID: actor.UserID,
+		BaseRevision: 0, SchemaVersion: 1, JSONDocument: seedRaw,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedPath := "/v1/editor-json/node/" + node.NodeID + "/documents/" + seedDocumentID + "?company_id=" + companyID
+	if response := deleteDocument(seedPath, "delete-seeded-document", 1); response.Code != http.StatusOK {
+		t.Fatalf("delete seeded document status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(3)
+
+	projectPath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/88888888-8888-4888-8888-888888888888?company_id=" + companyID
+	if response := post(projectPath, "project-mention-operation", 0, regular); response.Code != http.StatusOK {
+		t.Fatalf("project mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	items = waitNotifications(4)
+	projectNotifications := 0
+	for _, item := range items {
+		if item.EntityType == store.EntityTypeProject && item.EntityID == projectResult.Project.ProjectID {
+			projectNotifications++
+		}
+	}
+	if projectNotifications != 1 {
+		t.Fatalf("project notifications=%d items=%+v", projectNotifications, items)
+	}
+
+	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/89898989-8989-4989-8989-898989898989?company_id=" + companyID
+	if response := post(logicGatePath, "logic-gate-urgent-operation", 0, mentionContent("urgent")); response.Code != http.StatusOK {
+		t.Fatalf("logic gate mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	items = waitNotifications(5)
+	logicGateNotifications := 0
+	for _, item := range items {
+		if item.EntityType == store.EntityTypeLogicGate && item.EntityID == logicGate.LogicGateID && item.Type == domain.NotificationEventUrgentMentionCreated {
+			logicGateNotifications++
+		}
+	}
+	if logicGateNotifications != 1 {
+		t.Fatalf("logic gate urgent notifications=%d items=%+v", logicGateNotifications, items)
 	}
 }
+
 func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "83838383-8383-4383-8383-838383838383"

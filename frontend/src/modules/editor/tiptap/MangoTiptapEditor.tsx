@@ -103,6 +103,8 @@ export type MangoTiptapEditorProps = {
   onBlur?: () => void;
   onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
   onError?: (message: string) => void;
+  onRecoveryStorageError?: (message: string) => void;
+  onRecoveryStorageRecovered?: () => void;
   onAnnotationActivate?: (annotation: { id: string; kind: string }) => void;
   onSelectionChatRequest?: (selection: MangoTiptapSelectionAction) => void;
   onImageChatRequest?: (image: MangoTiptapImageAction) => void;
@@ -435,6 +437,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onBlur,
   onConflict,
   onError,
+  onRecoveryStorageError,
+  onRecoveryStorageRecovered,
   onAnnotationActivate,
   onSelectionChatRequest,
   onImageChatRequest,
@@ -482,12 +486,14 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
   });
   callbacksRef.current = {
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
@@ -633,7 +639,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onRecoveryStorageError: (message) => {
         setRecoveryStorageError(message);
-        callbacksRef.current.onError?.(message);
+        callbacksRef.current.onRecoveryStorageError?.(message);
+      },
+      onRecoveryStorageRecovered: () => {
+        setRecoveryStorageError("");
+        callbacksRef.current.onRecoveryStorageRecovered?.();
       },
       });
       syncRef.current = sync;

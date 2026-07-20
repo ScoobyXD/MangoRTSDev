@@ -2966,6 +2966,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               onChange={(next) => { documentDraftRef.current = next; }}
               onFlush={(next) => { documentDraftRef.current = next; }}
               onError={setError}
+              onRecoveryStorageError={setError}
+              onRecoveryStorageRecovered={() => setError("")}
               onSelectionFontSizeChange={updateSelectionFontSize}
               onSelectionInlineFormatChange={updateSelectionInlineFormat}
               onSelectionHighlightColorChange={setSelectionHighlightColor}

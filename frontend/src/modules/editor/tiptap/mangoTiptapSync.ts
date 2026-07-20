@@ -33,6 +33,7 @@ type PendingCommit = {
   document: MangoTiptapDocument;
   annotations: MangoTiptapPersistedAnnotation[];
   created_at: number;
+  attempted: boolean;
 };
 
 type PendingDocumentRecord = {
@@ -58,6 +59,7 @@ export type MangoTiptapSyncOptions = {
   onConflict?: (conflict: MangoTiptapConflict) => void;
   onError?: (cause: unknown) => void;
   onRecoveryStorageError?: (message: string) => void;
+  onRecoveryStorageRecovered?: () => void;
   subscribeToCanonicalChange?: (recover: () => void, clientID: string) => () => void;
   batchMs?: number;
   maxBatchMs?: number;
@@ -162,6 +164,7 @@ export class MangoTiptapSync {
   private realtimeVisible = false;
   private stopped = false;
   private conflicted = false;
+  private recoveryStorageFailed = false;
 
   constructor(private readonly options: MangoTiptapSyncOptions) {
     this.storageKey = mangoTiptapPendingStorageKey(options);
@@ -220,7 +223,7 @@ export class MangoTiptapSync {
     this.options.onSnapshot?.(pendingDocument, serialized, annotations);
     this.persistence = this.persistence.catch(() => undefined).then(async () => {
       const last = this.pending[this.pending.length - 1];
-      if (last && this.drainPromise === undefined) {
+      if (last && !last.attempted) {
         last.document = pendingDocument;
         last.annotations = annotations;
       } else {
@@ -231,6 +234,7 @@ export class MangoTiptapSync {
           document: pendingDocument,
           annotations,
           created_at: Date.now(),
+          attempted: this.pending.length === 0 && this.drainPromise === undefined,
         });
       }
       this.options.onPendingChange?.(this.pending.length);
@@ -280,7 +284,10 @@ export class MangoTiptapSync {
     await this.captureScheduledSnapshot();
     let recoveryStorageAvailable = true;
     const [record, canonical] = await Promise.all([
-      readExactMangoTiptapPending(this.storageKey).catch((cause) => {
+      readExactMangoTiptapPending(this.storageKey).then((record) => {
+        this.reportRecoveryStorageRecovered();
+        return record;
+      }).catch((cause) => {
         recoveryStorageAvailable = false;
         this.reportRecoveryStorageFailure(cause);
         return null;
@@ -291,11 +298,11 @@ export class MangoTiptapSync {
     if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
     this.revision = canonical.revision;
     if (recoveryStorageAvailable) {
-      this.pending = (record?.commits ?? []).map((commit) => ({ ...commit, annotations: commit.annotations ?? [] }));
+      this.pending = (record?.commits ?? []).map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
     } else {
       // Storage failure must not erase an in-memory operation that still needs its
       // canonical backend acknowledgement during an active browser session.
-      this.pending = this.pending.map((commit) => ({ ...commit, annotations: commit.annotations ?? [] }));
+      this.pending = this.pending.map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
     }
     this.options.onPendingChange?.(this.pending.length);
     if (canonical.deleted) {
@@ -330,6 +337,7 @@ export class MangoTiptapSync {
         document: localCommit.document,
         annotations: localCommit.annotations ?? [],
         created_at: Date.now(),
+        attempted: true,
       });
       this.options.onPendingChange?.(1);
       await this.persistPendingBestEffort();
@@ -358,6 +366,7 @@ export class MangoTiptapSync {
   private async persistPendingBestEffort(): Promise<boolean> {
     try {
       await this.persistPending();
+      if (this.pending.length > 0) this.reportRecoveryStorageRecovered();
       return true;
     } catch (cause) {
       this.reportRecoveryStorageFailure(cause);
@@ -366,10 +375,17 @@ export class MangoTiptapSync {
   }
 
   private reportRecoveryStorageFailure(cause: unknown): void {
+    this.recoveryStorageFailed = true;
     const detail = cause instanceof Error && cause.message.trim() ? cause.message.trim() : String(cause || "unavailable");
     this.options.onRecoveryStorageError?.(
       `Browser recovery storage failed: ${detail}. Changes will still be sent to Mango, but this browser cannot safely recover them after a refresh until storage works.`,
     );
+  }
+
+  private reportRecoveryStorageRecovered(): void {
+    if (!this.recoveryStorageFailed) return;
+    this.recoveryStorageFailed = false;
+    this.options.onRecoveryStorageRecovered?.();
   }
 
   private armDrain(immediate: boolean): void {
@@ -396,6 +412,10 @@ export class MangoTiptapSync {
       while (this.pending.length > 0 && !this.conflicted) {
         const commit = this.pending[0];
         try {
+          if (!commit.attempted) {
+            commit.attempted = true;
+            await this.persistPendingBestEffort();
+          }
           incrementEditorRuntimeMetric("network_saves");
           const response = await this.options.requestJSON<MangoTiptapSnapshot & { deduplicated?: boolean }>(this.path, {
             method: "POST",
@@ -413,7 +433,7 @@ export class MangoTiptapSync {
           this.revision = response.revision;
           this.retryAttempt = 0;
           this.pending.shift();
-          this.pending.forEach((next, index) => { next.base_revision = this.revision + index; });
+          this.pending.forEach((next, index) => { if (!next.attempted) next.base_revision = this.revision + index; });
           // The server acknowledgement is canonical even when local browser storage
           // cleanup fails. Release virtualization pins before best-effort cleanup.
           this.options.onPendingChange?.(this.pending.length);

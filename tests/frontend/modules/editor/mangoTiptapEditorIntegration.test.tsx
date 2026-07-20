@@ -194,6 +194,11 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let releasePost: (() => void) | undefined;
   let subscriptions = 0;
   let unsubscriptions = 0;
+  let subscriptionRecover: (() => void | Promise<void>) | undefined;
+  let conflictCallbacks = 0;
+  const documentErrors: string[] = [];
+  const storageErrors: string[] = [];
+  let storageRecoveries = 0;
   const requestJSON = async <T,>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
     if (init?.method !== "POST") {
       canonicalReads += 1;
@@ -241,13 +246,18 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           resourceID="node-1"
           documentID="document-1"
           requestJSON={requestJSON}
-          subscribeToCanonicalChange={() => {
+          subscribeToCanonicalChange={(recover) => {
+            subscriptionRecover = recover;
             subscriptions += 1;
             return () => { unsubscriptions += 1; };
           }}
           annotations={annotations}
           formattingControllerRef={controllerRef}
           onChange={(next) => changes.push(next)}
+          onConflict={() => { conflictCallbacks += 1; }}
+          onError={(message) => documentErrors.push(message)}
+          onRecoveryStorageError={(message) => storageErrors.push(message)}
+          onRecoveryStorageRecovered={() => { storageRecoveries += 1; }}
           onLifecycleChange={(snapshot) => {
             lifecyclePins.push(snapshot.pinned);
             setPinned(snapshot.pinned);
@@ -433,11 +443,21 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(remountedEditorRoot.dataset.mangoEditorPinned, "true");
     releasePost?.();
     await waitFor(() => remountedEditorRoot.dataset.mangoEditorPinned !== "true", "backend acknowledgement should unpin despite IndexedDB failure");
+    assert.equal(conflictCallbacks, 0, "a storage failure must not surface as a document conflict");
+    assert.deepEqual(documentErrors, []);
+    assert.ok(storageErrors.some((message) => message.startsWith("Browser recovery storage failed:")));
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, writable: true, value: fakeIndexedDB });
+    reentryExactObserver.trigger(false);
+    reentryExactObserver.trigger(true);
+    await act(async () => { await subscriptionRecover?.(); });
+    await waitFor(() => storageRecoveries === 1, "a later successful recovery read should clear the storage warning");
+    await waitFor(() => !remountedEditorRoot.querySelector('[role="alert"]'), "the recovered storage warning should disappear");
+    assert.equal(conflictCallbacks, 0);
 
     await act(async () => root.unmount());
     mountedRoot = null;
     assert.equal(subscriptions, 2);
-    assert.equal(unsubscriptions, 2, "unmount cleanup releases only the active re-entry subscription");
+    assert.equal(unsubscriptions, 2, "unmount cleanup releases the active visible subscription");
   } finally {
     releasePost?.();
     if (pageHostRoot) await act(async () => pageHostRoot?.unmount());
