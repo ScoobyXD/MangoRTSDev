@@ -1,6 +1,7 @@
 import React from "react";
 import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
 import type { Account } from "../accounts/accountsApi.js";
+import type { MyTeraCardStateByNodeID } from "./mapAppearancePersistence.js";
 
 // Reusable line-divider style for panel sections in node-map side UI.
 export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
@@ -82,6 +83,8 @@ export type NodeMapState = {
   // Legacy cache slot. New browser-cache writes keep this empty because shared
   // map geometry is owned by the map-layout API/database, not localStorage.
   nodePositions: Record<string, NodePosition>;
+  nodeSizes?: Record<string, { w: number; h: number }>;
+  myTeraCards?: MyTeraCardStateByNodeID;
   relationshipColorsEnabled?: boolean;
   relationshipRoleColors?: { parent: string; peer: string; child: string };
 };

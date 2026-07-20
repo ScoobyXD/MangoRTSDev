@@ -16,23 +16,22 @@ import {
   snapToGrid,
 } from "./shared";
 import type { NodeMapRelationshipRole } from "./NodeMapContextMenus";
+import { restoreMyTeraCardStates, restoreNodeMapRelationshipRoleColors, restoreNodeSizes, type MyTeraCardStateByNodeID } from "./mapAppearancePersistence";
 
-const DEFAULT_RELATIONSHIP_ROLE_COLORS: Record<NodeMapRelationshipRole, string> = {
-  parent: "#64748b",
-  peer: "#475569",
-  child: "#64748b",
-};
 
 type UseNodeMapGraphPersistenceInput = {
   companyID: string;
   mapStateKey: string;
   fallbackMapStateKey: string;
+  mapAppearanceStateKey: string;
   restoredViewport: boolean;
   zoom: number;
   pan: { x: number; y: number };
   selectedNodeID: string;
   nodePositions: Record<string, NodePosition>;
   nodes: NodeRecord[];
+  nodeSizes: Record<string, { w: number; h: number }>;
+  myTeraCards: MyTeraCardStateByNodeID;
   relationshipColorsEnabled: boolean;
   relationshipRoleColors: Record<NodeMapRelationshipRole, string>;
   worldWidth: number;
@@ -47,6 +46,8 @@ type UseNodeMapGraphPersistenceInput = {
   setSelectedNodeID: React.Dispatch<React.SetStateAction<string>>;
   setSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   setNodePositions: React.Dispatch<React.SetStateAction<Record<string, NodePosition>>>;
+  setNodeSizes: React.Dispatch<React.SetStateAction<Record<string, { w: number; h: number }>>>;
+  setMyTeraCards: React.Dispatch<React.SetStateAction<MyTeraCardStateByNodeID>>;
   setRelationshipColorsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   setRelationshipRoleColors: React.Dispatch<React.SetStateAction<Record<NodeMapRelationshipRole, string>>>;
   layoutPersistenceReadyRef: React.MutableRefObject<boolean>;
@@ -60,12 +61,15 @@ export function useNodeMapGraphPersistence({
   mapStateKey,
   fallbackMapStateKey,
   restoredViewport,
+  mapAppearanceStateKey,
   zoom,
   pan,
   selectedNodeID,
   nodePositions,
   nodes,
   relationshipColorsEnabled,
+  nodeSizes,
+  myTeraCards,
   relationshipRoleColors,
   worldWidth,
   worldHeight,
@@ -80,6 +84,8 @@ export function useNodeMapGraphPersistence({
   setSelectedNodeIDs,
   setNodePositions,
   setRelationshipColorsEnabled,
+  setNodeSizes,
+  setMyTeraCards,
   setRelationshipRoleColors,
   layoutPersistenceReadyRef,
   lastPersistedNodePositionsRef,
@@ -106,55 +112,38 @@ export function useNodeMapGraphPersistence({
   }, [lastPersistedNodePositionsRef, layoutInteractionActiveRef, layoutPersistenceReadyRef, setNodePositions, worldHeight, worldWidth]);
 
   useEffect(() => {
-    const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);
-    if (cached) {
-      setZoom(clamp(cached.zoom, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM));
-      setPan(cached.pan);
-      setPanInitialized(true);
-      restoredSelectionRef.current = cached.selectedNodeID;
-      selectedNodeIDRef.current = cached.selectedNodeID;
-      suppressNextSelectionBroadcastRef.current = true;
-      setSelectedNodeID(cached.selectedNodeID);
-      setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
-      setNodePositions(cached.nodePositions);
-      setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
-      if (cached.relationshipRoleColors) {
-        setRelationshipRoleColors(DEFAULT_RELATIONSHIP_ROLE_COLORS);
+    const parseState = (raw: string | null): Partial<NodeMapState> | null => {
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw) as Partial<NodeMapState>;
+      } catch {
+        return null;
       }
-      setRestoredViewport(true);
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(mapStateKey) ?? localStorage.getItem(fallbackMapStateKey);
-      if (!raw) {
-        setRestoredViewport(true);
-        return;
+    };
+    const cachedViewport = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);
+    const parsedViewport = cachedViewport
+      ? null
+      : parseState(localStorage.getItem(mapStateKey) ?? localStorage.getItem(fallbackMapStateKey));
+    const viewportState = cachedViewport ?? parsedViewport;
+
+    if (viewportState) {
+      if (typeof viewportState.zoom === "number" && Number.isFinite(viewportState.zoom)) {
+        setZoom(clamp(viewportState.zoom, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM));
       }
-      const parsed = JSON.parse(raw) as {
-        zoom?: number;
-        pan?: { x?: number; y?: number };
-        selectedNodeID?: string;
-        nodePositions?: Record<string, { x?: number; y?: number }>;
-        relationshipColorsEnabled?: boolean;
-        relationshipRoleColors?: { parent?: string; peer?: string; child?: string };
-      };
-      if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
-        setZoom(clamp(parsed.zoom, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM));
-      }
-      if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") {
-        setPan({ x: parsed.pan.x, y: parsed.pan.y });
+      if (viewportState.pan && typeof viewportState.pan.x === "number" && typeof viewportState.pan.y === "number") {
+        setPan({ x: viewportState.pan.x, y: viewportState.pan.y });
         setPanInitialized(true);
       }
-      if (typeof parsed.selectedNodeID === "string") {
-        restoredSelectionRef.current = parsed.selectedNodeID;
-        selectedNodeIDRef.current = parsed.selectedNodeID;
+      if (typeof viewportState.selectedNodeID === "string") {
+        restoredSelectionRef.current = viewportState.selectedNodeID;
+        selectedNodeIDRef.current = viewportState.selectedNodeID;
         suppressNextSelectionBroadcastRef.current = true;
-        setSelectedNodeID(parsed.selectedNodeID);
-        setSelectedNodeIDs(parsed.selectedNodeID ? new Set([parsed.selectedNodeID]) : new Set());
+        setSelectedNodeID(viewportState.selectedNodeID);
+        setSelectedNodeIDs(viewportState.selectedNodeID ? new Set([viewportState.selectedNodeID]) : new Set());
       }
-      if (parsed.nodePositions && typeof parsed.nodePositions === "object") {
+      if (viewportState.nodePositions && typeof viewportState.nodePositions === "object") {
         const sanitized: Record<string, NodePosition> = {};
-        for (const [key, value] of Object.entries(parsed.nodePositions)) {
+        for (const [key, value] of Object.entries(viewportState.nodePositions)) {
           if (!value) continue;
           const x = typeof value.x === "number" ? value.x : 0;
           const y = typeof value.y === "number" ? value.y : 0;
@@ -165,24 +154,30 @@ export function useNodeMapGraphPersistence({
         }
         setNodePositions(sanitized);
       }
-      if (typeof parsed.relationshipColorsEnabled === "boolean") {
-        setRelationshipColorsEnabled(parsed.relationshipColorsEnabled);
-      }
-      if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
-        setRelationshipRoleColors(DEFAULT_RELATIONSHIP_ROLE_COLORS);
-      }
-    } catch {
-      // ignore local cache parse errors
-    } finally {
-      setRestoredViewport(true);
     }
+
+    const appearanceState = SESSION_NODE_MAP_STATE.get(mapAppearanceStateKey)
+      ?? parseState(localStorage.getItem(mapAppearanceStateKey))
+      ?? viewportState;
+    if (appearanceState) {
+      if (typeof appearanceState.relationshipColorsEnabled === "boolean") {
+        setRelationshipColorsEnabled(appearanceState.relationshipColorsEnabled);
+      }
+      setRelationshipRoleColors(restoreNodeMapRelationshipRoleColors(appearanceState.relationshipRoleColors));
+      setNodeSizes(restoreNodeSizes(appearanceState.nodeSizes, worldWidth, worldHeight));
+      setMyTeraCards(restoreMyTeraCardStates(appearanceState.myTeraCards, worldHeight));
+    }
+    setRestoredViewport(true);
   }, [
     fallbackMapStateKey,
+    mapAppearanceStateKey,
     mapStateKey,
     restoredSelectionRef,
     selectedNodeIDRef,
     suppressNextSelectionBroadcastRef,
+    setMyTeraCards,
     setNodePositions,
+    setNodeSizes,
     setPan,
     setPanInitialized,
     setRelationshipColorsEnabled,
@@ -214,12 +209,25 @@ export function useNodeMapGraphPersistence({
         const serializedState = JSON.stringify(nextState);
         localStorage.setItem(mapStateKey, serializedState);
         localStorage.setItem(fallbackMapStateKey, serializedState);
+        const appearanceState: NodeMapState = {
+          zoom,
+          pan,
+          selectedNodeID,
+          nodePositions: {},
+          nodeSizes,
+          myTeraCards,
+          relationshipColorsEnabled,
+          relationshipRoleColors,
+        };
+        SESSION_NODE_MAP_STATE.set(mapAppearanceStateKey, appearanceState);
+        localStorage.setItem(mapAppearanceStateKey, JSON.stringify(appearanceState));
+
       } catch {
         // ignore local storage quota/security errors
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [fallbackMapStateKey, mapStateKey, pan, relationshipColorsEnabled, relationshipRoleColors, restoredViewport, selectedNodeID, zoom]);
+  }, [fallbackMapStateKey, mapAppearanceStateKey, mapStateKey, myTeraCards, nodeSizes, pan, relationshipColorsEnabled, relationshipRoleColors, restoredViewport, selectedNodeID, zoom]);
 
   useEffect(() => {
     if (!restoredViewport || !layoutPersistenceReadyRef.current) return;

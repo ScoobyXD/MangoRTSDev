@@ -443,6 +443,7 @@ export function useNodeMapDragControls(input: {
   useEffect(() => {
     if (!input.dragState) return;
     const onMove = (event: PointerEvent) => {
+  nodeSizes?: Record<string, { w: number; h: number }>;
       if (event.pointerId !== input.dragState?.pointerID || !input.viewportRef.current) return;
       const bounds = input.viewportRef.current.getBoundingClientRect();
       const mouseX = event.clientX - bounds.left;
@@ -455,8 +456,8 @@ export function useNodeMapDragControls(input: {
           const worldX = (mouseX - input.pan.x) / input.zoom - offset.x;
           const worldY = (mouseY - input.pan.y) / input.zoom - offset.y;
           next[nodeID] = {
-            x: clamp(snapToGrid(worldX), 0, input.worldWidth - input.nodeWidth),
-            y: clamp(snapToGrid(worldY), 0, input.worldHeight - input.nodeHeight),
+            x: clamp(snapToGrid(worldX), 0, input.worldWidth - size.w),
+            y: clamp(snapToGrid(worldY), 0, input.worldHeight - size.h),
           };
         }
         return next;
@@ -464,6 +465,7 @@ export function useNodeMapDragControls(input: {
     };
     const onUp = (event: PointerEvent) => {
       if (event.pointerId !== input.dragState?.pointerID) return;
+          const size = input.nodeSizes?.[nodeID] ?? { w: input.nodeWidth, h: input.nodeHeight };
       if (input.dragState.clearSelectionOnClick && typeof input.dragState.startMouseX === "number" && typeof input.dragState.startMouseY === "number") {
         const isClick = shouldTreatNodeMapGestureAsClick({
           startMouseX: input.dragState.startMouseX,
