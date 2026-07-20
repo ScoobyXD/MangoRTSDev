@@ -486,6 +486,95 @@ The implementation sequence is:
 Notes for implementing problem 1 here:
 
 Notes for implementing problem 2 here:
+Yes—your list is broadly correct. The main thing is to separate “starts when the textbox mounts” from “runs after typing” and “runs when a typing batch closes.”
+Assume Problem 1 leaves a window of 20 mounted rows. For each editable textbox in those rows, current code does roughly this:
+When the textbox mounts
+Creates the frontend-backend textbox sync.
+Registers one exact realtime subscription scope.This is a logical subscription per textbox; the underlying WebSocket connection is shared.
+
+Starts recovery:Searches IndexedDB for unsent operations.
+Fetches the latest backend copy.
+Replays or sends pending work.
+Fetches the backend copy again at the end.
+
+Creates an empty undo-history container.It does not create full undo snapshots until editing begins.
+
+Creates selection, formatting, mention, and table-selection state.
+Starts a ResizeObserver.
+Installs several broad listeners:Window scroll.
+Window resize.
+Document selection changes.
+Document pointer release/cancellation.
+
+Starts scroll-position tracking and restoration.
+Schedules comment/change/chat highlighting work.
+Searches the textbox DOM for images.
+If images exist:Starts an intersection observer to detect images near the viewport.
+Resolves attachment URLs.
+Loads authenticated image blobs.
+Tracks image sizes.
+Starts timers, including a five-second fallback that eventually loads remaining images.
+
+Creates cleanup behavior for unmounting.
+Uses animation frames for some scroll, resize, and highlighting work.
+That means your consolidated mount list is:
+Frontend-backend textbox sync.
+Realtime subscription.
+IndexedDB and backend recovery.
+Undo-history container.
+Selection and formatting tracking.
+Mention detection infrastructure.
+Table-selection tracking.
+Resize observation.
+Scroll tracking and restoration.
+Comment, change, and chat highlighting.
+Image discovery, observation, loading, and sizing.
+Window and document event listeners.
+Timers and animation-frame callbacks.
+Unmount cleanup and flushing.
+There are some important qualifications:
+Read-only textboxes do not start the frontend-backend sync, but much of the visual machinery still starts.
+Undo history is almost free when initially created. The expensive full-document snapshots happen during editing.
+Mention detection mainly runs on input and key release, rather than constantly running in the background.
+Some highlighting is conditional, but the chat-highlight path currently reads the complete document even when no chat anchors exist.
+Images appear lazy initially, but the five-second fallback makes all images in a mounted textbox eventually eligible to load.
+A textbox hidden using CSS can remain mounted, meaning its subscriptions, observers, and listeners can remain alive.
+Unmounting and remounting repeats recovery and loses the textbox’s in-memory undo history.
+After the user types one character
+A separate group of work occurs:
+The browser changes the editable DOM.
+At the beginning of a typing batch, the editor captures the complete “before” HTML for undo.
+It checks the caret and selection.
+It calculates formatting state for the toolbar.
+It runs mention detection.
+It checks table selection.
+It reads the complete plain text for list and automatic-outline behavior.
+It updates React state, which can cause surrounding Node or Project components to rerender.
+Some of these checks happen again on key release.
+When the typing batch closes
+Typing is grouped into batches—normally after about 160 milliseconds of inactivity, with a maximum continuous batch of about 500 milliseconds.
+At that point:
+The complete editor DOM is sanitized and serialized to HTML.
+The complete plain text is extracted.
+The complete “after” undo snapshot is captured.
+The before and after HTML snapshots are stored in undo history.
+The old and new HTML strings are compared.
+The changed section is converted to UTF-8.
+A bounded HTML patch is created.
+The pending operation is written to IndexedDB.
+The operation is sent to the backend.
+The backend applies the patch and updates the complete canonical HTML and compatibility projection in PostgreSQL.
+One precision correction to your pasted note: the complete “before” snapshot is captured when the batch begins, while the complete “after” snapshot is captured when it closes. They are then stored together as one undo entry.
+So Problem 2 is really asking:
+For every textbox that Problem 1 leaves mounted, which of these systems must be awake now, which can sleep, and which should activate only when the textbox becomes visible, focused, edited, or explicitly opened?
+
+A sensible lifecycle would be:
+Mounted but sleeping: display the existing HTML without recovery, broad listeners, or active editing machinery.
+Near the viewport: recover the latest content and begin image eligibility.
+Focused/active: start selection, formatting, mention, and undo behavior.
+Dirty: keep sync and recovery alive until the edit is safely stored and confirmed.
+Inactive again: remove broad listeners and observers while retaining only the state needed for correctness.
+The major rewrites of undo, caret positions, formatting commands, comment positions, and HTML serialization should still wait for Tiptap. Problem 2 can reduce when those systems run, but should avoid rebuilding them just before Tiptap replaces them.
 
 Notes for implementing problem 3 here:
 
