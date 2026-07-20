@@ -264,7 +264,16 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /ProjectRelationshipNodePanel/);
   assert.match(source, /surfaceID="project-relationships-inline-node"/);
   assert.match(source, /aria-expanded=\{expanded\}/);
-  assert.match(source, /relationshipNodePanelRowStyle\(depth\)/);
+  assert.match(source, /relationshipNodePanelRowStyle\(\)/);
+  assert.match(source, /function relationshipNodePanelRowStyle\(\): React\.CSSProperties \{[^}]*width: "100%"[^}]*marginLeft: 0/);
+  assert.doesNotMatch(source, /function relationshipNodePanelRowStyle\(\): React\.CSSProperties \{[^}]*relationshipRowLeftOffset/);
+  assert.match(source, /aria-label="Add Node or Logic Gate"/);
+  assert.match(source, /<ProjectRelationshipSearchPicker/);
+  assert.match(source, /Search Explorer Nodes and Logic Gates/);
+  assert.match(source, /fetchCompanyExplorerSearchResults\([\s\S]*relationshipPickerSearchText[\s\S]*\["node", "logic_gate"\]/);
+  assert.match(source, /expandLogicGateRelationshipTargets\(\[\{ \.\.\.target, resourceID \}\], workspace\)/);
+  assert.match(source, /existingRelationshipKeys\.has\(key\)/);
+  assert.match(source, /addRelationshipTargets\(targets\)/);
   assert.match(source, /project-critical-path-node-window/);
   assert.match(source, /event\.detail > 1/);
   assert.match(source, /setSelectedRelationshipNodePanel/);

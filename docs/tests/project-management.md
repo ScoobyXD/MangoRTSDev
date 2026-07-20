@@ -66,6 +66,8 @@ PM55 - A successful same-window Node or Logic Gate rename patches matching Proje
 PM56 - The Project editor header uses the shared primary order Editor, Permissions, formatting toolbar, and Outline Styles/Automatic Numbering. Assignments and available open/minimize commands remain in one accessible **More editor actions** menu. Project assignment/permission dialogs and previews use the shared body-level overlay layer above Key Views, Explorer, and Search Explorer and trap/restore focus when blocking; the Logic Gates / Nodes editor remains inline in document flow.
 PM57 - A Node backed by an email collaboration uses normal project-relationship attach/upsert/delete behavior. Project projections preserve its `created_from_email` origin so the established email icon renders. Collaboration participant authorization and canonical source-email protection remain unchanged by project membership.
 PM58 - A successful inline Project rename updates the parent Project Management list immediately. Browser Back from `/projects/{project_id}` to `/project-management` clears the detail target and shows the Project list with the committed name.
+PM59 - Expanding a node in Project Logic Gates / Nodes renders the inline node editor at the full relationship-panel width. Group and row depth still indent the collapsed row labels, but must not add a left offset or reduce the width of the expanded editor.
+PM60 - Project Logic Gates / Nodes exposes an Add control that opens an elevated Company Explorer search surface restricted to Nodes and Logic Gates. Choosing a result creates or reuses its project relationship; a selected Logic Gate follows the existing Logic Gate-add contract and includes its known child nodes. Existing relationships are visibly marked and cannot be added again.
 
 ## Scenarios
 
@@ -231,6 +233,8 @@ Business logic covered:
 - PM51
 - PM56
 - PM58
+- PM59
+- PM60
 
 Given:
 - A project has related Logic Gates and nodes.
@@ -241,6 +245,8 @@ Expected:
 - The project detail work panel shows Logic Gates / Nodes before Critical Path and opens on Logic Gates / Nodes by default.
 - Switching between the two views does not change project relationship data.
 - Clicking a node row in Logic Gates / Nodes expands its node editor immediately below the row while keeping the Project page open; clicking the row again collapses it.
+- The expanded node editor fills the relationship-panel width without inheriting the collapsed row's group-depth indentation.
+- **Add** opens an elevated Company Explorer search limited to Nodes and Logic Gates. Selecting an available result attaches it to the Project, selecting a Logic Gate includes its known child nodes, and an already-related result remains marked and disabled.
 - The embedded node panel applies node access and saves node edits through node information/projection persistence.
 - Project Management owns only the panel selection; it does not own node text-box edits, attached-email edits, or node chat messages.
 - Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
