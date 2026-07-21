@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestDeleteExpiredNotificationsRemovesOnlyOldNotificationRows(t *testing.T) {
+func TestDeleteExpiredNotificationsPreservesArchivedNotificationRows(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "61616161-6161-4161-8161-616161616161"
 	repo.EnsureCompany(companyID, "Notification Retention Co")
@@ -65,20 +65,23 @@ func TestDeleteExpiredNotificationsRemovesOnlyOldNotificationRows(t *testing.T) 
 	old.CreatedTimestamp = oldTimestamp
 	repo.notifications[created[0].NotificationID] = old
 	repo.mu.Unlock()
+	if _, err := repo.MarkNotificationRead(user.UserID, created[0].NotificationID, true); err != nil {
+		t.Fatalf("MarkNotificationRead: %v", err)
+	}
 
 	deleted, err := repo.DeleteExpiredNotifications(time.Now().UTC().Add(-DefaultNotificationRetentionDuration), 10)
 	if err != nil {
 		t.Fatalf("DeleteExpiredNotifications: %v", err)
 	}
-	if len(deleted) != 1 || deleted[0].NotificationID != created[0].NotificationID {
-		t.Fatalf("deleted = %+v, want only old notification", deleted)
+	if len(deleted) != 0 {
+		t.Fatalf("deleted = %+v, want archived history preserved", deleted)
 	}
 	remaining, err := repo.ListNotifications(NotificationListInput{UserID: user.UserID, CompanyID: companyID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListNotifications: %v", err)
 	}
-	if len(remaining) != 1 || remaining[0].NotificationID != created[1].NotificationID {
-		t.Fatalf("remaining notifications = %+v, want only fresh notification", remaining)
+	if len(remaining) != 2 {
+		t.Fatalf("remaining notifications = %+v, want archived and fresh rows", remaining)
 	}
 }
 

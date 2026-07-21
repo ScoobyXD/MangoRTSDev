@@ -542,7 +542,7 @@ func (r *MemoryRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) 
 
 	candidates := make([]domain.Notification, 0)
 	for _, item := range r.notifications {
-		if item.CreatedTimestamp.Before(olderThan) {
+		if item.ReadTimestamp == nil && item.CreatedTimestamp.Before(olderThan) {
 			candidates = append(candidates, item)
 		}
 	}

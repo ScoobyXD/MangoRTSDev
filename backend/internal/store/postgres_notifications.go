@@ -458,6 +458,7 @@ with expired as (
   select notification_id
   from notifications
   where created_timestamp < $1
+    and read_timestamp is null
   order by created_timestamp asc, notification_id asc
   limit $2
 ),

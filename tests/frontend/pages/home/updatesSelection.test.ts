@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
+import { createSeenUpdatesDateWindow, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
   const orderedIDs = ["a", "b", "c", "d"];
@@ -160,4 +161,27 @@ test("Updates resolves current Logic Gate labels without rewriting historical no
     label: "Zulu Current Gate",
     sortValue: "zulu current gate",
   });
+});
+
+test("seen Updates date sliders default to a bounded window and never query more than 90 days", () => {
+  const bounds = seenUpdatesDateBounds({
+    oldest_created_timestamp: "2025-01-01T12:00:00Z",
+    newest_created_timestamp: "2026-07-21T18:00:00Z",
+  });
+  if (!bounds) {
+    throw new Error("expected a seen Updates date range");
+  }
+  const initial = createSeenUpdatesDateWindow(bounds);
+  assert.deepEqual(seenUpdatesDateQuery(initial), {
+    fromDate: "2026-06-22",
+    toDate: "2026-07-21",
+  });
+
+  const movedStart = moveSeenUpdatesDateWindow(initial, "start", bounds.oldestDay);
+  assert.equal(movedStart.endDay - movedStart.startDay + 1, 90);
+  assert.equal(seenUpdatesDateQuery(movedStart).fromDate, "2025-01-01");
+
+  const movedEnd = moveSeenUpdatesDateWindow(movedStart, "end", bounds.newestDay);
+  assert.equal(movedEnd.endDay - movedEnd.startDay + 1, 90);
+  assert.equal(seenUpdatesDateQuery(movedEnd).toDate, "2026-07-21");
 });

@@ -9,11 +9,41 @@ import (
 	"time"
 )
 
+func (r *PostgresRepo) GetSeenUpdatesRange(input UpdatesQuery) (UpdatesSeenRange, error) {
+	input.UserID = cleanUUIDText(input.UserID)
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	if input.UserID == "" || input.CompanyID == "" {
+		return UpdatesSeenRange{}, ErrInvalid
+	}
+	var oldest, newest sql.NullTime
+	err := r.db.QueryRowContext(context.Background(), `
+select min(created_timestamp), max(created_timestamp)
+from notifications
+where recipient_user_id=$1::uuid
+  and company_id=$2::uuid
+  and read_timestamp is not null`+notificationRecipientVisibilityWhereSQL,
+		input.UserID, input.CompanyID,
+	).Scan(&oldest, &newest)
+	if err != nil {
+		return UpdatesSeenRange{}, err
+	}
+	result := UpdatesSeenRange{}
+	if oldest.Valid {
+		value := oldest.Time.UTC()
+		result.OldestCreatedTimestamp = &value
+	}
+	if newest.Valid {
+		value := newest.Time.UTC()
+		result.NewestCreatedTimestamp = &value
+	}
+	return result, nil
+}
+
 func (r *PostgresRepo) ListUpdateRootGroups(input UpdatesQuery) ([]UpdatesNestedGroup, error) {
 	input.UserID = cleanUUIDText(input.UserID)
 	input.CompanyID = cleanUUIDText(input.CompanyID)
-	filter, ok := normalizeUpdatesFilter(input.Filter)
-	if input.UserID == "" || input.CompanyID == "" || !ok {
+	input, filter, err := normalizeUpdatesQuery(input)
+	if err != nil {
 		return nil, ErrInvalid
 	}
 	return r.listPostgresUpdateRootGroups(context.Background(), input, filter)
@@ -30,8 +60,8 @@ func (r *PostgresRepo) ListUpdateBranch(input UpdatesQuery) (UpdatesNestedGroup,
 func (r *PostgresRepo) listPostgresUpdatesForQuery(input UpdatesQuery) ([]domain.Notification, updatesBuildContext, error) {
 	input.UserID = cleanUUIDText(input.UserID)
 	input.CompanyID = cleanUUIDText(input.CompanyID)
-	filter, ok := normalizeUpdatesFilter(input.Filter)
-	if input.UserID == "" || input.CompanyID == "" || !ok {
+	input, filter, err := normalizeUpdatesQuery(input)
+	if err != nil {
 		return nil, updatesBuildContext{}, ErrInvalid
 	}
 	items, err := r.listPostgresUpdatesNotifications(context.Background(), input, filter)
@@ -56,7 +86,10 @@ with visible as (
   from notifications
   where notifications.recipient_user_id=$1::uuid
     and notifications.company_id=$2::uuid
-    and notifications.read_timestamp is null
+    and (
+      ($6::boolean and notifications.read_timestamp is not null and notifications.created_timestamp >= $7::timestamptz and notifications.created_timestamp < $8::timestamptz)
+      or (not $6::boolean and notifications.read_timestamp is null)
+    )
     and (
       $3 = 'all'
       or ($3 = 'urgent' and notifications.notification_type = $4)
@@ -153,7 +186,7 @@ group by field, resource_type, resource_id, label
 order by
   case field when 'project' then 1 when 'logic_gate' then 2 when 'node' then 3 else 4 end,
   lower(label),
-  resource_id`, input.UserID, input.CompanyID, filter, domain.NotificationEventUrgentMentionCreated, domain.NotificationEventMentionCreated)
+  resource_id`, input.UserID, input.CompanyID, filter, domain.NotificationEventUrgentMentionCreated, domain.NotificationEventMentionCreated, input.SeenOnly, input.CreatedFrom, input.CreatedTo)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +223,10 @@ with filtered as (
   from notifications
   where notifications.recipient_user_id=$1::uuid
     and notifications.company_id=$2::uuid
-    and notifications.read_timestamp is null
+    and (
+      ($6::boolean and notifications.read_timestamp is not null and notifications.created_timestamp >= $7::timestamptz and notifications.created_timestamp < $8::timestamptz)
+      or (not $6::boolean and notifications.read_timestamp is null)
+    )
     and (
       $3 = 'all'
       or ($3 = 'urgent' and notifications.notification_type = $4)
@@ -215,16 +251,16 @@ with filtered as (
   select *
   from with_gate
   where (
-    not $6::boolean
+    not $9::boolean
     or (
-      $7 = 'project'
+      $10 = 'project'
       and (
-        with_gate.target_project_id = $8
+        with_gate.target_project_id = $11
         or exists (
           select 1
           from project_relationship_projection relationship
           where relationship.company_id=with_gate.company_id
-            and relationship.project_id=$8::uuid
+            and relationship.project_id=$11::uuid
             and (
               (with_gate.target_node_id <> '' and relationship.node_id=with_gate.target_node_id::uuid)
               or (with_gate.path_logic_gate_id <> '' and relationship.logic_gate_id=with_gate.path_logic_gate_id::uuid)
@@ -232,15 +268,15 @@ with filtered as (
         )
       )
     )
-    or ($7 = 'logic_gate' and with_gate.path_logic_gate_id = $8)
-    or ($7 = 'node' and with_gate.target_node_id = $8)
-    or ($7 = 'update' and with_gate.target_project_id = '' and with_gate.target_node_id = '' and with_gate.path_logic_gate_id = '')
+    or ($10 = 'logic_gate' and with_gate.path_logic_gate_id = $11)
+    or ($10 = 'node' and with_gate.target_node_id = $11)
+    or ($10 = 'update' and with_gate.target_project_id = '' and with_gate.target_node_id = '' and with_gate.path_logic_gate_id = '')
   )
 )
 select `+notificationSelectColumns+`
 from branch_filtered notifications
 order by created_timestamp desc, notification_id desc`,
-		input.UserID, input.CompanyID, filter, domain.NotificationEventUrgentMentionCreated, domain.NotificationEventMentionCreated, hasRootFilter, rootField, sqlRootResourceID)
+		input.UserID, input.CompanyID, filter, domain.NotificationEventUrgentMentionCreated, domain.NotificationEventMentionCreated, input.SeenOnly, input.CreatedFrom, input.CreatedTo, hasRootFilter, rootField, sqlRootResourceID)
 	if err != nil {
 		return nil, err
 	}

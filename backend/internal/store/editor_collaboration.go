@@ -66,8 +66,10 @@ type EditorCollaborationCommit struct {
 	Revision             int64                                  `json:"revision"`
 	CommittedAt          time.Time                              `json:"committed_at"`
 	Deduplicated         bool                                   `json:"deduplicated,omitempty"`
+	PreviousHTML         string                                 `json:"-"`
 	Patch                EditorHTMLPatch                        `json:"patch"`
 	ConcurrentOperations []EditorCollaborationRevisionOperation `json:"concurrent_operations,omitempty"`
+	CommittedHTML        string                                 `json:"-"`
 }
 
 type EditorCollaborationDeleteInput struct {

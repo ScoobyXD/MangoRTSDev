@@ -948,6 +948,7 @@ type NotificationRepository interface {
 	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
 	ListUpdateRootGroups(input UpdatesQuery) ([]UpdatesNestedGroup, error)
 	ListUpdateBranch(input UpdatesQuery) (UpdatesNestedGroup, error)
+	GetSeenUpdatesRange(input UpdatesQuery) (UpdatesSeenRange, error)
 	GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error)
 	CountUnreadNotifications(userID, companyID string) (int, error)
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
@@ -2043,11 +2044,21 @@ type NotificationListInput struct {
 	Limit            int
 }
 
+const UpdatesSeenMaxWindow = 90 * 24 * time.Hour
+
 type UpdatesQuery struct {
-	UserID    string
-	CompanyID string
-	Filter    string
-	RootID    string
+	UserID      string
+	CompanyID   string
+	Filter      string
+	RootID      string
+	SeenOnly    bool
+	CreatedFrom time.Time
+	CreatedTo   time.Time
+}
+
+type UpdatesSeenRange struct {
+	OldestCreatedTimestamp *time.Time `json:"oldest_created_timestamp,omitempty"`
+	NewestCreatedTimestamp *time.Time `json:"newest_created_timestamp,omitempty"`
 }
 
 type UpdatesNestedGroup struct {

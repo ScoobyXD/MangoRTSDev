@@ -112,6 +112,14 @@ func (s *Server) handleEditorCollaborationOperation(w http.ResponseWriter, r *ht
 		writeEditorCollaborationStoreError(w, err)
 		return
 	}
+	if !commit.Deduplicated {
+		addedMentions := s.addedEditorHTMLMentionNotificationHTML(ref.CompanyID, commit.PreviousHTML, commit.CommittedHTML)
+		if addedMentions != "" {
+			s.recordMentionNotificationsWithIdempotencyScope(
+				r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", addedMentions, "editor-html:"+commit.OperationID,
+			)
+		}
+	}
 	s.wakeRealtimeSpine()
 	s.recordOperationalMetric("realtime.editor_operation_committed_count", "editor", 1, 0)
 	if commit.Deduplicated {

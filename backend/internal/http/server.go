@@ -296,6 +296,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/user-pins/", s.handleUserPinByID)
 	mux.HandleFunc("/v1/updates/groups/roots", s.handleUpdateRootGroups)
 	mux.HandleFunc("/v1/updates/groups/branch", s.handleUpdateBranch)
+	mux.HandleFunc("/v1/updates/seen-range", s.handleSeenUpdatesRange)
 	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
 	mux.HandleFunc("/nylas/webhook", s.handleNylasWebhook)
 	mux.HandleFunc("/v1/accounts", s.handleAccounts)

@@ -14,10 +14,11 @@ import {
   KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
 } from "../../modules/kanban/shared";
 import {
-  deleteNotification,
-  deleteNotifications,
+  fetchSeenUpdatesRange,
   fetchUpdateBranch,
   fetchUpdateRootGroups,
+  markNotificationRead,
+  markNotificationsRead,
   EVENT_NOTIFICATIONS_UPDATED,
   NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
   NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
@@ -26,6 +27,7 @@ import {
   type NotificationItem,
   type UpdateFeedFilter,
   type UpdateGroup,
+  type UpdateFeedView,
 } from "../../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import { createSavedViewID, fetchSavedViews, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
@@ -36,6 +38,7 @@ import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import { createSeenUpdatesDateWindow, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDateInput, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
 import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
@@ -83,8 +86,8 @@ type UpdatesViewProps = {
   companyID: string;
   currentUserID: string;
   onOpenNode: (nodeID: string, informationID?: string) => void;
-  onOpenLogicGate: (logicGateID: string, label: string) => void;
-  onOpenProject: (projectID: string, label: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string, informationID?: string) => void;
+  onOpenProject: (projectID: string, label: string, informationID?: string) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
   resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
@@ -183,6 +186,10 @@ export function UpdatesView({
   const [branchLoadingIDs, setBranchLoadingIDs] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<UpdateFeedFilter>("all");
+  const [viewMode, setViewMode] = useState<UpdateFeedView>("current");
+  const [seenDateWindow, setSeenDateWindow] = useState<SeenUpdatesDateWindow | null>(null);
+  const [seenQueryWindow, setSeenQueryWindow] = useState<SeenUpdatesDateWindow | null>(null);
+  const [seenRangeLoading, setSeenRangeLoading] = useState(false);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const fallbackSetting = useMemo(() => createDefaultUpdateGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
   const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => [fallbackSetting]);
@@ -266,7 +273,49 @@ export function UpdatesView({
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
 
+  const seenDateQueryRange = useMemo(
+    () => seenQueryWindow ? seenUpdatesDateQuery(seenQueryWindow) : null,
+    [seenQueryWindow],
+  );
+
   useEffect(() => {
+    if (viewMode !== "seen" || !companyID.trim()) {
+      setSeenRangeLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setSeenRangeLoading(true);
+    setError("");
+    void fetchSeenUpdatesRange(companyID)
+      .then((range) => {
+        if (cancelled) return;
+        const bounds = seenUpdatesDateBounds(range);
+        const nextWindow = bounds ? createSeenUpdatesDateWindow(bounds) : null;
+        setSeenDateWindow(nextWindow);
+        setSeenQueryWindow(nextWindow);
+      })
+      .catch((nextError) => {
+        if (cancelled) return;
+        setSeenDateWindow(null);
+        setSeenQueryWindow(null);
+        setError(nextError instanceof Error ? nextError.message : "Failed to load seen update dates");
+      })
+      .finally(() => {
+        if (!cancelled) setSeenRangeLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== "seen" || !seenDateWindow) return undefined;
+    const timerID = window.setTimeout(() => setSeenQueryWindow(seenDateWindow), 180);
+    return () => window.clearTimeout(timerID);
+  }, [seenDateWindow, viewMode]);
+
+  useEffect(() => {
+    setViewMode("current");
+    setSeenDateWindow(null);
+    setSeenQueryWindow(null);
     setHiddenNotificationIDs(new Set());
     setSelectedNotificationKey("");
     setSelectedNotificationKeys(new Set());
@@ -282,21 +331,30 @@ export function UpdatesView({
   }, [companyID, currentUserID]);
 
   useEffect(() => {
+    setHiddenNotificationIDs(new Set());
     setSelectedNotificationKey("");
     setSelectedNotificationKeys(new Set());
     setSelectionAnchorNotificationKey("");
     setHoveredNotificationKey("");
     setContextMenu(null);
     setActiveNodePanel(null);
-  }, [filter]);
+  }, [filter, seenDateQueryRange?.fromDate, seenDateQueryRange?.toDate, viewMode]);
 
   const loadBranch = useCallback((rootID: string) => {
     const cleanRootID = rootID.trim();
     if (!companyID.trim() || !cleanRootID) return;
+    if (viewMode === "seen" && !seenDateQueryRange) return;
     if (branchByRootID[cleanRootID] || branchLoadingIDs.has(cleanRootID)) return;
     setBranchLoadingIDs((current) => new Set(current).add(cleanRootID));
     setError("");
-    void fetchUpdateBranch({ companyID, filter, rootID: cleanRootID })
+    void fetchUpdateBranch({
+      companyID,
+      filter,
+      rootID: cleanRootID,
+      view: viewMode,
+      fromDate: seenDateQueryRange?.fromDate,
+      toDate: seenDateQueryRange?.toDate,
+    })
       .then((branch) => {
         setBranchByRootID((current) => ({ ...current, [cleanRootID]: branch }));
         setExpandedGroupIDs((current) => {
@@ -315,10 +373,10 @@ export function UpdatesView({
           return next;
         });
       });
-  }, [branchByRootID, branchLoadingIDs, companyID, filter]);
+  }, [branchByRootID, branchLoadingIDs, companyID, filter, seenDateQueryRange, viewMode]);
 
   useEffect(() => {
-    if (!companyID.trim()) {
+    if (!companyID.trim() || (viewMode === "seen" && !seenDateQueryRange)) {
       canonicalLoadInFlightRef.current = false;
       notificationReloadQueuedRef.current = false;
       canonicalLoadScopeRef.current = "";
@@ -329,7 +387,7 @@ export function UpdatesView({
       return;
     }
     let cancelled = false;
-    const scopeKey = `${companyID.trim()}\u0000${filter}`;
+    const scopeKey = `${companyID.trim()}\u0000${filter}\u0000${viewMode}\u0000${seenDateQueryRange?.fromDate ?? ""}\u0000${seenDateQueryRange?.toDate ?? ""}`;
     const preserveVisibleState = canonicalLoadScopeRef.current === scopeKey;
     canonicalLoadScopeRef.current = scopeKey;
     setLoadingRoots(!preserveVisibleState);
@@ -341,7 +399,13 @@ export function UpdatesView({
       setBranchLoadingIDs(new Set());
       setExpandedGroupIDs(new Set());
     }
-    void fetchUpdateRootGroups({ companyID, filter })
+    void fetchUpdateRootGroups({
+      companyID,
+      filter,
+      view: viewMode,
+      fromDate: seenDateQueryRange?.fromDate,
+      toDate: seenDateQueryRange?.toDate,
+    })
       .then(async (roots) => {
         if (cancelled) return;
         if (roots.length === 0) {
@@ -357,7 +421,14 @@ export function UpdatesView({
         }
         const branchResults = await Promise.allSettled(roots.map(async (root) => ({
           rootID: root.id,
-          branch: await fetchUpdateBranch({ companyID, filter, rootID: root.id }),
+          branch: await fetchUpdateBranch({
+            companyID,
+            filter,
+            rootID: root.id,
+            view: viewMode,
+            fromDate: seenDateQueryRange?.fromDate,
+            toDate: seenDateQueryRange?.toDate,
+          }),
         })));
         if (cancelled) return;
         const nextBranches: Record<string, UpdateGroup> = {};
@@ -406,7 +477,7 @@ export function UpdatesView({
       canonicalLoadInFlightRef.current = false;
       notificationReloadQueuedRef.current = false;
     };
-  }, [companyID, filter, reloadToken]);
+  }, [companyID, filter, reloadToken, seenDateQueryRange, viewMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -453,9 +524,12 @@ export function UpdatesView({
   const groupingSignature = useMemo(() => JSON.stringify({
     companyID,
     filter,
+    viewMode,
+    fromDate: seenDateQueryRange?.fromDate,
+    toDate: seenDateQueryRange?.toDate,
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
-  }), [companyID, filter, selectedSetting.groupings, selectedSetting.setting_id]);
+  }), [companyID, filter, seenDateQueryRange?.fromDate, seenDateQueryRange?.toDate, selectedSetting.groupings, selectedSetting.setting_id, viewMode]);
 
   useEffect(() => {
     if (displayGroups.length === 0) return;
@@ -565,6 +639,37 @@ export function UpdatesView({
     if (options.focusRow !== false) focusUpdateRow(row.rowKey);
     onOpenNode(nodeID, informationID);
   }, [focusUpdateRow, onOpenNode, resolveNodeDetails]);
+  const openUpdateRow = useCallback((row: UpdateFeedRow) => {
+    const nodeID = updateRowNodeID(row);
+    if (nodeID) {
+      openUpdateNodePanel(row);
+      return;
+    }
+    const informationID = row.item.information_id?.trim() || undefined;
+    const logicGateID = row.item.logic_gate_id?.trim()
+      || row.logicGate?.id.trim()
+      || (row.item.entity_type === "logic_gate" ? row.item.entity_id.trim() : "");
+    if (logicGateID) {
+      setActiveNodePanel(null);
+      onOpenLogicGate(
+        logicGateID,
+        resolveCurrentUpdateLogicGateLabel({
+          currentDetails: resolveLogicGateDetails?.(logicGateID),
+          groupedLabel: row.logicGate?.label || row.item.title,
+        }),
+        row.item.node_id?.trim() || undefined,
+        informationID,
+      );
+      return;
+    }
+    const projectID = row.project?.id.trim()
+      || (row.item.entity_type === "project" ? row.item.entity_id.trim() : "");
+    if (projectID) {
+      setActiveNodePanel(null);
+      onOpenProject(projectID, row.project?.label || row.item.title || "Project", informationID);
+    }
+  }, [onOpenLogicGate, onOpenProject, openUpdateNodePanel, resolveLogicGateDetails]);
+
 
   const openNodePanelByResource = useCallback((nodeID: string, label = "") => {
     const cleanNodeID = nodeID.trim();
@@ -601,8 +706,8 @@ export function UpdatesView({
     setSelectedNotificationKey(primaryKey);
     if (options.focus) focusUpdateRow(row.rowKey);
     if (!shouldOpen) return;
-    openUpdateNodePanel(row);
-  }, [focusUpdateRow, openUpdateNodePanel, selectedNotificationKeys, selectionAnchorNotificationKey, visibleUpdateRows]);
+    openUpdateRow(row);
+  }, [focusUpdateRow, openUpdateRow, selectedNotificationKeys, selectionAnchorNotificationKey, visibleUpdateRows]);
 
   const selectAdjacentUpdate = useCallback((row: UpdateFeedRow, direction: 1 | -1) => {
     if (visibleUpdateRows.length === 0) return;
@@ -659,7 +764,7 @@ export function UpdatesView({
       if (!retainedClickedPreview) setActiveNodePanel(null);
     }
     setContextMenu(null);
-    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -680,7 +785,7 @@ export function UpdatesView({
 
   const markAllUpdatesSeen = useCallback(() => {
     if (!companyID.trim()) return;
-    if (typeof window !== "undefined" && !window.confirm("Are you sure you want to mark all updates as seen? This will remove them from Updates.")) return;
+    if (typeof window !== "undefined" && !window.confirm("Are you sure you want to mark all current updates as seen? They will remain available in Seen Updates.")) return;
     const hiddenKeys = visibleNotifications.map(updateNotificationSelectionKey);
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
@@ -691,7 +796,7 @@ export function UpdatesView({
     setSelectedNotificationKeys(new Set());
     setSelectionAnchorNotificationKey("");
     setContextMenu(null);
-    void deleteNotifications({ companyID, source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }).catch((nextError) => {
+    void markNotificationsRead({ companyID, source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -782,17 +887,32 @@ export function UpdatesView({
     storeUpdatesNodePanelMainRatio(companyID, currentUserID, nextRatio);
   }, [companyID, currentUserID]);
 
-  const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
+  const meta = seenRangeLoading || loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
 
   return (
     <section ref={updatesShellRef} style={updatesShellStyle(Boolean(activeNodePanel), nodePanelMainRatio)}>
       <div style={updatesMainPaneStyle}>
         <div style={updatesHeaderStyle}>
           <div style={updatesTitleStackStyle}>
-            <h2 style={updatesTitleStyle}>Updates</h2>
+            <h2 style={updatesTitleStyle}>{viewMode === "seen" ? "Seen updates" : "Updates"}</h2>
             {meta && <div style={updatesMetaStyle}>{meta}</div>}
           </div>
           <div style={updatesHeaderControlsStyle}>
+            <button
+              type="button"
+              style={updatesHeaderActionButtonStyle}
+              onClick={() => setViewMode((current) => current === "current" ? "seen" : "current")}
+            >
+              {viewMode === "current" ? "View seen updates" : "View current updates"}
+            </button>
+            {viewMode === "seen" && seenDateWindow && (
+              <SeenUpdatesDateSlider
+                window={seenDateWindow}
+                onChange={(edge, value) => {
+                  setSeenDateWindow((current) => current ? moveSeenUpdatesDateWindow(current, edge, value) : current);
+                }}
+              />
+            )}
             <button
               type="button"
               aria-label="Collapse all Update groups"
@@ -813,14 +933,16 @@ export function UpdatesView({
             >
               Expand all
             </button>
-            <button
-              type="button"
-              style={updatesHeaderActionButtonStyle}
-              disabled={visibleNotifications.length === 0}
-              onClick={markAllUpdatesSeen}
-            >
-              Seen all
-            </button>
+            {viewMode === "current" && (
+              <button
+                type="button"
+                style={updatesHeaderActionButtonStyle}
+                disabled={visibleNotifications.length === 0}
+                onClick={markAllUpdatesSeen}
+              >
+                Seen all
+              </button>
+            )}
             <div style={updatesFilterRowStyle}>
               {UPDATE_FILTERS.map((item) => (
                 <button key={item.value} type="button" title={item.title} style={updatesFilterButtonStyle(filter === item.value)} onClick={() => setFilter(item.value)}>
@@ -832,7 +954,7 @@ export function UpdatesView({
         </div>
         <div ref={updatesListRef} className="mango-home-scroll" style={updatesListStyle}>
           {!loadingRoots && !error && displayGroups.length === 0 ? (
-            <div style={updatesEmptyStyle}>No updates</div>
+            <div style={updatesEmptyStyle}>{viewMode === "seen" ? "No seen updates in this date range" : "No current updates"}</div>
           ) : (
             <UpdateGroupList
               groups={displayGroups}
@@ -841,13 +963,13 @@ export function UpdatesView({
               onToggleGroup={toggleGroup}
               onSelectRow={selectUpdateRow}
               onSelectAdjacent={selectAdjacentUpdate}
-              onMarkSeen={markUpdateSeen}
+              onMarkSeen={viewMode === "current" ? markUpdateSeen : undefined}
               selectedNotificationKey={selectedNotificationKey}
               selectedNotificationKeys={selectedNotificationKeys}
               hoveredNotificationKey={hoveredNotificationKey}
               onHoverNotification={setHoveredNotificationKey}
               onOpenGroupResource={openGroupResource}
-              onOpenContextMenu={openUpdateContextMenu}
+              onOpenContextMenu={viewMode === "current" ? openUpdateContextMenu : undefined}
               resolveNodeDetails={resolveNodeDetails}
               resolveUserLabel={resolveUserLabel}
             />
@@ -899,6 +1021,43 @@ export function UpdatesView({
   );
 }
 
+function SeenUpdatesDateSlider({
+  window,
+  onChange,
+}: {
+  window: SeenUpdatesDateWindow;
+  onChange: (edge: "start" | "end", value: number) => void;
+}) {
+  return (
+    <div role="group" aria-label="Seen updates date range" style={seenUpdatesDateSliderStyle}>
+      <span style={seenUpdatesDateValueStyle}>{utcDayToDateInput(window.startDay)}</span>
+      <div style={seenUpdatesDateTracksStyle}>
+        <input
+          type="range"
+          min={window.oldestDay}
+          max={window.newestDay}
+          value={window.startDay}
+          aria-label="Seen updates start date"
+          aria-valuetext={utcDayToDateInput(window.startDay)}
+          style={seenUpdatesDateInputStyle}
+          onChange={(event) => onChange("start", Number(event.currentTarget.value))}
+        />
+        <input
+          type="range"
+          min={window.oldestDay}
+          max={window.newestDay}
+          value={window.endDay}
+          aria-label="Seen updates end date"
+          aria-valuetext={utcDayToDateInput(window.endDay)}
+          style={seenUpdatesDateInputStyle}
+          onChange={(event) => onChange("end", Number(event.currentTarget.value))}
+        />
+      </div>
+      <span style={seenUpdatesDateValueStyle}>{utcDayToDateInput(window.endDay)}</span>
+    </div>
+  );
+}
+
 function UpdateGroupList({
   groups,
   expandedGroupIDs,
@@ -922,13 +1081,13 @@ function UpdateGroupList({
   onToggleGroup: (groupID: string) => void;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen: (row: UpdateFeedRow) => void;
+  onMarkSeen?: (row: UpdateFeedRow) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
   onOpenGroupResource: (group: UpdateDisplayGroup) => void;
-  onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
+  onOpenContextMenu?: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
@@ -1077,12 +1236,12 @@ function UpdateRows({
   depth: number;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen: (row: UpdateFeedRow) => void;
+  onMarkSeen?: (row: UpdateFeedRow) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
-  onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
+  onOpenContextMenu?: (event: React.MouseEvent, row: UpdateFeedRow) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
 }) {
@@ -1108,7 +1267,7 @@ function UpdateRows({
               event.currentTarget.focus();
             }}
             onClick={(event) => onSelectRow(row, event)}
-            onContextMenu={(event) => onOpenContextMenu(event, row)}
+            onContextMenu={onOpenContextMenu ? (event) => onOpenContextMenu(event, row) : undefined}
             onMouseEnter={() => onHoverNotification(notificationKey)}
             onMouseLeave={() => onHoverNotification("")}
             onKeyDown={(event) => {
@@ -1141,17 +1300,19 @@ function UpdateRows({
               {rowBody && <span style={updateRowBodyStyle}>{rowBody}</span>}
             </span>
             <span style={updateRowTimeStyle}>{formatNotificationTimestamp(item.created_timestamp)}</span>
-            <button
-              type="button"
-              style={updateMarkReadButtonStyle}
-              disabled={!item.notification_id?.trim()}
-              onClick={(event) => {
-                event.stopPropagation();
-                onMarkSeen(row);
-              }}
-            >
-              Seen
-            </button>
+            {onMarkSeen && (
+              <button
+                type="button"
+                style={updateMarkReadButtonStyle}
+                disabled={!item.notification_id?.trim()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onMarkSeen(row);
+                }}
+              >
+                Seen
+              </button>
+            )}
           </div>
         );
       })}
@@ -1968,6 +2129,37 @@ const updatesHeaderActionButtonStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   boxShadow: "0 6px 14px rgba(15, 23, 42, 0.06)",
 };
+const seenUpdatesDateSliderStyle: React.CSSProperties = {
+  minWidth: 250,
+  display: "grid",
+  gridTemplateColumns: "72px minmax(110px, 1fr) 72px",
+  alignItems: "center",
+  gap: 6,
+  padding: "3px 8px",
+  border: "1px solid rgba(15, 23, 42, 0.14)",
+  borderRadius: 6,
+  background: "rgba(255, 255, 255, 0.76)",
+};
+const seenUpdatesDateTracksStyle: React.CSSProperties = {
+  minWidth: 110,
+  display: "grid",
+  gap: 1,
+};
+const seenUpdatesDateInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 12,
+  margin: 0,
+  accentColor: "#2563eb",
+  cursor: "pointer",
+};
+const seenUpdatesDateValueStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 10,
+  fontWeight: 800,
+  fontVariantNumeric: "tabular-nums",
+  textAlign: "center",
+};
+
 const updatesFilterRowStyle: React.CSSProperties = {
   display: "inline-flex",
   border: "1px solid rgba(15, 23, 42, 0.18)",
