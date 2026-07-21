@@ -2311,6 +2311,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [accent, blocks]);
 
+  const revealNodeEmailMessage = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID) return;
+    setNodeEmailNavigationRequest((current) => ({
+      messageID: cleanMessageID,
+      requestID: (current?.requestID ?? 0) + 1,
+    }));
+    setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
+    setClosedEmailBlockIDs((current) => {
+      if (!current.has(NODE_EMAIL_COLUMN_LAYOUT_ID)) return current;
+      const next = new Set(current);
+      next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      return next;
+    });
+    setFocusedTextBlockID("");
+  }, []);
+
   const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
     if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth, maxWidth);
@@ -3406,7 +3423,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <div
                     data-node-text-box-header="true"
                     className="mango-editor-header-scroll"
-                    style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockEmailAccent ? `linear-gradient(90deg, ${blockEmailAccent}30, ${blockEmailAccent}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}
+                    title={linkedEmailMessageID ? "Show the linked email message in the email column" : undefined}
+                    onClick={(event) => {
+                      if (!linkedEmailMessageID) return;
+                      const target = event.target;
+                      if (target instanceof Element && target.closest("button, input, label, select, textarea, a, details, summary")) return;
+                      revealNodeEmailMessage(linkedEmailMessageID);
+                    }}
+                    style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockEmailAccent ? `linear-gradient(90deg, ${blockEmailAccent}30, ${blockEmailAccent}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", cursor: linkedEmailMessageID ? "pointer" : undefined }}
                   >
                     <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${blockEmailAccent ? 128 : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 96}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
@@ -3464,17 +3488,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       accent={blockEmailAccent || accent}
                       surfaceText={surfaceText}
                       strokeColor={strokeColor}
-                      ruleColor={ruleColor}
+                      activeSelection={activeNodeEmailSelection}
+                      highlightRemovalRequest={emailHighlightRemovalRequest}
                       onEmailSelectionChatRequest={openEmailSelectionChat}
                       onEmailSelectionTextBoxRequest={(messageID, quote) => { createEmailTextBlock(messageID, quote); }}
                       onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
-                      onEmailMessageTextBoxRequest={(messageID) => { createEmailTextBlock(messageID); }}
-                      onEmailMessageActivate={revealEmailTextBlock}
-                      onReplyEditorFocus={() => {
-                        setEmailReplyBlockID(block.id);
-                        setFocusedTextBlockID("");
-                        if (formattingControllerRef) formattingControllerRef.current = null;
-                      }}
                       onError={onError}
                     />
                   )}

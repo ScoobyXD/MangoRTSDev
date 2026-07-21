@@ -66,9 +66,10 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 
 - The bounded Node text-box list keeps stable leading, trailing, and pinned-row spacer identities while its mounted window advances. The virtualizer also preserves the latest native scroll position across the React commit, so rapid wheel or trackpad input cannot be clamped back to a previously mounted text box.
 - The Node scroll root disables browser scroll anchoring and contains vertical overscroll. Inner editor, chat, and email scroll areas retain their own scrolling, while the outer text-box list remains monotonic from the first row through the last.
-- An email-associated text box exposes a clear **Show email** button in its header. It expands the existing full email conversation viewer inside that fixed-height text-box card without inserting provider content into the editable document.
-- The expanded viewer shows the provider message body and available From, To, Cc, and Bcc metadata. **Hide email** removes that viewer and restores the full editor/chat height; this display state is local UI only and does not alter the text-box document or email association.
-- The header toggle remains an in-text-box expansion when the text box references a child message but the Node's attached-email projection references the thread root. The preview resolves the matching attached thread and mailbox scope, focuses the exact linked message, and reports a retryable inline error instead of redirecting to the separate Node email column.
+- An email-associated text box exposes a clear **Show email** button in its header. It expands one self-contained plane for the exact linked provider message inside that fixed-height text-box card without inserting provider content into the editable document. The plane does not include the rest of the thread, thread timeline controls, or reply controls.
+- The expanded message shows its body and available Subject, From, To, Cc, and Bcc metadata. **Hide email** removes that plane and restores the full editor/chat height; this display state is local UI only and does not alter the text-box document or email association.
+- A child-message link still resolves through an attached thread root and the correct mailbox scope, but only that child is rendered inline. Clicking a linked text-box header outside its controls separately reopens the Node email column and smoothly focuses the exact related message in the full thread viewer.
+- Email text used to start a chat remains visibly highlighted in both plain-text and rich-HTML provider bodies. The stored quote and offsets drive the highlight, and quote matching recovers it if provider markup causes offsets to drift.
 
 ### Node Email Focus And Compact Chat Note (2026-07-21)
 

@@ -43,6 +43,7 @@ import {
   type EmailSignatureApplicationSession,
   type ScopedEmailSignatureState,
 } from "./emailSignatureBody.js";
+import { applyEmailBodyHighlights, type EmailBodyHighlightRange } from "./emailBodyHighlights.js";
 import { splitChatTextLinks } from "./nodeChatLinks";
 import {
   getEditorSelectionOffsets,
@@ -4281,6 +4282,7 @@ const AttachedEmailThreadCard: React.FC<{
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const handledFocusMessageRequestRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -4304,6 +4306,9 @@ const AttachedEmailThreadCard: React.FC<{
     const targetMessageID = initialFocusMessageID?.trim() ?? "";
     if (!targetMessageID || !onFocusMessageFound) return;
     if (targetMessageID !== email.messageID && !threadMessages.some((message) => message.id === targetMessageID)) return;
+    const requestKey = `${targetMessageID}:${initialFocusMessageRequestID}`;
+    if (handledFocusMessageRequestRef.current === requestKey) return;
+    handledFocusMessageRequestRef.current = requestKey;
     onFocusMessageFound(email.messageID);
   }, [email.messageID, initialFocusMessageID, initialFocusMessageRequestID, onFocusMessageFound, threadMessages]);
 
@@ -4590,13 +4595,11 @@ type LinkedEmailPreviewPaneProps = {
   accent: string;
   surfaceText: string;
   strokeColor: string;
-  ruleColor: string;
+  activeSelection?: EmailActiveSelection | null;
+  highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onEmailSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
-  onEmailMessageTextBoxRequest?: (messageID: string) => void;
-  onEmailMessageActivate?: (messageID: string) => void;
-  onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
 };
 
@@ -4665,7 +4668,7 @@ async function resolveLinkedEmailPreview(
   return null;
 }
 
-/** Full email conversation card embedded below a linked text-box header. */
+/** One exact provider message embedded below its linked text-box header. */
 export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   messageID,
   emails,
@@ -4682,16 +4685,13 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   accent,
   surfaceText,
   strokeColor,
-  ruleColor,
+  activeSelection = null,
+  highlightRemovalRequest = null,
   onEmailSelectionChatRequest,
   onEmailSelectionTextBoxRequest,
   onEmailSelectionNodeRequest,
-  onEmailMessageTextBoxRequest,
-  onEmailMessageActivate,
-  onReplyEditorFocus,
   onError,
 }) => {
-  const [replyTarget, setReplyTarget] = useState<{ messageID: string; replyAll: boolean } | null>(null);
   const [resolvedPreview, setResolvedPreview] = useState<ResolvedLinkedEmailPreview | null>(null);
   const [resolving, setResolving] = useState(true);
   const [resolveError, setResolveError] = useState("");
@@ -4699,7 +4699,6 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    setReplyTarget(null);
     setResolvedPreview(null);
     setResolveError("");
     setResolving(true);
@@ -4734,12 +4733,16 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
         </div>
       )}
       {resolvedPreview && (
-        <AttachedEmailThreadCard
-          email={resolvedPreview.email}
+        <EmailConversationPane
+          messageID={resolvedPreview.focusMessageID}
+          collaborationID={resolvedPreview.email.collaborationID}
           nodeID={nodeID}
+          emailThreadID={resolvedPreview.email.emailThreadID}
           apiBase={apiBase}
           companyID={companyID}
           companyUsers={companyUsers}
+          sharedInboxID={resolvedPreview.email.sharedInboxID}
+          accountEmail={resolvedPreview.email.accountEmail}
           attachmentRequestJSON={attachmentRequestJSON}
           attachmentResourceType={attachmentResourceType}
           attachmentResourceID={attachmentResourceID}
@@ -4749,28 +4752,18 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
           accent={accent}
           surfaceText={surfaceText}
           strokeColor={strokeColor}
-          ruleColor={ruleColor}
-          selected
-          collapsed={false}
-          draggable={false}
+          ruleColor="transparent"
+          activeSelection={activeSelection?.messageID === resolvedPreview.focusMessageID ? activeSelection : null}
+          highlightRemovalRequest={highlightRemovalRequest?.messageID === resolvedPreview.focusMessageID ? highlightRemovalRequest : null}
           initialFocusMessageID={resolvedPreview.focusMessageID}
           initialFocusMessageRequestID={resolveRequestID + 1}
-          replyTargetMessageID={replyTarget?.messageID ?? ""}
-          replyAll={replyTarget?.replyAll ?? false}
-          onToggleCollapsed={() => undefined}
-          onSelect={() => undefined}
-          onMessageActivate={onEmailMessageActivate}
-          onReply={(messageID, replyAll) => setReplyTarget({ messageID, replyAll })}
-          onReplyComplete={() => setReplyTarget(null)}
-          onReplyEditorFocus={onReplyEditorFocus}
+          inlineExpansion
+          singleMessageOnly
           onError={onError}
-          onDragStart={() => undefined}
-          onDragEnd={() => undefined}
-          onDropOnEmail={(event) => event.preventDefault()}
-          onSelectionChatRequest={onEmailSelectionChatRequest}
-          onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
-          onSelectionNodeRequest={onEmailSelectionNodeRequest}
-          onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
+          onSelectionChatRequest={onEmailSelectionChatRequest ? (selection) => onEmailSelectionChatRequest(selection.messageID, selection) : undefined}
+          onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest ? (selection) => onEmailSelectionTextBoxRequest(selection.messageID, selection.quote) : undefined}
+          onSelectionNodeRequest={onEmailSelectionNodeRequest ? (selection) => onEmailSelectionNodeRequest(selection.messageID, selection.quote) : undefined}
+          messageAccents={{ [resolvedPreview.focusMessageID]: accent }}
         />
       )}
     </div>
@@ -5437,6 +5430,7 @@ type EmailConversationPaneProps = {
   initialFocusMessageRequestID?: number;
   initialReplyAll?: boolean;
   inlineExpansion?: boolean;
+  singleMessageOnly?: boolean;
   onReplyComplete?: () => void;
   onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
@@ -5464,12 +5458,7 @@ type EmailFrameSelection = Pick<EmailSelectionDraft, "quote" | "startOffset" | "
   clientBottom: number;
 };
 
-type EmailLocalHighlight = {
-  id: string;
-  quote: string;
-  startOffset: number;
-  endOffset: number;
-};
+type EmailLocalHighlight = EmailBodyHighlightRange;
 
 type EmailLocalHighlightsByMessageID = Record<string, EmailLocalHighlight[]>;
 
@@ -5578,14 +5567,17 @@ const EmailBodyFrame: React.FC<{
   compact: boolean;
   strokeColor: string;
   accent: string;
+  highlights?: readonly EmailLocalHighlight[];
+  activeSelection?: EmailActiveSelection | null;
   onSelectionChange?: (selection: EmailFrameSelection | null) => void;
-}> = ({ message, body, apiBase, companyID, sharedInboxID, accountEmail, collaborationID, compact, strokeColor, accent, onSelectionChange }) => {
+}> = ({ message, body, apiBase, companyID, sharedInboxID, accountEmail, collaborationID, compact, strokeColor, accent, highlights = [], activeSelection = null, onSelectionChange }) => {
   const attachments = useMemo(() => message.attachments ?? [], [message.attachments]);
   const [srcDoc, setSrcDoc] = useState(() => messageDocument(body, compact));
   const [height, setHeight] = useState(compact ? 96 : 420);
   const [selectedImage, setSelectedImage] = useState<EmailBodyImageSelection | null>(null);
   const [previewImage, setPreviewImage] = useState<EmailBodyImageSelection | null>(null);
   const frameCleanupRef = useRef<() => void>(() => undefined);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const filenameBySourceRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -5636,12 +5628,17 @@ const EmailBodyFrame: React.FC<{
 
   useEffect(() => () => frameCleanupRef.current(), []);
 
+  useEffect(() => {
+    applyEmailBodyHighlights(iframeRef.current?.contentDocument, highlights, activeSelection);
+  }, [activeSelection, highlights]);
+
   const handleLoad = useCallback((event: React.SyntheticEvent<HTMLIFrameElement>) => {
     frameCleanupRef.current();
     frameCleanupRef.current = () => undefined;
     const frame = event.currentTarget;
     const frameDocument = frame.contentDocument;
     if (!frameDocument?.body || !frameDocument.documentElement) return;
+    applyEmailBodyHighlights(frameDocument, highlights, activeSelection);
     const resize = () => {
       const measured = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
       setHeight(Math.min(1600, Math.max(compact ? 64 : 190, measured + 4)));
@@ -5721,7 +5718,7 @@ const EmailBodyFrame: React.FC<{
       frameDocument.removeEventListener("keyup", publishSelection);
       imageCleanups.forEach((cleanup) => cleanup());
     };
-  }, [accent, compact, onSelectionChange]);
+  }, [accent, activeSelection, compact, highlights, onSelectionChange]);
 
   return (
     <>
@@ -5738,6 +5735,7 @@ const EmailBodyFrame: React.FC<{
           </button>
         )}
         <iframe
+          ref={iframeRef}
           title={`Email body ${message.id}`}
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           srcDoc={srcDoc}
@@ -6215,6 +6213,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   initialFocusMessageRequestID = 0,
   initialReplyAll = false,
   inlineExpansion = false,
+  singleMessageOnly = false,
   onReplyComplete,
   onReplyEditorFocus,
   onError,
@@ -6362,7 +6361,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       if (!payload) throw new Error("email_collaboration_thread_unavailable");
       if (cancelled) return;
       setMessage(payload);
-      setThreadMessages(immediateMessages.length ? immediateMessages : [payload]);
+      setThreadMessages(singleMessageOnly ? [payload] : immediateMessages.length ? immediateMessages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setCcDraft("");
@@ -6370,7 +6369,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
 
-      if (storedThread || collaborationThread) return;
+      if (singleMessageOnly || storedThread || collaborationThread) return;
 
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
@@ -6419,7 +6418,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [collaborationID, companyID, emailThreadID, mailboxScope, messageID, nodeID]);
+  }, [collaborationID, companyID, emailThreadID, mailboxScope, messageID, nodeID, singleMessageOnly]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;
@@ -6436,7 +6435,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const recipients = parseEmailAddressDraft(toDraft);
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
-  const providerReplyAvailable = editable && !collaborationID?.trim();
+  const providerReplyAvailable = editable && !collaborationID?.trim() && !singleMessageOnly;
   const replyEditingEnabled = providerReplyAvailable && !sending;
   const canSend = replyEditingEnabled && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
@@ -6459,7 +6458,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
     : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionTextBoxRequest || onSelectionNodeRequest);
-  const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  const displayThreadMessages = useMemo(() => {
+    const merged = mergeEmailThreadMessages(message, threadMessages, sentReplies);
+    if (!singleMessageOnly) return merged;
+    const exactMessage = merged.find((candidate) => candidate.id === messageID)
+      ?? (message?.id === messageID ? message : null)
+      ?? merged[0]
+      ?? null;
+    return exactMessage ? [exactMessage] : [];
+  }, [message, messageID, sentReplies, singleMessageOnly, threadMessages]);
   useEffect(() => {
     setExpandedThreadMessageID((current) => {
       if (current && displayThreadMessages.some((threadMessage) => threadMessage.id === current)) return current;
@@ -6911,8 +6918,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const threadMessageID = threadMessage.id || messageID;
               const threadMessageAccent = messageAccents[threadMessageID]?.trim() || "";
               const isSelectedMessage = threadMessage.id === message.id;
-              const hideInlineMessageChrome = false;
-              const isExpanded = expandedThreadMessageID === threadMessageID;
+              const hideInlineMessageChrome = singleMessageOnly;
+              const isExpanded = singleMessageOnly || expandedThreadMessageID === threadMessageID;
               const fullThreadBody = threadMessage.body || threadMessage.snippet || "";
               const quotedContent = splitEmailQuotedHistory(fullThreadBody);
               const quotedHistoryVisible = quotedHistoryMessageIDs.has(threadMessageID);
@@ -6930,19 +6937,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               return (
                 <div
                   key={emailThreadMessageRenderKey(threadMessage) || `${index}`}
-                  data-email-timeline-item="true"
+                  data-email-timeline-item={singleMessageOnly ? undefined : "true"}
                   data-email-message-id={threadMessage.id}
+                  data-email-single-message={singleMessageOnly ? "true" : undefined}
                   data-email-message-sources={emailThreadMessageSourceLabel(threadMessage)}
                   style={{
                     minWidth: 0,
                     display: "grid",
-                    gridTemplateColumns: "20px minmax(0, 1fr)",
+                    gridTemplateColumns: singleMessageOnly ? "minmax(0, 1fr)" : "20px minmax(0, 1fr)",
                     gap: 8,
                     alignItems: "stretch",
                     margin: inlineExpansion ? "8px 0" : "12px 0",
                   }}
                 >
-                  <NodeEmailConversationTimeline expanded={isExpanded} sent={threadMessageIsSent} timelineStart={index === 0} timelineEnd={index === displayThreadMessages.length - 1} />
+                  {!singleMessageOnly && <NodeEmailConversationTimeline expanded={isExpanded} sent={threadMessageIsSent} timelineStart={index === 0} timelineEnd={index === displayThreadMessages.length - 1} />}
                   <div
                     style={{
                       position: "relative",
@@ -6959,6 +6967,18 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       transition: "background 140ms ease, box-shadow 160ms ease, border-color 140ms ease",
                     }}
                   >
+                  {hideInlineMessageChrome && (
+                    <div data-linked-email-message-metadata="true" role="group" aria-label="Linked email message details" style={{ display: "grid", gap: 3, color: "rgba(71,85,105,0.9)", fontSize: 10.5, fontWeight: 700 }}>
+                      <div style={{ minWidth: 0, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                        <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12 }}>{threadMessage.subject || "(no subject)"}</strong>
+                        <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)" }}>{formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}</span>
+                      </div>
+                      <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>From:</strong> {fromLine}</div>
+                      <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>To:</strong> {toLine}</div>
+                      {formatAddressList(threadMessage.cc) && <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>Cc:</strong> {formatAddressList(threadMessage.cc)}</div>}
+                      {formatAddressList(threadMessage.bcc) && <div style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>Bcc:</strong> {formatAddressList(threadMessage.bcc)}</div>}
+                    </div>
+                  )}
                   {!hideInlineMessageChrome && (
                     <>
                       <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${onMessageTextBoxRequest ? " auto" : ""} auto auto`, alignItems: "start", gap: 8 }}>
@@ -7076,6 +7096,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       compact={inlineExpansion}
                       strokeColor={strokeColor}
                       accent={accent}
+                      highlights={emailHighlightsByMessageID[threadMessageID] ?? []}
+                      activeSelection={activeSelection?.messageID === threadMessageID ? activeSelection : null}
                       onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, selection) : undefined}
                     />
                   ) : (

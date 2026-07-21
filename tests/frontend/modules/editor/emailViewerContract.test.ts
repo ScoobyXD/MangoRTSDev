@@ -39,7 +39,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /<EmailBodyFrame/);
   assert.match(nodeParts, /splitEmailQuotedHistory\(fullThreadBody\)/);
   assert.match(nodeParts, /body=\{displayThreadBody\}/);
-  assert.match(nodeParts, /data-email-timeline-item="true"/);
+  assert.match(nodeParts, /data-email-timeline-item=\{singleMessageOnly \? undefined : "true"\}/);
   assert.match(nodeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
   assert.match(nodeParts, /data-email-message-id=\{threadMessage\.id\}/);
   assert.match(nodeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(threadMessage\)\}/);
@@ -72,9 +72,12 @@ test("node-attached email viewer discloses per-message recipients while retainin
 test("node email and linked text boxes expose animated two-way navigation and collision-free colors", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const emailBodyHighlights = source("frontend/src/modules/editor/emailBodyHighlights.ts");
   const triageChat = source("frontend/src/pages/home/EmailCollaborationChatSurface.tsx");
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
+  assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
+  assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID\)/);
   assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
   assert.match(nodeSurface, /messageID=\{linkedEmailMessageID\}/);
   assert.match(nodeSurface, /emails=\{nodeAttachedEmails\}/);
@@ -117,6 +120,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /resolveLinkedEmailPreview/);
   assert.match(nodeParts, /loadAttachedEmailThreadPreview/);
   assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
+  assert.match(nodeParts, /singleMessageOnly/);
+  assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);
+  assert.match(nodeParts, /data-linked-email-message-metadata="true"/);
+  assert.match(nodeParts, /setThreadMessages\(singleMessageOnly \? \[payload\]/);
+  assert.match(nodeParts, /applyEmailBodyHighlights\(frameDocument, highlights, activeSelection\)/);
+  assert.match(emailBodyHighlights, /data-mango-email-body-highlight/);
+  assert.match(emailBodyHighlights, /unwrapExistingHighlights/);
+  assert.match(emailBodyHighlights, /text\.indexOf\(quote\)/);
   assert.match(nodeParts, /data-node-email-thread-list="true"/);
   assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
