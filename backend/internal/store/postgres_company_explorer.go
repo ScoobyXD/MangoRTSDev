@@ -1036,9 +1036,6 @@ func execOptionalPostgresShapeCleanupTx(tx *sql.Tx, tableName, query string, arg
 
 func postgresDeleteNodeWithDependentProjectionsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	defer observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.total")()
-	if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, companyID, nodeID); err != nil {
-		return err
-	}
 	stop := observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.projection_dependencies")
 	err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 		CompanyID: companyID,

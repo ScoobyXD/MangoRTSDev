@@ -3,18 +3,22 @@ package store
 import "miraeopus/backend/internal/domain"
 
 type memoryNodeGraphEventSnapshot struct {
-	nodes             map[string]domain.Node
-	nodeInfo          map[string][]domain.NodeInformation
-	nodeText          map[string]map[string]domain.NodeProjection
-	nodeRels          map[string][]domain.NodeRelationship
-	folders           map[string]domain.CompanyExplorerFolder
-	folderItems       map[string]domain.CompanyExplorerFolderItem
-	defaultFolderSeed map[string]bool
-	nodeMapPositions  map[string]domain.NodeMapPosition
-	kanbanCards       map[string][]domain.KanbanCard
-	emailNodeLinks    map[string]communicationsEmailNodeLink
-	domainEvents      map[string]domain.DomainEvent
-	effectiveAccess   map[string]domain.EffectiveResourceAccess
+	nodes                          map[string]domain.Node
+	nodeInfo                       map[string][]domain.NodeInformation
+	nodeText                       map[string]map[string]domain.NodeProjection
+	nodeRels                       map[string][]domain.NodeRelationship
+	folders                        map[string]domain.CompanyExplorerFolder
+	folderItems                    map[string]domain.CompanyExplorerFolderItem
+	defaultFolderSeed              map[string]bool
+	nodeMapPositions               map[string]domain.NodeMapPosition
+	kanbanCards                    map[string][]domain.KanbanCard
+	emailNodeLinks                 map[string]communicationsEmailNodeLink
+	emailDrafts                    map[string]domain.CommunicationsEmailDraft
+	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
+	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
+	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
+	domainEvents                   map[string]domain.DomainEvent
+	effectiveAccess                map[string]domain.EffectiveResourceAccess
 }
 
 func cloneMemoryMap[V any](items map[string]V) map[string]V {
@@ -43,18 +47,22 @@ func cloneMemoryNodeText(items map[string]map[string]domain.NodeProjection) map[
 
 func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSnapshot {
 	return memoryNodeGraphEventSnapshot{
-		nodes:             cloneMemoryMap(r.nodes),
-		nodeInfo:          cloneMemorySliceMap(r.nodeInfo),
-		nodeText:          cloneMemoryNodeText(r.nodeText),
-		nodeRels:          cloneMemorySliceMap(r.nodeRels),
-		folders:           cloneMemoryMap(r.folders),
-		folderItems:       cloneMemoryMap(r.folderItems),
-		defaultFolderSeed: cloneMemoryMap(r.defaultFolderSeed),
-		nodeMapPositions:  cloneMemoryMap(r.nodeMapPositions),
-		kanbanCards:       cloneMemorySliceMap(r.kanbanCards),
-		emailNodeLinks:    cloneMemoryMap(r.emailNodeLinks),
-		domainEvents:      cloneMemoryMap(r.domainEvents),
-		effectiveAccess:   cloneMemoryMap(r.effectiveAccess),
+		nodes:                          cloneMemoryMap(r.nodes),
+		nodeInfo:                       cloneMemorySliceMap(r.nodeInfo),
+		nodeText:                       cloneMemoryNodeText(r.nodeText),
+		nodeRels:                       cloneMemorySliceMap(r.nodeRels),
+		folders:                        cloneMemoryMap(r.folders),
+		folderItems:                    cloneMemoryMap(r.folderItems),
+		defaultFolderSeed:              cloneMemoryMap(r.defaultFolderSeed),
+		nodeMapPositions:               cloneMemoryMap(r.nodeMapPositions),
+		kanbanCards:                    cloneMemorySliceMap(r.kanbanCards),
+		emailNodeLinks:                 cloneMemoryMap(r.emailNodeLinks),
+		emailDrafts:                    cloneMemoryMap(r.emailDrafts),
+		nodeEmailThreads:               cloneMemoryMap(r.nodeEmailThreads),
+		emailCollaborations:            cloneMemoryMap(r.emailCollaborations),
+		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
+		domainEvents:                   cloneMemoryMap(r.domainEvents),
+		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
 	}
 }
 
@@ -69,6 +77,10 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.nodeMapPositions = snapshot.nodeMapPositions
 	r.kanbanCards = snapshot.kanbanCards
 	r.emailNodeLinks = snapshot.emailNodeLinks
+	r.emailDrafts = snapshot.emailDrafts
+	r.nodeEmailThreads = snapshot.nodeEmailThreads
+	r.emailCollaborations = snapshot.emailCollaborations
+	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
 	r.domainEvents = snapshot.domainEvents
 	r.effectiveAccess = snapshot.effectiveAccess
 }

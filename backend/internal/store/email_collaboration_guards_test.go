@@ -141,9 +141,6 @@ func TestMemoryEmailCollaborationNodeUsesNormalWorkSemanticsAndProtectsCanonical
 	}); !errors.Is(err, ErrProtectedEmailCollaborationResource) {
 		t.Fatalf("SetEntityPermissions email node error = %v, want protected participant policy", err)
 	}
-	if err := repo.DeleteNode(companyID, collaboration.NodeID); !errors.Is(err, ErrProtectedEmailCollaborationResource) {
-		t.Fatalf("DeleteNode email node error = %v, want protected canonical source", err)
-	}
 
 	folders := companyExplorerDefaultFolderIDs(companyID)
 	children, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: folders.NodesFolderID})
@@ -153,6 +150,42 @@ func TestMemoryEmailCollaborationNodeUsesNormalWorkSemanticsAndProtectsCanonical
 	row := findCompanyExplorerV2Row(children.Rows, CompanyExplorerV2EntityNode, collaboration.NodeID)
 	if row == nil || row.ParentEntityID != folders.NodesFolderID {
 		t.Fatalf("email node Explorer row = %+v, want Unfiled/Nodes", row)
+	}
+
+	const draftID = "delete-email-node-draft"
+	repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
+		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		IsShared: true,
+	}
+
+	emailThreadID := collaboration.EmailThreadID
+	if emailThreadID == "" {
+		t.Fatal("email collaboration did not persist an independent email thread")
+	}
+	if err := repo.DeleteNode(companyID, collaboration.NodeID); err != nil {
+		t.Fatalf("DeleteNode email node: %v", err)
+	}
+	if _, err := repo.GetNode(companyID, collaboration.NodeID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetNode after email node delete error = %v, want not found", err)
+	}
+	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, creator.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetCommunicationsEmailCollaboration after node delete error = %v, want not found", err)
+	}
+	if _, ok := repo.emailCollaborationParticipants[emailCollaborationParticipantKey(companyID, collaboration.CollaborationID, creator.UserID)]; ok {
+		t.Fatal("email collaboration participant survived its collaboration node")
+	}
+	if _, err := repo.GetCommunicationsNodeEmailThread(companyID, collaboration.NodeID, emailThreadID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetCommunicationsNodeEmailThread after node delete error = %v, want not found", err)
+	}
+	if _, ok := repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]; ok {
+		t.Fatal("shared email draft survived its collaboration node")
+	}
+	thread, err := repo.GetCommunicationsEmailThread(companyID, emailThreadID)
+	if err != nil {
+		t.Fatalf("GetCommunicationsEmailThread after node delete: %v", err)
+	}
+	if thread.RootProviderMessageID != collaboration.RootMessageID || len(thread.Messages) == 0 {
+		t.Fatalf("stored email thread after node delete = %+v, want original email intact", thread)
 	}
 }
 

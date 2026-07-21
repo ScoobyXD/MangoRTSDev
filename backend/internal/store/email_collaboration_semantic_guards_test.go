@@ -20,6 +20,7 @@ func TestPostgresEmailNodeWorkPathsAreOpenWhileCanonicalEmailRemainsProtected(t 
 		{file: "postgres_gvic.go", signature: "func (r *PostgresRepo) applyResourceGVICAssignmentCommand"},
 		{file: "accounts.go", signature: "func (r *PostgresRepo) SetNodeAccountAssignments"},
 		{file: "postgres_projects.go", signature: "func (r *PostgresRepo) UpsertProjectRelationship"},
+		{file: "postgres_company_explorer.go", signature: "func postgresDeleteNodeWithDependentProjectionsTx"},
 	}
 	for _, test := range allowed {
 		raw, err := os.ReadFile(test.file)

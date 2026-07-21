@@ -7,10 +7,10 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-// ErrProtectedEmailCollaborationResource marks mutations that would break the
-// durable email/node bridge. Collaboration nodes are intentionally managed by
-// the email collaboration lifecycle rather than by generic node, permission,
-// or Company Explorer mutation APIs.
+// ErrProtectedEmailCollaborationResource marks mutations that would overwrite
+// or detach collaboration-owned canonical resources outside their lifecycle.
+// Deleting the owning Node is allowed and tears down the Node-side bridge while
+// leaving the independent stored email thread and provider email untouched.
 var ErrProtectedEmailCollaborationResource = errors.New("protected email collaboration resource")
 
 func (r *MemoryRepo) emailCollaborationForNodeLocked(companyID, nodeID string) (domain.CommunicationsEmailCollaboration, bool) {
