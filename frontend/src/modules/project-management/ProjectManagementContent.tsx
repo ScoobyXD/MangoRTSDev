@@ -71,9 +71,11 @@ import {
   ProjectListView,
   resolveProjectFolderRootID,
   type ProjectListContextMenuRequest,
+  type ProjectListFieldUpdate,
   type ProjectListGroupingField,
 } from "./ProjectListView.js";
 import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
+import { EVENT_PROJECT_VIEW_SETTINGS_REQUESTED } from "./projectViewEvents.js";
 
 type ProjectManagementContentProps = {
   accent: string;
@@ -677,6 +679,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
   const [projectListGroupings, setProjectListGroupings] = useState(() => readProjectListGroupings(companyID));
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectFieldSavingIDs, setProjectFieldSavingIDs] = useState<Set<string>>(() => new Set());
   const [projectFolders, setProjectFolders] = useState<CompanyExplorerFolder[]>([]);
   const [projectFolderItems, setProjectFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
@@ -1303,6 +1306,19 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           parentFolderID: dialog.parentFolderID,
           name,
         });
+        const createdFolder: CompanyExplorerFolder = {
+          company_id: created.company_id || companyID,
+          folder_id: created.entity_id,
+          parent_folder_id: created.parent_entity_id || dialog.parentFolderID,
+          folder_kind: "project",
+          name: created.name || name,
+          position: created.position ?? 0,
+          created_timestamp: created.created_timestamp,
+          updated_timestamp: created.updated_timestamp,
+        };
+        setProjectFolders((current) => (
+          current.some((folder) => folder.folder_id === createdFolder.folder_id) ? current : [...current, createdFolder]
+        ));
         if (dialog.projectIDs.length > 0) {
           await moveProjectsToFolder({
             companyID,
@@ -1375,6 +1391,64 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
   }, [closeProjectAssignments, companyID, loadProjectList, projectAssignmentAccountIDs, projectAssignmentTeamIDs, projectAssignmentsTarget]);
 
+  const saveProjectListField = useCallback(async (project: ProjectRecord, update: ProjectListFieldUpdate) => {
+    const projectID = project.project_id.trim();
+    if (!projectID) return;
+    const accountIDs = update.accountIDs ?? project.accounts?.map((account) => account.account_id) ?? [];
+    const teamIDs = update.teamIDs ?? project.teams?.map((team) => team.group_id) ?? [];
+    const optimistic: ProjectRecord = {
+      ...project,
+      status: update.status ?? project.status ?? "Active",
+      health: update.health ?? normalizeProjectHealth(project.health),
+      accounts: accountIDs.map((accountID) => (
+        timelineAccounts.find((account) => account.account_id === accountID)
+        ?? project.accounts?.find((account) => account.account_id === accountID)
+      )).filter((account): account is NonNullable<typeof account> => Boolean(account)),
+      teams: teamIDs.map((teamID) => {
+        const existing = project.teams?.find((team) => team.group_id === teamID);
+        if (existing) return existing;
+        const group = groups.find((item) => item.group_id === teamID);
+        return {
+          company_id: companyID,
+          group_id: teamID,
+          parent_group_id: group?.parent_group_id,
+          name: group?.name || teamID,
+          position: group?.position ?? 0,
+          created_timestamp: project.created_timestamp,
+          updated_timestamp: project.updated_timestamp,
+        };
+      }),
+    };
+    setProjectFieldSavingIDs((current) => new Set(current).add(projectID));
+    setProjects((current) => current.map((item) => item.project_id === projectID ? optimistic : item));
+    setError("");
+    try {
+      const result = await updateProject({
+        companyID,
+        projectID,
+        name: optimistic.name || "Untitled Project",
+        status: optimistic.status || "Active",
+        health: normalizeProjectHealth(optimistic.health),
+        accountIDs,
+        teamIDs,
+      });
+      if (result.project) {
+        setProjects((current) => current.map((item) => item.project_id === projectID ? result.project! : item));
+      } else {
+        await loadProjectList();
+      }
+      scheduleProjectListReload();
+    } catch (saveError) {
+      setProjects((current) => current.map((item) => item.project_id === projectID ? project : item));
+      setError(saveError instanceof Error ? saveError.message : "Failed to update project");
+    } finally {
+      setProjectFieldSavingIDs((current) => {
+        const next = new Set(current);
+        next.delete(projectID);
+        return next;
+      });
+    }
+  }, [companyID, groups, loadProjectList, scheduleProjectListReload, timelineAccounts]);
 
   const showLocalProjectExplorer = false;
 
@@ -1393,7 +1467,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         focusRequestID={targetProjectID?.trim() === activeProjectID ? targetProjectRequestID : undefined}
         accent={accent}
         workspace={workspace}
-        onBack={() => setActiveProjectID("")}
         onProjectUpdated={(updatedProject) => setProjects((current) => current.map((item) => (
           item.project_id === updatedProject.project_id ? updatedProject : item
         )))}
@@ -1429,6 +1502,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               onChange={setProjectListGroupings}
               buttonLabel="•••"
               popoverLabel="Edit Projects view"
+              triggerHidden
+              openRequestEventName={EVENT_PROJECT_VIEW_SETTINGS_REQUESTED}
               emptyLabel="Projects are shown in their folder structure"
               accent={accent}
             />
@@ -1502,7 +1577,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             rootFolderID={projectFolderRootID}
             loading={projectsLoading || projectFoldersLoading}
             groupings={projectListGroupings}
+            accounts={timelineAccounts}
+            teams={groups}
+            savingProjectIDs={projectFieldSavingIDs}
             onProjectOpen={openProject}
+            onProjectFieldChange={saveProjectListField}
             onContextMenu={setProjectContextMenu}
             onMoveProjects={moveProjectRows}
             onMoveFolder={moveProjectFolder}

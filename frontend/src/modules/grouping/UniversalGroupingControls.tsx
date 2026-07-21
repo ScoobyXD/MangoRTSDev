@@ -16,6 +16,8 @@ export type UniversalGroupingControlsProps<Field extends string> = {
   accent?: string;
   disabled?: boolean;
   popoverAlign?: "start" | "end";
+  triggerHidden?: boolean;
+  openRequestEventName?: string;
 };
 
 type GroupingDropTarget = {
@@ -33,11 +35,14 @@ export function UniversalGroupingControls<Field extends string>({
   accent = "#2563eb",
   disabled = false,
   popoverAlign = "end",
+  triggerHidden = false,
+  openRequestEventName,
 }: UniversalGroupingControlsProps<Field>) {
   const [open, setOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<GroupingDropTarget | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [externalPopoverPosition, setExternalPopoverPosition] = useState<{ left: number; top: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const popoverID = useId();
@@ -51,6 +56,25 @@ export function UniversalGroupingControls<Field extends string>({
     setDraggedIndex(null);
     setDropTarget(null);
   }, [disabled]);
+
+  useEffect(() => {
+    if (!openRequestEventName || typeof window === "undefined") return undefined;
+    const handleOpenRequest = (event: Event) => {
+      if (disabled) return;
+      const detail = (event as CustomEvent<Partial<{ left: number; top: number; right: number; bottom: number }>>).detail;
+      if (!detail || typeof detail.top !== "number") return;
+      const width = 326;
+      const estimatedHeight = 330;
+      const requestedLeft = typeof detail.right === "number" ? detail.right + 8 : (detail.left ?? 8);
+      setExternalPopoverPosition({
+        left: Math.max(8, Math.min(requestedLeft, window.innerWidth - width - 8)),
+        top: Math.max(8, Math.min(detail.top, window.innerHeight - estimatedHeight - 8)),
+      });
+      setOpen(true);
+    };
+    window.addEventListener(openRequestEventName, handleOpenRequest);
+    return () => window.removeEventListener(openRequestEventName, handleOpenRequest);
+  }, [disabled, openRequestEventName]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -109,22 +133,27 @@ export function UniversalGroupingControls<Field extends string>({
   };
 
   return (
-    <div ref={rootRef} style={controlsRootStyle}>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={open ? popoverID : undefined}
-        disabled={disabled}
-        style={groupButtonStyle(open, disabled, accent)}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span>{buttonLabel}</span>
-        <span aria-label={`${groupings.length} grouping levels`} style={groupCountStyle(open, accent)}>
-          {groupings.length}
-        </span>
-      </button>
+    <div ref={rootRef} style={controlsRootStyle(triggerHidden)}>
+      {!triggerHidden && (
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? popoverID : undefined}
+          disabled={disabled}
+          style={groupButtonStyle(open, disabled, accent)}
+          onClick={() => {
+            setExternalPopoverPosition(null);
+            setOpen((value) => !value);
+          }}
+        >
+          <span>{buttonLabel}</span>
+          <span aria-label={`${groupings.length} grouping levels`} style={groupCountStyle(open, accent)}>
+            {groupings.length}
+          </span>
+        </button>
+      )}
 
       {open && (
         <div
@@ -132,7 +161,7 @@ export function UniversalGroupingControls<Field extends string>({
           id={popoverID}
           role="dialog"
           aria-label={popoverLabel}
-          style={groupPopoverStyle(popoverAlign)}
+          style={groupPopoverStyle(popoverAlign, externalPopoverPosition)}
         >
           <div style={popoverHeaderStyle}>
             <span style={popoverTitleStyle}>{popoverLabel}</span>
@@ -329,11 +358,14 @@ function dropPlacementForEvent(event: React.DragEvent<HTMLElement>): GroupingDro
   return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
 }
 
-const controlsRootStyle: React.CSSProperties = {
-  position: "relative",
-  display: "inline-flex",
-  alignItems: "center",
-};
+function controlsRootStyle(triggerHidden: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    ...(triggerHidden ? { width: 0, height: 0 } : {}),
+  };
+}
 
 function groupButtonStyle(open: boolean, disabled: boolean, accent: string): React.CSSProperties {
   return {
@@ -373,12 +405,13 @@ function groupCountStyle(open: boolean, accent: string): React.CSSProperties {
   };
 }
 
-function groupPopoverStyle(align: "start" | "end"): React.CSSProperties {
+function groupPopoverStyle(align: "start" | "end", externalPosition: { left: number; top: number } | null): React.CSSProperties {
   return {
-    position: "absolute",
-    top: "calc(100% + 6px)",
-    ...(align === "start" ? { left: 0 } : { right: 0 }),
-    zIndex: 60,
+    position: externalPosition ? "fixed" : "absolute",
+    ...(externalPosition
+      ? { left: externalPosition.left, top: externalPosition.top }
+      : { top: "calc(100% + 6px)", ...(align === "start" ? { left: 0 } : { right: 0 }) }),
+    zIndex: externalPosition ? 10020 : 60,
     width: 326,
     maxWidth: "min(326px, calc(100vw - 24px))",
     display: "grid",

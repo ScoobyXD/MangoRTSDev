@@ -9,6 +9,7 @@ import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderS
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
+import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
@@ -1285,6 +1286,10 @@ export function AppSidebar({
             active: activePage === "project-management",
             onSelect: () => onPageSelect("project-management"),
             onPreload: preloadProjectManagementSurface,
+            settings: {
+              ariaLabel: "Edit Projects view",
+              onOpen: requestProjectViewSettings,
+            },
           }}
         />
       </section>

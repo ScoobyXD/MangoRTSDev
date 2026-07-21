@@ -5256,7 +5256,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Email thread{orderedEmails.length === 1 ? "" : "s"}</span>
           <span style={{ opacity: 0.62 }}>{orderedEmails.length}</span>
         </div>
-        <div role="tablist" aria-label="Attached email threads" style={{ minWidth: 0, display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 0", background: "rgba(248,250,252,0.86)" }}>
+        <div className="mango-editor-header-scroll" role="tablist" aria-label="Attached email threads" style={{ minWidth: 0, display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 0", background: "rgba(248,250,252,0.86)" }}>
           {orderedEmails.map((email) => {
             const active = email.messageID === activeEmail?.messageID;
             return (
