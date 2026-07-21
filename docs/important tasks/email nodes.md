@@ -13,6 +13,9 @@ An email or email thread is imported into one Node-wide email column. The email 
 - Text boxes form the normal Node text-box sequence, using the existing creation-time ordering.
 - A text box row contains only its text editor and its directly attached chat pane.
 - The Node-wide email column, a text box editor, and that text box's chat are independently toggleable. Any one, any pair, or all three can be visible at the same time.
+- The email column fills the remaining Node height down to the bottom edge and has a collapse control in its own header.
+- One visible surface receives the full available workspace. Two visible surfaces split that workspace into two distinct columns. With all three visible, email remains its own column while the text-box row divides its remaining space between editor and chat.
+- Collapsing email never moves the thread into a text box. It only gives the remaining editor and/or chat surface more width.
 - An email-linked text box has a durable accent and a “Linked email” marker. Activating it reveals the exact source message in the separate email column.
 - Activating a source email message reveals the text boxes linked to that exact message.
 
