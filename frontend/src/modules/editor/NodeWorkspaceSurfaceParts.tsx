@@ -226,6 +226,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
   onDelete,
 }) => {
   const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ left: 12, top: 12 });
   const rootRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useAppFloatingMenuDismissal(open, rootRef, close);
@@ -251,7 +252,15 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
         aria-haspopup="menu"
         aria-expanded={open}
         title="Text box actions"
-        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        onClick={(event) => {
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMenuPosition({ left: Math.max(12, Math.round(rect.right - 148)), top: Math.round(rect.bottom + 6) });
+          setOpen(true);
+        }}
         style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(100,116,139,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
       >
         ...
@@ -261,10 +270,10 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
           role="menu"
           aria-label="Text box actions"
           style={{
-            position: "absolute",
-            zIndex: 50,
-            top: "calc(100% + 6px)",
-            right: 0,
+            position: "fixed",
+            zIndex: 130,
+            top: menuPosition.top,
+            left: menuPosition.left,
             width: 148,
             display: "grid",
             gap: 3,
@@ -1899,6 +1908,7 @@ type ChatPaneProps = {
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
   headerTrailing?: React.ReactNode;
+  hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
@@ -1950,6 +1960,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   messages,
   emailPane,
   headerTrailing,
+  hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
   draft,
@@ -2241,9 +2252,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           height,
           marginTop: 0,
           display: "grid",
-          gridTemplateRows: showingEmail
-            ? (fixedHeight === undefined ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr)")
-            : (fixedHeight === undefined ? "auto minmax(0, 1fr) auto 7px" : "auto minmax(0, 1fr) auto"),
+          gridTemplateRows: hideHeader
+            ? showingEmail
+              ? (fixedHeight === undefined ? "minmax(0, 1fr) 7px" : "minmax(0, 1fr)")
+              : (fixedHeight === undefined ? "minmax(0, 1fr) auto 7px" : "minmax(0, 1fr) auto")
+            : showingEmail
+              ? (fixedHeight === undefined ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr)")
+              : (fixedHeight === undefined ? "auto minmax(0, 1fr) auto 7px" : "auto minmax(0, 1fr) auto"),
           border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
           borderRadius: 14,
           background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
@@ -2252,7 +2267,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           boxShadow: active ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW,
         }}
       >
-        <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 800, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
+        {!hideHeader && (
+        <div data-chat-pane-header="true" style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 800, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
           {hasEmailPane ? (
             <>
               <button
@@ -2321,6 +2337,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             </div>
           )}
         </div>
+        )}
         {showingEmail ? (
           <div style={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
             {emailPane}
@@ -4548,6 +4565,98 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
+type LinkedEmailPreviewPaneProps = {
+  email: EditorAttachedEmail;
+  nodeID?: string;
+  apiBase?: string;
+  companyID: string;
+  companyUsers?: MentionableCompanyUser[];
+  attachmentRequestJSON?: AttachmentRequestJSON;
+  attachmentResourceType?: MangoAttachmentResourceType;
+  attachmentResourceID?: string;
+  attachmentInformationID?: string;
+  attachmentEditorSurface?: string;
+  editable: boolean;
+  accent: string;
+  surfaceText: string;
+  strokeColor: string;
+  ruleColor: string;
+  onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
+  onEmailSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
+  onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
+  onEmailMessageTextBoxRequest?: (messageID: string) => void;
+  onEmailMessageActivate?: (messageID: string) => void;
+  onReplyEditorFocus?: () => void;
+  onError: (message: string) => void;
+};
+
+/** Full email conversation card embedded below a linked text-box header. */
+export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
+  email,
+  nodeID = "",
+  apiBase = "",
+  companyID,
+  companyUsers = [],
+  attachmentRequestJSON,
+  attachmentResourceType,
+  attachmentResourceID,
+  attachmentInformationID,
+  attachmentEditorSurface,
+  editable,
+  accent,
+  surfaceText,
+  strokeColor,
+  ruleColor,
+  onEmailSelectionChatRequest,
+  onEmailSelectionTextBoxRequest,
+  onEmailSelectionNodeRequest,
+  onEmailMessageTextBoxRequest,
+  onEmailMessageActivate,
+  onReplyEditorFocus,
+  onError,
+}) => {
+  const [replyTarget, setReplyTarget] = useState<{ messageID: string; replyAll: boolean } | null>(null);
+  return (
+    <div data-node-linked-email-preview="true" className="editor-document-scroll" style={{ minWidth: 0, minHeight: 0, overflow: "auto", padding: 8, background: "rgba(248,250,252,0.82)", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+      <AttachedEmailThreadCard
+        email={email}
+        nodeID={nodeID}
+        apiBase={apiBase}
+        companyID={companyID}
+        companyUsers={companyUsers}
+        attachmentRequestJSON={attachmentRequestJSON}
+        attachmentResourceType={attachmentResourceType}
+        attachmentResourceID={attachmentResourceID}
+        attachmentInformationID={attachmentInformationID}
+        attachmentEditorSurface={attachmentEditorSurface}
+        editable={editable}
+        accent={accent}
+        surfaceText={surfaceText}
+        strokeColor={strokeColor}
+        ruleColor={ruleColor}
+        selected
+        collapsed={false}
+        draggable={false}
+        replyTargetMessageID={replyTarget?.messageID ?? ""}
+        replyAll={replyTarget?.replyAll ?? false}
+        onToggleCollapsed={() => undefined}
+        onSelect={() => undefined}
+        onMessageActivate={onEmailMessageActivate}
+        onReply={(messageID, replyAll) => setReplyTarget({ messageID, replyAll })}
+        onReplyComplete={() => setReplyTarget(null)}
+        onReplyEditorFocus={onReplyEditorFocus}
+        onError={onError}
+        onDragStart={() => undefined}
+        onDragEnd={() => undefined}
+        onDropOnEmail={(event) => event.preventDefault()}
+        onSelectionChatRequest={onEmailSelectionChatRequest}
+        onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
+        onSelectionNodeRequest={onEmailSelectionNodeRequest}
+        onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
+      />
+    </div>
+  );
+};
 export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, onRequestCollapse, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
@@ -4974,8 +5083,15 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   };
 
   const renderUnfiledGroup = () => {
-    const label = normalizedLayout.folders.length > 0 ? "Unfiled emails" : "Attached emails";
     const unfiledEmails = emailsByFolderID.get("") ?? [];
+    if (normalizedLayout.folders.length === 0) {
+      return (
+        <div data-node-email-thread-list="true" style={{ minWidth: 0, display: "grid", alignContent: "start", gap: 8 }}>
+          {renderEmailCards("")}
+        </div>
+      );
+    }
+    const label = "Unfiled emails";
     return (
       <div
         key="unfiled"

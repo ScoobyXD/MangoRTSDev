@@ -80,10 +80,10 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
-  assert.match(nodeSurface, /Show the linked email message/);
+  assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Collapse linked email" : "Expand linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
-  assert.match(nodeSurface, /const nodeWorkspaceViewportHeight = Math\.max\(240, Math\.floor\(height - 45\)\)/);
+  assert.match(nodeSurface, /Math\.max\(TEXT_BLOCK_ROW_HEIGHT, Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT\)\)/);
   assert.doesNotMatch(nodeSurface, /min\(720px, calc\(100vh - 170px\)\)/);
   assert.match(nodeSurface, /nodeEmailOnly \? "minmax\(0, 1fr\)"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);
@@ -96,6 +96,15 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const chatBlockID = block\.id/);
   assert.match(nodeSurface, /suppressAutomaticCreation: nodeAttachedEmails\.length > 0/);
   assert.doesNotMatch(nodeSurface, /aria-label="Toggle email column"/);
+  assert.match(nodeSurface, /defaultOpenTextBlockChatIDs/);
+  assert.match(nodeSurface, /emailOriginNode && block\.id === emailOriginChatHostBlockID/);
+  assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
+  assert.match(nodeSurface, /data-node-pane-header="editor"/);
+  assert.match(nodeSurface, /data-node-pane-header="chat"/);
+  assert.match(nodeSurface, /<ChatPane[\s\S]{0,420}hideHeader/);
+  assert.match(nodeParts, /data-node-linked-email-preview="true"/);
+  assert.match(nodeParts, /data-node-email-thread-list="true"/);
+  assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
   assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(emailMessageID, existingEmailAccents\)/);
 });

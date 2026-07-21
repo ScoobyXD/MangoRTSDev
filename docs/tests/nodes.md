@@ -675,3 +675,33 @@ Expected:
 - The reply dock shows the neutral ten-second Undo surface. No provider request begins before expiry; Undo prevents dispatch and leaves the reply available, while expiry sends exactly once through the retained mailbox scope.
 
 N112 - Every Node has one optional, independently resizable email column to the left of its full multi-text-box list. Importing one message stores one node-level attached-email source and displays the full thread as collapsed message cards on the mail viewer's compact vertical line-and-dot timeline; importing another reply from that same mailbox/thread does not create a duplicate source. Thread headers and the column header collapse or expand complete threads. Each text box independently owns its editor and optional chat. Email-linked text boxes persist a message ID and a matching accent shared with that exact email card; distinct linked messages within one node use distinct accents, including repaired legacy duplicates, while ordinary text boxes have no email accent. Clicking either side smoothly scrolls and pulses its exact linked partner. Email-created nodes bind their initial editor to the source message, and later normal or email-linked text boxes can coexist in any order.
+
+N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; linked text boxes can expand their exact full email card inline. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
+
+### Scenario N-S23: Email, Editor, And Chat Column Correction
+
+Business logic covered:
+- N57
+- N58
+- N59
+- N72
+- N112
+- N113
+
+Given:
+- A Node has one attached email source, an older legacy email-origin chat, an existing linked text box, and the user creates a newer ordinary or email-linked text box.
+- The Node is opened before its final element measurement is available, the user toggles Editor/Chat, expands the linked email, opens the three-dot menu, and the optional attachment-list request returns a browser network error.
+
+Expected:
+- The left column reaches at least the full text-box-row height immediately and then the remaining Node viewport; it has one Email header and no redundant `Attached emails` group when no folders exist.
+- The new box opens with Editor only and contains no old chat. The older legacy chat remains on the stable associated/original box before and after the new box is prepended.
+- Editor and Chat labels appear in the one shared row header. Opening Chat does not add a second Chat header inside the pane, and editor-only/chat-only/editor-plus-chat modes keep their existing independent toggles and horizontal resizing.
+- The linked box header and exact email card share the persisted accent. **Email** opens the full conversation card inside the row; **Hide email** removes it without changing durable text, email, or chat projections.
+- Clicking the three dots displays a viewport-fixed menu with **Delete**. Choosing it opens confirmation; confirming deletes the box and only chat projections directly owned by that box, while canceling changes nothing.
+- A raw `Failed to fetch` from the optional node attachment listing does not appear in the global bottom-left error surface. The attachment menu shows an actionable retry message, while editing, email, and chat remain usable.
+
+Automated coverage:
+- `tests/frontend/modules/editor/nodeTextBlockCreation.test.ts` covers editor-only defaults and stable legacy chat hosting.
+- `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts` covers actionable attachment-list network error formatting.
+- `tests/frontend/modules/editor/editorRowVirtualizationReact.test.tsx` covers the actual Node host: full-height email column, single headers, inline linked-email expansion, chat-header removal, and visible Delete menu.
+- `tests/frontend/modules/editor/emailViewerContract.test.ts` locks the Node/email composition contract and no-folder direct thread list.

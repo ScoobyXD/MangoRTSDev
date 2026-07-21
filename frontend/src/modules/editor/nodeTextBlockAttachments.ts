@@ -162,6 +162,14 @@ export function textBlockAttachmentContextLabel(
   return title || "Deleted text box";
 }
 
+export function formatNodeAttachmentListError(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message.trim() : "";
+  if (!message || /^failed to fetch$/i.test(message) || /networkerror/i.test(message)) {
+    return "Attachments are temporarily unavailable. Retry from the attachment menu.";
+  }
+  return message;
+}
+
 function editorAttachmentDurableID(attachment: EditorChatAttachment): string {
   return attachment.attachmentID?.trim() || attachment.id.trim();
 }

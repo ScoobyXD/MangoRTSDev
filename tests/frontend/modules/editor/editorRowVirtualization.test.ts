@@ -119,7 +119,7 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.ok(project.includes('aria-label="Resize chat column"'));
   assert.ok(!node.includes("tabbed={emailOriginPrimaryRow}"));
   assert.match(parts, /resize: "none"/);
-  assert.ok(node.includes("fixedHeight={TEXT_BLOCK_MIN_HEIGHT}"));
+  assert.ok(node.includes("fixedHeight={communicationPaneHeight}"));
   assert.ok(project.includes("fixedHeight={TEXT_BLOCK_MIN_HEIGHT}"));
   assert.ok(node.includes("closedEditorBlockIDs"));
   assert.ok(node.includes("closedEmailBlockIDs"));

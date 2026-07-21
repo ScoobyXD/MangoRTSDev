@@ -6,6 +6,7 @@ import {
   appendUniqueEditorAttachments,
   editorChatAttachmentsReadyForSubmit,
   failEditorChatAttachmentTransfer,
+  formatNodeAttachmentListError,
   nodeAttachmentUploadScopeMatches,
   resolveEditorChatAttachmentTransfer,
   stageEditorChatAttachmentTransfer,
@@ -33,6 +34,13 @@ test("node attachment context keeps deleted text-box links visible with a durabl
   assert.equal(textBlockAttachmentContextLabel("", titles), "Node");
 });
 
+test("optional attachment-list network failures stay local and actionable", () => {
+  assert.equal(
+    formatNodeAttachmentListError(new TypeError("Failed to fetch")),
+    "Attachments are temporarily unavailable. Retry from the attachment menu.",
+  );
+  assert.equal(formatNodeAttachmentListError(new Error("permission_denied")), "permission_denied");
+});
 test("an in-flight upload remains node-scoped after its origin text box is deleted", () => {
   const started = { companyID: "company-1", nodeID: "node-1", canEdit: true, generation: 7 };
   const currentAfterBlockDeletion = { ...started };

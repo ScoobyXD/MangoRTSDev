@@ -187,3 +187,20 @@ The old editor remains authoritative until a future whole-workspace conversion v
 
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.
+
+## Node email, editor, and chat row ownership (2026-07-20)
+
+`NodeWorkspaceSurface` owns the Node-specific three-column composition. `AttachedEmailOrganizerPane` owns the one left email column, while each text-box row owns one Editor surface and one optional Chat surface.
+
+- The Node email column is independent of every text box. Its organizer header is the only column header. The no-folder path renders email thread cards directly and does not synthesize an `Attached emails` group.
+- The email column uses at least `TEXT_BLOCK_ROW_HEIGHT` while the root `ResizeObserver` settles. After measurement it uses the larger remaining-viewport value, preventing the column from stopping above the bottom of the visible Node workspace.
+- A text-box row has exactly one horizontal chrome row. That chrome contains the optional linked-email action, the Editor label/toggle and text-box actions, then the Chat label/toggle. Node passes `hideHeader` to `ChatPane`; email collaboration and Project surfaces retain their existing ChatPane headers unless they explicitly opt out.
+- A new box is editor-only. `defaultOpenTextBlockChatIDs` opens chat only when projections already contain direct chat for that box or compatible legacy email-origin chat for its stable host. Manual open/closed layout state continues to override that default.
+- `resolveLegacyEmailChatHostBlockID` must not use render position. It prefers the persisted message association, then a declared block ID, then the oldest box. This prevents prepending a new box from moving old chat.
+- `TextBlockActionsMenu` is viewport-fixed. Keeping it inside the React ownership tree preserves outside-click/Escape handling, while fixed positioning escapes the row's deliberate overflow clipping.
+- `LinkedEmailPreviewPane` reuses `AttachedEmailThreadCard` and `EmailConversationPane`. It fetches and renders the email from its durable mailbox/thread reference; it does not copy provider HTML, attachments, or credentials into `Text box` information.
+- Expanding a linked email divides the existing fixed row between the email card and the remaining Editor/Chat body. It does not change virtualization row height, create a nested permanent column, or persist expansion state.
+
+### Error-surface rule
+
+Optional background reads should report failure at the control that can retry them. Node attachment-list failures populate `nodeAttachmentsLoadError` and remain in `AttachmentCountDropdown`; they do not call the global `onError`. Mutations and document/chat persistence failures still call `onError` because user-authored work may require action.
