@@ -62,6 +62,14 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`, preserving node information/projection saves, attached-email behavior, and separate chat panes.
 - Project critical-path inline node windows mount the shared shell while edits inside them remain node editor mutations rather than project critical-path mutations.
 
+### Node Email Focus And Compact Chat Note (2026-07-21)
+
+- A newly opened Node chat starts at 340 pixels wide. Per-text-box drag resizing still clamps to the existing safety bounds and persists normally.
+- The Node email header's old collapse arrow is removed. The Node-level Email control still hides or reopens the whole email column.
+- The replacement email-focus button animates between normal and focused layouts. Focused email receives every available horizontal pixel except the 38-pixel text-box timeline rail on the right.
+- Focus mode keeps editor and chat components mounted so unsaved local UI state is preserved, but the clipped rail is inert and hidden from assistive technology until normal layout is restored.
+- Entering focus mode does not rewrite the user's saved email or chat separator widths; restoring returns to those normal widths.
+
 ### V1 Mango Attachment System Note (2026-07-09)
 
 #### Retained Associations And In-App Preview (2026-07-10)

@@ -646,13 +646,15 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assertNodePaneToggles(emailNodeRow, [true, true]);
     const emailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
     const emailWorkspace = nodeContainer.querySelector<HTMLElement>('[data-node-email-workspace-mode]');
-    const emailCollapseToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Collapse email column"]');
+    const removedEmailCollapseToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Collapse email column"]');
+    const emailFocusToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Expand email column"]');
     const nodeEmailToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Toggle node email column"]');
     const editorToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
     const chatToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
     assert.ok(emailColumn, "attached email should render once in the node-wide column");
     assert.ok(emailWorkspace);
-    assert.ok(emailCollapseToggle, "the email header should expose its own collapse control");
+    assert.equal(removedEmailCollapseToggle, null, "the obsolete email-header collapse arrow should stay removed");
+    assert.ok(emailFocusToggle, "the email header should expose its focus expansion control");
     assert.ok(nodeEmailToggle);
     assert.ok(editorToggle);
     assert.ok(chatToggle);
@@ -668,6 +670,29 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(emailNodeRow.querySelector('[data-node-pane-header="chat"]')?.textContent?.includes("Chat"), true);
     assert.doesNotMatch(emailColumn.textContent ?? "", /Attached emails/, "the email column should not repeat a redundant second header");
     assert.ok(Number.parseFloat(emailColumn.style.height) >= 700, "the email column should cover at least the full fixed row while viewport sizing settles");
+    assert.equal(emailFocusToggle.getAttribute("aria-expanded"), "false");
+    assert.match(emailWorkspace.style.transition, /grid-template-columns 180ms/, "email focus mode should animate the column tracks");
+    await act(async () => { emailFocusToggle.click(); });
+    await flushWork();
+    assert.equal(emailWorkspace.dataset.nodeEmailFocusMode, "expanded");
+    assert.equal(emailFocusToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(emailFocusToggle.getAttribute("aria-label"), "Restore email layout");
+    const timelineOnlyRail = nodeContainer.querySelector<HTMLElement>('[data-node-email-timeline-rail="true"]');
+    assert.ok(timelineOnlyRail, "email focus mode should retain the text-box timeline rail");
+    assert.equal(timelineOnlyRail.getAttribute("aria-hidden"), "true");
+    const expandedTracks = emailWorkspace.style.gridTemplateColumns.split(/\s+/);
+    assert.equal(expandedTracks[1], "0px", "email focus mode should remove the normal resize gap");
+    assert.equal(expandedTracks[2], "38px", "email focus mode should leave only the compact timeline on the right");
+    assert.ok(
+      Number.parseFloat(expandedTracks[0] ?? "0") > Number.parseFloat(expandedTracks[2] ?? "0") * 5,
+      "the focused email column should own the vast majority of workspace width",
+    );
+    await act(async () => { emailFocusToggle.click(); });
+    await flushWork();
+    assert.equal(emailWorkspace.dataset.nodeEmailFocusMode, "normal");
+    assert.equal(emailFocusToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(emailFocusToggle.getAttribute("aria-label"), "Expand email column");
+    assert.equal(nodeContainer.querySelector('[data-node-email-timeline-rail="true"]'), null);
 
     const linkedEmailToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Expand linked email"]');
     assert.ok(linkedEmailToggle, "an email-linked text box should expose a direct body expansion button");
@@ -707,7 +732,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assertNodePaneToggles(emailNodeRow, [false, false]);
     assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-only", "email should own the full workspace when it is the only visible pane");
 
-    await act(async () => { emailCollapseToggle.click(); });
+    await act(async () => { nodeEmailToggle.click(); });
     await flushWork();
     assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null);
     assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "text-only");

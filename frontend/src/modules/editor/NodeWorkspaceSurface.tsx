@@ -133,6 +133,7 @@ const TEXT_CHAT_GRID_COLUMN_GAP_PX = 4;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
 const TEXT_BLOCK_RESIZE_MIN_WIDTH_PX = 160;
 const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
+const TEXT_CHAT_PANE_DEFAULT_WIDTH_PX = 340;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const NODE_EMAIL_COLUMN_LAYOUT_ID = "__node_email_column__";
@@ -481,6 +482,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
+  const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
   const [logicGateSearchResults, setLogicGateSearchResults] = useState<CompanyExplorerSearchResult[]>([]);
@@ -557,6 +559,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return Array.from(byConversation.values());
   }, [attachedEmails]);
+  useEffect(() => {
+    if (nodeAttachedEmails.length === 0) setNodeEmailFocusExpanded(false);
+  }, [nodeAttachedEmails.length]);
+
   const emailOriginAttachedEmail = nodeAttachedEmails.find((email) => email.createdFromEmail) ?? null;
   const emailOriginChatBlockID = emailOriginAttachedEmail?.id.trim() ?? "";
   const emailOriginChatHostBlockID = resolveLegacyEmailChatHostBlockID(blocks, emailOriginAttachedEmail);
@@ -819,6 +825,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   useEffect(() => {
+    setNodeEmailFocusExpanded(false);
     setLogicGateAssignerOpen(false);
     setProjectAssignerOpen(false);
     setNodeEmailModalMessageID("");
@@ -2782,6 +2789,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       textCommunicationContentWidth - nodeEmailPaneWidth - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX,
     )
     : textCommunicationContentWidth;
+  const nodeTextTimelineRailWidth = TEXT_TIMELINE_COLUMN_WIDTH_PX + TEXT_CHAT_GRID_COLUMN_GAP_PX;
+  const nodeTextWorkspaceOuterWidth = nodeTextCommunicationContentWidth + nodeTextTimelineRailWidth;
+  const nodeEmailFocusActive = nodeEmailFocusExpanded && nodeEmailColumnVisible && !nodeEmailOnly;
+  const nodeEmailWorkspacePixelWidth = nodeEmailPaneWidth
+    + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX
+    + nodeTextWorkspaceOuterWidth;
+  const nodeEmailWorkspaceGridTemplateColumns = nodeEmailOnly
+    ? "minmax(0, 1fr)"
+    : nodeEmailColumnVisible
+      ? nodeEmailFocusActive
+        ? (nodeEmailWorkspacePixelWidth - nodeTextTimelineRailWidth) + "px 0px " + nodeTextTimelineRailWidth + "px"
+        : nodeEmailPaneWidth + "px " + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX + "px " + nodeTextWorkspaceOuterWidth + "px"
+      : "minmax(0, 1fr)";
   const nodeEmailWorkspaceMode = nodeEmailOnly
     ? "email-only"
     : nodeEmailColumnVisible
@@ -2789,6 +2809,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       : "text-only";
   const toggleNodeEmailColumn = () => {
     const nextVisible = !nodeEmailColumnVisible;
+    if (!nextVisible) setNodeEmailFocusExpanded(false);
     setFocusedTextBlockID("");
     setOpenEmailBlockIDs((current) => {
       const next = new Set(current);
@@ -3125,7 +3146,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         <div
           data-node-email-workspace="true"
           data-node-email-workspace-mode={nodeEmailWorkspaceMode}
-          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailOnly ? "minmax(0, 1fr)" : nodeEmailColumnVisible ? `${nodeEmailPaneWidth}px ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(0, 1fr)` : "minmax(0, 1fr)", minWidth: 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch" }}
+          data-node-email-focus-mode={nodeEmailFocusActive ? "expanded" : "normal"}
+          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch", transition: nodeEmailColumnVisible && !nodeEmailOnly ? "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" : undefined }}
         >
         {nodeEmailColumnVisible && (
           <div
@@ -3167,17 +3189,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onEmailMessageTextBoxRequest={(messageID) => { createEmailTextBlock(messageID); }}
               onEmailMessageActivate={revealEmailTextBlock}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
-              onRequestCollapse={toggleNodeEmailColumn}
+              emailFocusExpanded={nodeEmailFocusActive}
+              onRequestEmailFocusToggle={nodeTextSurfaceVisible || nodeEmailFocusExpanded
+                ? () => setNodeEmailFocusExpanded((current) => !current)
+                : undefined}
               onError={onError}
             />
           </div>
         )}
-        {nodeEmailColumnVisible && !nodeEmailOnly && renderTextSidePaneResizeHandle(NODE_EMAIL_COLUMN_LAYOUT_ID, "email", "after", nodeEmailPaneWidth, nodeEmailPaneMaxWidth)}
+        {nodeEmailColumnVisible && !nodeEmailOnly && (nodeEmailFocusActive
+          ? <div aria-hidden="true" data-node-email-focus-gap="true" />
+          : renderTextSidePaneResizeHandle(NODE_EMAIL_COLUMN_LAYOUT_ID, "email", "after", nodeEmailPaneWidth, nodeEmailPaneMaxWidth))}
         <div
           ref={rowVirtualizer.listRef}
           data-mango-bounded-editor-rows="node"
           data-mounted-row-count={rowVirtualizer.mountedRowCount}
-          style={{ display: nodeEmailOnly ? "none" : "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0 }}
+          data-node-email-timeline-rail={nodeEmailFocusActive ? "true" : undefined}
+          aria-hidden={nodeEmailFocusActive || undefined}
+          {...(nodeEmailFocusActive ? { inert: "" } : {})}
+          style={{ gridColumn: nodeEmailColumnVisible && !nodeEmailOnly ? "3" : "1", display: nodeEmailOnly ? "none" : "grid", gridTemplateColumns: nodeEmailFocusActive ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px 0px` : editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0, overflow: nodeEmailFocusActive ? "hidden" : undefined }}
         >
         {rowVirtualizer.entries.map((entry) => {
           if (entry.kind === "spacer") {
@@ -3204,7 +3234,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             ? sidePaneWidthForBlock(
               chatBlockID,
               "chat",
-              Math.round(nodeTextCommunicationContentWidth / 2),
+              TEXT_CHAT_PANE_DEFAULT_WIDTH_PX,
               chatPaneMaxWidth,
             )
             : nodeTextCommunicationContentWidth;
