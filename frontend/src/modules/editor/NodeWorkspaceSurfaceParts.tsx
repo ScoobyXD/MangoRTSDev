@@ -16,6 +16,7 @@ import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type Edi
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
+import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
 import { createEditorScrollMemory, type EditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
@@ -1155,6 +1156,13 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
+    selectionNodeActionOffsetX: 36,
+    selectionNodeActionButtonStyle: {
+      border: "1px solid transparent",
+      background: EDITOR_NEU_SURFACE + " padding-box, " + EDITOR_NEU_EDGE_FRAME + " border-box",
+      color: accent,
+      boxShadow: EDITOR_NEU_SHADOW,
+    },
     entityLinkContext: { companyID, requestJSON: textboxSyncRequestJSON },
     editorImageAttachmentContext,
   });
@@ -1310,12 +1318,16 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const firstRect = rangeRects[0] ?? selectionRect;
     const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
     const iconRect = isForwardSelection ? lastRect : firstRect;
-    const preferredX = isForwardSelection
-      ? iconRect.right - wrapperRect.left + 8
-      : iconRect.left - wrapperRect.left - 36;
-    const preferredY = iconRect.top - wrapperRect.top + ((iconRect.height - 28) / 2);
-    const x = Math.max(8, Math.min(preferredX, wrapperRect.width - 34));
-    const y = Math.max(6, Math.min(preferredY, wrapperRect.height - 34));
+    const actionPosition = calculateEditorSelectionActionPosition({
+      rect: iconRect,
+      isForwardSelection,
+      boundaryWidth: wrapperRect.width,
+      containerLeft: wrapperRect.left,
+      containerTop: wrapperRect.top,
+      rightInset: 36,
+    });
+    const x = actionPosition.left;
+    const y = Math.min(actionPosition.top, wrapperRect.height - 34);
     return {
       blockID,
       quote: selectedText,

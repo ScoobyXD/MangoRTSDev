@@ -102,11 +102,14 @@ import {
   openEditorEntityLink,
   readActiveEntityLinkDraft,
   readEditorEntityLinkElement,
+  replaceEditorEntityLinkWithLabel,
   searchEditorEntityLinks,
   type ActiveEntityLinkDraft,
   type EditorEntityLink,
   type EditorEntityLinkContext,
 } from "./editorEntityLinks.js";
+import { EditorSelectionNodeIcon } from "./EditorSelectionNodeIcon.js";
+import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
 import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE,
@@ -209,6 +212,8 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   mentionSurfaceText?: string;
   mentionStrokeColor?: string;
   mentionMenuPosition?: "fixed" | "absolute";
+  selectionNodeActionOffsetX?: number;
+  selectionNodeActionButtonStyle?: React.CSSProperties;
   entityLinkContext?: EditorEntityLinkContext;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
   onEditorImageAttachmentError?: (message: string) => void;
@@ -3121,20 +3126,40 @@ function readRichTextEntityDraft(root: HTMLElement, position: "fixed" | "absolut
   return { ...draft, left: Math.max(minLeft, Math.min(left, maxLeft)), top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(top, maxTop)), position };
 }
 
-function readRichTextSelectionNodeDraft(root: HTMLElement, position: "fixed" | "absolute" = "fixed"): RichTextSelectionNodeDraft | null {
+function readRichTextSelectionNodeDraft(
+  root: HTMLElement,
+  position: "fixed" | "absolute" = "fixed",
+  actionOffsetX = 0,
+): RichTextSelectionNodeDraft | null {
   const range = getEditorSelectionRange(root);
   if (!range || range.collapsed) return null;
   const quote = range.toString();
   if (!quote.replace(/\s+/g, " ").trim()) return null;
-  const rect = getCaretRect(root, range);
+  const selection = root.ownerDocument.getSelection();
+  const isForwardSelection = !selection
+    || (selection.anchorNode === range.startContainer && selection.anchorOffset === range.startOffset);
+  const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  const selectionRect = range.getBoundingClientRect();
+  const firstRect = rangeRects[0] ?? selectionRect;
+  const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
+  const actionRect = isForwardSelection ? lastRect : firstRect;
   const container = position === "absolute" ? root.parentElement : null;
   const containerRect = container?.getBoundingClientRect() ?? null;
+  const view = root.ownerDocument.defaultView;
+  const boundaryWidth = position === "absolute" && containerRect ? containerRect.width : view?.innerWidth ?? 1280;
+  const actionPosition = calculateEditorSelectionActionPosition({
+    rect: actionRect,
+    isForwardSelection,
+    boundaryWidth,
+    containerLeft: position === "absolute" ? containerRect?.left : 0,
+    containerTop: position === "absolute" ? containerRect?.top : 0,
+    offsetX: actionOffsetX,
+  });
   return {
     root,
     range: range.cloneRange(),
     quote,
-    left: Math.max(8, Math.round(position === "absolute" && containerRect ? rect.left - containerRect.left : rect.left)),
-    top: Math.max(8, Math.round(position === "absolute" && containerRect ? rect.bottom - containerRect.top + 6 : rect.bottom + 6)),
+    ...actionPosition,
     position,
   };
 }
@@ -4311,6 +4336,8 @@ export function useEditorDocumentSurfaceHandlers({
   mentionSurfaceText = "#111827",
   mentionStrokeColor = "rgba(15,23,42,0.18)",
   mentionMenuPosition = "fixed",
+  selectionNodeActionOffsetX = 0,
+  selectionNodeActionButtonStyle,
   entityLinkContext,
   editorImageAttachmentContext,
   onEditorImageAttachmentError,
@@ -4851,8 +4878,7 @@ export function useEditorDocumentSurfaceHandlers({
         onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => event.preventDefault(),
         style: {
           position: selectionNodeDraft.position, left: selectionNodeDraft.left, top: selectionNodeDraft.top, zIndex: 2002,
-          display: "grid", gridTemplateColumns: "auto minmax(0,220px)", alignItems: "center", gap: 6,
-          padding: 4, border: `1px solid ${mentionStrokeColor}`, borderRadius: 8, background: "#fff", boxShadow: "0 12px 30px rgba(15,23,42,.18)",
+          display: "flex", alignItems: "center", gap: 6,
         } satisfies React.CSSProperties,
       },
       React.createElement("button", {
@@ -4861,9 +4887,20 @@ export function useEditorDocumentSurfaceHandlers({
         title: "Create node from this highlighted piece of text.",
         disabled: selectionNodeState === "creating",
         onClick: () => void createNodeFromSelection(),
-        style: { width: 30, height: 30, border: 0, borderRadius: 6, background: "#ecfdf5", color: "#0f766e", cursor: selectionNodeState === "creating" ? "wait" : "pointer", fontWeight: 900 } satisfies React.CSSProperties,
-      }, selectionNodeState === "creating" ? "…" : "+▣"),
-      selectionNodeState === "error" ? React.createElement("span", { role: "alert", style: { color: "#b91c1c", fontSize: 10.5 } }, selectionNodeError) : null,
+        style: {
+          width: 28, height: 28, display: "inline-grid", placeItems: "center", padding: 0,
+          border: "1px solid " + mentionStrokeColor, borderRadius: 8, background: "#fff", color: "#0f766e",
+          boxShadow: "0 4px 12px rgba(15,23,42,.14)", cursor: selectionNodeState === "creating" ? "wait" : "pointer",
+          ...selectionNodeActionButtonStyle,
+        } satisfies React.CSSProperties,
+      }, selectionNodeState === "creating" ? "…" : React.createElement(EditorSelectionNodeIcon)),
+      selectionNodeState === "error" ? React.createElement("span", {
+        role: "alert",
+        style: {
+          maxWidth: 220, padding: "5px 7px", border: "1px solid " + mentionStrokeColor, borderRadius: 7,
+          background: "#fff", boxShadow: "0 8px 20px rgba(15,23,42,.14)", color: "#b91c1c", fontSize: 10.5,
+        },
+      }, selectionNodeError) : null,
     )
     : null;
 
@@ -5405,7 +5442,7 @@ export function useEditorDocumentSurfaceHandlers({
         activeEntityRootRef.current = null;
         setSelectionNodeState("idle");
         setSelectionNodeError("");
-        setSelectionNodeDraft(readRichTextSelectionNodeDraft(root, mentionMenuPosition));
+        setSelectionNodeDraft(readRichTextSelectionNodeDraft(root, mentionMenuPosition, selectionNodeActionOffsetX));
         setActiveTableContextMenu(null);
         clearPendingTypingStyle();
         syncActiveSelectionFormat(root);
@@ -5591,6 +5628,21 @@ export function useEditorDocumentSurfaceHandlers({
         editorInputBatcher.flush(root);
         openEditorEntityLink(keyboardEntity, entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined);
         return;
+      }
+      if (!event.nativeEvent.isComposing && event.key === "Backspace") {
+        editorInputBatcher.flush(root);
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        if (replaceEditorEntityLinkWithLabel(root, keyboardEntityElement)) {
+          event.preventDefault();
+          event.stopPropagation();
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "delete");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+          rememberEditorSelectionRange(root);
+          pendingEditorTypingCaretRef.current = getEditorTypingCaretBookmark(root);
+          setActiveEntityDraft(null);
+          activeEntityRootRef.current = null;
+          return;
+        }
       }
       if (!event.nativeEvent.isComposing) {
         if (event.key === "Backspace" || event.key === "Delete") {

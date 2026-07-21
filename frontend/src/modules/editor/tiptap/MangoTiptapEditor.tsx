@@ -8,6 +8,8 @@ import {
 } from "../../attachments/attachmentApi";
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
+import { EditorSelectionNodeIcon } from "../EditorSelectionNodeIcon.js";
+import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
 import {
   createNodeEntityFromSelection,
   normalizeEditorSelectionNodeTitle,
@@ -135,12 +137,6 @@ function initialDocument(value?: string): { document: MangoTiptapDocument; error
   return parsed.valid ? { document: parsed.value } : { document: createEmptyMangoTiptapDocument(), error: parsed.error };
 }
 
-const SelectionNodeIcon: React.FC = () => (
-  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-    <rect x="5" y="5" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
-    <path d="M9 12h6M12 9v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-  </svg>
-);
 
 function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
   return users.flatMap((user) => {
@@ -1121,9 +1117,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
                 onSelectionChatRequest(selectionAction);
                 setSelectionAction(null);
               }}
-              style={{ minWidth: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0369a1", cursor: "pointer" }}
+              style={{ width: 30, height: 30, display: "inline-grid", placeItems: "center", padding: 0, borderRadius: 7, border: 0, background: "transparent", color: "#0369a1", cursor: "pointer" }}
             >
-              Chat
+              <ChatIcon color="#0369a1" />
             </button>
           )}
           <button
@@ -1134,7 +1130,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             onClick={() => void createNodeFromSelection()}
             style={{ display: "inline-grid", placeItems: "center", width: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0f766e", cursor: creatingSelectionNode ? "wait" : "pointer" }}
           >
-            <SelectionNodeIcon />
+            <EditorSelectionNodeIcon />
           </button>
         </div>
       )}
