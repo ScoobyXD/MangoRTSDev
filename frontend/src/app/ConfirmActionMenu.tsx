@@ -15,11 +15,6 @@ export function confirmMenuPositionFromElement(element: Element): ConfirmActionM
   };
 }
 
-export function confirmationDisplayNameMatches(input: string, expected: string): boolean {
-  const expectedText = expected.trim();
-  return expectedText !== "" && input.trim().toLocaleLowerCase() === expectedText.toLocaleLowerCase();
-}
-
 type ConfirmActionMenuProps = {
   title: React.ReactNode;
   detail?: React.ReactNode;
@@ -57,11 +52,8 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
   const mutedText = isDarkTheme ? "#b8c4cc" : "#334155";
   const buttonSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
   const [currentUserDisplayName, setCurrentUserDisplayName] = React.useState("");
-  const [confirmationInput, setConfirmationInput] = React.useState("");
   const expectedConfirmationText = (requiredConfirmationText ?? currentUserDisplayName).trim();
-  const confirmationRequired = requireDisplayNameConfirmation && expectedConfirmationText !== "";
-  const confirmationMatches = !confirmationRequired || confirmationDisplayNameMatches(confirmationInput, expectedConfirmationText);
-  const effectiveConfirmDisabled = confirmDisabled || !confirmationMatches;
+  const effectiveConfirmDisabled = confirmDisabled || (requireDisplayNameConfirmation && expectedConfirmationText === "");
 
   React.useEffect(() => {
     if (!requireDisplayNameConfirmation || requiredConfirmationText !== undefined) return undefined;
@@ -99,29 +91,6 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
             {detail}
           </div>
         )}
-        {confirmationRequired && (
-          <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700, color: panelText }}>
-            <span>Type your full name to confirm</span>
-            <input
-              type="text"
-              value={confirmationInput}
-              onChange={(event) => setConfirmationInput(event.currentTarget.value)}
-              autoComplete="name"
-              spellCheck={false}
-              style={{
-                minHeight: 28,
-                minWidth: 0,
-                border: "1px solid rgba(100,116,139,0.45)",
-                borderRadius: 6,
-                background: buttonSurface,
-                color: panelText,
-                padding: "0 8px",
-                fontSize: 12,
-                boxSizing: "border-box",
-              }}
-            />
-          </label>
-        )}
         {children}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <button
@@ -129,7 +98,7 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
             disabled={effectiveConfirmDisabled}
             onClick={() => {
               if (effectiveConfirmDisabled) return;
-              complete(() => onConfirm(confirmationInput.trim()));
+              complete(() => onConfirm(requireDisplayNameConfirmation ? expectedConfirmationText : ""));
             }}
             style={{
               minHeight: 26,

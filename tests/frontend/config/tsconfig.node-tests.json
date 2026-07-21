@@ -55,6 +55,7 @@
     "../../../frontend/src/modules/project-management/projectManagementApi.ts",
     "../../../frontend/src/modules/project-management/projectManagementCommittedTitles.ts",
     "../modules/project-management/projectManagementApi.test.ts",
+    "../modules/project-management/projectListView.test.ts",
     "../../../frontend/src/pages/home/homeUtils.ts",
     "../pages/home/homeUtils.test.ts",
     "../pages/home/emailReadReceipts.test.ts",

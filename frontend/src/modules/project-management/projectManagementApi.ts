@@ -1,5 +1,6 @@
 import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
 export type ProjectHealth = "On Track" | "AT RISK" | "Off Track";
@@ -148,6 +149,22 @@ export type ProjectMutationResponse = {
   deleted_id?: string;
 };
 
+export type ProjectFolderSnapshot = {
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+};
+
+export type ProjectFolderMutationRow = {
+  company_id: string;
+  entity_id: string;
+  entity_type: "folder";
+  name: string;
+  parent_entity_id?: string;
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
 export type ProjectRelationshipMutationResponse = {
   relationship?: ProjectRelationshipProjection;
   deleted_id?: string;
@@ -256,6 +273,82 @@ export async function listProjects(companyID: string): Promise<{ projects: Proje
   const params = new URLSearchParams();
   params.set("company_id", companyID);
   return apiFetchJSON<{ projects: ProjectRecord[] }>(`/v1/projects?${params.toString()}`);
+}
+
+export async function fetchProjectFolderSnapshot(companyID: string): Promise<ProjectFolderSnapshot> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  params.set("folder_kind", "project");
+  const payload = await apiFetchJSON<{
+    folders?: CompanyExplorerFolder[];
+    folder_items?: CompanyExplorerFolderItem[];
+  }>(`/v1/workspace/snapshot?${params.toString()}`);
+  return {
+    folders: payload.folders ?? [],
+    folderItems: (payload.folder_items ?? []).filter((item) => item.item_type === "project"),
+  };
+}
+
+export async function createProjectFolder(input: {
+  companyID: string;
+  parentFolderID: string;
+  name: string;
+  position?: number;
+}): Promise<ProjectFolderMutationRow> {
+  return apiFetchJSON<ProjectFolderMutationRow>("/v1/company-explorer/folders", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      parent_folder_id: input.parentFolderID,
+      name: input.name,
+      position: input.position ?? 0,
+    }),
+  });
+}
+
+export async function updateProjectFolder(input: {
+  companyID: string;
+  folderID: string;
+  parentFolderID?: string;
+  name?: string;
+  position?: number;
+}): Promise<ProjectFolderMutationRow> {
+  const body: Record<string, unknown> = { company_id: input.companyID };
+  if (input.parentFolderID !== undefined) body.parent_folder_id = input.parentFolderID;
+  if (input.name !== undefined) body.name = input.name;
+  if (input.position !== undefined) body.position = input.position;
+  return apiFetchJSON<ProjectFolderMutationRow>(`/v1/company-explorer/folders/${encodeURIComponent(input.folderID)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function moveProjectsToFolder(input: {
+  companyID: string;
+  projectIDs: string[];
+  folderID: string;
+}): Promise<{ rows?: unknown[] }> {
+  const projectIDs = Array.from(new Set(input.projectIDs.map((projectID) => projectID.trim()).filter(Boolean)));
+  return apiFetchJSON<{ rows?: unknown[] }>("/v1/company-explorer/items", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      items: projectIDs.map((projectID, index) => ({
+        parent_entity_id: input.folderID,
+        target_type: "project",
+        target_id: projectID,
+        position: (index + 1) * 1000,
+      })),
+    }),
+  });
+}
+
+export async function deleteProjectFolder(companyID: string, folderID: string): Promise<{ status: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<{ status: string }>(`/v1/company-explorer/folders/${encodeURIComponent(folderID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
 }
 
 export async function createProject(input: {

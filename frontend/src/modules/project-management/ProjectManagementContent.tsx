@@ -19,6 +19,7 @@ import {
 } from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
@@ -40,13 +41,18 @@ import {
 } from "../perspectives/PerspectiveSelector.js";
 import {
   createProject,
+  createProjectFolder,
   createProjectManagementTimelineItem,
   deleteProject,
+  deleteProjectFolder,
   deleteProjectManagementNode,
   deleteProjectManagementTimelineItem,
+  fetchProjectFolderSnapshot,
   fetchProjectManagementTimeline,
   listProjects,
+  moveProjectsToFolder,
   updateProject,
+  updateProjectFolder,
   updateProjectManagementTimelineItem,
   type ProjectRecord,
   type ProjectHealth,
@@ -57,7 +63,17 @@ import {
   reconcileProjectResourceDisplayTitles,
   reconcileProjectManagementWorkspaceTitles,
 } from "./projectManagementCommittedTitles.js";
-import { ProjectSummaryContent } from "./ProjectSummaryContent.js";
+import {
+  normalizeProjectListGroupings,
+  PROJECT_LIST_GROUPING_FIELDS,
+  ProjectFolderPicker,
+  projectFolderSubtreeIDs,
+  ProjectListView,
+  resolveProjectFolderRootID,
+  type ProjectListContextMenuRequest,
+  type ProjectListGroupingField,
+} from "./ProjectListView.js";
+import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
 
 type ProjectManagementContentProps = {
   accent: string;
@@ -113,12 +129,7 @@ type TimelineContextMenuState = {
   y: number;
 };
 
-type ProjectContextMenuState = {
-  project: ProjectRecord;
-  x: number;
-  y: number;
-};
-
+type ProjectContextMenuState = ProjectListContextMenuRequest;
 type TimelineLoadOptions = {
   showLoading?: boolean;
 };
@@ -162,11 +173,33 @@ type TimelineGroupDisplayRow = {
 
 type TimelineDisplayRow = TimelineWorkDisplayRow | TimelineGroupDisplayRow;
 
+type ProjectFolderNameDialogState = {
+  mode: "create" | "rename";
+  parentFolderID: string;
+  folder?: CompanyExplorerFolder;
+  projectIDs: string[];
+};
+
+type ProjectFolderMoveDialogState =
+  | { kind: "projects"; projectIDs: string[] }
+  | { kind: "folder"; folder: CompanyExplorerFolder };
+
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
+const PROJECT_LIST_GROUPING_STORAGE_PREFIX = "mangorts-project-list-groupings-v1";
 const PROJECT_GROUP_FIELDS: Array<{ field: ProjectGroupField; label: string }> = [
   { field: "account", label: "Account" },
   { field: "team", label: "Team" },
 ];
+
+function readProjectListGroupings(companyID: string) {
+  if (typeof window === "undefined") return [];
+  try {
+    return normalizeProjectListGroupings(JSON.parse(window.localStorage.getItem(`${PROJECT_LIST_GROUPING_STORAGE_PREFIX}:${companyID}`) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
@@ -510,20 +543,6 @@ function uniqueGroupValues(values: ProjectGroupValue[], fallbackLabel = "Unassig
   return byKey.size > 0 ? Array.from(byKey.values()) : [fallbackGroupValue(fallbackLabel)];
 }
 
-function projectGroupValues(project: ProjectRecord, field: ProjectGroupField): ProjectGroupValue[] {
-  if (field === "account") {
-    const accounts = project.accounts ?? [];
-    const values = accounts.map((account) => ({ key: account.account_id, label: account.name || account.account_id }));
-    return uniqueGroupValues(values);
-  }
-  if (field === "team") {
-    const teams = project.teams ?? [];
-    const values = teams.map((team) => ({ key: team.group_id, label: team.name || team.group_id }));
-    return uniqueGroupValues(values);
-  }
-  return [fallbackGroupValue()];
-}
-
 function timelineGroupValues(
   row: ProjectManagementTimelineRow,
   field: ProjectGroupField,
@@ -625,18 +644,6 @@ function buildGroupedTimelineRows(
   return displayRows;
 }
 
-function projectAccountLabel(project: ProjectRecord): string {
-  const labels = (project.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
-  if (labels.length > 0) return labels.join(", ");
-  return "Unassigned";
-}
-
-function projectTeamLabel(project: ProjectRecord): string {
-  const labels = (project.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
-  if (labels.length > 0) return labels.join(", ");
-  return "Unassigned";
-}
-
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({
   accent,
   widgetId,
@@ -663,11 +670,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectFoldersLoading, setProjectFoldersLoading] = useState(true);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("list");
   const [groupBy, setGroupBy] = useState<ProjectGroupingField>("");
   const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
+  const [projectListGroupings, setProjectListGroupings] = useState(() => readProjectListGroupings(companyID));
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectFolders, setProjectFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [projectFolderItems, setProjectFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
@@ -683,11 +694,21 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
   const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<{ project: ProjectRecord; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [projectFolderDeleteConfirmation, setProjectFolderDeleteConfirmation] = useState<{ folder: CompanyExplorerFolder; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [timelineNodeDeleteConfirmation, setTimelineNodeDeleteConfirmation] = useState<{ item: ProjectManagementTimelineRow; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRecord | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [projectRenameSaving, setProjectRenameSaving] = useState(false);
+  const [projectFolderNameDialog, setProjectFolderNameDialog] = useState<ProjectFolderNameDialogState | null>(null);
+  const [projectFolderNameDraft, setProjectFolderNameDraft] = useState("");
+  const [projectFolderSaving, setProjectFolderSaving] = useState(false);
+  const [projectFolderMoveDialog, setProjectFolderMoveDialog] = useState<ProjectFolderMoveDialogState | null>(null);
+  const [projectAssignmentsTarget, setProjectAssignmentsTarget] = useState<ProjectRecord | null>(null);
+  const [projectAssignmentAccountIDs, setProjectAssignmentAccountIDs] = useState<string[]>([]);
+  const [projectAssignmentTeamIDs, setProjectAssignmentTeamIDs] = useState<string[]>([]);
+  const [projectAssignmentsSaving, setProjectAssignmentsSaving] = useState(false);
   const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
+  const projectFolderRootID = useMemo(() => resolveProjectFolderRootID(projectFolders), [projectFolders]);
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setWorkspace((current) => reconcileProjectManagementWorkspaceTitles(current, update, companyID));
@@ -722,6 +743,21 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setProjectsLoading(false);
     }
   }, [companyID]);
+  const loadProjectFolders = useCallback(async (showLoading = false) => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) return;
+    if (showLoading) setProjectFoldersLoading(true);
+    try {
+      const response = await fetchProjectFolderSnapshot(cleanCompanyID);
+      setProjectFolders(response.folders ?? []);
+      setProjectFolderItems(response.folderItems ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load project folders");
+    } finally {
+      setProjectFoldersLoading(false);
+    }
+  }, [companyID]);
+
 
   const scheduleWorkspacePanelReload = useCallback(() => {
     const cleanCompanyID = companyID.trim();
@@ -744,9 +780,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
     projectListReloadTimerRef.current = window.setTimeout(() => {
       projectListReloadTimerRef.current = null;
-      void loadProjectList();
+      void Promise.all([loadProjectList(), loadProjectFolders()]);
     }, 250);
-  }, [companyID, loadProjectList]);
+  }, [companyID, loadProjectFolders, loadProjectList]);
 
   useEffect(() => {
     let cancelled = false;
@@ -862,7 +898,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => {
     void loadProjectList(true);
-  }, [loadProjectList]);
+    void loadProjectFolders(true);
+  }, [loadProjectFolders, loadProjectList]);
+
+  useEffect(() => {
+    setProjectListGroupings(readProjectListGroupings(companyID));
+  }, [companyID]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(`${PROJECT_LIST_GROUPING_STORAGE_PREFIX}:${companyID}`, JSON.stringify(projectListGroupings));
+  }, [companyID, projectListGroupings]);
 
   useEffect(() => {
     const cleanProjectID = targetProjectID?.trim() ?? "";
@@ -1202,10 +1248,133 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       } else {
         await loadProjectList();
       }
+      scheduleProjectListReload();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to create project");
     }
-  }, [companyID, loadProjectList, openProject]);
+  }, [companyID, loadProjectList, openProject, scheduleProjectListReload]);
+  const moveProjectRows = useCallback(async (projectIDs: string[], folderID: string) => {
+    const cleanProjectIDs = Array.from(new Set(projectIDs.map((projectID) => projectID.trim()).filter(Boolean)));
+    if (!folderID || cleanProjectIDs.length === 0) return;
+    setError("");
+    try {
+      await moveProjectsToFolder({ companyID, projectIDs: cleanProjectIDs, folderID });
+      await loadProjectFolders();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Failed to move projects");
+      await loadProjectFolders();
+    }
+  }, [companyID, loadProjectFolders]);
+
+  const moveProjectFolder = useCallback(async (folderID: string, parentFolderID: string) => {
+    if (!folderID || !parentFolderID || folderID === parentFolderID) return;
+    setError("");
+    try {
+      await updateProjectFolder({ companyID, folderID, parentFolderID });
+      await loadProjectFolders();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Failed to move folder");
+      await loadProjectFolders();
+    }
+  }, [companyID, loadProjectFolders]);
+
+  const openProjectFolderNameDialog = useCallback((dialog: ProjectFolderNameDialogState) => {
+    setProjectFolderNameDialog(dialog);
+    setProjectFolderNameDraft(dialog.mode === "rename" ? dialog.folder?.name ?? "" : "New Folder");
+    setProjectContextMenu(null);
+  }, []);
+
+  const saveProjectFolderName = useCallback(async () => {
+    const dialog = projectFolderNameDialog;
+    const name = projectFolderNameDraft.trim();
+    if (!dialog || !name) return;
+    if (dialog.mode === "create" && !dialog.parentFolderID) {
+      setError("Project folders are still loading");
+      return;
+    }
+    setError("");
+    setProjectFolderSaving(true);
+    try {
+      if (dialog.mode === "rename" && dialog.folder) {
+        await updateProjectFolder({ companyID, folderID: dialog.folder.folder_id, name });
+      } else {
+        const created = await createProjectFolder({
+          companyID,
+          parentFolderID: dialog.parentFolderID,
+          name,
+        });
+        if (dialog.projectIDs.length > 0) {
+          await moveProjectsToFolder({
+            companyID,
+            projectIDs: dialog.projectIDs,
+            folderID: created.entity_id,
+          });
+        }
+      }
+      setProjectFolderNameDialog(null);
+      setProjectFolderNameDraft("");
+      await loadProjectFolders();
+    } catch (folderError) {
+      setError(folderError instanceof Error ? folderError.message : "Failed to save folder");
+    } finally {
+      setProjectFolderSaving(false);
+    }
+  }, [companyID, loadProjectFolders, projectFolderNameDialog, projectFolderNameDraft]);
+
+  const confirmDeleteProjectFolder = useCallback(async (folder: CompanyExplorerFolder) => {
+    setProjectFolderDeleteConfirmation(null);
+    setProjectContextMenu(null);
+    setError("");
+    try {
+      await deleteProjectFolder(companyID, folder.folder_id);
+      await loadProjectFolders();
+    } catch (folderError) {
+      setError(folderError instanceof Error ? folderError.message : "Failed to delete folder");
+      await loadProjectFolders();
+    }
+  }, [companyID, loadProjectFolders]);
+
+  const openProjectAssignments = useCallback((project: ProjectRecord) => {
+    setProjectAssignmentsTarget(project);
+    setProjectAssignmentAccountIDs(project.accounts?.map((account) => account.account_id) ?? []);
+    setProjectAssignmentTeamIDs(project.teams?.map((team) => team.group_id) ?? []);
+    setProjectContextMenu(null);
+  }, []);
+
+  const closeProjectAssignments = useCallback(() => {
+    setProjectAssignmentsTarget(null);
+    setProjectAssignmentAccountIDs([]);
+    setProjectAssignmentTeamIDs([]);
+  }, []);
+
+  const saveProjectAssignments = useCallback(async () => {
+    const project = projectAssignmentsTarget;
+    if (!project) return;
+    setProjectAssignmentsSaving(true);
+    setError("");
+    try {
+      const result = await updateProject({
+        companyID,
+        projectID: project.project_id,
+        name: project.name || "Untitled Project",
+        status: project.status || "Active",
+        health: normalizeProjectHealth(project.health),
+        accountIDs: projectAssignmentAccountIDs,
+        teamIDs: projectAssignmentTeamIDs,
+      });
+      if (result.project) {
+        setProjects((current) => current.map((item) => item.project_id === project.project_id ? result.project! : item));
+      } else {
+        await loadProjectList();
+      }
+      closeProjectAssignments();
+    } catch (assignmentError) {
+      setError(assignmentError instanceof Error ? assignmentError.message : "Failed to save project assignments");
+    } finally {
+      setProjectAssignmentsSaving(false);
+    }
+  }, [closeProjectAssignments, companyID, loadProjectList, projectAssignmentAccountIDs, projectAssignmentTeamIDs, projectAssignmentsTarget]);
+
 
   const showLocalProjectExplorer = false;
 
@@ -1253,12 +1422,24 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>
           </div>
           <div style={surfaceHeaderActionsStyle}>
-          <ProjectGroupingControls
-            groupBy={groupBy}
-            subgroupBy={subgroupBy}
-            onGroupByChange={setGroupBy}
-            onSubgroupByChange={setSubgroupBy}
-          />
+          {viewMode === "list" ? (
+            <UniversalGroupingControls<ProjectListGroupingField>
+              groupings={projectListGroupings}
+              fieldOptions={PROJECT_LIST_GROUPING_FIELDS}
+              onChange={setProjectListGroupings}
+              buttonLabel="•••"
+              popoverLabel="Edit Projects view"
+              emptyLabel="Projects are shown in their folder structure"
+              accent={accent}
+            />
+          ) : (
+            <ProjectGroupingControls
+              groupBy={groupBy}
+              subgroupBy={subgroupBy}
+              onGroupByChange={setGroupBy}
+              onSubgroupByChange={setSubgroupBy}
+            />
+          )}
           {viewMode === "timeline" ? (
             <>
               <CompanyPerspectiveSelector
@@ -1286,7 +1467,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               </div>
             </>
           ) : (
-            <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
+            <>
+              <button type="button" style={secondaryButtonStyle} disabled={!projectFolderRootID || projectFoldersLoading} onClick={() => openProjectFolderNameDialog({ mode: "create", parentFolderID: projectFolderRootID, projectIDs: [] })}>New Folder</button>
+              <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
+            </>
           )}
           </div>
         </div>
@@ -1311,17 +1495,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             onToggleGate={toggleTimelineGate}
           />
         ) : (
-          <ProjectListTable
+          <ProjectListView
             projects={projects}
-            loading={projectsLoading}
-            groupBy={groupBy}
-            subgroupBy={subgroupBy}
+            folders={projectFolders}
+            folderItems={projectFolderItems}
+            rootFolderID={projectFolderRootID}
+            loading={projectsLoading || projectFoldersLoading}
+            groupings={projectListGroupings}
             onProjectOpen={openProject}
-            onProjectContextMenu={(project, event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setProjectContextMenu({ project, x: event.clientX, y: event.clientY });
-            }}
+            onContextMenu={setProjectContextMenu}
+            onMoveProjects={moveProjectRows}
+            onMoveFolder={moveProjectFolder}
           />
         )}
       </section>
@@ -1355,6 +1539,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           onPointerDown={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
+          {projectContextMenu.kind === "project" ? (
+            <>
           <button
             type="button"
             role="menuitem"
@@ -1381,6 +1567,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           >
             Pin
           </button>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectAssignments(projectContextMenu.project)}>
+                Edit account &amp; team
+              </button>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
+                setProjectFolderMoveDialog({ kind: "projects", projectIDs: projectContextMenu.selectedProjectIDs });
+                setProjectContextMenu(null);
+              }}>Move to folder…</button>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
+                mode: "create",
+                parentFolderID: projectFolderRootID,
+                projectIDs: projectContextMenu.selectedProjectIDs,
+              })}>Create folder from selection</button>
           <button
             type="button"
             role="menuitem"
@@ -1406,6 +1604,50 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           >
             Delete project
           </button>
+            </>
+          ) : projectContextMenu.kind === "folder" ? (
+            <>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
+                mode: "create",
+                parentFolderID: projectContextMenu.folder.folder_id,
+                projectIDs: [],
+              })}>New subfolder</button>
+              {projectContextMenu.selectedProjectIDs.length > 0 ? (
+                <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
+                  void moveProjectRows(projectContextMenu.selectedProjectIDs, projectContextMenu.folder.folder_id);
+                  setProjectContextMenu(null);
+                }}>Move selected projects here</button>
+              ) : null}
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
+                mode: "rename",
+                parentFolderID: projectContextMenu.folder.parent_folder_id ?? projectFolderRootID,
+                folder: projectContextMenu.folder,
+                projectIDs: [],
+              })}>Rename folder</button>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
+                setProjectFolderMoveDialog({ kind: "folder", folder: projectContextMenu.folder });
+                setProjectContextMenu(null);
+              }}>Move folder…</button>
+              <button type="button" role="menuitem" style={{ ...projectContextMenuButtonStyle, color: "#dc2626" }} onClick={(event) => {
+                setProjectFolderDeleteConfirmation({ folder: projectContextMenu.folder, position: confirmMenuPositionFromElement(event.currentTarget) });
+              }}>Delete folder</button>
+            </>
+          ) : (
+            <>
+              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
+                mode: "create",
+                parentFolderID: projectFolderRootID,
+                projectIDs: [],
+              })}>New folder</button>
+              {projectContextMenu.selectedProjectIDs.length > 0 ? (
+                <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
+                  mode: "create",
+                  parentFolderID: projectFolderRootID,
+                  projectIDs: projectContextMenu.selectedProjectIDs,
+                })}>Create folder from selection</button>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
       {projectRenameTarget ? (
@@ -1446,6 +1688,75 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           </div>
         </div>
         </AppModalPortal>
+      ) : null}
+      {projectFolderNameDialog ? (
+        <AppModalPortal onRequestClose={projectFolderSaving ? undefined : () => setProjectFolderNameDialog(null)}>
+          <div role="presentation" style={projectDeleteBackdropStyle} onPointerDown={() => { if (!projectFolderSaving) setProjectFolderNameDialog(null); }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="project-folder-name-title" style={projectDeleteDialogStyle} onPointerDown={(event) => event.stopPropagation()}>
+              <h3 id="project-folder-name-title" style={projectDeleteTitleStyle}>
+                {projectFolderNameDialog.mode === "rename" ? "Rename folder" : projectFolderNameDialog.projectIDs.length > 0 ? "Create folder from selection" : "Create folder"}
+              </h3>
+              <input
+                autoFocus
+                value={projectFolderNameDraft}
+                style={projectRenameInputStyle}
+                onChange={(event) => setProjectFolderNameDraft(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void saveProjectFolderName();
+                  }
+                }}
+              />
+              <div style={projectDeleteActionsStyle}>
+                <button type="button" style={projectDeleteCancelButtonStyle} disabled={projectFolderSaving} onClick={() => setProjectFolderNameDialog(null)}>Cancel</button>
+                <button type="button" style={projectRenameSaveButtonStyle} disabled={projectFolderSaving || !projectFolderNameDraft.trim()} onClick={() => void saveProjectFolderName()}>
+                  {projectFolderSaving ? "Saving" : projectFolderNameDialog.mode === "rename" ? "Save" : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </AppModalPortal>
+      ) : null}
+      {projectFolderMoveDialog && projectFolderRootID ? (
+        <ProjectFolderPicker
+          title={projectFolderMoveDialog.kind === "projects" ? `Move ${projectFolderMoveDialog.projectIDs.length} project${projectFolderMoveDialog.projectIDs.length === 1 ? "" : "s"}` : `Move ${projectFolderMoveDialog.folder.name}`}
+          actionLabel="Move"
+          folders={projectFolders}
+          rootFolderID={projectFolderRootID}
+          disabledFolderIDs={projectFolderMoveDialog.kind === "folder" ? projectFolderSubtreeIDs(projectFolders, projectFolderMoveDialog.folder.folder_id) : undefined}
+          onChoose={(folderID) => {
+            if (projectFolderMoveDialog.kind === "projects") void moveProjectRows(projectFolderMoveDialog.projectIDs, folderID);
+            else void moveProjectFolder(projectFolderMoveDialog.folder.folder_id, folderID);
+            setProjectFolderMoveDialog(null);
+          }}
+          onClose={() => setProjectFolderMoveDialog(null)}
+        />
+      ) : null}
+      {projectAssignmentsTarget ? (
+        <ProjectAssignmentsDialog
+          accounts={timelineAccounts}
+          groups={groups}
+          selectedAccountIDs={projectAssignmentAccountIDs}
+          selectedTeamIDs={projectAssignmentTeamIDs}
+          saving={projectAssignmentsSaving}
+          onSetAccountIDs={setProjectAssignmentAccountIDs}
+          onSetTeamIDs={setProjectAssignmentTeamIDs}
+          onSave={() => void saveProjectAssignments()}
+          onClose={closeProjectAssignments}
+        />
+      ) : null}
+      {projectFolderDeleteConfirmation ? (
+        <ConfirmActionMenu
+          title="Delete folder?"
+          detail={`Delete ${projectFolderDeleteConfirmation.folder.name}? Projects inside it will remain available at the top level.`}
+          position={projectFolderDeleteConfirmation.position}
+          confirmLabel="Yes, delete"
+          requireDisplayNameConfirmation={false}
+          cancelLabel="No"
+          onConfirm={() => void confirmDeleteProjectFolder(projectFolderDeleteConfirmation.folder)}
+          onCancel={() => setProjectFolderDeleteConfirmation(null)}
+        />
       ) : null}
       {projectDeleteConfirmation ? (
         <ConfirmActionMenu
@@ -1520,131 +1831,6 @@ function ProjectGroupingControls({
 
 function normalizeProjectHealth(value: string | undefined | null): ProjectHealth {
   return PROJECT_HEALTH_OPTIONS.includes(value as ProjectHealth) ? value as ProjectHealth : "On Track";
-}
-
-function ProjectListTable({
-  projects,
-  loading,
-  groupBy,
-  subgroupBy,
-  onProjectOpen,
-  onProjectContextMenu,
-}: {
-  projects: ProjectRecord[];
-  loading: boolean;
-  groupBy: ProjectGroupingField;
-  subgroupBy: ProjectGroupingField;
-  onProjectOpen: (projectID: string) => void;
-  onProjectContextMenu: (project: ProjectRecord, event: React.MouseEvent<HTMLTableRowElement>) => void;
-}) {
-  const [hoveredProjectID, setHoveredProjectID] = useState("");
-  const sortedProjects = useMemo(() => [...projects].sort((left, right) => (
-    left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
-    left.project_id.localeCompare(right.project_id)
-  )), [projects]);
-
-  if (loading) {
-    return <div style={projectListEmptyStyle}>Loading</div>;
-  }
-
-  const renderProjectRows = (items: ProjectRecord[]) => (
-    <>
-      {items.map((project) => (
-        <tr
-          key={project.project_id}
-          style={projectRowStyle(hoveredProjectID === project.project_id)}
-          onPointerEnter={() => setHoveredProjectID(project.project_id)}
-          onPointerLeave={() => setHoveredProjectID((current) => current === project.project_id ? "" : current)}
-          onClick={() => onProjectOpen(project.project_id)}
-          onDoubleClick={() => onProjectOpen(project.project_id)}
-          onContextMenu={(event) => onProjectContextMenu(project, event)}
-        >
-          <td style={projectNameCellStyle}>
-            <span style={projectNameCellInnerStyle}>
-              <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
-              <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
-            </span>
-          </td>
-          <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
-          <td style={projectCellStyle}><span style={projectHealthPillStyle(normalizeProjectHealth(project.health))}>{normalizeProjectHealth(project.health)}</span></td>
-          <td style={projectCellStyle}>{projectAccountLabel(project)}</td>
-          <td style={projectCellStyle}>{projectTeamLabel(project)}</td>
-        </tr>
-      ))}
-    </>
-  );
-
-  if (groupBy) {
-    const effectiveSubgroupBy = subgroupBy && subgroupBy !== groupBy ? subgroupBy : "";
-    const sections = buildGroupedSections(
-      sortedProjects,
-      projectGroupValues,
-      groupBy,
-      effectiveSubgroupBy,
-    );
-    return (
-      <div className="kanban-board-scroll" style={projectListScrollStyle}>
-        <div style={projectGroupedListStyle}>
-          {sections.map((section) => (
-            <section key={`y:${section.group.key}`} style={projectGroupedSectionStyle}>
-              <div style={projectGroupHeaderStyle}>
-                <span style={projectGroupHeaderAxisStyle}>Group by</span>
-                <span style={projectGroupHeaderTextStyle}>{section.group.label}</span>
-              </div>
-              {section.buckets.map((bucket) => (
-                <div key={`x:${section.group.key}:${bucket.group.key}`} style={projectGroupedBucketStyle}>
-                  {effectiveSubgroupBy ? (
-                    <div style={projectBucketHeaderStyle}>
-                      <span style={projectGroupHeaderAxisStyle}>Subgroup</span>
-                      <span style={projectBucketHeaderTextStyle}>{bucket.group.label}</span>
-                      <span style={projectBucketCountStyle}>{bucket.items.length}</span>
-                    </div>
-                  ) : null}
-                  <table style={projectTableStyle}>
-                    <thead>
-                      <tr>
-                        <th style={projectHeaderCellStyle}>Project Name</th>
-                        <th style={projectHeaderCellStyle}>Status</th>
-                        <th style={projectHeaderCellStyle}>Health</th>
-                        <th style={projectHeaderCellStyle}>Account</th>
-                        <th style={projectHeaderCellStyle}>Team</th>
-                      </tr>
-                    </thead>
-                    <tbody>{renderProjectRows(bucket.items)}</tbody>
-                  </table>
-                </div>
-              ))}
-            </section>
-          ))}
-          {sections.length === 0 ? <div style={projectListEmptyStyle}>No projects</div> : null}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="kanban-board-scroll" style={projectListScrollStyle}>
-      <table style={projectTableStyle}>
-        <thead>
-          <tr>
-            <th style={projectHeaderCellStyle}>Project Name</th>
-            <th style={projectHeaderCellStyle}>Status</th>
-            <th style={projectHeaderCellStyle}>Health</th>
-            <th style={projectHeaderCellStyle}>Account</th>
-            <th style={projectHeaderCellStyle}>Team</th>
-          </tr>
-        </thead>
-        <tbody>
-          {renderProjectRows(sortedProjects)}
-          {sortedProjects.length === 0 ? (
-            <tr>
-              <td colSpan={5} style={projectEmptyCellStyle}>No projects</td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 function TimelineChart({
@@ -2191,210 +2377,6 @@ const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
   cursor: "pointer",
   boxShadow: "0 8px 18px rgba(37, 99, 235, 0.16)",
 });
-
-const projectListScrollStyle: React.CSSProperties = {
-  minHeight: 0,
-  overflow: "auto",
-  border: "1px solid rgba(148, 163, 184, 0.20)",
-  borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.82)",
-};
-
-const projectTableStyle: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "separate",
-  borderSpacing: 0,
-  minWidth: 720,
-  color: "#0f172a",
-};
-
-const projectGroupedListStyle: React.CSSProperties = {
-  minWidth: 760,
-  display: "grid",
-  alignContent: "start",
-  gap: 14,
-  padding: 12,
-  boxSizing: "border-box",
-};
-
-const projectGroupedSectionStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const projectGroupHeaderStyle: React.CSSProperties = {
-  minHeight: 34,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-  color: "#0f172a",
-};
-
-const projectGroupHeaderAxisStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  minHeight: 22,
-  borderRadius: 999,
-  padding: "0 8px",
-  background: "#e2e8f0",
-  color: "#475569",
-  fontSize: 10,
-  fontWeight: 950,
-};
-
-const projectGroupHeaderTextStyle: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 950,
-};
-
-const projectGroupedBucketStyle: React.CSSProperties = {
-  overflow: "hidden",
-  border: "1px solid rgba(148, 163, 184, 0.22)",
-  borderRadius: 8,
-  background: "#ffffff",
-};
-
-const projectBucketHeaderStyle: React.CSSProperties = {
-  minHeight: 34,
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "0 12px",
-  borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
-  background: "#f8fafc",
-  boxSizing: "border-box",
-};
-
-const projectBucketHeaderTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "#0f172a",
-  fontSize: 13,
-  fontWeight: 950,
-};
-
-const projectBucketCountStyle: React.CSSProperties = {
-  marginLeft: "auto",
-  color: "#64748b",
-  fontSize: 11,
-  fontWeight: 900,
-};
-
-const projectHeaderCellStyle: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  zIndex: 1,
-  height: 42,
-  padding: "0 14px",
-  background: "#f8fafc",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.26)",
-  color: "#475569",
-  fontSize: 12,
-  fontWeight: 900,
-  textAlign: "left",
-};
-
-const projectRowStyle = (hovered: boolean): React.CSSProperties => ({
-  height: 48,
-  cursor: "pointer",
-  background: hovered ? "linear-gradient(90deg, rgba(236, 253, 245, 0.82), rgba(240, 249, 255, 0.76))" : "transparent",
-  outline: hovered ? "2px solid rgba(14, 165, 233, 0.22)" : "2px solid transparent",
-  outlineOffset: -2,
-  transition: "background 150ms ease, outline-color 150ms ease",
-});
-
-const projectCellStyle: React.CSSProperties = {
-  padding: "0 14px",
-  borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
-  fontSize: 13,
-  fontWeight: 700,
-  color: "#334155",
-  whiteSpace: "nowrap",
-  verticalAlign: "middle",
-};
-
-const projectNameCellStyle: React.CSSProperties = {
-  ...projectCellStyle,
-  color: "#0f172a",
-  fontWeight: 900,
-};
-
-const projectNameCellInnerStyle: React.CSSProperties = {
-  minHeight: 48,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 9,
-  maxWidth: "100%",
-  verticalAlign: "middle",
-};
-
-const projectIconCellStyle: React.CSSProperties = {
-  width: 18,
-  height: 18,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flexShrink: 0,
-};
-
-const projectNameTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const projectStatusPillStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  minHeight: 24,
-  borderRadius: 999,
-  padding: "0 9px",
-  background: "rgba(16, 185, 129, 0.12)",
-  color: "#047857",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-function projectHealthPillStyle(health: ProjectHealth): React.CSSProperties {
-  const colors = health === "AT RISK"
-    ? { background: "rgba(249, 115, 22, 0.14)", color: "#c2410c", border: "rgba(249, 115, 22, 0.30)" }
-    : health === "Off Track"
-      ? { background: "rgba(239, 68, 68, 0.13)", color: "#b91c1c", border: "rgba(239, 68, 68, 0.30)" }
-      : { background: "rgba(16, 185, 129, 0.12)", color: "#047857", border: "rgba(16, 185, 129, 0.26)" };
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    minHeight: 24,
-    borderRadius: 999,
-    border: `1px solid ${colors.border}`,
-    padding: "0 9px",
-    background: colors.background,
-    color: colors.color,
-    fontSize: 12,
-    fontWeight: 950,
-  };
-}
-
-const projectEmptyCellStyle: React.CSSProperties = {
-  height: 120,
-  textAlign: "center",
-  color: "#64748b",
-  fontWeight: 850,
-};
-
-const projectListEmptyStyle: React.CSSProperties = {
-  minHeight: 0,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(148, 163, 184, 0.20)",
-  borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.82)",
-  color: "#64748b",
-  fontWeight: 850,
-};
 
 const titleClusterStyle: React.CSSProperties = {
   minWidth: 0,

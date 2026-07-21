@@ -3427,7 +3427,7 @@ function toggleSetValue(current: Set<string>, value: string): Set<string> {
   return next;
 }
 
-function ProjectAssignmentsDialog({
+export function ProjectAssignmentsDialog({
   accounts,
   groups,
   selectedAccountIDs,
