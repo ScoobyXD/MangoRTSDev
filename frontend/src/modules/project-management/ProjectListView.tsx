@@ -1,9 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
+import type { Account } from "../accounts/accountsApi.js";
+import type { CompanyUserGroup } from "../communications/communicationsApi.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalGroupingSetting, type UniversalNestedGroup } from "../grouping/universalGrouping.js";
 import type { ProjectHealth, ProjectRecord } from "./projectManagementApi.js";
+import {
+  ProjectFieldControl,
+  PROJECT_HEALTH_CHOICES,
+  projectStatusChoices,
+  type ProjectFieldTone,
+} from "./ProjectFieldControl.js";
 import { PROJECT_LIST_GROUPING_FIELDS, projectFolderSubtreeIDs, type ProjectListGroupingField } from "./projectListViewModel.js";
 export { PROJECT_LIST_GROUPING_FIELDS, normalizeProjectListGroupings, projectFolderSubtreeIDs, resolveProjectFolderRootID } from "./projectListViewModel.js";
 export type { ProjectListGroupingField } from "./projectListViewModel.js";
@@ -12,6 +20,13 @@ export type ProjectListContextMenuRequest =
   | { kind: "root"; x: number; y: number; selectedProjectIDs: string[] }
   | { kind: "folder"; x: number; y: number; folder: CompanyExplorerFolder; selectedProjectIDs: string[] }
   | { kind: "project"; x: number; y: number; project: ProjectRecord; selectedProjectIDs: string[] };
+
+export type ProjectListFieldUpdate = Partial<{
+  status: string;
+  health: ProjectHealth;
+  accountIDs: string[];
+  teamIDs: string[];
+}>;
 
 type ProjectTreeRow =
   | { kind: "folder"; id: string; depth: number; folder: CompanyExplorerFolder; expanded: boolean; hasChildren: boolean }
@@ -26,7 +41,11 @@ export function ProjectListView({
   rootFolderID,
   loading,
   groupings,
+  accounts,
+  teams,
+  savingProjectIDs,
   onProjectOpen,
+  onProjectFieldChange,
   onContextMenu,
   onMoveProjects,
   onMoveFolder,
@@ -37,7 +56,11 @@ export function ProjectListView({
   rootFolderID: string;
   loading: boolean;
   groupings: Array<UniversalGroupingSetting<ProjectListGroupingField>>;
+  accounts: Account[];
+  teams: CompanyUserGroup[];
+  savingProjectIDs: Set<string>;
   onProjectOpen: (projectID: string) => void;
+  onProjectFieldChange: (project: ProjectRecord, update: ProjectListFieldUpdate) => void | Promise<void>;
   onContextMenu: (request: ProjectListContextMenuRequest) => void;
   onMoveProjects: (projectIDs: string[], folderID: string) => void | Promise<void>;
   onMoveFolder: (folderID: string, parentFolderID: string) => void | Promise<void>;
@@ -134,6 +157,8 @@ export function ProjectListView({
 
   const projectRow = (project: ProjectRecord, depth: number, key: string) => {
     const selected = selectedProjectIDs.has(project.project_id);
+    const saving = savingProjectIDs.has(project.project_id);
+    const health = normalizeProjectHealth(project.health);
     return (
       <tr
         key={key}
@@ -157,10 +182,46 @@ export function ProjectListView({
             <span style={nameTextStyle}>{project.name || project.project_id}</span>
           </span>
         </td>
-        <td style={cellStyle}><span style={statusPillStyle}>{project.status || "Active"}</span></td>
-        <td style={cellStyle}><span style={healthPillStyle(normalizeProjectHealth(project.health))}>{normalizeProjectHealth(project.health)}</span></td>
-        <td style={cellStyle}>{projectEntityLabel(project.accounts?.map((account) => account.name || account.account_id) ?? [])}</td>
-        <td style={cellStyle}>{projectEntityLabel(project.teams?.map((team) => team.name || team.group_id) ?? [])}</td>
+        <td style={editableCellStyle}>
+          <ProjectFieldControl
+            ariaLabel={`Status for ${project.name || "project"}`}
+            values={[project.status || "Active"]}
+            choices={projectStatusChoices(project.status)}
+            tone="status"
+            disabled={saving}
+            onChange={(values) => onProjectFieldChange(project, { status: values[0] || "Active" })}
+          />
+        </td>
+        <td style={editableCellStyle}>
+          <ProjectFieldControl
+            ariaLabel={`Health for ${project.name || "project"}`}
+            values={[health]}
+            choices={PROJECT_HEALTH_CHOICES}
+            tone={projectHealthTone(health)}
+            disabled={saving}
+            onChange={(values) => onProjectFieldChange(project, { health: normalizeProjectHealth(values[0]) })}
+          />
+        </td>
+        <td style={editableCellStyle}>
+          <ProjectFieldControl
+            ariaLabel={`Accounts for ${project.name || "project"}`}
+            values={project.accounts?.map((account) => account.account_id) ?? []}
+            choices={accounts.map((account) => ({ id: account.account_id, label: account.name || account.account_id }))}
+            multiple
+            disabled={saving}
+            onChange={(accountIDs) => onProjectFieldChange(project, { accountIDs })}
+          />
+        </td>
+        <td style={editableCellStyle}>
+          <ProjectFieldControl
+            ariaLabel={`Teams for ${project.name || "project"}`}
+            values={project.teams?.map((team) => team.group_id) ?? []}
+            choices={teams.map((team) => ({ id: team.group_id, label: team.name || team.group_id }))}
+            multiple
+            disabled={saving}
+            onChange={(teamIDs) => onProjectFieldChange(project, { teamIDs })}
+          />
+        </td>
       </tr>
     );
   };
@@ -171,11 +232,13 @@ export function ProjectListView({
     return (
       <React.Fragment key={group.id}>
         <tr data-project-row="group" style={groupRowStyle(group.depth)} onClick={() => setExpandedGroupIDs((current) => toggleSet(current, group.id))}>
-          <td colSpan={5} style={groupCellStyle(group.depth)}>
-            <span style={disclosureStyle}><ExplorerDisclosureIcon open={expanded} color="#64748b" /></span>
-            <span style={groupAxisStyle}>{groupingFieldLabel(group.field)}</span>
-            <span style={groupLabelStyle}>{group.label}</span>
-            <span style={countStyle}>{rows.length}</span>
+          <td colSpan={5} style={groupCellStyle}>
+            <span style={groupCellInnerStyle(group.depth)}>
+              <span style={disclosureStyle}><ExplorerDisclosureIcon open={expanded} color="#64748b" /></span>
+              <span style={groupAxisStyle}>{groupingFieldLabel(group.field)}</span>
+              <span style={groupLabelStyle}>{group.label}</span>
+              <span style={countStyle}>{rows.length}</span>
+            </span>
           </td>
         </tr>
         {expanded ? (group.groups.length > 0 ? renderGroups(group.groups) : group.rows.map((project) => projectRow(project, group.depth + 1, `${group.id}:${project.project_id}`))) : null}
@@ -506,19 +569,16 @@ function toggleSet(current: Set<string>, value: string): Set<string> {
   return next;
 }
 
-function projectEntityLabel(labels: string[]): string {
-  const unique = Array.from(new Set(labels.map((label) => label.trim()).filter(Boolean)));
-  if (unique.length === 0) return "Unassigned";
-  if (unique.length <= 2) return unique.join(", ");
-  return `${unique.slice(0, 2).join(", ")} +${unique.length - 2}`;
-}
-
 function groupingFieldLabel(field: ProjectListGroupingField): string {
   return PROJECT_LIST_GROUPING_FIELDS.find((option) => option.value === field)?.label ?? field;
 }
 
 function normalizeProjectHealth(value?: string | null): ProjectHealth {
   return value === "AT RISK" || value === "Off Track" ? value : "On Track";
+}
+
+function projectHealthTone(health: ProjectHealth): ProjectFieldTone {
+  return health === "AT RISK" ? "warning" : health === "Off Track" ? "danger" : "healthy";
 }
 
 const listScrollStyle = (dropActive: boolean): React.CSSProperties => ({
@@ -531,20 +591,20 @@ const listScrollStyle = (dropActive: boolean): React.CSSProperties => ({
 const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 720, color: "#0f172a" };
 const headerCellStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 5, height: 42, padding: "0 14px", background: "#f8fafc", borderBottom: "1px solid rgba(148, 163, 184, 0.26)", color: "#475569", fontSize: 12, fontWeight: 900, textAlign: "left" };
 const cellStyle: React.CSSProperties = { height: 44, padding: "0 14px", borderBottom: "1px solid rgba(226, 232, 240, 0.9)", fontSize: 13, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", verticalAlign: "middle" };
+const editableCellStyle: React.CSSProperties = { ...cellStyle, minWidth: 142, padding: "5px 14px" };
 const nameCellStyle: React.CSSProperties = { ...cellStyle, color: "#0f172a", fontWeight: 900 };
 const projectRowStyle = (selected: boolean): React.CSSProperties => ({ cursor: "pointer", background: selected ? "linear-gradient(90deg, rgba(219, 234, 254, 0.92), rgba(239, 246, 255, 0.72))" : "transparent", outline: selected ? "2px solid rgba(37, 99, 235, 0.30)" : "2px solid transparent", outlineOffset: -2 });
 const folderRowStyle = (dropActive: boolean): React.CSSProperties => ({ cursor: "pointer", background: dropActive ? "rgba(219, 234, 254, 0.92)" : "rgba(248, 250, 252, 0.78)" });
 const folderCellStyle: React.CSSProperties = { ...cellStyle, padding: 0, height: 40 };
-const nameCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 7, maxWidth: "100%", paddingLeft: 10 + Math.max(0, depth) * 22 });
+const nameCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 7, maxWidth: "100%", paddingLeft: 10 + Math.max(0, depth) * 34 });
 const treeSpacerStyle: React.CSSProperties = { width: 14, flexShrink: 0 };
 const disclosureStyle: React.CSSProperties = { width: 14, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
 const iconStyle: React.CSSProperties = { width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
 const nameTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const folderNameStyle: React.CSSProperties = { ...nameTextStyle, color: "#334155", fontSize: 13, fontWeight: 850 };
-const statusPillStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", minHeight: 24, borderRadius: 999, padding: "0 9px", background: "rgba(16, 185, 129, 0.12)", color: "#047857", fontSize: 12, fontWeight: 900 };
-const healthPillStyle = (health: ProjectHealth): React.CSSProperties => ({ display: "inline-flex", alignItems: "center", minHeight: 24, borderRadius: 999, padding: "0 9px", background: health === "On Track" ? "rgba(16,185,129,.12)" : health === "AT RISK" ? "rgba(245,158,11,.14)" : "rgba(239,68,68,.12)", color: health === "On Track" ? "#047857" : health === "AT RISK" ? "#b45309" : "#b91c1c", fontSize: 12, fontWeight: 900 });
 const groupRowStyle = (depth: number): React.CSSProperties => ({ cursor: "pointer", background: depth === 0 ? "#e2e8f0" : "#f1f5f9" });
-const groupCellStyle = (depth: number): React.CSSProperties => ({ height: 38, padding: `0 12px 0 ${12 + depth * 20}px`, borderBottom: "1px solid rgba(148,163,184,.22)", color: "#0f172a", fontSize: 12, fontWeight: 900 });
+const groupCellStyle: React.CSSProperties = { height: 38, padding: 0, borderBottom: "1px solid rgba(148,163,184,.22)", color: "#0f172a", fontSize: 12, fontWeight: 900 };
+const groupCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 38, display: "inline-flex", alignItems: "center", paddingLeft: 12 + Math.max(0, depth) * 34 });
 const groupAxisStyle: React.CSSProperties = { display: "inline-flex", marginLeft: 7, marginRight: 7, borderRadius: 999, padding: "3px 7px", background: "rgba(255,255,255,.7)", color: "#64748b", fontSize: 10, fontWeight: 900 };
 const groupLabelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 950 };
 const countStyle: React.CSSProperties = { marginLeft: 8, color: "#64748b", fontSize: 11, fontWeight: 800 };

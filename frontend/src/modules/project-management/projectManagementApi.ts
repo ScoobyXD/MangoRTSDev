@@ -282,7 +282,7 @@ export async function fetchProjectFolderSnapshot(companyID: string): Promise<Pro
   const payload = await apiFetchJSON<{
     folders?: CompanyExplorerFolder[];
     folder_items?: CompanyExplorerFolderItem[];
-  }>(`/v1/workspace/snapshot?${params.toString()}`);
+  }>(`/v1/workspace/snapshot?${params.toString()}`, { cache: "no-store" });
   return {
     folders: payload.folders ?? [],
     folderItems: (payload.folder_items ?? []).filter((item) => item.item_type === "project"),

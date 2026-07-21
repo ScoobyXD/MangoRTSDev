@@ -127,6 +127,12 @@ import {
   type ProjectRelationshipProjection,
 } from "./projectManagementApi.js";
 import {
+  ProjectFieldControl,
+  PROJECT_HEALTH_CHOICES,
+  projectStatusChoices,
+  type ProjectFieldTone,
+} from "./ProjectFieldControl.js";
+import {
   reconcileProjectResourceDisplayTitles,
   reconcileRelationshipContextTitle,
   reconcileSelectedNodeTitle,
@@ -149,7 +155,6 @@ type ProjectSummaryContentProps = {
   focusRequestID?: number;
   accent: string;
   refreshToken?: number;
-  onBack: () => void;
   onNodeOpen?: (nodeID: string) => void;
   onProjectUpdated?: (project: ProjectRecord) => void;
   onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
@@ -248,7 +253,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   focusRequestID,
   accent,
   refreshToken = 0,
-  onBack,
   onNodeOpen,
   onProjectUpdated,
   onLogicGateOpen,
@@ -316,6 +320,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
   const [assignmentAccountIDs, setAssignmentAccountIDs] = useState<string[]>([]);
   const [assignmentTeamIDs, setAssignmentTeamIDs] = useState<string[]>([]);
+  const [projectMetadataSaving, setProjectMetadataSaving] = useState(false);
   const [assignmentsSaving, setAssignmentsSaving] = useState(false);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
   const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
@@ -1399,28 +1404,64 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [assignmentAccountIDs, assignmentTeamIDs, companyID, loadProject, project, projectID]);
 
-  const saveProjectHealth = useCallback(async (health: ProjectHealth) => {
+  const saveProjectMetadata = useCallback(async (update: Partial<{
+    status: string;
+    health: ProjectHealth;
+    accountIDs: string[];
+    teamIDs: string[];
+  }>) => {
     if (!project) return;
-    const nextHealth = normalizeProjectHealth(health);
     const previous = project;
-    setProject({ ...project, health: nextHealth });
+    const accountIDs = update.accountIDs ?? projectAccountIDs(project);
+    const teamIDs = update.teamIDs ?? projectTeamIDs(project);
+    const optimistic: ProjectRecord = {
+      ...project,
+      status: update.status ?? project.status ?? "Active",
+      health: update.health ?? normalizeProjectHealth(project.health),
+      accounts: accountIDs.map((accountID) => (
+        accounts.find((account) => account.account_id === accountID)
+        ?? project.accounts?.find((account) => account.account_id === accountID)
+      )).filter((account): account is Account => Boolean(account)),
+      teams: teamIDs.map((teamID) => {
+        const existing = project.teams?.find((team) => team.group_id === teamID);
+        if (existing) return existing;
+        const group = groups.find((item) => item.group_id === teamID);
+        return {
+          company_id: companyID,
+          group_id: teamID,
+          parent_group_id: group?.parent_group_id,
+          name: group?.name || teamID,
+          position: group?.position ?? 0,
+          created_timestamp: project.created_timestamp,
+          updated_timestamp: project.updated_timestamp,
+        };
+      }),
+    };
+    setProjectMetadataSaving(true);
+    setProject(optimistic);
     setError("");
     try {
       const result = await updateProject({
         companyID,
         projectID,
-        name: project.name || "Untitled Project",
-        status: project.status || "Active",
-        health: nextHealth,
-        accountIDs: projectAccountIDs(project),
-        teamIDs: projectTeamIDs(project),
+        name: optimistic.name || "Untitled Project",
+        status: optimistic.status || "Active",
+        health: normalizeProjectHealth(optimistic.health),
+        accountIDs,
+        teamIDs,
       });
-      if (result.project) setProject(result.project);
-    } catch (healthError) {
+      const saved = result.project ?? optimistic;
+      setProject(saved);
+      setAssignmentAccountIDs(projectAccountIDs(saved));
+      setAssignmentTeamIDs(projectTeamIDs(saved));
+      onProjectUpdated?.(saved);
+    } catch (metadataError) {
       setProject(previous);
-      setError(healthError instanceof Error ? healthError.message : "Failed to update project health");
+      setError(metadataError instanceof Error ? metadataError.message : "Failed to update project");
+    } finally {
+      setProjectMetadataSaving(false);
     }
-  }, [companyID, project, projectID]);
+  }, [accounts, companyID, groups, onProjectUpdated, project, projectID]);
 
   const selectRelationshipNode = useCallback((relationshipID: string, event: React.MouseEvent<HTMLElement>) => {
     const next = buildProjectRelationshipNodeSelectionUpdate({
@@ -1954,7 +1995,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   return (
     <div style={summaryShellStyle}>
       <div style={summaryHeaderStyle}>
-        <button type="button" style={backButtonStyle} onClick={onBack}>{"<"} Projects</button>
         <div style={summaryTitleClusterStyle}>
           <div style={summaryEyebrowStyle}>Project Summary</div>
           {projectTitleEditing ? (
@@ -1997,17 +2037,50 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           )}
         </div>
         <div style={summaryMetaPillsStyle}>
-          <span style={statusPillStyle(accent)}>{project?.status || "Active"}</span>
-          <select
-            aria-label="Project health"
-            value={normalizeProjectHealth(project?.health)}
-            style={healthSelectStyle(normalizeProjectHealth(project?.health))}
-            onChange={(event) => void saveProjectHealth(event.currentTarget.value as ProjectHealth)}
-          >
-            {PROJECT_HEALTH_OPTIONS.map((health) => <option key={health} value={health}>{health}</option>)}
-          </select>
-          {projectAccountLabels(project).map((label) => <span key={`account:${label}`} style={plainPillStyle}>{label}</span>)}
-          {projectTeamLabels(project).map((label) => <span key={`team:${label}`} style={plainPillStyle}>{label}</span>)}
+          <div style={summaryMetaFieldStyle}>
+            <span style={summaryMetaFieldLabelStyle}>Status</span>
+            <ProjectFieldControl
+              ariaLabel="Project status"
+              values={[project?.status || "Active"]}
+              choices={projectStatusChoices(project?.status)}
+              tone="status"
+              disabled={projectMetadataSaving || !project}
+              onChange={(values) => void saveProjectMetadata({ status: values[0] || "Active" })}
+            />
+          </div>
+          <div style={summaryMetaFieldStyle}>
+            <span style={summaryMetaFieldLabelStyle}>Health</span>
+            <ProjectFieldControl
+              ariaLabel="Project health"
+              values={[normalizeProjectHealth(project?.health)]}
+              choices={PROJECT_HEALTH_CHOICES}
+              tone={projectSummaryHealthTone(normalizeProjectHealth(project?.health))}
+              disabled={projectMetadataSaving || !project}
+              onChange={(values) => void saveProjectMetadata({ health: normalizeProjectHealth(values[0]) })}
+            />
+          </div>
+          <div style={summaryMetaFieldStyle}>
+            <span style={summaryMetaFieldLabelStyle}>Account</span>
+            <ProjectFieldControl
+              ariaLabel="Project accounts"
+              values={projectAccountIDs(project)}
+              choices={accounts.map((account) => ({ id: account.account_id, label: account.name || account.account_id }))}
+              multiple
+              disabled={projectMetadataSaving || !project}
+              onChange={(accountIDs) => void saveProjectMetadata({ accountIDs })}
+            />
+          </div>
+          <div style={summaryMetaFieldStyle}>
+            <span style={summaryMetaFieldLabelStyle}>Team</span>
+            <ProjectFieldControl
+              ariaLabel="Project teams"
+              values={projectTeamIDs(project)}
+              choices={groups.map((group) => ({ id: group.group_id, label: group.name || group.group_id }))}
+              multiple
+              disabled={projectMetadataSaving || !project}
+              onChange={(teamIDs) => void saveProjectMetadata({ teamIDs })}
+            />
+          </div>
         </div>
       </div>
       {permissionsOpen && (
@@ -2127,7 +2200,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
                     <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
                     <div className="mango-fixed-editor-row" data-project-text-box-row={block.id} style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)" }}>
-                      <div style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                      <div className="mango-editor-header-scroll" style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
                         <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${emailOpen ? projectSidePaneWidths.email : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                           <div style={{ display: "flex", justifyContent: "flex-start" }}>
                             <button type="button" title={emailOpen ? "Hide email" : "Open email"} aria-label="Toggle email column" aria-pressed={emailOpen} onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, block.id))} style={projectTextBlockIconButtonStyle(accent, emailOpen)}>
@@ -3252,6 +3325,10 @@ function normalizeProjectHealth(value: string | undefined | null): ProjectHealth
   return PROJECT_HEALTH_OPTIONS.includes(value as ProjectHealth) ? value as ProjectHealth : "On Track";
 }
 
+function projectSummaryHealthTone(health: ProjectHealth): ProjectFieldTone {
+  return health === "AT RISK" ? "warning" : health === "Off Track" ? "danger" : "healthy";
+}
+
 function compareRelationshipProjection(left: ProjectRelationshipProjection, right: ProjectRelationshipProjection): number {
   return (left.position ?? 0) - (right.position ?? 0)
     || left.display_title.localeCompare(right.display_title, undefined, { numeric: true, sensitivity: "base" })
@@ -3410,15 +3487,6 @@ function projectTeamIDs(project?: ProjectRecord | null): string[] {
   return uniqueStringIDs(fromTeams);
 }
 
-function projectAccountLabels(project?: ProjectRecord | null): string[] {
-  const labels = (project?.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
-  return labels;
-}
-
-function projectTeamLabels(project?: ProjectRecord | null): string[] {
-  const labels = (project?.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
-  return labels;
-}
 
 function toggleSetValue(current: Set<string>, value: string): Set<string> {
   const next = new Set(current);
@@ -3647,17 +3715,6 @@ const summaryHeaderStyle: React.CSSProperties = {
   flexShrink: 0,
 };
 
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  border: "1px solid rgba(91, 141, 239, 0.32)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#1d4ed8",
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 12px",
-};
-
 const summaryTitleClusterStyle: React.CSSProperties = {
   minWidth: 0,
   flex: "1 1 auto",
@@ -3703,34 +3760,25 @@ const summaryTitleInputStyle: React.CSSProperties = {
 
 const summaryMetaPillsStyle: React.CSSProperties = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-end",
   gap: 8,
   flexWrap: "wrap",
   justifyContent: "flex-end",
 };
 
-const statusPillStyle = (accent: string): React.CSSProperties => ({
-  minHeight: 28,
-  display: "inline-flex",
-  alignItems: "center",
-  borderRadius: 999,
-  padding: "0 10px",
-  background: `${accent}18`,
-  color: "#1d4ed8",
-  fontSize: 12,
-  fontWeight: 800,
-});
+const summaryMetaFieldStyle: React.CSSProperties = {
+  minWidth: 124,
+  maxWidth: 210,
+  display: "grid",
+  gap: 3,
+};
 
-const plainPillStyle: React.CSSProperties = {
-  minHeight: 28,
-  display: "inline-flex",
-  alignItems: "center",
-  borderRadius: 999,
-  padding: "0 10px",
-  background: "#eef2f7",
-  color: "#334155",
-  fontSize: 12,
-  fontWeight: 700,
+const summaryMetaFieldLabelStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 900,
+  textTransform: "uppercase",
+  letterSpacing: 0.2,
 };
 
 const assignmentDialogBackdropStyle: React.CSSProperties = {
@@ -4020,27 +4068,6 @@ const rightPanelTabStyle = (active: boolean): React.CSSProperties => ({
   fontSize: 12,
   fontWeight: 900,
 });
-
-function healthSelectStyle(health: ProjectHealth): React.CSSProperties {
-  const colors = health === "AT RISK"
-    ? { background: "#fff7ed", color: "#c2410c", border: "rgba(249, 115, 22, 0.42)" }
-    : health === "Off Track"
-      ? { background: "#fef2f2", color: "#b91c1c", border: "rgba(239, 68, 68, 0.42)" }
-      : { background: "#ecfdf5", color: "#047857", border: "rgba(16, 185, 129, 0.34)" };
-  return {
-    minHeight: 28,
-    border: `1px solid ${colors.border}`,
-    borderRadius: 999,
-    background: colors.background,
-    color: colors.color,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontSize: 12,
-    fontWeight: 950,
-    padding: "0 28px 0 10px",
-    outline: "none",
-  };
-}
 
 const criticalPathPanelStyle: React.CSSProperties = {
   minHeight: 0,

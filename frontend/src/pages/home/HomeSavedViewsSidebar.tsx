@@ -54,6 +54,10 @@ type HomeSavedViewsSidebarSectionProps = {
     active: boolean;
     onSelect: () => void;
     onPreload?: () => void;
+    settings?: {
+      ariaLabel: string;
+      onOpen: (anchor: DOMRect) => void;
+    };
   };
 };
 
@@ -554,6 +558,21 @@ export function HomeSavedViewsSidebarSection({
             >
               <span style={savedViewNameStyle}>{builtInView.label}</span>
             </button>
+            {builtInView.settings ? (
+              <button
+                type="button"
+                title={builtInView.settings.ariaLabel}
+                aria-label={builtInView.settings.ariaLabel}
+                style={savedViewSettingsButtonStyle}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  builtInView.settings?.onOpen(event.currentTarget.getBoundingClientRect());
+                }}
+              >
+                ...
+              </button>
+            ) : null}
           </div>
         )}
         {settings.map((item) => {
