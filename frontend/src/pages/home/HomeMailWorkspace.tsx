@@ -1,6 +1,6 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
@@ -252,6 +252,7 @@ export function HomeMailWorkspace({
   nodes,
   notice,
   noticeAction,
+  emailConnectionPrompt,
   pendingStarredMessageIDs,
   searchDraft,
   selectedMessage,
@@ -337,6 +338,7 @@ export function HomeMailWorkspace({
   nodes: NodeRecord[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
+  emailConnectionPrompt?: { onConnect: (provider: EmailProvider) => void };
   pendingStarredMessageIDs: Set<string>;
   searchDraft: string;
   selectedMessage: EmailMessage | null;
@@ -344,7 +346,7 @@ export function HomeMailWorkspace({
   selectedMessageIDs: Set<string>;
   selectedThreadMessages: EmailMessage[];
   sharedInboxSettings?: { onOpen: () => void; onOpenGVIC?: () => void };
-  unassignedSharedInbox?: { folderName: string; message?: string; onAssignEmail?: () => void };
+  unassignedSharedInbox?: { folderName: string; message?: string; actionLabel?: string; onAssignEmail?: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
@@ -356,7 +358,7 @@ export function HomeMailWorkspace({
   onColumnResizeStart: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
   onComposeChange: React.Dispatch<React.SetStateAction<ComposeState>>;
   onDeleteSelected: () => void;
-  onDisconnect: (position?: ConfirmActionMenuPosition) => void;
+  onDisconnect?: (position?: ConfirmActionMenuPosition) => void;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onLoadMoreMessages: () => void;
   onPrefetchMessages: () => void;
@@ -455,7 +457,7 @@ export function HomeMailWorkspace({
             <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#111827", textAlign: "center" }}>
               <strong style={{ fontSize: 20, lineHeight: 1.2 }}>{unassignedSharedInbox.folderName}</strong>
               <span>{unassignedSharedInbox.message ?? "This folder has not been assigned an email"}</span>
-              {unassignedSharedInbox.onAssignEmail && <button type="button" style={mailPanelPrimaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>}
+              {unassignedSharedInbox.onAssignEmail && <button type="button" style={mailPanelPrimaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>{unassignedSharedInbox.actionLabel ?? "Assign email to inbox"}</button>}
             </div>
           </div>
         </section>
@@ -488,7 +490,7 @@ export function HomeMailWorkspace({
               </div>
               <div style={accountRowStyle}>
                 <span style={accountEmailStyle}>{accountEmail}</span>
-                <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>
+                {onDisconnect && <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>}
               </div>
             </div>
           ) : (
@@ -497,6 +499,16 @@ export function HomeMailWorkspace({
                 <h2 style={panelTitleStyle}>{listViewLabel}</h2>
               </div>
               <button style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
+            </div>
+          )}
+          {emailConnectionPrompt && (
+            <div role="alert" style={{ ...inlineErrorStyle, display: "grid", gap: 8 }}>
+              <strong>Email is disconnected</strong>
+              <span>Reconnect your company email to resume syncing.</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <button type="button" style={mailPanelPrimaryButtonStyle} disabled={!!busy} onClick={() => emailConnectionPrompt.onConnect("google")}>{busy === "google" ? "Opening" : "Reconnect Google"}</button>
+                <button type="button" style={mailPanelPrimaryButtonStyle} disabled={!!busy} onClick={() => emailConnectionPrompt.onConnect("microsoft")}>{busy === "microsoft" ? "Opening" : "Reconnect Microsoft"}</button>
+              </div>
             </div>
           )}
           {visibleError && <div style={inlineErrorStyle}>{visibleError}</div>}
@@ -639,7 +651,7 @@ export function HomeMailWorkspace({
           {!isArchivableListView && (
             <div style={accountRowStyle}>
               <span style={accountEmailStyle}>{accountEmail}</span>
-              <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>
+              {onDisconnect && <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>}
             </div>
           )}
           <form style={searchRowStyle} onSubmit={onSubmitSearch}>

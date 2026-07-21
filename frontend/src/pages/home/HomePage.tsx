@@ -394,6 +394,12 @@ type SharedInboxEmailConnectionDialogState = {
   createIntent?: CommunicationsSharedInboxCreateIntent;
 };
 
+type SharedInboxEmailConnectionIssue = {
+  folderID: string;
+  accountEmail: string;
+  canConnect: boolean;
+};
+
 type SharedInboxEmailAssignmentDialogState = {
   folderID: string;
   folderName: string;
@@ -526,6 +532,7 @@ export function HomePage({
   const [sharedInboxPermissionsFolderID, setSharedInboxPermissionsFolderID] = useState("");
   const [sharedInboxGVICFolderID, setSharedInboxGVICFolderID] = useState("");
   const [sharedInboxEmailConnectionDialog, setSharedInboxEmailConnectionDialog] = useState<SharedInboxEmailConnectionDialogState | null>(null);
+  const [sharedInboxEmailConnectionIssue, setSharedInboxEmailConnectionIssue] = useState<SharedInboxEmailConnectionIssue | null>(null);
   const [sharedInboxEmailAssignmentDialog, setSharedInboxEmailAssignmentDialog] = useState<SharedInboxEmailAssignmentDialogState | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -731,7 +738,10 @@ export function HomePage({
   const activeSharedInboxIsMailbox = !!activeSharedInbox && activeSharedInbox.entry_type === "shared_inbox";
   const activeSharedInboxNeedsEmail = activeSharedInboxIsMailbox && !(activeSharedInbox.account_email ?? "").trim();
   const activeSharedInboxBlocksEmail = !!activeSharedInboxFolderID && !!activeSharedInbox && !activeSharedInboxIsMailbox;
-  const activeMailViewUsesSharedConnection = sharedInboxCanLoadMail(activeSharedInbox);
+  const activeSharedInboxConnectionIssue = sharedInboxEmailConnectionIssue?.folderID === activeSharedInboxFolderID
+    ? sharedInboxEmailConnectionIssue
+    : null;
+  const activeMailViewUsesSharedConnection = sharedInboxCanLoadMail(activeSharedInbox) && !activeSharedInboxConnectionIssue;
   const activeMailViewHasEmailConnection = activeSharedInboxFolderID
     ? activeMailViewUsesSharedConnection
     : activePersonalMailViewNeedsConnection && status?.connected === true;
@@ -928,9 +938,12 @@ export function HomePage({
   }, []);
   const canLoadMailForView = useCallback((viewID: HomeViewID): boolean => {
     const sharedInboxID = sharedInboxIDForHomeView(viewID);
-    if (sharedInboxID) return sharedInboxCanLoadMail(sharedInboxForHomeView(viewID));
+    if (sharedInboxID) {
+      if (sharedInboxEmailConnectionIssue?.folderID === sharedInboxID) return false;
+      return sharedInboxCanLoadMail(sharedInboxForHomeView(viewID));
+    }
     return (viewID === "my-triage" || viewID === "primary") && status?.connected === true;
-  }, [sharedInboxForHomeView, status?.connected]);
+  }, [sharedInboxEmailConnectionIssue?.folderID, sharedInboxForHomeView, status?.connected]);
   const sharedInboxPermissionsFolder = useMemo(
     () => sharedInboxPermissionsFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxPermissionsFolderID) ?? null : null,
     [sharedInboxPermissionsFolderID, sharedInboxes],
@@ -951,6 +964,18 @@ export function HomePage({
     if (!cleanFolderID) return false;
     return sharedInboxTreeUserCanManageMail(sharedInboxes, cleanFolderID, currentUserID, false);
   }, [currentUserCanManageSharedInboxStructure, currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
+  const showSharedInboxEmailConnectionIssue = useCallback((folderID: string, accountEmail: string) => {
+    const cleanFolderID = folderID.trim();
+    const cleanAccountEmail = accountEmail.trim().toLowerCase();
+    if (!cleanFolderID || !cleanAccountEmail) return;
+    const issue = {
+      folderID: cleanFolderID,
+      accountEmail: cleanAccountEmail,
+      canConnect: canRepairSharedInboxConnection(cleanFolderID),
+    };
+    setSharedInboxEmailConnectionIssue(issue);
+    setSharedInboxEmailConnectionDialog({ accountEmail: issue.accountEmail, canConnect: issue.canConnect });
+  }, [canRepairSharedInboxConnection]);
   useEffect(() => {
     if (!notice || notice !== noticeResourceTextRef.current) {
       noticeResourceTextRef.current = "";
@@ -1352,7 +1377,7 @@ export function HomePage({
         const folder = sharedInboxes.find((item) => item.folder_id === sharedInboxID);
         const accountEmail = folder?.account_email?.trim().toLowerCase() ?? "";
         if (accountEmail) {
-          setSharedInboxEmailConnectionDialog({ accountEmail, canConnect: canRepairSharedInboxConnection(sharedInboxID) });
+          showSharedInboxEmailConnectionIssue(sharedInboxID, accountEmail);
           return false;
         }
       }
@@ -1363,7 +1388,7 @@ export function HomePage({
       setError(formatError(folderError, "Failed to load folders"));
       return false;
     }
-  }, [canRepairSharedInboxConnection, companyID, handleEmailAccessExpired, mailboxFolderOwnerIsCurrent, sharedInboxes]);
+  }, [companyID, handleEmailAccessExpired, mailboxFolderOwnerIsCurrent, sharedInboxes, showSharedInboxEmailConnectionIssue]);
   useLayoutEffect(() => {
     loadFoldersCanonicalRef.current = loadFoldersCanonical;
   }, [loadFoldersCanonical]);
@@ -1783,7 +1808,7 @@ export function HomePage({
     } catch (messageError) {
       if (messageRequestSeqRef.current === requestSeq) {
         if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
-          setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase(), canConnect: canRepairSharedInboxConnection(activeSharedInboxFolderID) });
+          showSharedInboxEmailConnectionIssue(activeSharedInboxFolderID, activeSharedInbox.account_email);
           setMessages([]);
           setNextPageToken("");
           return;
@@ -1811,7 +1836,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeEmailMailboxScopeKey, activeMailAccountEmail, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, clearSelectedMessageState, companyID, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListOrder, scheduleMessageListRefresh, searchQuery, sharedInboxes, unreadOnly]);
+  }, [activeEmailMailboxScopeKey, activeMailAccountEmail, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, clearMailListState, clearPrefetchedMessagePage, clearSelectedMessageState, companyID, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListOrder, scheduleMessageListRefresh, searchQuery, sharedInboxes, showSharedInboxEmailConnectionIssue, unreadOnly]);
   useEffect(() => {
     const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
     if (!sharedInboxID) return;
@@ -1968,7 +1993,7 @@ export function HomePage({
     } catch (messageError) {
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
       if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
-        setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase(), canConnect: canRepairSharedInboxConnection(activeSharedInboxFolderID) });
+        showSharedInboxEmailConnectionIssue(activeSharedInboxFolderID, activeSharedInbox.account_email);
         return;
       }
       if (isEmailAccessExpiredError(messageError)) {
@@ -1982,7 +2007,7 @@ export function HomePage({
         setLoadingMoreMessages(false);
       }
     }
-  }, [activeEmailMailboxScopeKey, activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, canLoadMailForView, canRepairSharedInboxConnection, companyID, currentMailboxRequestOwner, currentMessageFilterKey, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailboxRequestOwnerIsCurrent, messageListWithinPrefetchDistance, prefetchNextMessagePage, scheduleOwnedMailRequest]);
+  }, [activeEmailMailboxScopeKey, activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, canLoadMailForView, companyID, currentMailboxRequestOwner, currentMessageFilterKey, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailboxRequestOwnerIsCurrent, messageListWithinPrefetchDistance, prefetchNextMessagePage, scheduleOwnedMailRequest, showSharedInboxEmailConnectionIssue]);
   const replaceVisibleMessagesForAdvance = useCallback((page: MessagePage, owner: HomeMailboxRequestOwner) => {
     if (!mailboxRequestOwnerIsCurrent(owner)) return;
     const navigableSharedInboxIDs = new Set(sharedInboxes
@@ -4296,10 +4321,7 @@ export function HomePage({
                 ));
                 const accountEmail = sharedInbox?.account_email?.trim().toLowerCase() ?? "";
                 if (accountEmail) {
-                  setSharedInboxEmailConnectionDialog({
-                    accountEmail,
-                    canConnect: canRepairSharedInboxConnection(requestSharedInboxID),
-                  });
+                  showSharedInboxEmailConnectionIssue(requestSharedInboxID, accountEmail);
                 } else {
                   setError(formatError(markError, "Shared inbox email access expired."));
                 }
@@ -4318,7 +4340,7 @@ export function HomePage({
     for (const unreadMessage of messagesToMark) {
       markUnreadMessageRead(unreadMessage);
     }
-  }, [activeMailAccountEmail, canRepairSharedInboxConnection, companyID, currentMessageFilterKey, currentUserID, forgetLocalMailboxMutationEchoes, handleEmailAccessExpired, rememberLocalMailboxMutationEchoes, scheduleMessageListRefresh]);
+  }, [activeMailAccountEmail, companyID, currentMessageFilterKey, currentUserID, forgetLocalMailboxMutationEchoes, handleEmailAccessExpired, rememberLocalMailboxMutationEchoes, scheduleMessageListRefresh, showSharedInboxEmailConnectionIssue]);
   const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
     activeDeleteSelectionKindRef.current = "message";
     if (compose.open) {
@@ -6006,6 +6028,9 @@ export function HomePage({
             companyUserGroupMembers={companyUserGroupMembers}
             notice={notice}
             noticeAction={mailNoticeAction}
+            emailConnectionPrompt={status?.connected === false && activePersonalMailViewNeedsConnection
+              ? { onConnect: (provider) => { void startConnection(provider); } }
+              : undefined}
             pendingStarredMessageIDs={pendingStarredMessageIDs}
             searchDraft={searchDraft}
             selectedMessage={selectedMessage}
@@ -6018,6 +6043,20 @@ export function HomePage({
             } : undefined}
             unassignedSharedInbox={activeSharedInboxBlocksEmail && activeSharedInbox
               ? { folderName: activeSharedInbox.name, message: "Parent folders cannot have emails assigned." }
+              : activeSharedInboxConnectionIssue && activeSharedInbox
+                ? {
+                    folderName: activeSharedInbox.name,
+                    message: activeSharedInboxConnectionIssue.canConnect
+                      ? `${activeSharedInboxConnectionIssue.accountEmail} is disconnected. Reconnect it to resume mail syncing.`
+                      : `${activeSharedInboxConnectionIssue.accountEmail} is disconnected. A manager or admin with access to this inbox must reconnect it.`,
+                    actionLabel: "Reconnect email",
+                    onAssignEmail: activeSharedInboxConnectionIssue.canConnect
+                      ? () => setSharedInboxEmailConnectionDialog({
+                          accountEmail: activeSharedInboxConnectionIssue.accountEmail,
+                          canConnect: true,
+                        })
+                      : undefined,
+                  }
               : activeSharedInboxNeedsEmail && activeSharedInbox
                 ? { folderName: activeSharedInbox.name, onAssignEmail: currentUserCanManageSharedInboxStructure ? assignActiveSharedInboxEmail : undefined }
                 : undefined}
@@ -6032,7 +6071,7 @@ export function HomePage({
             onColumnResizeStart={startColumnResize}
             onComposeChange={handleComposeChange}
             onDeleteSelected={deleteSelected}
-            onDisconnect={requestDisconnect}
+            onDisconnect={activeSharedTreeViewSelected ? undefined : requestDisconnect}
             onLoadMessageBody={loadSelectedThreadMessageBody}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
             onPrefetchMessages={() => { void prefetchNextMessagePage(); }}
