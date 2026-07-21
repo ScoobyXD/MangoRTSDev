@@ -6,6 +6,7 @@ import { JSDOM } from "jsdom";
 import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import type { NodeProjectionItem } from "../../../../frontend/src/modules/node-map/NodeRecordStore.ts";
 import { buildEditorAttachedEmailPayload, buildEditorTextBlockChatPayload } from "../../../../frontend/src/modules/editor/editorProjection.ts";
+import { applyEmailBodyHighlights } from "../../../../frontend/src/modules/editor/emailBodyHighlights.ts";
 import type { ProjectProjection, ProjectView } from "../../../../frontend/src/modules/project-management/projectManagementApi.ts";
 
 type Restore = () => void;
@@ -14,6 +15,27 @@ const NODE_ID = "virtualization-test-node";
 const PROJECT_ID = "virtualization-test-project";
 const DOCUMENT_PREFIX = "<!-- mango-editor-html-v1 -->";
 const TEXT_BLOCK_PREFIX = "<!-- mango-node-text-block-v1 -->";
+
+test("rich email bodies paint stored and active chat selections without flattening markup", () => {
+  const dom = new JSDOM("<!doctype html><html><body>Hello <strong>linked email</strong> body.</body></html>");
+  const bodyText = dom.window.document.body.textContent ?? "";
+  const quote = "linked email";
+  const startOffset = bodyText.indexOf(quote);
+  applyEmailBodyHighlights(dom.window.document, [{ id: "stored-chat", quote, startOffset, endOffset: startOffset + quote.length }]);
+  const stored = dom.window.document.querySelector<HTMLElement>('[data-mango-email-body-highlight="stored"]');
+  assert.equal(stored?.textContent, quote);
+  assert.equal(dom.window.document.querySelector("strong")?.textContent, quote, "painting a highlight must preserve the provider's rich markup");
+
+  const activeQuote = "body";
+  applyEmailBodyHighlights(dom.window.document, [{ id: "stored-chat", quote, startOffset, endOffset: startOffset + quote.length }], {
+    quote: activeQuote,
+    startOffset: 0,
+    endOffset: 1,
+  });
+  assert.equal(dom.window.document.querySelectorAll('[data-mango-email-body-highlight="stored"]').length, 1, "repainting must not duplicate stored highlights");
+  assert.equal(dom.window.document.querySelector<HTMLElement>('[data-mango-email-body-highlight="active"]')?.textContent, activeQuote, "active chat navigation should fall back to the persisted quote when offsets drift");
+  dom.window.close();
+});
 
 function installGlobal(name: string, value: unknown, restores: Restore[]) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -254,7 +276,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   installGlobal("IntersectionObserver", TestIntersectionObserver, restores);
   Object.defineProperty(dom.window, "ResizeObserver", { configurable: true, value: TestResizeObserver });
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
-  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => undefined });
+  const scrolledIntoView: HTMLElement[] = [];
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value(this: HTMLElement) { scrolledIntoView.push(this); } });
   Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => undefined });
   Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => undefined });
   Object.defineProperty(dom.window, "matchMedia", {
@@ -741,6 +764,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Hide linked email");
     const linkedEmailPreview = emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-preview="true"]');
     assert.ok(linkedEmailPreview, "the exact child message should resolve through its attached root thread and expand inside the text box");
+    assert.equal(linkedEmailPreview.querySelectorAll('[data-email-single-message="true"]').length, 1, "the inline plane should contain exactly one email message");
+    assert.equal(linkedEmailPreview.querySelector('[data-email-timeline-item="true"]'), null, "the inline plane should not render thread timeline chrome");
+    assert.ok(linkedEmailPreview.querySelector('[data-email-message-id="message-node-block-0"]'), "the inline plane should render the linked child rather than its attached thread root");
+    assert.doesNotMatch(linkedEmailPreview.textContent ?? "", /Earlier linked email body\./, "the inline plane should not include another message from the thread");
     assert.match(linkedEmailPreview.textContent ?? "", /From:\s*Sender Person <sender@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /To:\s*Recipient Person <recipient@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
@@ -750,6 +777,17 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork();
     assert.equal(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), null);
     assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Show linked email");
+
+    await act(async () => { nodeEmailToggle.click(); });
+    await flushWork();
+    assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null, "the Node-level email control should still hide the left column");
+    scrolledIntoView.length = 0;
+    const linkedTextBoxHeader = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-header="true"]');
+    assert.ok(linkedTextBoxHeader);
+    await act(async () => { linkedTextBoxHeader.click(); });
+    await flushWork(24);
+    assert.ok(nodeContainer.querySelector('[data-node-email-column="true"]'), "clicking the linked text-box header should reopen the left email column");
+    assert.ok(scrolledIntoView.some((element) => element.dataset.emailMessageId === "message-node-block-0"), "the left email column should scroll to the exact child message linked to the text box");
 
     const textBoxActions = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Text box actions"]');
     assert.ok(textBoxActions);
