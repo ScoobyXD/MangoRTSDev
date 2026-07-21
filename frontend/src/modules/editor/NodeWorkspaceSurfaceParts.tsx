@@ -351,6 +351,7 @@ type NodeTextBlockEditorProps = {
   pendingChatSelectionAnchor?: TextBlockSelectionAnchor;
   activeChatAnchorMessageID: string;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
+  onChatNavigationConsumed?: (requestID: number) => void;
   surfaceText: string;
   accent: string;
   outlineStyle: EditorOutlineStyleID;
@@ -834,6 +835,7 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   pendingChatSelectionAnchor,
   activeChatAnchorMessageID,
   chatNavigationRequest,
+  onChatNavigationConsumed,
   surfaceText,
   accent,
   outlineStyle,
@@ -878,6 +880,7 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const formattingControllerWasActivatedRef = useRef(false);
   const indentGuideFrameRef = useRef<number | null>(null);
   const selectionPointerDownRef = useRef(false);
+  const lastHandledChatNavigationRequestRef = useRef(0);
   const selectedImageFrameRef = useRef<HTMLElement | null>(null);
   const lastAppliedDocumentRef = useRef("");
   const userEditedDocumentRef = useRef(false);
@@ -991,6 +994,7 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
   useEffect(() => {
     if (!chatNavigationRequest?.anchorMessageID) return;
+    if (chatNavigationRequest.requestID === lastHandledChatNavigationRequestRef.current) return;
     const editor = editorRef.current;
     if (!editor) return;
     const frame = window.requestAnimationFrame(() => {
@@ -1001,10 +1005,12 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       const range = createTextRangeFromOffsets(editor, anchorRange.startOffset, anchorRange.endOffset);
       if (!range) return;
       scrollTextRangeIntoEditorView(editor, range);
+      lastHandledChatNavigationRequestRef.current = chatNavigationRequest.requestID;
+      onChatNavigationConsumed?.(chatNavigationRequest.requestID);
       refreshTextHighlights();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [chatMessages, chatNavigationRequest?.anchorMessageID, chatNavigationRequest?.requestID, refreshTextHighlights]);
+  }, [chatMessages, chatNavigationRequest?.anchorMessageID, chatNavigationRequest?.requestID, onChatNavigationConsumed, refreshTextHighlights]);
 
   const scheduleTextBlockIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -1838,6 +1844,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       mentionUsers={props.companyUsers}
       annotations={annotations}
       target={target}
+      onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}
       formattingControllerRef={props.formattingControllerRef}
       onFocus={props.onFocus}
       onBlur={props.onBlur}

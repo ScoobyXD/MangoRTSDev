@@ -466,6 +466,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openChatBlockIDs));
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
+  const chatNavigationRequestIDRef = useRef(0);
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
@@ -1718,11 +1719,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     setActiveChatBlockID(blockID);
     setActiveChatMessageIDs((current) => ({ ...current, [blockID]: messageID }));
-    setChatNavigationRequest((current) => ({
+    chatNavigationRequestIDRef.current += 1;
+    setChatNavigationRequest({
       blockID: navigationBlockID,
       anchorMessageID,
-      requestID: (current?.requestID ?? 0) + 1,
-    }));
+      requestID: chatNavigationRequestIDRef.current,
+    });
+  }, []);
+  const consumeChatNavigationRequest = useCallback((requestID: number) => {
+    setChatNavigationRequest((current) => current?.requestID === requestID ? null : current);
   }, []);
   const submitChat = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -3487,6 +3492,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             pendingChatSelectionAnchor={selectionAnchor}
                             activeChatAnchorMessageID={activeChatAnchorMessageID}
                             chatNavigationRequest={chatNavigationRequest?.blockID === chatBlockID ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID } : null}
+                            onChatNavigationConsumed={consumeChatNavigationRequest}
                             documentScrollMemoryRef={documentScrollMemoryRef}
                             surfaceText={surfaceText}
                             accent={accent}

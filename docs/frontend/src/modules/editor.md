@@ -188,6 +188,13 @@ The old editor remains authoritative until a future whole-workspace conversion v
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.
 
+## One-shot chat/source navigation (2026-07-21)
+
+- Clicking a chat comment creates one monotonic navigation request for its linked editor annotation. The request may wait while the target row or annotation loads, but one successful range focus/scroll consumes it.
+- Both the legacy HTML editor and the JSON/Tiptap editor acknowledge successful navigation. `NodeWorkspaceSurface` clears only the matching request, so a stale acknowledgement cannot erase a newer click.
+- Legacy rendering also remembers the last handled request locally, and Tiptap keeps the same request-ID guard. Ordinary parent rerenders, chat-message refreshes, pointer hold/release, focus or selection updates, and row unmount/remount cannot replay a consumed request or pull the user away from a later caret/scroll position.
+- A later explicit click receives a new request ID and is allowed one new navigation. Failed or not-yet-resolvable targets remain pending instead of being falsely consumed.
+
 ## Node email, editor, and chat row ownership (2026-07-20)
 
 `NodeWorkspaceSurface` owns the Node-specific three-column composition. `AttachedEmailOrganizerPane` owns the one left email column, while each text-box row owns one Editor surface and one optional Chat surface.

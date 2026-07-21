@@ -169,12 +169,17 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     ];
     const activatedMessageIDs: string[] = [];
     const selectionRequests: Array<{ quote: string; startOffset: number; endOffset: number }> = [];
+    const consumedNavigationRequestIDs: number[] = [];
+    const handleNavigationConsumed = (requestID: number) => consumedNavigationRequestIDs.push(requestID);
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
     const root = createRoot(container);
     mountedRoot = root;
 
-    await act(async () => root.render(
+    const renderPrimaryEditor = (
+      navigationRequest: { anchorMessageID: string; requestID: number } | null,
+      nextMessages = messages,
+    ) => (
       <NodeTextBlockEditor
         blockID="block-1"
         editable
@@ -186,9 +191,10 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         companyUsers={[]}
         documentValue="<!-- mango-editor-html-v1 -->alpha beta gamma"
         contentChanges={[]}
-        chatMessages={messages}
+        chatMessages={nextMessages}
         activeChatAnchorMessageID=""
-        chatNavigationRequest={null}
+        chatNavigationRequest={navigationRequest}
+        onChatNavigationConsumed={handleNavigationConsumed}
         surfaceText="#111827"
         accent="#7c3aed"
         outlineStyle="automatic-outline-numbering"
@@ -203,14 +209,25 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         onSelectionChatRequest={(selection) => selectionRequests.push(selection)}
         onImageChatRequest={noop}
         onImageNodeRequest={noop}
-      />,
-    ));
+      />
+    );
+    await act(async () => root.render(renderPrimaryEditor(null)));
     const editor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-1"]');
     const editorWrapper = editor?.parentElement;
     assert.ok(editor);
     assert.ok(editorWrapper);
     editor.getBoundingClientRect = () => rect(0, 0, 400, 220);
     editorWrapper.getBoundingClientRect = () => rect(0, 0, 400, 220);
+    const sourceNavigationScrollTops: number[] = [];
+    Object.defineProperty(editor, "clientHeight", { configurable: true, value: 220 });
+    Object.defineProperty(editor, "scrollTo", {
+      configurable: true,
+      value(options: ScrollToOptions) {
+        const top = options.top ?? editor.scrollTop;
+        sourceNavigationScrollTops.push(top);
+        editor.scrollTop = top;
+      },
+    });
     await act(async () => editor.focus());
     await flushFrames();
 
@@ -259,6 +276,25 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       selectionRequests.map(({ quote, startOffset, endOffset }) => ({ quote, startOffset, endOffset })),
       [{ quote: "alpha", startOffset: 0, endOffset: 5 }],
     );
+
+    const firstNavigationRequest = { anchorMessageID: "comment-alpha", requestID: 41 };
+    await act(async () => root.render(renderPrimaryEditor(firstNavigationRequest, [...messages])));
+    await flushFrames();
+    assert.equal(sourceNavigationScrollTops.length, 1, "one chat click scrolls its source range once");
+    assert.deepEqual(consumedNavigationRequestIDs, [41]);
+
+    editor.scrollTop = 137;
+    await act(async () => root.render(renderPrimaryEditor(firstNavigationRequest, [...messages])));
+    await flushFrames();
+    assert.equal(sourceNavigationScrollTops.length, 1, "rerenders cannot replay a handled chat navigation request");
+    assert.equal(editor.scrollTop, 137, "a handled request cannot drag the user back after manual scrolling");
+    assert.deepEqual(consumedNavigationRequestIDs, [41], "a handled request is acknowledged once");
+
+    const secondNavigationRequest = { anchorMessageID: "comment-alpha", requestID: 42 };
+    await act(async () => root.render(renderPrimaryEditor(secondNavigationRequest, [...messages])));
+    await flushFrames();
+    assert.equal(sourceNavigationScrollTops.length, 2, "a later explicit click may navigate once with a new request ID");
+    assert.deepEqual(consumedNavigationRequestIDs, [41, 42]);
 
     await act(async () => root.render(
       <NodeTextBlockEditor

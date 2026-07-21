@@ -1444,6 +1444,21 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(projectSummary, /height: "min\(980px, calc\(100dvh - 16px\)\)"/);
 });
 
+test("chat-to-editor navigation is a consumed one-shot request in both document formats", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+
+  assert.ok(nodeSurface.includes("const chatNavigationRequestIDRef = useRef(0);"));
+  assert.ok(nodeSurface.includes("chatNavigationRequestIDRef.current += 1;"));
+  assert.ok(nodeSurface.includes("current?.requestID === requestID ? null : current"));
+  assert.ok(nodeSurface.includes("onChatNavigationConsumed={consumeChatNavigationRequest}"));
+  assert.ok(nodeParts.includes("chatNavigationRequest.requestID === lastHandledChatNavigationRequestRef.current"));
+  assert.ok(nodeParts.includes("onChatNavigationConsumed?.(chatNavigationRequest.requestID)"));
+  assert.ok(nodeParts.includes("onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}"));
+  assert.ok(tiptapEditor.includes("callbacksRef.current.onTargetHandled?.(target.requestID)"));
+});
+
 test("node image actions cover attachment chat, inline/fullscreen download, portable copy, and new-block focus", () => {
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");

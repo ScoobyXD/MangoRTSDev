@@ -94,6 +94,7 @@ export type MangoTiptapEditorProps = {
   mentionUsers?: MentionableCompanyUser[];
   annotations?: MangoTiptapAnnotation[];
   target?: MangoTiptapTarget | null;
+  onTargetHandled?: (requestID: number) => void;
   formattingControllerRef?:
     | React.MutableRefObject<EditorDocumentFormattingController | null>
     | React.MutableRefObject<MangoTiptapFormattingController | null>;
@@ -430,6 +431,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   mentionUsers = EMPTY_MENTION_USERS,
   annotations = EMPTY_ANNOTATIONS,
   target,
+  onTargetHandled,
   formattingControllerRef,
   onChange,
   onFlush,
@@ -490,6 +492,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
+    onTargetHandled,
   });
   callbacksRef.current = {
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
@@ -497,6 +500,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
+    onTargetHandled,
   };
   attachmentContextRef.current = attachmentContext;
   imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
@@ -937,6 +941,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         attempts += 1;
         if (editorRef.current && navigateMangoTiptapTarget(editorRef.current, target)) {
           lifecycleRef.current.setTargeted(false);
+          callbacksRef.current.onTargetHandled?.(target.requestID);
           return;
         }
         if (attempts < 8) {
