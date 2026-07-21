@@ -114,6 +114,33 @@ test("legacy entity chips preserve identity, type styling, and routes", () => {
   }
 });
 
+test("entity chips render the canonical Node, Logic Gate, and Project icons", () => {
+  const dom = new JSDOM("<!doctype html>");
+  try {
+    const icons = [
+      ["node", "M3.7 1.7h5.45l3.15 3.15v9.45H3.7z"],
+      ["logic_gate", "M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z"],
+      ["project", "M2.3 3.1h11.4v9.8H2.3z"],
+    ] as const;
+    for (const [entityType, expectedPath] of icons) {
+      const element = createEditorEntityLinkElement(dom.window.document, {
+        entityType,
+        entityID: `${entityType}-1`,
+        label: `${entityType} name`,
+      });
+      const icon = element.querySelector("svg.mango-editor-entity-icon");
+      if (!icon) throw new Error(`${entityType} should render an SVG icon`);
+      assert.ok(
+        [...icon.querySelectorAll("path")].some((pathElement) => pathElement.getAttribute("d") === expectedPath),
+        `${entityType} should use its canonical product icon path`,
+      );
+      assert.equal(element.querySelector(".mango-editor-entity-label")?.textContent, `${entityType} name`);
+    }
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("legacy rich HTML sanitization retains only canonical entity-link data", () => {
   const dom = new JSDOM("<!doctype html>");
   const domGlobals = dom.window as unknown as typeof globalThis;
@@ -185,6 +212,8 @@ test("# entity menu selects its top result with Tab and the entity participates 
     assert.equal(inserted?.attrs?.entityId, "project-1");
     assert.equal(inserted?.attrs?.label, "Most recent project");
     assert.match(editor.getHTML(), /data-mango-entity-id="project-1"/);
+    assert.match(editor.getHTML(), /mango-editor-entity-icon/);
+    assert.match(editor.getHTML(), /M2.3 3.1h11.4v9.8H2.3z/);
     assert.equal(editor.commands.undo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
     assert.equal(editor.commands.redo(), true);

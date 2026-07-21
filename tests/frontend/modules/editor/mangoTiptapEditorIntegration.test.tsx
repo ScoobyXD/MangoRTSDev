@@ -111,6 +111,8 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /data-static-image="image-1"/);
   assert.match(html, /data-mango-entity-id="project-1"/);
   assert.match(html, /href="\/projects\/project-1"/);
+  assert.match(html, /mango-editor-entity-icon/);
+  assert.match(html, /M2.3 3.1h11.4v9.8H2.3z/);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {

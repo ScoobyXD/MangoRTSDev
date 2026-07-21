@@ -1,4 +1,5 @@
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../app/deepLinkRoutes.js";
+import { createExplorerEntityIconElement } from "../company-explorer/CompanyExplorerEntityIcon.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../node-map/selectionNodeCreation.js";
 
 export type EditorEntityType = "node" | "logic_gate" | "project";
@@ -136,6 +137,12 @@ export function applyEditorEntityLinkStyle(element: HTMLElement, entityType?: Ed
   if (entityType) element.classList.add(`mango-editor-entity-link--${entityType}`);
 }
 
+export function createEditorEntityIconElement(ownerDocument: Document, entityType: EditorEntityType): SVGSVGElement {
+  const icon = createExplorerEntityIconElement(ownerDocument, entityType);
+  icon.classList.add("mango-editor-entity-icon", `mango-editor-entity-icon--${entityType}`);
+  return icon;
+}
+
 export function createEditorEntityLinkElement(ownerDocument: Document, entity: EditorEntityLink): HTMLSpanElement {
   const element = ownerDocument.createElement("span");
   applyEditorEntityLinkStyle(element, entity.entityType);
@@ -144,7 +151,10 @@ export function createEditorEntityLinkElement(ownerDocument: Document, entity: E
   element.setAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE, entity.label.trim());
   element.setAttribute("aria-label", `Open ${editorEntityTypeLabel(entity.entityType)} ${entity.label.trim()}`);
   element.setAttribute("title", `Open ${editorEntityTypeLabel(entity.entityType)}: ${entity.label.trim()}`);
-  element.textContent = entity.label.trim();
+  const label = ownerDocument.createElement("span");
+  label.className = "mango-editor-entity-label";
+  label.textContent = entity.label.trim();
+  element.append(createEditorEntityIconElement(ownerDocument, entity.entityType), label);
   return element;
 }
 
