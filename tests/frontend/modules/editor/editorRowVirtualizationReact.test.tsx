@@ -300,6 +300,21 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   let committedEditorOperations = 0;
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
+    if (url.pathname === "/v1/communications/messages/message-node-block-0") return jsonResponse({
+      message: {
+        id: "message-node-block-0",
+        subject: "Email for node-block-0",
+        snippet: "Full linked message preview",
+        body: "Complete linked email body.",
+        date: 1_768_521_600,
+        unread: false,
+        starred: false,
+        from: [{ name: "Sender Person", email: "sender@example.test" }],
+        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+        cc: [{ name: "Copy Person", email: "copy@example.test" }],
+        bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
+      },
+    });
     if (url.pathname === "/v1/editor-data-format") return jsonResponse({
       company_id: COMPANY_ID,
       editor_format: "legacy_html",
@@ -455,6 +470,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const nodeScrollElement = nodeContainer.firstElementChild as HTMLElement | null;
     assert.ok(nodeScrollElement);
     assert.equal(nodeScrollElement.style.overflowAnchor, "none");
+    assert.equal(nodeScrollElement.style.overscrollBehaviorY, "contain");
     Object.defineProperty(nodeScrollElement, "clientHeight", { configurable: true, value: 900 });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
     await flushWork();
@@ -694,15 +710,23 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(emailFocusToggle.getAttribute("aria-label"), "Expand email column");
     assert.equal(nodeContainer.querySelector('[data-node-email-timeline-rail="true"]'), null);
 
-    const linkedEmailToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Expand linked email"]');
+    const linkedEmailToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Show linked email"]');
     assert.ok(linkedEmailToggle, "an email-linked text box should expose a direct body expansion button");
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(linkedEmailToggle.getAttribute("aria-expanded"), "true");
-    assert.ok(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), "linked email should expand inside its text box");
+    assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Hide linked email");
+    const linkedEmailPreview = emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-preview="true"]');
+    assert.ok(linkedEmailPreview, "linked email should expand inside its text box");
+    assert.match(linkedEmailPreview.textContent ?? "", /From:\s*Sender Person <sender@example\.test>/);
+    assert.match(linkedEmailPreview.textContent ?? "", /To:\s*Recipient Person <recipient@example\.test>/);
+    assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
+    assert.match(linkedEmailPreview.textContent ?? "", /Bcc:\s*Blind Copy <blind@example\.test>/);
+    assert.match(linkedEmailPreview.textContent ?? "", /Complete linked email body\./);
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), null);
+    assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Show linked email");
 
     const textBoxActions = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Text box actions"]');
     assert.ok(textBoxActions);

@@ -85,6 +85,52 @@ test("fast long jumps stay bounded and preserve full scroll geometry", () => {
   assert.equal(representedHeight, ITEM_COUNT * (ROW_HEIGHT + ROW_GAP));
 });
 
+test("successive windows reuse stable leading and trailing spacer identities", () => {
+  const firstEntries = buildBoundedEditorRowEntries(
+    ITEM_COUNT,
+    ROW_HEIGHT,
+    ROW_GAP,
+    windowAt(100 * (ROW_HEIGHT + ROW_GAP)),
+  );
+  const secondEntries = buildBoundedEditorRowEntries(
+    ITEM_COUNT,
+    ROW_HEIGHT,
+    ROW_GAP,
+    windowAt(300 * (ROW_HEIGHT + ROW_GAP)),
+  );
+  const spacerKeys = (entries: typeof firstEntries) => entries
+    .filter((entry) => entry.kind === "spacer")
+    .map((entry) => entry.key);
+  assert.deepEqual(spacerKeys(firstEntries), ["spacer:leading", "spacer:trailing"]);
+  assert.deepEqual(spacerKeys(secondEntries), ["spacer:leading", "spacer:trailing"]);
+});
+
+test("spacers split by a pinned editor keep identities anchored to that pin", () => {
+  const firstEntries = buildBoundedEditorRowEntries(
+    ITEM_COUNT,
+    ROW_HEIGHT,
+    ROW_GAP,
+    windowAt(300 * (ROW_HEIGHT + ROW_GAP)),
+    [100],
+  );
+  const secondEntries = buildBoundedEditorRowEntries(
+    ITEM_COUNT,
+    ROW_HEIGHT,
+    ROW_GAP,
+    windowAt(500 * (ROW_HEIGHT + ROW_GAP)),
+    [100],
+  );
+  const spacerKeys = (entries: typeof firstEntries) => entries
+    .filter((entry) => entry.kind === "spacer")
+    .map((entry) => entry.key);
+  assert.deepEqual(spacerKeys(firstEntries), [
+    "spacer:leading",
+    "spacer:after-pinned:100",
+    "spacer:trailing",
+  ]);
+  assert.deepEqual(spacerKeys(secondEntries), spacerKeys(firstEntries));
+});
+
 test("focused rows can remain mounted without unbounding the list", () => {
   const entries = buildBoundedEditorRowEntries(
     ITEM_COUNT,
