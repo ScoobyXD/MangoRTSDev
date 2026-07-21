@@ -1154,6 +1154,7 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
+    entityLinkContext: { companyID, requestJSON: textboxSyncRequestJSON },
     editorImageAttachmentContext,
   });
   const { mentionMenu: documentMentionMenu, insertTable, restoreSelection, flushPendingInput, ...documentSurfaceHandlers } = handlers;
@@ -7234,6 +7235,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 onSelectionHighlightColorChange={setReplyHighlightColor}
                 onSelectionTextAlignmentChange={setReplyTextAlignment}
+                entityLinkContext={attachmentRequestJSON ? { companyID, requestJSON: attachmentRequestJSON } : undefined}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);

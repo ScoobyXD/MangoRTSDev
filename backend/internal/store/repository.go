@@ -789,11 +789,12 @@ type CompanyExplorerLocationSegment struct {
 }
 
 type CompanyExplorerSearchQuery struct {
-	CompanyID        string
-	Query            string
-	PermissionUserID string
-	Limit            int
-	ResourceTypes    []string
+	CompanyID           string
+	Query               string
+	PermissionUserID    string
+	Limit               int
+	ResourceTypes       []string
+	EditorEntityRanking bool
 }
 
 type CompanyExplorerSearchResult struct {

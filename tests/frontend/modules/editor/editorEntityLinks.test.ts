@@ -1,0 +1,205 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { JSDOM } from "jsdom";
+
+import {
+  createMangoTiptapExtensions,
+  MangoTiptapEditorEngine,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
+
+import { sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import {
+  createEditorEntityLinkElement,
+  createNodeEntityFromSelection,
+  editorEntityRoute,
+  normalizeEditorSelectionNodeTitle,
+  readActiveEntityLinkDraft,
+  readEditorEntityLinkElement,
+  searchEditorEntityLinks,
+} from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
+
+test("# entity drafts respect text boundaries and allow a searchable phrase", () => {
+  assert.deepEqual(readActiveEntityLinkDraft("Link #road map", 14), {
+    start: 5,
+    end: 14,
+    query: "road map",
+    trigger: "#",
+  });
+  assert.equal(readActiveEntityLinkDraft("word#road", 9), null);
+  assert.equal(readActiveEntityLinkDraft("#road ", 6)?.query, "road ");
+  assert.equal(readActiveEntityLinkDraft("#road,", 6), null);
+});
+
+test("entity search requests scoped Nodes, Logic Gates, and Projects and keeps ranked API order", async () => {
+  let requestedPath = "";
+  const results = await searchEditorEntityLinks({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string): Promise<T> => {
+      requestedPath = path;
+      return {
+        results: [
+          { resource_type: "project", resource_id: "project-1", display_name: "Roadmap" },
+          { resource_type: "node", resource_id: "node-1", display_name: "Roadmap task" },
+          { resource_type: "logic_gate", resource_id: "gate-1", display_name: "Roadmap review" },
+          { resource_type: "folder", resource_id: "folder-1", display_name: "Ignored" },
+          { resource_type: "node", resource_id: "node-1", display_name: "Duplicate" },
+        ],
+      } as T;
+    },
+  }, "road");
+
+  const url = new URL(requestedPath, "https://mango.test");
+  assert.equal(url.pathname, "/v1/company-explorer/search");
+  assert.equal(url.searchParams.get("company_id"), "company-1");
+  assert.equal(url.searchParams.get("q"), "road");
+  assert.equal(url.searchParams.get("resource_types"), "node,logic_gate,project");
+  assert.equal(url.searchParams.get("ranking"), "editor_entities");
+  assert.deepEqual(results.map((entity) => entity.entityType), ["project", "node", "logic_gate"]);
+});
+
+test("selection Node creation normalizes the exact title and returns a durable entity", async () => {
+  let submittedBody: Record<string, unknown> | undefined;
+  const entity = await createNodeEntityFromSelection({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string, init?: RequestInit): Promise<T> => {
+      assert.equal(path, "/v1/workspace/entity-batches");
+      submittedBody = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+      return {
+        nodes: [{
+          company_id: "company-1",
+          node_id: "node-created",
+          name: "Create this Node",
+          created_timestamp: "2026-07-21T12:00:00Z",
+        }],
+        relationships: [],
+        folder_items: [],
+        node_map_positions: [],
+      } as T;
+    },
+  }, "  Create\n this   Node  ");
+
+  assert.equal(normalizeEditorSelectionNodeTitle("  Create\n this   Node  "), "Create this Node");
+  assert.equal((submittedBody?.items as Array<{ name: string }>)[0]?.name, "Create this Node");
+  assert.deepEqual(entity, {
+    entityType: "node",
+    entityID: "node-created",
+    label: "Create this Node",
+    updatedTimestamp: "2026-07-21T12:00:00Z",
+  });
+});
+
+test("legacy entity chips preserve identity, type styling, and routes", () => {
+  const dom = new JSDOM("<!doctype html>");
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const previousHTMLElement = globalThis.HTMLElement;
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
+  try {
+    const element = createEditorEntityLinkElement(dom.window.document, {
+      entityType: "logic_gate",
+      entityID: "gate one",
+      label: "Approval gate",
+    });
+    assert.equal(element.getAttribute("contenteditable"), "false");
+    assert.equal(element.classList.contains("mango-editor-entity-link--logic_gate"), true);
+    assert.deepEqual(readEditorEntityLinkElement(element), {
+      entityType: "logic_gate",
+      entityID: "gate one",
+      label: "Approval gate",
+    });
+    assert.equal(editorEntityRoute({ entityType: "logic_gate", entityID: "gate one" }), "/logic-gates/gate%20one");
+  } finally {
+    if (previousHTMLElement === undefined) delete (globalThis as Record<string, unknown>).HTMLElement;
+    else Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: previousHTMLElement });
+    dom.window.close();
+  }
+});
+
+test("legacy rich HTML sanitization retains only canonical entity-link data", () => {
+  const dom = new JSDOM("<!doctype html>");
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const names = ["document", "Node", "Element", "HTMLElement", "HTMLLIElement", "HTMLSpanElement", "HTMLTableCellElement", "HTMLUListElement"] as const;
+  const previous = new Map<string, unknown>();
+  for (const name of names) {
+    previous.set(name, (globalThis as unknown as Record<string, unknown>)[name]);
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === "document" ? dom.window.document : (domGlobals as unknown as Record<string, unknown>)[name] });
+  }
+  try {
+    const sanitized = sanitizeEditorDocumentHTML('<span data-mango-entity-link="true" data-mango-entity-type="project" data-mango-entity-id="project-1" data-mango-entity-label="Roadmap" onclick="steal()" style="position:fixed">Spoofed</span>');
+    assert.match(sanitized, /data-mango-entity-link="true"/);
+    assert.match(sanitized, /data-mango-entity-type="project"/);
+    assert.match(sanitized, /data-mango-entity-id="project-1"/);
+    assert.match(sanitized, /data-mango-entity-label="Roadmap"/);
+    assert.match(sanitized, />Roadmap<\/span>/);
+    assert.doesNotMatch(sanitized, /onclick|position:fixed|Spoofed/);
+  } finally {
+    for (const name of names) {
+      const value = previous.get(name);
+      if (value === undefined) delete (globalThis as unknown as Record<string, unknown>)[name];
+      else Object.defineProperty(globalThis, name, { configurable: true, value });
+    }
+    dom.window.close();
+  }
+});
+
+test("# entity menu selects its top result with Tab and the entity participates in history", async () => {
+  const dom = new JSDOM("<!doctype html><div id=\"editor\"></div>", { url: "https://mango.test/" });
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const names = ["window", "document", "Node", "Element", "HTMLElement", "MutationObserver", "KeyboardEvent"] as const;
+  const previous = new Map<string, unknown>();
+  for (const name of names) {
+    previous.set(name, (globalThis as unknown as Record<string, unknown>)[name]);
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? dom.window : name === "document" ? dom.window.document : (domGlobals as unknown as Record<string, unknown>)[name] });
+  }
+  const previousRAF = globalThis.requestAnimationFrame;
+  const previousCancelRAF = globalThis.cancelAnimationFrame;
+  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: (handle: number) => clearTimeout(handle) });
+  if (!domGlobals.Range.prototype.getClientRects) domGlobals.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  if (!domGlobals.Range.prototype.getBoundingClientRect) domGlobals.Range.prototype.getBoundingClientRect = () => new domGlobals.DOMRect();
+  const queries: string[] = [];
+  const editor = new MangoTiptapEditorEngine({
+    element: dom.window.document.querySelector<HTMLElement>("#editor"),
+    extensions: createMangoTiptapExtensions({
+      editable: true,
+      searchEntityLinks: async (query) => {
+        queries.push(query);
+        return [
+          { entityType: "project", entityID: "project-1", label: "Most recent project" },
+          { entityType: "node", entityID: "node-1", label: "Second Node" },
+        ];
+      },
+    }),
+    content: { type: "doc", content: [{ type: "paragraph" }] },
+  });
+  try {
+    editor.commands.focus();
+    editor.commands.insertContent("#");
+    for (let index = 0; index < 50 && !dom.window.document.querySelector('[data-mango-tiptap-entity-menu="true"] [role="option"]'); index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    assert.deepEqual(queries, [""]);
+    assert.ok(dom.window.document.querySelector('[data-mango-tiptap-entity-menu="true"] [role="option"]'));
+    editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    const inserted = editor.getJSON().content?.[0]?.content?.find((node) => node.type === "mangoEntityLink") as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(inserted?.attrs?.entityType, "project");
+    assert.equal(inserted?.attrs?.entityId, "project-1");
+    assert.equal(inserted?.attrs?.label, "Most recent project");
+    assert.match(editor.getHTML(), /data-mango-entity-id="project-1"/);
+    assert.equal(editor.commands.undo(), true);
+    assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
+    assert.equal(editor.commands.redo(), true);
+    assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
+  } finally {
+    editor.destroy();
+    dom.window.close();
+    for (const name of names) {
+      const value = previous.get(name);
+      if (value === undefined) delete (globalThis as unknown as Record<string, unknown>)[name];
+      else Object.defineProperty(globalThis, name, { configurable: true, value });
+    }
+    if (previousRAF === undefined) delete (globalThis as unknown as Record<string, unknown>).requestAnimationFrame;
+    else Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: previousRAF });
+    if (previousCancelRAF === undefined) delete (globalThis as unknown as Record<string, unknown>).cancelAnimationFrame;
+    else Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: previousCancelRAF });
+  }
+});

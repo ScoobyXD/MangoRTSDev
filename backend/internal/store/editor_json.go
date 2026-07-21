@@ -212,9 +212,10 @@ var editorJSONNodeAttrs = map[string]map[string]bool{
 	"bulletList": {"blockId": true}, "orderedList": {"blockId": true, "start": true},
 	"listItem": {"blockId": true}, "taskList": {"blockId": true}, "taskItem": {"blockId": true, "checked": true},
 	"table": {"blockId": true, "style": true}, "tableRow": {},
-	"tableHeader": {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
-	"tableCell":   {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
-	"mention":     {"userId": true, "label": true, "kind": true},
+	"tableHeader":     {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
+	"tableCell":       {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
+	"mention":         {"userId": true, "label": true, "kind": true},
+	"mangoEntityLink": {"entityType": true, "entityId": true, "label": true},
 	"mangoAttachmentImage": {
 		"attachmentId": true, "filename": true, "mimeType": true, "width": true, "height": true,
 		"displayWidth": true, "displayHeight": true, "alignment": true, "position": true,
@@ -303,6 +304,20 @@ func validateEditorJSONNode(value any, path string, depth int, count *int) error
 			return fmt.Errorf("%w: mention kind required", ErrInvalid)
 		}
 	}
+	if nodeType == "mangoEntityLink" {
+		entityType, typeOK := attrs["entityType"].(string)
+		entityID, idOK := attrs["entityId"].(string)
+		label, labelOK := attrs["label"].(string)
+		if !typeOK || (entityType != EntityTypeNode && entityType != EntityTypeLogicGate && entityType != EntityTypeProject) {
+			return fmt.Errorf("%w: entity link type required", ErrInvalid)
+		}
+		if !idOK || strings.TrimSpace(entityID) == "" || len(entityID) > 160 {
+			return fmt.Errorf("%w: entity link id required", ErrInvalid)
+		}
+		if !labelOK || strings.TrimSpace(label) == "" || len(label) > 500 {
+			return fmt.Errorf("%w: entity link label required", ErrInvalid)
+		}
+	}
 	if nodeType == "mangoAttachmentImage" {
 		attachmentID, ok := attrs["attachmentId"].(string)
 		if !ok || strings.TrimSpace(attachmentID) == "" {
@@ -383,7 +398,7 @@ func validateEditorJSONNode(value any, path string, depth int, count *int) error
 
 func editorJSONAtomNode(nodeType string) bool {
 	switch nodeType {
-	case "text", "hardBreak", "horizontalRule", "mention", "mangoAttachmentImage":
+	case "text", "hardBreak", "horizontalRule", "mention", "mangoEntityLink", "mangoAttachmentImage":
 		return true
 	default:
 		return false
@@ -411,7 +426,7 @@ func editorJSONBlockNode(nodeType string) bool {
 func editorJSONChildAllowed(parentType, childType string, index int) bool {
 	switch parentType {
 	case "paragraph", "heading":
-		return childType == "text" || childType == "hardBreak" || childType == "mention"
+		return childType == "text" || childType == "hardBreak" || childType == "mention" || childType == "mangoEntityLink"
 	case "codeBlock":
 		return childType == "text"
 	case "doc", "blockquote", "tableCell", "tableHeader":

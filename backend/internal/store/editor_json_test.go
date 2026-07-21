@@ -32,6 +32,7 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 			{"type":"heading","attrs":{"level":2,"blockId":"heading-1","textAlign":"center","indentLevel":0},"content":[{"type":"text","text":"Plan","marks":[{"type":"bold"}]}]},
 			{"type":"paragraph","attrs":{"blockId":"paragraph-1","textAlign":"left","indentLevel":1},"content":[
 				{"type":"mention","attrs":{"userId":"user-1","label":"Ada","kind":"normal"}},
+				{"type":"mangoEntityLink","attrs":{"entityType":"node","entityId":"node-1","label":"Linked Node"}},
 				{"type":"text","text":" link","marks":[{"type":"link","attrs":{"href":"https://example.test","target":"_blank","rel":"noopener"}},{"type":"textStyle","attrs":{"fontSize":"18px","color":"#123456"}},{"type":"highlight","attrs":{"color":"#fff59d"}}]}
 			]},
 			{"type":"bulletList","attrs":{"blockId":"list-1"},"content":[{"type":"listItem","attrs":{"blockId":"item-1"},"content":[{"type":"paragraph","content":[{"type":"text","text":"Nested"}]}]}]},
@@ -60,6 +61,8 @@ func TestMangoTiptapJSONRejectsUnknownSchemaHTMLAndTransientURLs(t *testing.T) {
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","marks":[{"type":"bold"}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"textStyle","attrs":{"color":"red;background:url(https://example.test)"}}]}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","displayWidth":1000000}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"folder","entityId":"folder-1","label":"Bad"}}]}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"node","entityId":"","label":"Missing"}}]}]}}`),
 	}
 	for index, raw := range cases {
 		if _, err := ValidateMangoTiptapJSON(raw); !errors.Is(err, ErrInvalid) {

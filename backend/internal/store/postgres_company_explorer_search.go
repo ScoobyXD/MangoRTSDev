@@ -269,6 +269,7 @@ with recursive visible_folder_paths as (
 ), matched as (
   select candidate.*,
          case
+           when $2='' then 'recent'
            when lower(candidate.display_name)=lower($2) then 'name_exact'
            when lower(candidate.display_name) like lower($2) || '%' then 'name_prefix'
            when lower(candidate.display_name) like '%' || lower($2) || '%' then 'name_contains'
@@ -282,6 +283,7 @@ with recursive visible_folder_paths as (
            else 4
          end as type_priority,
          case
+           when $2='' then 0
            when lower(candidate.display_name)=lower($2) then 0
            when lower(candidate.display_name) like lower($2) || '%' then 1
            when lower(candidate.display_name) like '%' || lower($2) || '%' then 2
@@ -289,7 +291,7 @@ with recursive visible_folder_paths as (
          end as match_priority
   from candidates candidate
   where ($6 = '' or candidate.resource_type = any(string_to_array($6, ',')::text[]))
-    and (
+    and ($2='' or
       lower(candidate.display_name) like '%' || lower($2) || '%'
       or candidate.entity_id::text like '%' || $2 || '%'
     )
@@ -305,12 +307,13 @@ select matched.company_id::text,
        matched.created_timestamp,
        matched.updated_timestamp
 from matched
-order by matched.type_priority,
-         matched.match_priority,
+order by case when $7 then matched.match_priority else matched.type_priority end,
+         case when $7 then matched.updated_timestamp end desc,
+         case when $7 then matched.type_priority else matched.match_priority end,
          lower(matched.display_name),
          matched.created_timestamp desc,
          matched.entity_id
-limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionEdit, query.Limit, strings.Join(query.ResourceTypes, ","))
+limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionEdit, query.Limit, strings.Join(query.ResourceTypes, ","), query.EditorEntityRanking)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompanyExplorerSearchResults{Results: []CompanyExplorerSearchResult{}}, nil
 	}

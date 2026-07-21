@@ -8,6 +8,13 @@ import {
 } from "../../attachments/attachmentApi";
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
+import {
+  createNodeEntityFromSelection,
+  normalizeEditorSelectionNodeTitle,
+  openEditorEntityLink,
+  searchEditorEntityLinks,
+  type EditorEntityLink,
+} from "../editorEntityLinks.js";
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
 import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
 import type {
@@ -92,6 +99,7 @@ export type MangoTiptapEditorProps = {
   subscribeToCanonicalChange?: (recover: () => void, clientID: string) => () => void;
   attachmentContext?: EditorImageAttachmentContext;
   mentionUsers?: MentionableCompanyUser[];
+  onEntityOpen?: (entity: EditorEntityLink) => void;
   annotations?: MangoTiptapAnnotation[];
   target?: MangoTiptapTarget | null;
   onTargetHandled?: (requestID: number) => void;
@@ -126,6 +134,13 @@ function initialDocument(value?: string): { document: MangoTiptapDocument; error
   const parsed = parseMangoTiptapDocument(value);
   return parsed.valid ? { document: parsed.value } : { document: createEmptyMangoTiptapDocument(), error: parsed.error };
 }
+
+const SelectionNodeIcon: React.FC = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <rect x="5" y="5" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+    <path d="M9 12h6M12 9v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+);
 
 function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
   return users.flatMap((user) => {
@@ -429,6 +444,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   subscribeToCanonicalChange,
   attachmentContext,
   mentionUsers = EMPTY_MENTION_USERS,
+  onEntityOpen,
   annotations = EMPTY_ANNOTATIONS,
   target,
   onTargetHandled,
@@ -483,6 +499,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   } | null>(null);
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [selectionAction, setSelectionAction] = useState<MangoTiptapSelectionAction | null>(null);
+  const [creatingSelectionNode, setCreatingSelectionNode] = useState(false);
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
@@ -540,7 +557,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       strikethrough: state.strikethrough,
     });
     const selection = editor.state.selection;
-    if (selection.empty || !callbacksRef.current.onSelectionChatRequest) {
+    if (selection.empty) {
       setSelectionAction(null);
       return;
     }
@@ -796,12 +813,24 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     });
   }, []);
   const hasAttachmentContext = Boolean(attachmentContext);
+  const searchEntityLinksForEditor = useCallback(
+    (query: string) => searchEditorEntityLinks({ companyID, requestJSON }, query),
+    [companyID, requestJSON],
+  );
+  const openEntityLink = useCallback((entity: EditorEntityLink) => {
+    openEditorEntityLink(entity, { onOpen: onEntityOpen });
+  }, [onEntityOpen]);
   const extensions = useMemo(() => createMangoTiptapExtensions({
     editable,
     attachmentImageExtension: attachmentExtension,
     mentionUsers: normalizedMentionUsers(mentionUsers),
+    searchEntityLinks: searchEntityLinksForEditor,
+    onEntityLinkSearchError: (message) => {
+      setError(message);
+      callbacksRef.current.onError?.(message);
+    },
     onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
-  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers]);
+  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers, searchEntityLinksForEditor]);
 
   const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
 
@@ -823,12 +852,33 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           class: "mango-tiptap-prosemirror",
         },
         handleKeyDown: (_view, event) => {
+          const keyboardEntityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
+          if (keyboardEntityElement && (event.key === "Enter" || event.key === " ")) {
+            const entityType = keyboardEntityElement.dataset.mangoEntityType;
+            const entityID = keyboardEntityElement.dataset.mangoEntityId?.trim() ?? "";
+            const label = keyboardEntityElement.dataset.mangoEntityLabel?.trim() ?? "";
+            if ((entityType === "node" || entityType === "logic_gate" || entityType === "project") && entityID && label) {
+              event.preventDefault();
+              openEntityLink({ entityType, entityID, label });
+              return true;
+            }
+          }
           if (event.key !== "Tab") return false;
-          if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"]')) return false;
+          if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-tiptap-entity-menu="true"]')) return false;
           const current = editorRef.current;
           if (!current) return false;
           event.preventDefault();
           return event.shiftKey ? formattingControllerRef?.current?.outdent() ?? false : formattingControllerRef?.current?.indent() ?? false;
+        },
+        handleClickOn: (_view, _pos, node, _nodePos, event) => {
+          if (node.type.name !== "mangoEntityLink") return false;
+          const entityType = node.attrs.entityType;
+          const entityID = typeof node.attrs.entityId === "string" ? node.attrs.entityId.trim() : "";
+          const label = typeof node.attrs.label === "string" ? node.attrs.label.trim() : "";
+          if (!(["node", "logic_gate", "project"] as const).includes(entityType) || !entityID || !label) return false;
+          event.preventDefault();
+          openEntityLink({ entityType, entityID, label });
+          return true;
         },
       },
       onContentError: ({ error: contentError }) => {
@@ -910,7 +960,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       releaseActive();
     };
   }, [
-    ariaLabel, editable, extensions, formattingControllerRef, isActive, placeholder, updateSelectionState,
+    ariaLabel, editable, extensions, formattingControllerRef, isActive, openEntityLink, placeholder, updateSelectionState,
   ]);
 
   useEffect(() => {
@@ -977,6 +1027,41 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return () => root.removeEventListener("mango:tiptap-annotation-activate", listener);
   }, [onAnnotationActivate]);
 
+  const createNodeFromSelection = useCallback(async () => {
+    const editor = editorRef.current;
+    const action = selectionAction;
+    if (!editor || !action || creatingSelectionNode) return;
+    const title = normalizeEditorSelectionNodeTitle(action.quote);
+    if (!title) {
+      const message = "Highlight text before creating a Node.";
+      setError(message);
+      callbacksRef.current.onError?.(message);
+      return;
+    }
+    setCreatingSelectionNode(true);
+    setError("");
+    try {
+      const entity = await createNodeEntityFromSelection({ companyID, requestJSON }, action.quote);
+      const currentSelection = editor.state.selection;
+      const currentText = editor.state.doc.textBetween(action.from, action.to, "\n", "\n");
+      if (currentSelection.from !== action.from || currentSelection.to !== action.to || currentText !== action.quote) {
+        throw new Error("The Node was created, but the highlighted text changed before its link could be inserted. Select the text again and link the existing Node with #.");
+      }
+      editor.chain().focus().insertContentAt(
+        { from: action.from, to: action.to },
+        { type: "mangoEntityLink", attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label } },
+      ).run();
+      setSelectionAction(null);
+      setError("");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Unable to create a Node from the highlighted text";
+      setError(message);
+      callbacksRef.current.onError?.(message);
+    } finally {
+      setCreatingSelectionNode(false);
+    }
+  }, [companyID, creatingSelectionNode, requestJSON, selectionAction]);
+
   const renderStaticAttachment = useCallback((attributes: MangoStaticAttachmentImageProps) => (
     <MangoAuthenticatedImage attributes={attributes} attachmentContext={attachmentContext} />
   ), [attachmentContext]);
@@ -1019,20 +1104,39 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           <button type="button" onClick={() => editorRef.current?.chain().focus().deleteTable().run()}>Delete table</button>
         </div>
       )}
-      {isActive && editable && selectionAction && onSelectionChatRequest && (
-        <button
-          type="button"
-          aria-label="Comment on selection"
-          title="Comment on selection"
+      {isActive && editable && selectionAction && (
+        <div
+          role="toolbar"
+          aria-label="Highlighted text actions"
+          contentEditable={false}
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => {
-            onSelectionChatRequest(selectionAction);
-            setSelectionAction(null);
-          }}
-          style={{ position: "absolute", left: selectionAction.x, top: selectionAction.y, zIndex: 12, width: 30, height: 30, borderRadius: 8, border: "1px solid #7dd3fc", background: "#ffffff", color: "#0369a1", cursor: "pointer" }}
+          style={{ position: "absolute", left: selectionAction.x, top: selectionAction.y, zIndex: 12, display: "flex", gap: 4, padding: 3, borderRadius: 9, border: "1px solid #bae6fd", background: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,0.14)" }}
         >
-          Chat
-        </button>
+          {onSelectionChatRequest && (
+            <button
+              type="button"
+              aria-label="Comment on selection"
+              title="Comment on selection"
+              onClick={() => {
+                onSelectionChatRequest(selectionAction);
+                setSelectionAction(null);
+              }}
+              style={{ minWidth: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0369a1", cursor: "pointer" }}
+            >
+              Chat
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Create node from this highlighted piece of text."
+            title="Create node from this highlighted piece of text."
+            disabled={creatingSelectionNode || !normalizeEditorSelectionNodeTitle(selectionAction.quote)}
+            onClick={() => void createNodeFromSelection()}
+            style={{ display: "inline-grid", placeItems: "center", width: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0f766e", cursor: creatingSelectionNode ? "wait" : "pointer" }}
+          >
+            <SelectionNodeIcon />
+          </button>
+        </div>
       )}
     </div>
   );

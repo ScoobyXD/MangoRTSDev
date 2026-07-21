@@ -92,6 +92,12 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 	}
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
+	ranking := strings.TrimSpace(r.URL.Query().Get("ranking"))
+	editorEntityRanking := ranking == "editor_entities"
+	if ranking != "" && !editorEntityRanking {
+		writeError(w, http.StatusBadRequest, "invalid_ranking")
+		return
+	}
 	if queryText == "" {
 		queryText = strings.TrimSpace(r.URL.Query().Get("query"))
 	}
@@ -99,7 +105,7 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	if queryText == "" {
+	if queryText == "" && !editorEntityRanking {
 		writeError(w, http.StatusBadRequest, "query_required")
 		return
 	}
@@ -123,11 +129,12 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	results, err := s.repo.SearchCompanyExplorer(store.CompanyExplorerSearchQuery{
-		CompanyID:        companyID,
-		Query:            queryText,
-		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
-		Limit:            limit,
-		ResourceTypes:    resourceTypes,
+		CompanyID:           companyID,
+		Query:               queryText,
+		PermissionUserID:    s.entityPermissionActorUserID(r, companyID),
+		Limit:               limit,
+		ResourceTypes:       resourceTypes,
+		EditorEntityRanking: editorEntityRanking,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_search_query")

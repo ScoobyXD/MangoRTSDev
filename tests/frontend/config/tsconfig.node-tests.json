@@ -183,6 +183,7 @@
     "../modules/editor/editorInputBatch.test.ts",
     "../../../frontend/src/modules/editor/editorMentions.ts",
     "../modules/editor/editorMentions.test.ts",
+    "../modules/editor/editorEntityLinks.test.ts",
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
     "../modules/editor/plainTextEditing.test.ts",
     "../../../frontend/src/modules/editor/unifiedRichEditorContract.ts",

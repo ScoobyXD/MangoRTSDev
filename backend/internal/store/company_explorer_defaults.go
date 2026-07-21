@@ -100,7 +100,7 @@ func normalizeCompanyExplorerSearchQuery(query CompanyExplorerSearchQuery) (Comp
 		return CompanyExplorerSearchQuery{}, err
 	}
 	query.ResourceTypes = resourceTypes
-	if query.CompanyID == "" || query.Query == "" {
+	if query.CompanyID == "" || (query.Query == "" && !query.EditorEntityRanking) {
 		return CompanyExplorerSearchQuery{}, ErrInvalid
 	}
 	if query.Limit <= 0 {

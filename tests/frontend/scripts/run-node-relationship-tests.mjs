@@ -81,6 +81,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorInputBatch.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorEntityLinks.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/unifiedRichEditorContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorImageHydration.test.js"),
