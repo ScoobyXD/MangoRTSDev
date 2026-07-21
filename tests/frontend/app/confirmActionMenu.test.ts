@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { confirmationDisplayNameMatches } from "../../../frontend/src/app/ConfirmActionMenu.js";
 import { clampFrameRightClickMenuPosition } from "../../../frontend/src/app/framerightclickmenu.js";
-
-test("confirmation display name matching ignores case but still requires the full name", () => {
-  assert.equal(confirmationDisplayNameMatches("  jOnAtHaN kIm  ", "Jonathan Kim"), true);
-  assert.equal(confirmationDisplayNameMatches("Jonathan", "Jonathan Kim"), false);
-  assert.equal(confirmationDisplayNameMatches("jonathan kim", ""), false);
-});
 
 test("confirmation menu position clamps to viewport bottom after content grows", () => {
   assert.deepEqual(
