@@ -1,13 +1,14 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
+import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { emailMessageRowKey } from "./homeUtils";
-import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationChatSession } from "./emailCollaborationChat";
+import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailCollaborationActionRequest, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailCollaborationPanelAction } from "./emailCollaborationChat";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 import {
@@ -101,14 +102,7 @@ function StarIcon({ filled }: { filled: boolean }) {
   );
 }
 
-function EmailNodeIndicatorIcon() {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-      <rect x="3" y="2.5" width="10" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.35" />
-      <path d="M5.3 5.6h5.4M5.3 8h5.4M5.3 10.4h3.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  );
-}
+
 function SendPointerIcon() {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
@@ -399,6 +393,7 @@ export function HomeMailWorkspace({
   const [emailSelection, setEmailSelection] = React.useState<EmailCollaborationSelection | null>(null);
   const [emailNavigation, setEmailNavigation] = React.useState<EmailCollaborationNavigation | null>(null);
   const [emailChatSession, setEmailChatSession] = React.useState<EmailCollaborationChatSession>(null);
+  const [emailActionRequest, setEmailActionRequest] = React.useState<EmailCollaborationActionRequest>(null);
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
   const emailChatAvailable = activeViewID === "my-triage" || activeViewID.startsWith("shared:");
   const emailChatKey = emailChatAvailable && selectedMessageRowKey
@@ -414,10 +409,25 @@ export function HomeMailWorkspace({
     emailNavigationSequenceRef.current += 1;
     setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
   }, []);
+  const requestEmailPanelAction = React.useCallback((action: EmailCollaborationPanelAction) => {
+    if (!emailChatKey) return;
+    setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, action));
+    setEmailChatSession({ key: emailChatKey, visible: true });
+  }, [emailChatKey]);
   const toggleEmailChat = React.useCallback(() => {
     if (!emailChatKey) return;
+    if (!emailChatVisible) setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, "chat"));
     setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
-  }, [emailChatKey]);
+  }, [emailChatKey, emailChatVisible]);
+  const createNodeFromEmail = React.useCallback(() => {
+    if (!selectedMessage) return;
+    if (selectedMessage.collaboration_node_id?.trim()) {
+      onOpenCollaborationNode(selectedMessage);
+      return;
+    }
+    requestEmailPanelAction("create");
+  }, [onOpenCollaborationNode, requestEmailPanelAction, selectedMessage]);
+  const addEmailToNode = React.useCallback(() => requestEmailPanelAction("import"), [requestEmailPanelAction]);
   const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
     if (!emailChatKey) return;
     setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
@@ -427,6 +437,7 @@ export function HomeMailWorkspace({
     setEmailSelection(null);
     setEmailNavigation(null);
     setEmailChatSession((current) => reconcileEmailCollaborationChatSession(current, emailChatKey));
+    setEmailActionRequest(null);
     setEmailCollaborationError("");
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
@@ -784,9 +795,9 @@ export function HomeMailWorkspace({
                                 event.stopPropagation();
                                 onOpenCollaborationNode(message);
                               }}
-                              style={{ width: 24, height: 22, border: "1px solid rgba(124,58,237,0.22)", borderRadius: 7, background: "rgba(245,243,255,0.86)", color: "#7c3aed", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                              style={{ width: 24, height: 22, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 7, background: "rgba(236,254,255,0.86)", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
                             >
-                              <EmailNodeIndicatorIcon />
+                              <ExplorerRowIcon kind="node" />
                             </button>
                           )}
                           <MessageAttachmentCount message={message} />
@@ -834,9 +845,9 @@ export function HomeMailWorkspace({
                                 event.stopPropagation();
                                 onOpenCollaborationNode(message);
                               }}
-                              style={{ width: 24, height: 22, border: "1px solid rgba(124,58,237,0.22)", borderRadius: 7, background: "rgba(245,243,255,0.86)", color: "#7c3aed", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                              style={{ width: 24, height: 22, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 7, background: "rgba(236,254,255,0.86)", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
                             >
-                              <EmailNodeIndicatorIcon />
+                              <ExplorerRowIcon kind="node" />
                             </button>
                           )}
                           <MessageAttachmentCount message={message} />
@@ -915,6 +926,8 @@ export function HomeMailWorkspace({
                 chatAvailable={emailChatAvailable}
                 chatOpen={emailChatVisible}
                 onToggleChat={toggleEmailChat}
+                onCreateEmailNode={createNodeFromEmail}
+                onAddEmailToNode={addEmailToNode}
                 onLoadMessageBody={onLoadMessageBody}
                 onReply={onOpenReply}
                 onReplyAll={onOpenReplyAll}
@@ -944,6 +957,7 @@ export function HomeMailWorkspace({
                 companyUserGroups={companyUserGroups}
                 companyUserGroupMembers={companyUserGroupMembers}
                 nodes={nodes}
+                actionRequest={emailActionRequest}
                 selection={emailSelection}
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
