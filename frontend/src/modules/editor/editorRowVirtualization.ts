@@ -76,6 +76,7 @@ export function buildBoundedEditorRowEntries(
   const count = Math.max(0, Math.trunc(itemCount));
   if (count === 0) return [];
   const slotHeight = normalizedRowSlotHeight(rowHeight, rowGap);
+  const pinnedIndexSet = new Set<number>();
   const mountedIndices = new Set<number>();
   const start = clampIndex(window.startIndex, count);
   const end = window.endIndex < 0 ? -1 : clampIndex(window.endIndex, count);
@@ -85,20 +86,34 @@ export function buildBoundedEditorRowEntries(
   for (const rawIndex of pinnedIndices) {
     if (!Number.isFinite(rawIndex)) continue;
     const index = Math.trunc(rawIndex);
-    if (index >= 0 && index < count) mountedIndices.add(index);
+    if (index >= 0 && index < count) {
+      pinnedIndexSet.add(index);
+      mountedIndices.add(index);
+    }
   }
 
   const sortedIndices = Array.from(mountedIndices).sort((left, right) => left - right);
   const entries: BoundedEditorRowEntry[] = [];
+  const spacerKey = (startIndex: number, endIndex: number): string => {
+    if (startIndex === 0) return "spacer:leading";
+    if (endIndex === count) return "spacer:trailing";
+    const previousIndex = startIndex - 1;
+    const previousIsPinned = pinnedIndexSet.has(previousIndex);
+    const nextIsPinned = pinnedIndexSet.has(endIndex);
+    if (previousIsPinned && nextIsPinned) return `spacer:between-pinned:${previousIndex}:${endIndex}`;
+    if (previousIsPinned) return `spacer:after-pinned:${previousIndex}`;
+    if (nextIsPinned) return `spacer:before-pinned:${endIndex}`;
+    return "spacer:window-gap";
+  };
   let cursor = 0;
   for (const index of sortedIndices) {
     if (index > cursor) {
-      entries.push({ kind: "spacer", key: `spacer:${cursor}:${index}`, height: (index - cursor) * slotHeight });
+      entries.push({ kind: "spacer", key: spacerKey(cursor, index), height: (index - cursor) * slotHeight });
     }
     entries.push({ kind: "row", key: `row:${index}`, index });
     cursor = index + 1;
   }
-  if (cursor < count) entries.push({ kind: "spacer", key: `spacer:${cursor}:${count}`, height: (count - cursor) * slotHeight });
+  if (cursor < count) entries.push({ kind: "spacer", key: spacerKey(cursor, count), height: (count - cursor) * slotHeight });
   return entries;
 }
 
@@ -142,6 +157,7 @@ export function useBoundedEditorRowVirtualization({
   const listOffsetRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const handledTargetRequestRef = useRef("");
+  const pendingWindowScrollTopRef = useRef<number | null>(null);
   const [rowWindow, setRowWindow] = useState<BoundedEditorRowWindow>(() => computeBoundedEditorRowWindow({
     itemCount,
     rowHeight,
@@ -155,20 +171,38 @@ export function useBoundedEditorRowVirtualization({
 
   const recalculateWindow = useCallback((preferredTargetIndex?: number | null) => {
     const scrollElement = scrollElementRef.current;
+    const scrollTop = scrollElement?.scrollTop ?? 0;
     const nextWindow = computeBoundedEditorRowWindow({
       itemCount,
       rowHeight,
       rowGap,
-      scrollTop: scrollElement?.scrollTop ?? 0,
+      scrollTop,
       viewportHeight: scrollElement?.clientHeight || EDITOR_ROW_FALLBACK_VIEWPORT_HEIGHT,
       listOffset: listOffsetRef.current,
       overscan,
       targetIndex: preferredTargetIndex,
     });
-    setRowWindow((current) => (
-      current.startIndex === nextWindow.startIndex && current.endIndex === nextWindow.endIndex ? current : nextWindow
-    ));
+    setRowWindow((current) => {
+      if (current.startIndex === nextWindow.startIndex && current.endIndex === nextWindow.endIndex) return current;
+      // Replacing a large virtual spacer can briefly shrink scrollHeight while
+      // React commits the new window. Remember the native position so the
+      // browser cannot clamp/anchor a fast wheel scroll back to an older row.
+      pendingWindowScrollTopRef.current = scrollTop;
+      return nextWindow;
+    });
   }, [itemCount, overscan, rowGap, rowHeight, scrollElementRef]);
+
+  useLayoutEffect(() => {
+    const desiredScrollTop = pendingWindowScrollTopRef.current;
+    if (desiredScrollTop === null) return;
+    pendingWindowScrollTopRef.current = null;
+    const scrollElement = scrollElementRef.current;
+    if (!scrollElement) return;
+    const preservedScrollTop = Math.max(0, desiredScrollTop);
+    if (Math.abs(scrollElement.scrollTop - preservedScrollTop) > 0.5) {
+      scrollElement.scrollTop = preservedScrollTop;
+    }
+  }, [rowWindow, scrollElementRef]);
 
   const measureAndRecalculateWindow = useCallback((preferredTargetIndex?: number | null) => {
     const scrollElement = scrollElementRef.current;

@@ -62,6 +62,13 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`, preserving node information/projection saves, attached-email behavior, and separate chat panes.
 - Project critical-path inline node windows mount the shared shell while edits inside them remain node editor mutations rather than project critical-path mutations.
 
+### Stable Text-Box Scrolling And Linked Email Preview (2026-07-21)
+
+- The bounded Node text-box list keeps stable leading, trailing, and pinned-row spacer identities while its mounted window advances. The virtualizer also preserves the latest native scroll position across the React commit, so rapid wheel or trackpad input cannot be clamped back to a previously mounted text box.
+- The Node scroll root disables browser scroll anchoring and contains vertical overscroll. Inner editor, chat, and email scroll areas retain their own scrolling, while the outer text-box list remains monotonic from the first row through the last.
+- An email-associated text box exposes a clear **Show email** button in its header. It expands the existing full email conversation viewer inside that fixed-height text-box card without inserting provider content into the editable document.
+- The expanded viewer shows the provider message body and available From, To, Cc, and Bcc metadata. **Hide email** removes that viewer and restores the full editor/chat height; this display state is local UI only and does not alter the text-box document or email association.
+
 ### Node Email Focus And Compact Chat Note (2026-07-21)
 
 - A newly opened Node chat starts at 340 pixels wide. Per-text-box drag resizing still clamps to the existing safety bounds and persists normally.

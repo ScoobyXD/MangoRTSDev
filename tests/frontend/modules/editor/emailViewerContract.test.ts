@@ -80,7 +80,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
-  assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Collapse linked email" : "Expand linked email"\}/);
+  assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
   assert.match(nodeSurface, /Math\.max\(TEXT_BLOCK_ROW_HEIGHT, Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT\)\)/);
