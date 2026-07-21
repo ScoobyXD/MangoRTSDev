@@ -47,6 +47,36 @@ func TestCORSAllowsFrontendRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestCORSAllowsPatchPreflight(t *testing.T) {
+	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "http://localhost:5173")
+
+	called := false
+	handler := withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodOptions, "/v1/editor-collaboration/node/node-1/documents/document-1", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPatch)
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if called {
+		t.Fatal("PATCH preflight request reached wrapped handler")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PATCH preflight status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("PATCH preflight allow origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPatch) {
+		t.Fatalf("PATCH preflight allow methods = %q, missing PATCH", got)
+	}
+}
+
 func TestCORSMatchesCommaSeparatedOrigins(t *testing.T) {
 	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "https://app.example.com, https://admin.example.com")
 
