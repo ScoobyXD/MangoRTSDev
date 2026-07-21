@@ -1079,38 +1079,18 @@ button, input, textarea, select {
   cursor: pointer;
 }
 
-.mango-editor-entity-link::before,
 .mango-editor-entity-icon {
-  content: "";
-  display: inline-block;
+  display: block;
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  box-sizing: border-box;
-  border: 1.5px solid #0f766e;
-  border-radius: 2px;
-  background: rgba(20, 184, 166, 0.10);
+  width: 15px;
+  height: 15px;
 }
 
-.mango-editor-entity-link--logic_gate::before,
-.mango-editor-entity-icon--logic_gate {
-  width: 9px;
-  height: 9px;
-  margin: 1px;
-  border-radius: 1px;
-  border-color: #7c3aed;
-  background: rgba(124, 58, 237, 0.10);
-  transform: rotate(45deg);
-}
-
-.mango-editor-entity-link--project::before,
-.mango-editor-entity-icon--project {
-  width: 12px;
-  height: 9px;
-  border-color: #b45309;
-  border-radius: 2px;
-  background: rgba(245, 158, 11, 0.14);
-  box-shadow: inset 0 2px 0 rgba(180, 83, 9, 0.22);
+.mango-editor-entity-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mango-editor-entity-link:hover {

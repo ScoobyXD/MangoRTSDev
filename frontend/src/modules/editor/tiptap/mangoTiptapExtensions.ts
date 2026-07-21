@@ -9,7 +9,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
 import { Plugin } from "@tiptap/pm/state";
-import { editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
+import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -368,17 +368,18 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
       },
       renderHTML({ node, HTMLAttributes }) {
         const type = String(node.attrs.entityType || "node");
+        const entityType = type === "logic_gate" || type === "project" ? type : "node";
         const label = String(node.attrs.label || "Entity");
         return ["span", mergeAttributes(HTMLAttributes, {
           "data-mango-entity-link": "true",
-          "data-mango-entity-type": type,
+          "data-mango-entity-type": entityType,
           "data-mango-entity-id": node.attrs.entityId,
           "data-mango-entity-label": label,
           role: "link",
           tabindex: "0",
-          "aria-label": `Open ${editorEntityTypeLabel(type === "logic_gate" || type === "project" ? type : "node")} ${label}`,
-          class: `mango-editor-entity-link mango-editor-entity-link--${type}`,
-        }), label];
+          "aria-label": `Open ${editorEntityTypeLabel(entityType)} ${label}`,
+          class: `mango-editor-entity-link mango-editor-entity-link--${entityType}`,
+        }), createEditorEntityIconElement(document, entityType), ["span", { class: "mango-editor-entity-label" }, label]];
       },
     }).configure({
       renderText: ({ node }) => String(node.attrs.label || "Entity"),
@@ -426,9 +427,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
                 width: "100%", border: "0", borderRadius: "6px", padding: "7px 8px", textAlign: "left",
                 cursor: "pointer", background: index === selectedIndex ? "#e0f2fe" : "#ffffff", color: "#0f172a",
               });
-              const icon = document.createElement("span");
-              icon.className = `mango-editor-entity-icon mango-editor-entity-icon--${item.entityType}`;
-              icon.setAttribute("aria-hidden", "true");
+              const icon = createEditorEntityIconElement(document, item.entityType);
               const label = document.createElement("span");
               label.textContent = item.label;
               label.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750";
