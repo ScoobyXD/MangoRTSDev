@@ -625,22 +625,72 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       dom.window.localStorage.removeItem(`node-editor-pane-layout-${version}:${COMPANY_ID}:${NODE_ID}`);
     }
     currentNodeProjectionItems = [
-      ...nodeProjections(61),
-      nodeChatProjection("node-block-59"),
-      nodeChatProjection("node-block-60"),
-      nodeEmailProjection("node-block-59"),
+      ...nodeProjections(1),
+      nodeChatProjection("node-block-0"),
+      nodeEmailProjection("node-block-0"),
     ];
     nodeRoot = createRoot(nodeContainer);
     await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
     await flushWork();
-    const emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-59"]');
+    const emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"]');
     assert.ok(emailNodeRow);
     assertNodePaneToggles(emailNodeRow, [true, true]);
-    assert.ok(nodeContainer.querySelector('[data-node-email-column="true"]'), "attached email should render once in the node-wide column");
-    assert.ok(nodeContainer.querySelector('button[aria-label="Toggle node email column"]'));
-    assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-59"]'));
-    assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-59"]'));
-    assert.match(nodeContainer.textContent ?? "", /Email for node-block-59/, "attached email should stay in the node-wide column");
+    const emailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
+    const emailWorkspace = nodeContainer.querySelector<HTMLElement>('[data-node-email-workspace-mode]');
+    const emailCollapseToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Collapse email column"]');
+    const nodeEmailToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Toggle node email column"]');
+    const editorToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
+    const chatToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
+    assert.ok(emailColumn, "attached email should render once in the node-wide column");
+    assert.ok(emailWorkspace);
+    assert.ok(emailCollapseToggle, "the email header should expose its own collapse control");
+    assert.ok(nodeEmailToggle);
+    assert.ok(editorToggle);
+    assert.ok(chatToggle);
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text");
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-chat");
+    assert.ok(Number.parseFloat(emailColumn.style.height) >= 240, "the email column should fill the remaining Node viewport instead of using the old short height cap");
+    assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-0"]'));
+    assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
+    assert.match(nodeContainer.textContent ?? "", /Email for node-block-0/, "attached email should stay in the node-wide column");
+
+    await act(async () => { chatToggle.click(); });
+    await flushWork();
+    assertNodePaneToggles(emailNodeRow, [true, false]);
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-only");
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text", "email and editor should remain distinct columns");
+
+    await act(async () => { editorToggle.click(); });
+    await flushWork();
+    assertNodePaneToggles(emailNodeRow, [false, false]);
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-only", "email should own the full workspace when it is the only visible pane");
+
+    await act(async () => { emailCollapseToggle.click(); });
+    await flushWork();
+    assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null);
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "text-only");
+
+    await act(async () => { editorToggle.click(); });
+    await flushWork();
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-only", "editor should own the row when it is the only visible pane");
+    assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-0"]'));
+
+    await act(async () => { editorToggle.click(); });
+    await flushWork();
+    await act(async () => { chatToggle.click(); });
+    await flushWork();
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "chat-only", "chat should own the row when it is the only visible pane");
+    assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
+
+    await act(async () => { nodeEmailToggle.click(); });
+    await flushWork();
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text", "email and chat should render as distinct columns");
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "chat-only");
+
+    await act(async () => { editorToggle.click(); });
+    await flushWork();
+    assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text");
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-chat", "all three pane types should render together");
 
     await act(async () => { nodeRoot?.unmount(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });

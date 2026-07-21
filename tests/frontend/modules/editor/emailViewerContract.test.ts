@@ -71,6 +71,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
 
 test("node email and linked text boxes expose animated two-way navigation and collision-free colors", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const triageChat = source("frontend/src/pages/home/EmailCollaborationChatSurface.tsx");
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
@@ -81,7 +82,17 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
   assert.match(nodeSurface, /Show the linked email message/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
+  assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
+  assert.match(nodeSurface, /const nodeWorkspaceViewportHeight = Math\.max\(240, Math\.floor\(height - 45\)\)/);
+  assert.doesNotMatch(nodeSurface, /min\(720px, calc\(100vh - 170px\)\)/);
+  assert.match(nodeSurface, /nodeEmailOnly \? "minmax\(0, 1fr\)"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);
+  assert.match(nodeSurface, /data-node-visible-panes=\{visiblePaneMode\}/);
+  assert.match(nodeSurface, /editorPaneIsVisible && chatPaneIsVisible[\s\S]{0,32}\? "editor-chat"/);
+  assert.match(nodeSurface, /chatPaneIsVisible[\s\S]{0,32}\? "chat-only"[\s\S]{0,32}: "none"/);
+  assert.match(nodeSurface, /onRequestCollapse=\{toggleNodeEmailColumn\}/);
+  assert.match(nodeParts, /aria-label="Collapse email column"/);
+  assert.match(nodeParts, /onClick=\{onRequestCollapse\}/);
   assert.match(nodeSurface, /const chatBlockID = block\.id/);
   assert.match(nodeSurface, /suppressAutomaticCreation: nodeAttachedEmails\.length > 0/);
   assert.doesNotMatch(nodeSurface, /aria-label="Toggle email column"/);

@@ -128,7 +128,7 @@ const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const NODE_EMAIL_COLUMN_LAYOUT_ID = "__node_email_column__";
-const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
+const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v2";
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
@@ -217,21 +217,6 @@ function clampTextSidePaneWidth(value: number, maxWidth = TEXT_SIDE_PANE_MAX_WID
   if (!Number.isFinite(value)) return TEXT_SIDE_PANE_DEFAULT_WIDTH_PX;
   const safeMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(TEXT_SIDE_PANE_MAX_WIDTH_PX, Math.round(maxWidth)));
   return Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(safeMaxWidth, Math.round(value)));
-}
-
-function fitTextSidePaneWidths(widths: number[], maxCombinedWidth: number): number[] {
-  if (widths.length === 0) return [];
-  const minTotalWidth = TEXT_SIDE_PANE_MIN_WIDTH_PX * widths.length;
-  const safeMaxCombinedWidth = Math.max(minTotalWidth, Math.round(maxCombinedWidth));
-  const maxSingleWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, safeMaxCombinedWidth - (TEXT_SIDE_PANE_MIN_WIDTH_PX * (widths.length - 1)));
-  const clamped = widths.map((width) => clampTextSidePaneWidth(width, maxSingleWidth));
-  const totalWidth = clamped.reduce((sum, width) => sum + width, 0);
-  if (totalWidth <= safeMaxCombinedWidth) return clamped;
-  const requestedExtras = clamped.map((width) => Math.max(0, width - TEXT_SIDE_PANE_MIN_WIDTH_PX));
-  const totalRequestedExtra = requestedExtras.reduce((sum, width) => sum + width, 0);
-  const availableExtra = Math.max(0, safeMaxCombinedWidth - minTotalWidth);
-  if (totalRequestedExtra <= 0) return clamped.map(() => TEXT_SIDE_PANE_MIN_WIDTH_PX);
-  return requestedExtras.map((extra) => Math.round(TEXT_SIDE_PANE_MIN_WIDTH_PX + ((extra / totalRequestedExtra) * availableExtra)));
 }
 
 function textSidePaneWidthStorageKey(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind): string {
@@ -452,6 +437,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const initialPaneLayoutRef = useRef(readStoredTextPaneLayout(companyID, nodeID));
   const paneLayoutReadyScopeRef = useRef("");
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
@@ -588,17 +574,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       - TEXT_CHAT_HORIZONTAL_PADDING_PX
       - TEXT_TIMELINE_COLUMN_WIDTH_PX
       - TEXT_CHAT_GRID_COLUMN_GAP_PX,
-  );
-  const textSidePaneAvailableWidth = Math.max(
-    TEXT_SIDE_PANE_MIN_WIDTH_PX,
-    textCommunicationContentWidth
-      - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX
-      - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX
-      - (TEXT_CHAT_GRID_COLUMN_GAP_PX * 2),
-  );
-  const textSidePaneDefaultWidth = clampTextSidePaneWidth(
-    Math.min(TEXT_SIDE_PANE_DEFAULT_WIDTH_PX, Math.round(textSidePaneAvailableWidth * 0.36)),
-    textSidePaneAvailableWidth,
   );
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
@@ -817,13 +792,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const updateWidth = () => setWidth(root.getBoundingClientRect().width);
-    updateWidth();
+    const updateSize = () => {
+      const bounds = root.getBoundingClientRect();
+      setWidth(bounds.width);
+      setHeight(bounds.height);
+    };
+    updateSize();
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateWidth);
-      return () => window.removeEventListener("resize", updateWidth);
+      window.addEventListener("resize", updateSize);
+      return () => window.removeEventListener("resize", updateSize);
     }
-    const observer = new ResizeObserver(updateWidth);
+    const observer = new ResizeObserver(updateSize);
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
@@ -2738,13 +2717,54 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   ) : null;
 
   const nodeEmailColumnVisible = nodeAttachedEmails.length > 0 && openEmailBlockIDs.has(NODE_EMAIL_COLUMN_LAYOUT_ID);
-  const nodeEmailPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(560, textCommunicationContentWidth - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX));
+  const maximumVisibleTextPaneCount = blocks.reduce((maximum, block) => {
+    const editorVisible = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
+    const chatVisible = openChatBlockIDs.has(block.id) || activeChatBlockID === block.id;
+    return Math.max(maximum, Number(editorVisible) + Number(chatVisible));
+  }, 0);
+  const nodeTextSurfaceVisible = maximumVisibleTextPaneCount > 0;
+  const nodeEmailOnly = nodeEmailColumnVisible && !nodeTextSurfaceVisible;
+  const nodeWorkspaceViewportHeight = Math.max(240, Math.floor(height - 45));
+  const minimumNodeTextWorkspaceWidth = maximumVisibleTextPaneCount > 1
+    ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX
+    : TEXT_SIDE_PANE_MIN_WIDTH_PX;
+  const nodeEmailPaneMaxWidth = Math.max(
+    TEXT_SIDE_PANE_MIN_WIDTH_PX,
+    textCommunicationContentWidth - minimumNodeTextWorkspaceWidth - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX,
+  );
   const nodeEmailPaneWidth = sidePaneWidthForBlock(
     NODE_EMAIL_COLUMN_LAYOUT_ID,
     "email",
-    Math.min(420, textSidePaneDefaultWidth),
+    Math.round(textCommunicationContentWidth / Math.max(2, maximumVisibleTextPaneCount + 1)),
     nodeEmailPaneMaxWidth,
   );
+  const nodeTextCommunicationContentWidth = nodeEmailColumnVisible && !nodeEmailOnly
+    ? Math.max(
+      minimumNodeTextWorkspaceWidth,
+      textCommunicationContentWidth - nodeEmailPaneWidth - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX,
+    )
+    : textCommunicationContentWidth;
+  const nodeEmailWorkspaceMode = nodeEmailOnly
+    ? "email-only"
+    : nodeEmailColumnVisible
+      ? "email-with-text"
+      : "text-only";
+  const toggleNodeEmailColumn = () => {
+    const nextVisible = !nodeEmailColumnVisible;
+    setFocusedTextBlockID("");
+    setOpenEmailBlockIDs((current) => {
+      const next = new Set(current);
+      if (nextVisible) next.add(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      else next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      return next;
+    });
+    setClosedEmailBlockIDs((current) => {
+      const next = new Set(current);
+      if (nextVisible) next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      else next.add(NODE_EMAIL_COLUMN_LAYOUT_ID);
+      return next;
+    });
+  };
   const nodeEmailMessageAccents = Object.fromEntries(blocks
     .filter((block) => Boolean(block.emailMessageID?.trim()))
     .map((block) => [
@@ -2838,21 +2858,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               title={nodeEmailColumnVisible ? "Hide node email column" : "Open node email column"}
               aria-label="Toggle node email column"
               aria-pressed={nodeEmailColumnVisible}
-              onClick={() => {
-                setFocusedTextBlockID("");
-                setOpenEmailBlockIDs((current) => {
-                  const next = new Set(current);
-                  if (nodeEmailColumnVisible) next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
-                  else next.add(NODE_EMAIL_COLUMN_LAYOUT_ID);
-                  return next;
-                });
-                setClosedEmailBlockIDs((current) => {
-                  const next = new Set(current);
-                  if (nodeEmailColumnVisible) next.add(NODE_EMAIL_COLUMN_LAYOUT_ID);
-                  else next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
-                  return next;
-                });
-              }}
+              onClick={toggleNodeEmailColumn}
               style={{ minHeight: 30, borderRadius: 9, border: nodeEmailColumnVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: nodeEmailColumnVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "0 9px", cursor: "pointer", fontSize: 11, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}
             >
               <MailIcon color={accent} />
@@ -3069,7 +3075,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           )}
           </div>
 
-        {blocks.length === 0 && (
+        {blocks.length === 0 && !nodeEmailColumnVisible && (
           <>
             <TimelineCell accent={accent} muted isLast />
             <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, minHeight: 92, display: "grid", placeItems: "center", color: surfaceText, opacity: 0.7, fontSize: 13, fontWeight: 700 }}>
@@ -3080,12 +3086,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         <div
           data-node-email-workspace="true"
-          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailColumnVisible ? `${nodeEmailPaneWidth}px ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(0, 1fr)` : "minmax(0, 1fr)", minWidth: 0, alignItems: "start" }}
+          data-node-email-workspace-mode={nodeEmailWorkspaceMode}
+          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailOnly ? "minmax(0, 1fr)" : nodeEmailColumnVisible ? `${nodeEmailPaneWidth}px ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(0, 1fr)` : "minmax(0, 1fr)", minWidth: 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch" }}
         >
         {nodeEmailColumnVisible && (
           <div
             data-node-email-column="true"
-            style={{ position: "sticky", top: 38, minWidth: 0, height: "min(720px, calc(100vh - 170px))", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}
+            style={{ position: "sticky", top: 38, minWidth: 0, height: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}
           >
             <AttachedEmailOrganizerPane
               emails={nodeAttachedEmails}
@@ -3122,16 +3129,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onEmailMessageTextBoxRequest={(messageID) => { createEmailTextBlock(messageID); }}
               onEmailMessageActivate={revealEmailTextBlock}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
+              onRequestCollapse={toggleNodeEmailColumn}
               onError={onError}
             />
           </div>
         )}
-        {nodeEmailColumnVisible && renderTextSidePaneResizeHandle(NODE_EMAIL_COLUMN_LAYOUT_ID, "email", "after", nodeEmailPaneWidth, nodeEmailPaneMaxWidth)}
+        {nodeEmailColumnVisible && !nodeEmailOnly && renderTextSidePaneResizeHandle(NODE_EMAIL_COLUMN_LAYOUT_ID, "email", "after", nodeEmailPaneWidth, nodeEmailPaneMaxWidth)}
         <div
           ref={rowVirtualizer.listRef}
           data-mango-bounded-editor-rows="node"
           data-mounted-row-count={rowVirtualizer.mountedRowCount}
-          style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0 }}
+          style={{ display: nodeEmailOnly ? "none" : "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0 }}
         >
         {rowVirtualizer.entries.map((entry) => {
           if (entry.kind === "spacer") {
@@ -3147,71 +3155,47 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const messages = [...legacyMessages, ...directMessages].sort((a, b) => (
             a.createdTimestamp.localeCompare(b.createdTimestamp) || a.id.localeCompare(b.id)
           ));
-          const blockEmails = nodeAttachedEmails;
           const chatIsActive = activeChatBlockID === chatBlockID;
-          const chatIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
+          const chatPaneIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
           const editorPaneIsVisible = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
-          const emailPaneIsVisible = false;
-          const emailPaneIsMounted = false;
-          const chatPaneIsVisible = chatIsVisible;
-          const sidePaneCount = (emailPaneIsVisible ? 1 : 0) + (chatPaneIsVisible ? 1 : 0);
-          const sidePaneChromeWidth = sidePaneCount > 0
-            ? (TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX * sidePaneCount) + (TEXT_CHAT_GRID_COLUMN_GAP_PX * sidePaneCount * 2)
-            : 0;
-          const maxCombinedSidePaneWidth = sidePaneCount > 0
-            ? Math.max(
-              TEXT_SIDE_PANE_MIN_WIDTH_PX * sidePaneCount,
-              textCommunicationContentWidth - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX - sidePaneChromeWidth,
-            )
-            : TEXT_SIDE_PANE_MIN_WIDTH_PX;
-          const sidePaneMaxWidth = Math.max(
+          const chatPaneMaxWidth = Math.max(
             TEXT_SIDE_PANE_MIN_WIDTH_PX,
-            maxCombinedSidePaneWidth - (TEXT_SIDE_PANE_MIN_WIDTH_PX * Math.max(0, sidePaneCount - 1)),
+            nodeTextCommunicationContentWidth - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX,
           );
-          const sidePaneFallbackWidth = sidePaneCount > 1
-            ? clampTextSidePaneWidth(Math.min(420, Math.floor(maxCombinedSidePaneWidth / sidePaneCount)), sidePaneMaxWidth)
-            : textSidePaneDefaultWidth;
-          const rawEmailPaneWidth = sidePaneWidthForBlock(block.id, "email", sidePaneFallbackWidth, sidePaneMaxWidth);
-          const rawChatPaneWidth = sidePaneWidthForBlock(chatBlockID, "chat", sidePaneFallbackWidth, sidePaneMaxWidth);
-          const fittedSidePaneWidths = fitTextSidePaneWidths(
-            [
-              emailPaneIsVisible ? rawEmailPaneWidth : 0,
-              chatPaneIsVisible ? rawChatPaneWidth : 0,
-            ].filter((paneWidth) => paneWidth > 0),
-            maxCombinedSidePaneWidth,
-          );
-          const emailPaneWidth = emailPaneIsVisible ? fittedSidePaneWidths[0] ?? rawEmailPaneWidth : rawEmailPaneWidth;
-          const chatPaneWidth = chatPaneIsVisible ? fittedSidePaneWidths[emailPaneIsVisible ? 1 : 0] ?? rawChatPaneWidth : rawChatPaneWidth;
-          const emailPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (chatPaneIsVisible ? chatPaneWidth : 0));
-          const chatPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (emailPaneIsVisible ? emailPaneWidth : 0));
-          const blockCommunicationGridTemplateColumns = [
-            emailPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${emailPaneWidth}px)` : "",
-            emailPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
-            editorPaneIsVisible ? `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr)` : "",
-            chatPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
-            chatPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${chatPaneWidth}px)` : "",
-          ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
-          const minimumCommunicationWidth = (emailPaneIsVisible ? emailPaneWidth + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX : 0)
-            + (editorPaneIsVisible ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX : 0)
-            + (chatPaneIsVisible ? chatPaneWidth + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX : 0);
+          const chatPaneWidth = editorPaneIsVisible && chatPaneIsVisible
+            ? sidePaneWidthForBlock(
+              chatBlockID,
+              "chat",
+              Math.round(nodeTextCommunicationContentWidth / 2),
+              chatPaneMaxWidth,
+            )
+            : nodeTextCommunicationContentWidth;
+          const blockCommunicationGridTemplateColumns = editorPaneIsVisible && chatPaneIsVisible
+            ? `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr) ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${chatPaneWidth}px)`
+            : editorPaneIsVisible
+              ? `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr)`
+              : chatPaneIsVisible
+                ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, 1fr)`
+                : "minmax(0, 1fr)";
+          const minimumCommunicationWidth = editorPaneIsVisible && chatPaneIsVisible
+            ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX
+            : editorPaneIsVisible
+              ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX
+              : chatPaneIsVisible
+                ? TEXT_SIDE_PANE_MIN_WIDTH_PX
+                : 0;
+          const visiblePaneMode = editorPaneIsVisible && chatPaneIsVisible
+            ? "editor-chat"
+            : editorPaneIsVisible
+              ? "editor-only"
+              : chatPaneIsVisible
+                ? "chat-only"
+                : "none";
           const textBlockIsFocused = focusedTextBlockID === block.id;
           const blockEmailAccent = block.emailMessageID ? (block.emailAccent?.trim() || editorEmailMessageAccent(block.emailMessageID)) : "";
           const selectionAnchor = chatSelectionAnchors[chatBlockID];
           const activeChatMessageID = activeChatMessageIDs[chatBlockID] ?? "";
-          const activeChatMessage = activeChatMessageID ? messages.find((message) => message.id === activeChatMessageID) ?? null : null;
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
-          const activeEmailSelection = activeChatMessage?.selectionSource === "email"
-            && activeChatMessage.selectionMessageID
-            && activeChatMessage.selectionQuote
-            && Number.isFinite(activeChatMessage.selectionStart)
-            && Number.isFinite(activeChatMessage.selectionEnd)
-            ? {
-              messageID: activeChatMessage.selectionMessageID,
-              quote: activeChatMessage.selectionQuote,
-              startOffset: activeChatMessage.selectionStart ?? 0,
-              endOffset: activeChatMessage.selectionEnd ?? 0,
-            }
-            : null;
           const emailChatParticipantIDs = emailOriginPrimaryRow
             ? new Set(messages.flatMap((message) => [message.authorID, ...(message.mentionedUserIDs ?? [])]).map((id) => id.trim()).filter(Boolean))
             : new Set<string>();
@@ -3230,51 +3214,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const blockAttachmentDropdownItems = (nodeTextBlockAttachmentsByInformationID.get(block.id) ?? []).map((resourceAttachment) => ({
             resourceAttachment,
           }));
-          const blockEmailPane = (
-            <AttachedEmailOrganizerPane
-              emails={blockEmails}
-              nodeID={nodeID}
-              apiBase={apiBase}
-              companyID={companyID}
-              companyUsers={companyUsers}
-              attachmentRequestJSON={requestJSON}
-              storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
-              tabbed={false}
-              editable={canEdit}
-              accent={accent}
-              surfaceText={surfaceText}
-              strokeColor={strokeColor}
-              ruleColor={ruleColor}
-              selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
-              focusMessageID={emailOriginPrimaryRow
-                ? (activeChatMessage?.selectionSource === "email" ? activeChatMessage.selectionMessageID : undefined) || focusEmailMessageID
-                : undefined}
-              activeEmailSelection={activeEmailSelection}
-              emailHighlightRemovalRequest={emailHighlightRemovalRequest}
-              onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
-              onClearSelectedMessage={() => clearBlockEmail(block.id)}
-              onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
-              onReplyEditorFocus={() => {
-                setActiveRowBlockID(block.id);
-                setEmailReplyBlockID(block.id);
-                setFocusedTextBlockID("");
-                if (formattingControllerRef) formattingControllerRef.current = null;
-              }}
-              onEmailSelectionChatRequest={(messageID, selection) => openSelectionChat({
-                blockID: block.id,
-                source: "email",
-                messageID,
-                quote: selection.quote,
-                startOffset: selection.startOffset,
-                endOffset: selection.endOffset,
-                x: selection.x,
-                y: selection.y,
-              }, chatBlockID)}
-              onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
-              onError={onError}
-              onEmailMessageActivate={revealEmailTextBlock}
-            />
-          );
           const toggleChat = () => {
             setFocusedTextBlockID("");
             if (chatPaneIsVisible) {
@@ -3442,13 +3381,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     </div>
                   </div>
                   <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
-                    <div data-node-text-box-columns="editor-chat" style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch" }}>
-                      {emailPaneIsMounted && (
-                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, display: emailPaneIsVisible ? "block" : "none", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: panelBackground, overflow: "hidden" }}>
-                          {blockEmailPane}
-                        </div>
-                      )}
-                      {emailPaneIsVisible && renderTextSidePaneResizeHandle(block.id, "email", "after", emailPaneWidth, emailPaneMaxWidth)}
+                    <div data-node-text-box-columns="editor-chat" data-node-visible-panes={visiblePaneMode} style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch" }}>
                       {editorPaneIsVisible && (
                         <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
                           <NodeTextBlockEditor
@@ -3509,9 +3442,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           />
                         </div>
                       )}
-                      {chatPaneIsVisible && renderTextSidePaneResizeHandle(chatBlockID, "chat", "before", chatPaneWidth, chatPaneMaxWidth)}
+                      {editorPaneIsVisible && chatPaneIsVisible && renderTextSidePaneResizeHandle(chatBlockID, "chat", "before", chatPaneWidth, chatPaneMaxWidth)}
                       {chatPaneIsVisible && (
-                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, overflow: "hidden" }}>
+                        <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, borderLeft: editorPaneIsVisible ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : 0, overflow: "hidden" }}>
                           <ChatPane
                     blockID={chatBlockID}
                     editable={canEdit}

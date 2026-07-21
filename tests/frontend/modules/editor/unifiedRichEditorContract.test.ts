@@ -303,7 +303,7 @@ test("attached-email reply focus clears the outer node or project formatting tar
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus\?: \(\) => void/);
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspaceParts, /onFocus=\{onReplyEditorFocus\}/);
-  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setEmailReplyBlockID\(block\.id\);\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
+  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setEmailReplyBlockID\(NODE_EMAIL_COLUMN_LAYOUT_ID\);\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
   assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setEmailReplyBlockID\(block\.id\);\s*setFocusedTextBlockID\(block\.id\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
 });
 
