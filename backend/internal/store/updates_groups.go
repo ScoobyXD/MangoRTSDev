@@ -61,6 +61,34 @@ func normalizeUpdatesFilter(filter string) (string, bool) {
 	}
 }
 
+func normalizeUpdatesQuery(input UpdatesQuery) (UpdatesQuery, string, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.RootID = strings.TrimSpace(input.RootID)
+	filter, ok := normalizeUpdatesFilter(input.Filter)
+	if input.UserID == "" || input.CompanyID == "" || !ok {
+		return UpdatesQuery{}, "", ErrInvalid
+	}
+	if !input.SeenOnly {
+		input.CreatedFrom = time.Time{}
+		input.CreatedTo = time.Time{}
+		return input, filter, nil
+	}
+	input.CreatedFrom = input.CreatedFrom.UTC()
+	input.CreatedTo = input.CreatedTo.UTC()
+	if input.CreatedFrom.IsZero() || input.CreatedTo.IsZero() || !input.CreatedFrom.Before(input.CreatedTo) || input.CreatedTo.Sub(input.CreatedFrom) > UpdatesSeenMaxWindow {
+		return UpdatesQuery{}, "", ErrInvalid
+	}
+	return input, filter, nil
+}
+
+func updateNotificationMatchesView(item domain.Notification, input UpdatesQuery) bool {
+	if input.SeenOnly {
+		return item.ReadTimestamp != nil && !item.CreatedTimestamp.Before(input.CreatedFrom) && item.CreatedTimestamp.Before(input.CreatedTo)
+	}
+	return item.ReadTimestamp == nil
+}
+
 func updatesNotificationMatchesFilter(item domain.Notification, filter string) bool {
 	switch filter {
 	case UpdatesFilterAll:

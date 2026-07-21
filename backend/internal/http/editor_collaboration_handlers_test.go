@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndRecoversByETag(t *testing.T) {
@@ -156,5 +157,92 @@ func TestEditorCollaborationHTTPAuthorizesExactResourceAcknowledgesCommitAndReco
 	deniedServer.Routes().ServeHTTP(deniedResponse, deniedReq)
 	if deniedResponse.Code != http.StatusForbidden {
 		t.Fatalf("denied exact-resource status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
+func TestEditorCollaborationHTTPCreatesUpdatesForNewMentionsAcrossResources(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "54545454-5454-4454-8454-545454545454"
+	repo.EnsureCompany(companyID, "Legacy editor mentions")
+	actor := mustRealtimeAuthUser(t, repo, companyID, "legacy-mention-actor", domain.RoleCompanyAdmin)
+	mentioned := mustRealtimeAuthUser(t, repo, companyID, "legacy-mention-target", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Legacy mention node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Legacy mention gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectResult, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Legacy mention project", ActorUserID: actor.UserID})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("project=%+v err=%v", projectResult, err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, mentioned.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeProject, projectResult.Project.ProjectID, mentioned.UserID)
+
+	const token = "legacy-mention-token"
+	server := newRealtimeAuthServerForTest(repo, token, actor)
+	defer server.Close()
+	cases := []struct {
+		ref  store.EditorDocumentRef
+		kind string
+	}{
+		{ref: store.EditorDocumentRef{CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID, DocumentID: "55545454-5454-4454-8454-545454545451"}, kind: "regular"},
+		{ref: store.EditorDocumentRef{CompanyID: companyID, ResourceType: store.EntityTypeProject, ResourceID: projectResult.Project.ProjectID, DocumentID: "55545454-5454-4454-8454-545454545452"}, kind: "regular"},
+		{ref: store.EditorDocumentRef{CompanyID: companyID, ResourceType: store.EntityTypeLogicGate, ResourceID: logicGate.LogicGateID, DocumentID: "55545454-5454-4454-8454-545454545453"}, kind: "urgent"},
+	}
+	postMention := func(item struct {
+		ref  store.EditorDocumentRef
+		kind string
+	}, operationID string) *httptest.ResponseRecorder {
+		t.Helper()
+		snapshot, snapshotErr := repo.GetEditorCollaborationSnapshot(item.ref)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		trigger := "@"
+		if item.kind == "urgent" {
+			trigger = "!"
+		}
+		html := `<!-- mango-editor-html-v1 --><p><span data-mango-mention="true" data-mango-mention-user-id="` + mentioned.UserID + `" data-mango-mention-kind="` + item.kind + `">` + trigger + mentioned.DisplayName + `</span> please review.</p>`
+		body, _ := json.Marshal(map[string]any{
+			"operation_id":  operationID,
+			"client_id":     "legacy-mention-client",
+			"base_revision": snapshot.Revision,
+			"patch":         map[string]any{"start_utf8": 0, "delete_utf8": len([]byte(snapshot.HTML)), "insert": html},
+		})
+		path := "/v1/editor-collaboration/" + item.ref.ResourceType + "/" + item.ref.ResourceID + "/documents/" + item.ref.DocumentID + "?company_id=" + companyID
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, request)
+		return response
+	}
+	for index, item := range cases {
+		if response := postMention(item, "legacy-mention-operation-"+string(rune('1'+index))); response.Code != http.StatusOK {
+			t.Fatalf("mention %d status=%d body=%s", index, response.Code, response.Body.String())
+		}
+	}
+	var notifications []domain.Notification
+	for attempts := 0; attempts < 100; attempts++ {
+		notifications, err = repo.ListNotifications(store.NotificationListInput{UserID: mentioned.UserID, CompanyID: companyID, Limit: 20})
+		if err != nil || len(notifications) == len(cases) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err != nil || len(notifications) != len(cases) {
+		t.Fatalf("notifications=%+v err=%v", notifications, err)
+	}
+	seen := map[string]string{}
+	for _, notification := range notifications {
+		seen[notification.EntityType] = notification.Type
+	}
+	if seen[store.EntityTypeNode] != domain.NotificationEventMentionCreated ||
+		seen[store.EntityTypeProject] != domain.NotificationEventMentionCreated ||
+		seen[store.EntityTypeLogicGate] != domain.NotificationEventUrgentMentionCreated {
+		t.Fatalf("notification types by resource=%v", seen)
 	}
 }

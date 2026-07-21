@@ -207,6 +207,57 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 		t.Fatalf("read roots = %+v, want no update roots after mark read", readRootsPayload.Groups)
 	}
 
+	seenRangeReq := httptest.NewRequest(http.MethodGet, "/v1/updates/seen-range?company_id="+companyID, nil)
+	seenRangeReq = requestWithActorForNotifications(seenRangeReq, user, companyID)
+	seenRangeRR := httptest.NewRecorder()
+	handler.ServeHTTP(seenRangeRR, seenRangeReq)
+	if seenRangeRR.Code != http.StatusOK {
+		t.Fatalf("seen range status = %d body=%s", seenRangeRR.Code, seenRangeRR.Body.String())
+	}
+	var seenRange store.UpdatesSeenRange
+	if err := json.NewDecoder(seenRangeRR.Body).Decode(&seenRange); err != nil {
+		t.Fatalf("decode seen range: %v", err)
+	}
+	if seenRange.OldestCreatedTimestamp == nil || seenRange.NewestCreatedTimestamp == nil {
+		t.Fatalf("seen range = %+v, want archived update bounds", seenRange)
+	}
+
+	seenDate := created[0].CreatedTimestamp.UTC().Format("2006-01-02")
+	seenRootsPath := "/v1/updates/groups/roots?company_id=" + companyID + "&filter=update&view=seen&from=" + seenDate + "&to=" + seenDate
+	seenRootsReq := httptest.NewRequest(http.MethodGet, seenRootsPath, nil)
+	seenRootsReq = requestWithActorForNotifications(seenRootsReq, user, companyID)
+	seenRootsRR := httptest.NewRecorder()
+	handler.ServeHTTP(seenRootsRR, seenRootsReq)
+	if seenRootsRR.Code != http.StatusOK {
+		t.Fatalf("seen roots status = %d body=%s", seenRootsRR.Code, seenRootsRR.Body.String())
+	}
+	var seenRootsPayload struct {
+		Groups []store.UpdatesNestedGroup `json:"groups"`
+	}
+	if err := json.NewDecoder(seenRootsRR.Body).Decode(&seenRootsPayload); err != nil {
+		t.Fatalf("decode seen roots: %v", err)
+	}
+	if len(seenRootsPayload.Groups) != 1 {
+		t.Fatalf("seen roots = %+v, want archived update root", seenRootsPayload.Groups)
+	}
+	seenBranchPath := "/v1/updates/groups/branch?company_id=" + companyID + "&filter=update&view=seen&from=" + seenDate + "&to=" + seenDate + "&root_id=" + url.QueryEscape(seenRootsPayload.Groups[0].ID)
+	seenBranchReq := httptest.NewRequest(http.MethodGet, seenBranchPath, nil)
+	seenBranchReq = requestWithActorForNotifications(seenBranchReq, user, companyID)
+	seenBranchRR := httptest.NewRecorder()
+	handler.ServeHTTP(seenBranchRR, seenBranchReq)
+	if seenBranchRR.Code != http.StatusOK {
+		t.Fatalf("seen branch status = %d body=%s", seenBranchRR.Code, seenBranchRR.Body.String())
+	}
+	var seenBranchPayload struct {
+		Group store.UpdatesNestedGroup `json:"group"`
+	}
+	if err := json.NewDecoder(seenBranchRR.Body).Decode(&seenBranchPayload); err != nil {
+		t.Fatalf("decode seen branch: %v", err)
+	}
+	if updateGroupNotificationCount(seenBranchPayload.Group) != 1 {
+		t.Fatalf("seen branch = %+v, want one archived notification", seenBranchPayload.Group)
+	}
+
 	urgentReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/branch?company_id="+companyID+"&filter=urgent&root_id="+url.QueryEscape(rootsPayload.Groups[0].ID), nil)
 	urgentReq = requestWithActorForNotifications(urgentReq, user, companyID)
 	urgentRR := httptest.NewRecorder()

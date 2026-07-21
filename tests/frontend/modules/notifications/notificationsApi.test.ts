@@ -8,6 +8,9 @@ import {
   claimLocalNotificationDeleteReconciliation,
   deleteNotification,
   deleteNotifications,
+  fetchSeenUpdatesRange,
+  fetchUpdateBranch,
+  fetchUpdateRootGroups,
   EVENT_NOTIFICATIONS_UPDATED,
   markNotificationRead,
   markNotificationsRead,
@@ -307,6 +310,53 @@ test("read and unread helpers still use notification read endpoints", async () =
     assert.match(calls[2].body ?? "", /"company_id":"company-1"/);
     assert.match(calls[2].body ?? "", /"type":"mention.created"/);
     assert.deepEqual(events.map((event) => event.detail.companyID), ["company-1", "company-1", "company-1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+test("seen Updates APIs send only the selected date window", async () => {
+  const originalFetch = globalThis.fetch;
+  const { restore } = installTestWindow();
+  const urls: string[] = [];
+  (globalThis as unknown as MutableTestGlobal).fetch = async (input) => {
+    const url = input.toString();
+    urls.push(url);
+    if (url.includes("/seen-range")) {
+      return jsonResponse({
+        oldest_created_timestamp: "2026-01-01T00:00:00Z",
+        newest_created_timestamp: "2026-07-21T00:00:00Z",
+      });
+    }
+    if (url.includes("/groups/roots")) return jsonResponse({ groups: [] });
+    return jsonResponse({
+      group: { id: "updates/node:node-1", key: "node:node-1", field: "node", label: "Node", depth: 0, groups: [] },
+    });
+  };
+  try {
+    const range = await fetchSeenUpdatesRange(" company-1 ");
+    assert.equal(range.oldest_created_timestamp, "2026-01-01T00:00:00Z");
+    await fetchUpdateRootGroups({
+      companyID: "company-1",
+      filter: "all",
+      view: "seen",
+      fromDate: "2026-06-22",
+      toDate: "2026-07-21",
+    });
+    await fetchUpdateBranch({
+      companyID: "company-1",
+      filter: "mention",
+      rootID: "updates/node:node-1",
+      view: "seen",
+      fromDate: "2026-06-22",
+      toDate: "2026-07-21",
+    });
+    assert.deepEqual(urls, [
+      "https://app.example.test/v1/updates/seen-range?company_id=company-1",
+      "https://app.example.test/v1/updates/groups/roots?company_id=company-1&filter=all&view=seen&from=2026-06-22&to=2026-07-21",
+      "https://app.example.test/v1/updates/groups/branch?company_id=company-1&filter=mention&root_id=updates%2Fnode%3Anode-1&view=seen&from=2026-06-22&to=2026-07-21",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     restore();

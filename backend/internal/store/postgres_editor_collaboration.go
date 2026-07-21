@@ -207,7 +207,7 @@ func (r *PostgresRepo) CommitEditorCollaborationOperation(input EditorCollaborat
 	}
 	return EditorCollaborationCommit{
 		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now,
-		Patch: input.Patch, ConcurrentOperations: concurrent,
+		Patch: input.Patch, PreviousHTML: document.CanonicalHTML, CommittedHTML: html, ConcurrentOperations: concurrent,
 	}, nil
 }
 

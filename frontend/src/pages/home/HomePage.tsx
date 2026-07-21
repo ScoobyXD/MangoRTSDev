@@ -4757,7 +4757,7 @@ export function HomePage({
     else window.location.assign(targetPath);
   }, [companyID, isInboxMatrixView, onNavigate]);
 
-  const openProjectManagement = useCallback((projectID: string, label: string) => {
+  const openProjectManagement = useCallback((projectID: string, label: string, informationID?: string) => {
     const cleanProjectID = projectID.trim();
     if (!cleanProjectID) return;
     const cleanLabel = label.trim() || "Project";
@@ -4767,6 +4767,7 @@ export function HomePage({
       kind: "project",
       id: cleanProjectID,
       label: cleanLabel,
+      informationID: informationID?.trim() || undefined,
       changedAt: Date.now(),
     });
     preloadProjectManagementSurface();
@@ -5905,7 +5906,7 @@ export function HomePage({
               companyID={companyID}
               currentUserID={currentUserID}
               onOpenNode={() => undefined}
-              onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
+              onOpenLogicGate={(logicGateID, label, nodeID, informationID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID, informationID)}
               onOpenProject={openProjectManagement}
               resolveNodeDetails={(nodeID) => {
                 const node = nodeByID.get(nodeID);

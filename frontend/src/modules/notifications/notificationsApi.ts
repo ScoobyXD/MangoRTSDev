@@ -29,6 +29,7 @@ export type NotificationItem = {
 };
 
 export type UpdateFeedFilter = "all" | "urgent" | "mention" | "update";
+export type UpdateFeedView = "current" | "seen";
 
 export type UpdateGroup = {
   id: string;
@@ -184,13 +185,24 @@ export async function fetchNotifications(input: {
   return normalizeNotifications(payload.notifications ?? []);
 }
 
+function appendSeenUpdateQuery(query: URLSearchParams, input: { view?: UpdateFeedView; fromDate?: string; toDate?: string }): void {
+  if (input.view !== "seen") return;
+  query.set("view", "seen");
+  query.set("from", input.fromDate?.trim() ?? "");
+  query.set("to", input.toDate?.trim() ?? "");
+}
+
 export async function fetchUpdateRootGroups(input: {
   companyID: string;
   filter: UpdateFeedFilter;
+  view?: UpdateFeedView;
+  fromDate?: string;
+  toDate?: string;
 }): Promise<UpdateGroup[]> {
   const query = new URLSearchParams();
   query.set("company_id", input.companyID.trim());
   query.set("filter", input.filter);
+  appendSeenUpdateQuery(query, input);
   const payload = await apiFetchJSON<{ groups?: UpdateGroup[] }>(`/v1/updates/groups/roots?${query.toString()}`);
   return normalizeUpdateGroups(payload.groups ?? []);
 }
@@ -199,11 +211,15 @@ export async function fetchUpdateBranch(input: {
   companyID: string;
   filter: UpdateFeedFilter;
   rootID: string;
+  view?: UpdateFeedView;
+  fromDate?: string;
+  toDate?: string;
 }): Promise<UpdateGroup> {
   const query = new URLSearchParams();
   query.set("company_id", input.companyID.trim());
   query.set("filter", input.filter);
   query.set("root_id", input.rootID.trim());
+  appendSeenUpdateQuery(query, input);
   const payload = await apiFetchJSON<{ group?: UpdateGroup }>(`/v1/updates/groups/branch?${query.toString()}`);
   return normalizeUpdateGroup(payload.group ?? {
     id: input.rootID,
@@ -215,17 +231,25 @@ export async function fetchUpdateBranch(input: {
   });
 }
 
-export async function markNotificationRead(notificationID: string, read = true): Promise<NotificationItem> {
+export async function fetchSeenUpdatesRange(companyID: string): Promise<{
+  oldest_created_timestamp?: string;
+  newest_created_timestamp?: string;
+}> {
+  const query = new URLSearchParams({ company_id: companyID.trim() });
+  return apiFetchJSON(`/v1/updates/seen-range?${query.toString()}`);
+}
+
+export async function markNotificationRead(notificationID: string, read = true, options: NotificationUpdateEventSource = {}): Promise<NotificationItem> {
   const cleanNotificationID = notificationID.trim();
   const action = read ? "read" : "unread";
   const item = await apiFetchJSON<NotificationItem>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}/${action}`, {
     method: "POST",
   });
-  emitNotificationsUpdated(item.company_id);
+  emitNotificationsUpdated(item.company_id, options.source);
   return normalizeNotification(item);
 }
 
-export async function markNotificationsRead(input: NotificationClearInput = {}): Promise<number> {
+export async function markNotificationsRead(input: NotificationClearInput & NotificationUpdateEventSource = {}): Promise<number> {
   const payload = {
     company_id: input.companyID?.trim() ?? "",
     type: input.type?.trim() ?? "",
@@ -238,7 +262,7 @@ export async function markNotificationsRead(input: NotificationClearInput = {}):
     method: "POST",
     body: JSON.stringify(payload),
   });
-  emitNotificationsUpdated(payload.company_id);
+  emitNotificationsUpdated(payload.company_id, input.source);
   return normalizeCount(result.updated_count);
 }
 

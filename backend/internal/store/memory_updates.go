@@ -5,6 +5,39 @@ import (
 	"strings"
 )
 
+func (r *MemoryRepo) GetSeenUpdatesRange(input UpdatesQuery) (UpdatesSeenRange, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	if input.UserID == "" || input.CompanyID == "" {
+		return UpdatesSeenRange{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var oldest, newest *domain.Notification
+	for _, item := range r.notifications {
+		if item.RecipientUserID != input.UserID || item.CompanyID != input.CompanyID || item.ReadTimestamp == nil || !r.notificationVisibleToUserLocked(item, input.UserID) {
+			continue
+		}
+		copy := item
+		if oldest == nil || copy.CreatedTimestamp.Before(oldest.CreatedTimestamp) {
+			oldest = &copy
+		}
+		if newest == nil || copy.CreatedTimestamp.After(newest.CreatedTimestamp) {
+			newest = &copy
+		}
+	}
+	result := UpdatesSeenRange{}
+	if oldest != nil {
+		value := oldest.CreatedTimestamp.UTC()
+		result.OldestCreatedTimestamp = &value
+	}
+	if newest != nil {
+		value := newest.CreatedTimestamp.UTC()
+		result.NewestCreatedTimestamp = &value
+	}
+	return result, nil
+}
+
 func (r *MemoryRepo) ListUpdateRootGroups(input UpdatesQuery) ([]UpdatesNestedGroup, error) {
 	items, ctx, err := r.listUpdatesForQuery(input)
 	if err != nil {
@@ -22,10 +55,8 @@ func (r *MemoryRepo) ListUpdateBranch(input UpdatesQuery) (UpdatesNestedGroup, e
 }
 
 func (r *MemoryRepo) listUpdatesForQuery(input UpdatesQuery) ([]domain.Notification, updatesBuildContext, error) {
-	input.UserID = strings.TrimSpace(input.UserID)
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	filter, ok := normalizeUpdatesFilter(input.Filter)
-	if input.UserID == "" || input.CompanyID == "" || !ok {
+	input, filter, err := normalizeUpdatesQuery(input)
+	if err != nil {
 		return nil, updatesBuildContext{}, ErrInvalid
 	}
 
@@ -37,7 +68,7 @@ func (r *MemoryRepo) listUpdatesForQuery(input UpdatesQuery) ([]domain.Notificat
 		if item.RecipientUserID != input.UserID || item.CompanyID != input.CompanyID {
 			continue
 		}
-		if item.ReadTimestamp != nil {
+		if !updateNotificationMatchesView(item, input) {
 			continue
 		}
 		if !updatesNotificationMatchesFilter(item, filter) {

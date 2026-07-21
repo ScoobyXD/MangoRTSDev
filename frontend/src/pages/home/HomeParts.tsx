@@ -46,7 +46,7 @@ import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import {
-  deleteNotification,
+  markNotificationRead,
   fetchNotifications,
   type NotificationItem,
   type NotificationGVICRole,
@@ -3456,7 +3456,7 @@ export function GVICRoleInboxMatrix({
         return { ...current, seenNotificationIDs: Array.from(seen) };
       });
       setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
-      void deleteNotification(notificationID, notification.company_id || getActiveCompanyID()).catch((error) => console.error("Failed to delete notification", error));
+      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to archive notification", error));
     }
     const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
@@ -3473,7 +3473,7 @@ export function GVICRoleInboxMatrix({
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, getActiveCompanyID()))).catch((error) => {
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
       console.error("Failed to clear updates", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear updates" } : current);
     });

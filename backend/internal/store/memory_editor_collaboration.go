@@ -128,6 +128,7 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 			transformed = TransformEditorHTMLPatch(operation.Input.Patch, transformed, true)
 		}
 	}
+	previousHTML := document.CanonicalHTML
 	input.Patch = transformed
 	patchBytes, err = json.Marshal(input.Patch)
 	if err != nil || len(patchBytes) > EditorCollaborationOperationMaxBytes {
@@ -169,7 +170,7 @@ func (r *MemoryRepo) CommitEditorCollaborationOperation(input EditorCollaboratio
 	r.editorCollaborationDocuments[key] = document
 	r.materializeEditorProjectionLocked(input.Document, html, revision, now)
 	return EditorCollaborationCommit{
-		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Patch: input.Patch,
+		OperationID: input.OperationID, EventID: eventID, Revision: revision, CommittedAt: now, Patch: input.Patch, PreviousHTML: previousHTML, CommittedHTML: html,
 		ConcurrentOperations: concurrent,
 	}, nil
 }
