@@ -160,12 +160,19 @@ test("Projects is the fixed first My Work subview instead of an Entities navigat
   const builtInViewStart = savedViewsSidebar.indexOf("{builtInView && (");
   const customViewsStart = savedViewsSidebar.indexOf("{settings.map((item) =>", builtInViewStart);
   const builtInViewMarkup = savedViewsSidebar.slice(builtInViewStart, customViewsStart);
+  const builtInViewStyleStart = savedViewsSidebar.indexOf("function builtInSavedViewRowShellStyle");
+  const builtInViewStyle = savedViewsSidebar.slice(
+    builtInViewStyleStart,
+    savedViewsSidebar.indexOf("const savedViewRowButtonStyle", builtInViewStyleStart),
+  );
 
   assert.ok(myWorkSectionStart >= 0 && entitiesSectionStart > myWorkSectionStart);
   assert.match(myWorkSection, /label: "Projects"[\s\S]*active: activePage === "project-management"[\s\S]*onSelect: \(\) => onPageSelect\("project-management"\)/);
   assert.doesNotMatch(entitiesSection, /label="Projects"/);
   assert.ok(builtInViewStart >= 0 && customViewsStart > builtInViewStart);
   assert.match(builtInViewMarkup, /aria-current={builtInView\.active \? "page" : undefined}/);
+  assert.match(builtInViewMarkup, /builtInView\.settings[\s\S]*savedViewSettingsButtonStyle/);
+  assert.doesNotMatch(builtInViewStyle, /gridTemplateColumns/);
   assert.doesNotMatch(builtInViewMarkup, /draggable|View settings|Rename|Delete/);
   assert.match(savedViewsSidebar, /savedViewRowShellStyle\(active && item\.setting_id === selectedSetting\.setting_id/);
 });

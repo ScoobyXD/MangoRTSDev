@@ -837,7 +837,6 @@ function savedViewRowShellStyle(active: boolean, dropPlacement: SavedViewDropPla
 function builtInSavedViewRowShellStyle(active: boolean): React.CSSProperties {
   return {
     ...savedViewRowShellStyle(active, null),
-    gridTemplateColumns: "minmax(0, 1fr)",
     cursor: "pointer",
   };
 }

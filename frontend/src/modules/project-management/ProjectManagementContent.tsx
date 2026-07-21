@@ -41,18 +41,13 @@ import {
 } from "../perspectives/PerspectiveSelector.js";
 import {
   createProject,
-  createProjectFolder,
   createProjectManagementTimelineItem,
   deleteProject,
-  deleteProjectFolder,
   deleteProjectManagementNode,
   deleteProjectManagementTimelineItem,
-  fetchProjectFolderSnapshot,
   fetchProjectManagementTimeline,
   listProjects,
-  moveProjectsToFolder,
   updateProject,
-  updateProjectFolder,
   updateProjectManagementTimelineItem,
   type ProjectRecord,
   type ProjectHealth,
@@ -66,10 +61,7 @@ import {
 import {
   normalizeProjectListGroupings,
   PROJECT_LIST_GROUPING_FIELDS,
-  ProjectFolderPicker,
-  projectFolderSubtreeIDs,
   ProjectListView,
-  resolveProjectFolderRootID,
   type ProjectListContextMenuRequest,
   type ProjectListFieldUpdate,
   type ProjectListGroupingField,
@@ -174,17 +166,6 @@ type TimelineGroupDisplayRow = {
 };
 
 type TimelineDisplayRow = TimelineWorkDisplayRow | TimelineGroupDisplayRow;
-
-type ProjectFolderNameDialogState = {
-  mode: "create" | "rename";
-  parentFolderID: string;
-  folder?: CompanyExplorerFolder;
-  projectIDs: string[];
-};
-
-type ProjectFolderMoveDialogState =
-  | { kind: "projects"; projectIDs: string[] }
-  | { kind: "folder"; folder: CompanyExplorerFolder };
 
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
 const PROJECT_LIST_GROUPING_STORAGE_PREFIX = "mangorts-project-list-groupings-v1";
@@ -672,7 +653,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [projectFoldersLoading, setProjectFoldersLoading] = useState(true);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("list");
   const [groupBy, setGroupBy] = useState<ProjectGroupingField>("");
@@ -680,8 +660,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [projectListGroupings, setProjectListGroupings] = useState(() => readProjectListGroupings(companyID));
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectFieldSavingIDs, setProjectFieldSavingIDs] = useState<Set<string>>(() => new Set());
-  const [projectFolders, setProjectFolders] = useState<CompanyExplorerFolder[]>([]);
-  const [projectFolderItems, setProjectFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
@@ -697,21 +675,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
   const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<{ project: ProjectRecord; position?: ConfirmActionMenuPosition | null } | null>(null);
-  const [projectFolderDeleteConfirmation, setProjectFolderDeleteConfirmation] = useState<{ folder: CompanyExplorerFolder; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [timelineNodeDeleteConfirmation, setTimelineNodeDeleteConfirmation] = useState<{ item: ProjectManagementTimelineRow; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRecord | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [projectRenameSaving, setProjectRenameSaving] = useState(false);
-  const [projectFolderNameDialog, setProjectFolderNameDialog] = useState<ProjectFolderNameDialogState | null>(null);
-  const [projectFolderNameDraft, setProjectFolderNameDraft] = useState("");
-  const [projectFolderSaving, setProjectFolderSaving] = useState(false);
-  const [projectFolderMoveDialog, setProjectFolderMoveDialog] = useState<ProjectFolderMoveDialogState | null>(null);
   const [projectAssignmentsTarget, setProjectAssignmentsTarget] = useState<ProjectRecord | null>(null);
   const [projectAssignmentAccountIDs, setProjectAssignmentAccountIDs] = useState<string[]>([]);
   const [projectAssignmentTeamIDs, setProjectAssignmentTeamIDs] = useState<string[]>([]);
   const [projectAssignmentsSaving, setProjectAssignmentsSaving] = useState(false);
   const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
-  const projectFolderRootID = useMemo(() => resolveProjectFolderRootID(projectFolders), [projectFolders]);
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setWorkspace((current) => reconcileProjectManagementWorkspaceTitles(current, update, companyID));
@@ -746,21 +718,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setProjectsLoading(false);
     }
   }, [companyID]);
-  const loadProjectFolders = useCallback(async (showLoading = false) => {
-    const cleanCompanyID = companyID.trim();
-    if (!cleanCompanyID) return;
-    if (showLoading) setProjectFoldersLoading(true);
-    try {
-      const response = await fetchProjectFolderSnapshot(cleanCompanyID);
-      setProjectFolders(response.folders ?? []);
-      setProjectFolderItems(response.folderItems ?? []);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load project folders");
-    } finally {
-      setProjectFoldersLoading(false);
-    }
-  }, [companyID]);
-
 
   const scheduleWorkspacePanelReload = useCallback(() => {
     const cleanCompanyID = companyID.trim();
@@ -783,9 +740,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
     projectListReloadTimerRef.current = window.setTimeout(() => {
       projectListReloadTimerRef.current = null;
-      void Promise.all([loadProjectList(), loadProjectFolders()]);
+      void loadProjectList();
     }, 250);
-  }, [companyID, loadProjectFolders, loadProjectList]);
+  }, [companyID, loadProjectList]);
 
   useEffect(() => {
     let cancelled = false;
@@ -901,8 +858,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => {
     void loadProjectList(true);
-    void loadProjectFolders(true);
-  }, [loadProjectFolders, loadProjectList]);
+  }, [loadProjectList]);
 
   useEffect(() => {
     setProjectListGroupings(readProjectListGroupings(companyID));
@@ -1256,100 +1212,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setError(createError instanceof Error ? createError.message : "Failed to create project");
     }
   }, [companyID, loadProjectList, openProject, scheduleProjectListReload]);
-  const moveProjectRows = useCallback(async (projectIDs: string[], folderID: string) => {
-    const cleanProjectIDs = Array.from(new Set(projectIDs.map((projectID) => projectID.trim()).filter(Boolean)));
-    if (!folderID || cleanProjectIDs.length === 0) return;
-    setError("");
-    try {
-      await moveProjectsToFolder({ companyID, projectIDs: cleanProjectIDs, folderID });
-      await loadProjectFolders();
-    } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "Failed to move projects");
-      await loadProjectFolders();
-    }
-  }, [companyID, loadProjectFolders]);
-
-  const moveProjectFolder = useCallback(async (folderID: string, parentFolderID: string) => {
-    if (!folderID || !parentFolderID || folderID === parentFolderID) return;
-    setError("");
-    try {
-      await updateProjectFolder({ companyID, folderID, parentFolderID });
-      await loadProjectFolders();
-    } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "Failed to move folder");
-      await loadProjectFolders();
-    }
-  }, [companyID, loadProjectFolders]);
-
-  const openProjectFolderNameDialog = useCallback((dialog: ProjectFolderNameDialogState) => {
-    setProjectFolderNameDialog(dialog);
-    setProjectFolderNameDraft(dialog.mode === "rename" ? dialog.folder?.name ?? "" : "New Folder");
-    setProjectContextMenu(null);
-  }, []);
-
-  const saveProjectFolderName = useCallback(async () => {
-    const dialog = projectFolderNameDialog;
-    const name = projectFolderNameDraft.trim();
-    if (!dialog || !name) return;
-    if (dialog.mode === "create" && !dialog.parentFolderID) {
-      setError("Project folders are still loading");
-      return;
-    }
-    setError("");
-    setProjectFolderSaving(true);
-    try {
-      if (dialog.mode === "rename" && dialog.folder) {
-        await updateProjectFolder({ companyID, folderID: dialog.folder.folder_id, name });
-      } else {
-        const created = await createProjectFolder({
-          companyID,
-          parentFolderID: dialog.parentFolderID,
-          name,
-        });
-        const createdFolder: CompanyExplorerFolder = {
-          company_id: created.company_id || companyID,
-          folder_id: created.entity_id,
-          parent_folder_id: created.parent_entity_id || dialog.parentFolderID,
-          folder_kind: "project",
-          name: created.name || name,
-          position: created.position ?? 0,
-          created_timestamp: created.created_timestamp,
-          updated_timestamp: created.updated_timestamp,
-        };
-        setProjectFolders((current) => (
-          current.some((folder) => folder.folder_id === createdFolder.folder_id) ? current : [...current, createdFolder]
-        ));
-        if (dialog.projectIDs.length > 0) {
-          await moveProjectsToFolder({
-            companyID,
-            projectIDs: dialog.projectIDs,
-            folderID: created.entity_id,
-          });
-        }
-      }
-      setProjectFolderNameDialog(null);
-      setProjectFolderNameDraft("");
-      await loadProjectFolders();
-    } catch (folderError) {
-      setError(folderError instanceof Error ? folderError.message : "Failed to save folder");
-    } finally {
-      setProjectFolderSaving(false);
-    }
-  }, [companyID, loadProjectFolders, projectFolderNameDialog, projectFolderNameDraft]);
-
-  const confirmDeleteProjectFolder = useCallback(async (folder: CompanyExplorerFolder) => {
-    setProjectFolderDeleteConfirmation(null);
-    setProjectContextMenu(null);
-    setError("");
-    try {
-      await deleteProjectFolder(companyID, folder.folder_id);
-      await loadProjectFolders();
-    } catch (folderError) {
-      setError(folderError instanceof Error ? folderError.message : "Failed to delete folder");
-      await loadProjectFolders();
-    }
-  }, [companyID, loadProjectFolders]);
-
   const openProjectAssignments = useCallback((project: ProjectRecord) => {
     setProjectAssignmentsTarget(project);
     setProjectAssignmentAccountIDs(project.accounts?.map((account) => account.account_id) ?? []);
@@ -1504,7 +1366,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               popoverLabel="Edit Projects view"
               triggerHidden
               openRequestEventName={EVENT_PROJECT_VIEW_SETTINGS_REQUESTED}
-              emptyLabel="Projects are shown in their folder structure"
+              emptyLabel="Projects are shown in a flat list"
               accent={accent}
             />
           ) : (
@@ -1542,10 +1404,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               </div>
             </>
           ) : (
-            <>
-              <button type="button" style={secondaryButtonStyle} disabled={!projectFolderRootID || projectFoldersLoading} onClick={() => openProjectFolderNameDialog({ mode: "create", parentFolderID: projectFolderRootID, projectIDs: [] })}>New Folder</button>
-              <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
-            </>
+            <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
           )}
           </div>
         </div>
@@ -1572,10 +1431,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         ) : (
           <ProjectListView
             projects={projects}
-            folders={projectFolders}
-            folderItems={projectFolderItems}
-            rootFolderID={projectFolderRootID}
-            loading={projectsLoading || projectFoldersLoading}
+            loading={projectsLoading}
             groupings={projectListGroupings}
             accounts={timelineAccounts}
             teams={groups}
@@ -1583,8 +1439,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             onProjectOpen={openProject}
             onProjectFieldChange={saveProjectListField}
             onContextMenu={setProjectContextMenu}
-            onMoveProjects={moveProjectRows}
-            onMoveFolder={moveProjectFolder}
           />
         )}
       </section>
@@ -1618,8 +1472,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           onPointerDown={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {projectContextMenu.kind === "project" ? (
-            <>
           <button
             type="button"
             role="menuitem"
@@ -1649,15 +1501,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectAssignments(projectContextMenu.project)}>
                 Edit account &amp; team
               </button>
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
-                setProjectFolderMoveDialog({ kind: "projects", projectIDs: projectContextMenu.selectedProjectIDs });
-                setProjectContextMenu(null);
-              }}>Move to folder…</button>
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
-                mode: "create",
-                parentFolderID: projectFolderRootID,
-                projectIDs: projectContextMenu.selectedProjectIDs,
-              })}>Create folder from selection</button>
           <button
             type="button"
             role="menuitem"
@@ -1683,50 +1526,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           >
             Delete project
           </button>
-            </>
-          ) : projectContextMenu.kind === "folder" ? (
-            <>
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
-                mode: "create",
-                parentFolderID: projectContextMenu.folder.folder_id,
-                projectIDs: [],
-              })}>New subfolder</button>
-              {projectContextMenu.selectedProjectIDs.length > 0 ? (
-                <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
-                  void moveProjectRows(projectContextMenu.selectedProjectIDs, projectContextMenu.folder.folder_id);
-                  setProjectContextMenu(null);
-                }}>Move selected projects here</button>
-              ) : null}
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
-                mode: "rename",
-                parentFolderID: projectContextMenu.folder.parent_folder_id ?? projectFolderRootID,
-                folder: projectContextMenu.folder,
-                projectIDs: [],
-              })}>Rename folder</button>
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => {
-                setProjectFolderMoveDialog({ kind: "folder", folder: projectContextMenu.folder });
-                setProjectContextMenu(null);
-              }}>Move folder…</button>
-              <button type="button" role="menuitem" style={{ ...projectContextMenuButtonStyle, color: "#dc2626" }} onClick={(event) => {
-                setProjectFolderDeleteConfirmation({ folder: projectContextMenu.folder, position: confirmMenuPositionFromElement(event.currentTarget) });
-              }}>Delete folder</button>
-            </>
-          ) : (
-            <>
-              <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
-                mode: "create",
-                parentFolderID: projectFolderRootID,
-                projectIDs: [],
-              })}>New folder</button>
-              {projectContextMenu.selectedProjectIDs.length > 0 ? (
-                <button type="button" role="menuitem" style={projectContextMenuButtonStyle} onClick={() => openProjectFolderNameDialog({
-                  mode: "create",
-                  parentFolderID: projectFolderRootID,
-                  projectIDs: projectContextMenu.selectedProjectIDs,
-                })}>Create folder from selection</button>
-              ) : null}
-            </>
-          )}
         </div>
       ) : null}
       {projectRenameTarget ? (
@@ -1768,50 +1567,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
         </AppModalPortal>
       ) : null}
-      {projectFolderNameDialog ? (
-        <AppModalPortal onRequestClose={projectFolderSaving ? undefined : () => setProjectFolderNameDialog(null)}>
-          <div role="presentation" style={projectDeleteBackdropStyle} onPointerDown={() => { if (!projectFolderSaving) setProjectFolderNameDialog(null); }}>
-            <div role="dialog" aria-modal="true" aria-labelledby="project-folder-name-title" style={projectDeleteDialogStyle} onPointerDown={(event) => event.stopPropagation()}>
-              <h3 id="project-folder-name-title" style={projectDeleteTitleStyle}>
-                {projectFolderNameDialog.mode === "rename" ? "Rename folder" : projectFolderNameDialog.projectIDs.length > 0 ? "Create folder from selection" : "Create folder"}
-              </h3>
-              <input
-                autoFocus
-                value={projectFolderNameDraft}
-                style={projectRenameInputStyle}
-                onChange={(event) => setProjectFolderNameDraft(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void saveProjectFolderName();
-                  }
-                }}
-              />
-              <div style={projectDeleteActionsStyle}>
-                <button type="button" style={projectDeleteCancelButtonStyle} disabled={projectFolderSaving} onClick={() => setProjectFolderNameDialog(null)}>Cancel</button>
-                <button type="button" style={projectRenameSaveButtonStyle} disabled={projectFolderSaving || !projectFolderNameDraft.trim()} onClick={() => void saveProjectFolderName()}>
-                  {projectFolderSaving ? "Saving" : projectFolderNameDialog.mode === "rename" ? "Save" : "Create"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </AppModalPortal>
-      ) : null}
-      {projectFolderMoveDialog && projectFolderRootID ? (
-        <ProjectFolderPicker
-          title={projectFolderMoveDialog.kind === "projects" ? `Move ${projectFolderMoveDialog.projectIDs.length} project${projectFolderMoveDialog.projectIDs.length === 1 ? "" : "s"}` : `Move ${projectFolderMoveDialog.folder.name}`}
-          actionLabel="Move"
-          folders={projectFolders}
-          rootFolderID={projectFolderRootID}
-          disabledFolderIDs={projectFolderMoveDialog.kind === "folder" ? projectFolderSubtreeIDs(projectFolders, projectFolderMoveDialog.folder.folder_id) : undefined}
-          onChoose={(folderID) => {
-            if (projectFolderMoveDialog.kind === "projects") void moveProjectRows(projectFolderMoveDialog.projectIDs, folderID);
-            else void moveProjectFolder(projectFolderMoveDialog.folder.folder_id, folderID);
-            setProjectFolderMoveDialog(null);
-          }}
-          onClose={() => setProjectFolderMoveDialog(null)}
-        />
-      ) : null}
       {projectAssignmentsTarget ? (
         <ProjectAssignmentsDialog
           accounts={timelineAccounts}
@@ -1823,18 +1578,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           onSetTeamIDs={setProjectAssignmentTeamIDs}
           onSave={() => void saveProjectAssignments()}
           onClose={closeProjectAssignments}
-        />
-      ) : null}
-      {projectFolderDeleteConfirmation ? (
-        <ConfirmActionMenu
-          title="Delete folder?"
-          detail={`Delete ${projectFolderDeleteConfirmation.folder.name}? Projects inside it will remain available at the top level.`}
-          position={projectFolderDeleteConfirmation.position}
-          confirmLabel="Yes, delete"
-          requireDisplayNameConfirmation={false}
-          cancelLabel="No"
-          onConfirm={() => void confirmDeleteProjectFolder(projectFolderDeleteConfirmation.folder)}
-          onCancel={() => setProjectFolderDeleteConfirmation(null)}
         />
       ) : null}
       {projectDeleteConfirmation ? (
