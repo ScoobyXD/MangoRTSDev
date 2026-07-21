@@ -1,4 +1,4 @@
-import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../app/deepLinkRoutes.js";
+import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRoute } from "../../app/deepLinkRoutes.js";
 import { createExplorerEntityIconElement } from "../company-explorer/CompanyExplorerEntityIcon.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../node-map/selectionNodeCreation.js";
 
@@ -39,6 +39,7 @@ export const EDITOR_ENTITY_LINK_ATTRIBUTE = "data-mango-entity-link";
 export const EDITOR_ENTITY_TYPE_ATTRIBUTE = "data-mango-entity-type";
 export const EDITOR_ENTITY_ID_ATTRIBUTE = "data-mango-entity-id";
 export const EDITOR_ENTITY_LABEL_ATTRIBUTE = "data-mango-entity-label";
+export const EDITOR_ENTITY_NAVIGATION_STATE_KEY = "mangoInlineEditorEntityNavigation";
 
 const ENTITY_DRAFT_BOUNDARY_PATTERN = /[A-Za-z0-9_#.-]/;
 const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project"]);
@@ -58,12 +59,50 @@ export function editorEntityRoute(entity: Pick<EditorEntityLink, "entityType" | 
   return buildNodeRoute(entity.entityID);
 }
 
+type EditorEntityNavigationState = {
+  kind: "node_from_node";
+  sourcePath: string;
+  targetNodeID: string;
+};
+
+export function readEditorEntitySourceNodePath(targetNodeID: string, state: unknown): string | null {
+  if (!state || typeof state !== "object") return null;
+  const navigation = (state as Record<string, unknown>)[EDITOR_ENTITY_NAVIGATION_STATE_KEY];
+  if (!navigation || typeof navigation !== "object") return null;
+  const value = navigation as Partial<EditorEntityNavigationState>;
+  if (value.kind !== "node_from_node" || value.targetNodeID !== targetNodeID.trim() || typeof value.sourcePath !== "string") return null;
+  const sourceRoute = parseDeepLinkRoute(value.sourcePath);
+  return sourceRoute?.kind === "node" && sourceRoute.nodeID !== value.targetNodeID ? value.sourcePath : null;
+}
+
+export function returnToEditorEntitySourceNode(targetNodeID: string): boolean {
+  if (typeof window === "undefined" || !readEditorEntitySourceNodePath(targetNodeID, window.history.state)) return false;
+  window.history.back();
+  return true;
+}
+
 export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<EditorEntityLinkContext, "onOpen">): void {
   if (context?.onOpen) {
     context.onOpen(entity);
     return;
   }
-  if (typeof window !== "undefined") window.location.assign(editorEntityRoute(entity));
+  if (typeof window === "undefined") return;
+  const targetPath = editorEntityRoute(entity);
+  if (window.location.pathname === targetPath) return;
+  const sourceRoute = parseDeepLinkRoute(window.location.pathname);
+  const navigationState: Record<string, unknown> = {};
+  if (sourceRoute?.kind === "node" && entity.entityType === "node" && sourceRoute.nodeID !== entity.entityID.trim()) {
+    navigationState[EDITOR_ENTITY_NAVIGATION_STATE_KEY] = {
+      kind: "node_from_node",
+      sourcePath: window.location.pathname,
+      targetNodeID: entity.entityID.trim(),
+    } satisfies EditorEntityNavigationState;
+  }
+  window.history.pushState(navigationState, "", targetPath);
+  const popStateEvent = typeof window.PopStateEvent === "function"
+    ? new window.PopStateEvent("popstate", { state: navigationState })
+    : new window.Event("popstate");
+  window.dispatchEvent(popStateEvent);
 }
 
 export function normalizeEditorSelectionNodeTitle(value: string): string {
@@ -164,4 +203,57 @@ export function readEditorEntityLinkElement(element: Element | null): EditorEnti
   const entityID = element.getAttribute(EDITOR_ENTITY_ID_ATTRIBUTE)?.trim() ?? "";
   const label = element.getAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE)?.trim() || element.textContent?.trim() || "";
   return isEditorEntityType(entityType) && entityID && label ? { entityType, entityID, label } : null;
+}
+
+function editorEntityLinkImmediatelyBeforeCaret(root: HTMLElement): HTMLElement | null {
+  const selection = root.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer)) return null;
+  let cursor: Node = range.startContainer;
+  let candidate: Node | null = null;
+  if (cursor.nodeType === 3) {
+    if (range.startOffset > 0) return null;
+    candidate = cursor.previousSibling;
+  } else {
+    candidate = cursor.childNodes.item(range.startOffset - 1);
+  }
+  while (!candidate && cursor.parentNode && cursor.parentNode !== root) {
+    cursor = cursor.parentNode;
+    candidate = cursor.previousSibling;
+  }
+  while (candidate) {
+    if (candidate instanceof HTMLElement && candidate.getAttribute(EDITOR_ENTITY_LINK_ATTRIBUTE) === "true") return candidate;
+    if (candidate.nodeType === 3) {
+      if (candidate.textContent) return null;
+      candidate = candidate.previousSibling;
+      continue;
+    }
+    if (candidate.lastChild) {
+      candidate = candidate.lastChild;
+      continue;
+    }
+    candidate = candidate.previousSibling;
+  }
+  return null;
+}
+
+export function replaceEditorEntityLinkWithLabel(root: HTMLElement, focusedElement?: HTMLElement | null): boolean {
+  const element = focusedElement && root.contains(focusedElement)
+    ? focusedElement
+    : editorEntityLinkImmediatelyBeforeCaret(root);
+  const entity = readEditorEntityLinkElement(element ?? null);
+  if (!element || !entity) return false;
+  const labelText = root.ownerDocument.createTextNode(entity.label);
+  element.replaceWith(labelText);
+  root.focus({ preventScroll: true });
+  const selection = root.ownerDocument.getSelection();
+  if (selection) {
+    const range = root.ownerDocument.createRange();
+    range.setStart(labelText, labelText.data.length);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  return true;
 }

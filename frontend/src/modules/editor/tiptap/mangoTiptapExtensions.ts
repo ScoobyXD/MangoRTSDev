@@ -8,7 +8,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
-import { Plugin } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
@@ -344,6 +344,32 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
     }),
     Mention.extend({
       name: "mangoEntityLink",
+      addKeyboardShortcuts() {
+        return {
+          Backspace: () => {
+            const { state, view } = this.editor;
+            const { selection } = state;
+            let from = -1;
+            let to = -1;
+            let label = "";
+            if (selection instanceof NodeSelection && selection.node.type.name === "mangoEntityLink") {
+              from = selection.from;
+              to = selection.to;
+              label = String(selection.node.attrs.label || "Entity");
+            } else if (selection.empty && selection.$from.nodeBefore?.type.name === "mangoEntityLink") {
+              const entityNode = selection.$from.nodeBefore;
+              from = selection.from - entityNode.nodeSize;
+              to = selection.from;
+              label = String(entityNode.attrs.label || "Entity");
+            }
+            if (from < 0 || to < from || !label) return false;
+            const transaction = state.tr.replaceWith(from, to, state.schema.text(label));
+            transaction.setSelection(TextSelection.create(transaction.doc, from + label.length));
+            view.dispatch(transaction.scrollIntoView());
+            return true;
+          },
+        };
+      },
       addAttributes() {
         return {
           entityType: {
@@ -383,7 +409,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
       },
     }).configure({
       renderText: ({ node }) => String(node.attrs.label || "Entity"),
-      deleteTriggerWithBackspace: true,
+      deleteTriggerWithBackspace: false,
       suggestions: [{
         char: "#",
         allowSpaces: true,

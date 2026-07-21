@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
@@ -8,15 +9,71 @@ import {
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 
 import { sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { calculateEditorSelectionActionPosition } from "../../../../frontend/src/modules/editor/editorSelectionActions.js";
 import {
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
   editorEntityRoute,
   normalizeEditorSelectionNodeTitle,
+  openEditorEntityLink,
   readActiveEntityLinkDraft,
   readEditorEntityLinkElement,
+  readEditorEntitySourceNodePath,
+  replaceEditorEntityLinkWithLabel,
+  returnToEditorEntitySourceNode,
   searchEditorEntityLinks,
 } from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
+
+test("highlighted-text actions keep the square-plus button immediately right of the chat button", () => {
+  const rect = { left: 80, right: 120, top: 40, height: 20 };
+  const chat = calculateEditorSelectionActionPosition({
+    rect,
+    isForwardSelection: true,
+    boundaryWidth: 500,
+    rightInset: 36,
+  });
+  const createNode = calculateEditorSelectionActionPosition({
+    rect,
+    isForwardSelection: true,
+    boundaryWidth: 500,
+    offsetX: 36,
+  });
+  assert.deepEqual(chat, { left: 128, top: 36 });
+  assert.deepEqual(createNode, { left: 164, top: 36 });
+  assert.equal(createNode.left - chat.left, 36);
+
+  const edgeChat = calculateEditorSelectionActionPosition({
+    rect: { left: 175, right: 198, top: 40, height: 20 },
+    isForwardSelection: true,
+    boundaryWidth: 200,
+    rightInset: 36,
+  });
+  const edgeCreateNode = calculateEditorSelectionActionPosition({
+    rect: { left: 175, right: 198, top: 40, height: 20 },
+    isForwardSelection: true,
+    boundaryWidth: 200,
+    offsetX: 36,
+  });
+  assert.equal(edgeCreateNode.left - edgeChat.left, 36);
+
+  const reverseEdgeChat = calculateEditorSelectionActionPosition({
+    rect: { left: 10, right: 40, top: 40, height: 20 },
+    isForwardSelection: false,
+    boundaryWidth: 200,
+    rightInset: 36,
+  });
+  const reverseEdgeCreateNode = calculateEditorSelectionActionPosition({
+    rect: { left: 10, right: 40, top: 40, height: 20 },
+    isForwardSelection: false,
+    boundaryWidth: 200,
+    offsetX: 36,
+  });
+  assert.equal(reverseEdgeCreateNode.left - reverseEdgeChat.left, 36);
+
+  const iconSource = readFileSync("frontend/src/modules/editor/EditorSelectionNodeIcon.tsx", "utf8");
+  assert.match(iconSource, /<rect x="5" y="5" width="14" height="14"/);
+  assert.match(iconSource, /<path d="M9 12h6M12 9v6"/);
+});
 
 test("# entity drafts respect text boundaries and allow a searchable phrase", () => {
   assert.deepEqual(readActiveEntityLinkDraft("Link #road map", 14), {
@@ -141,6 +198,68 @@ test("entity chips render the canonical Node, Logic Gate, and Project icons", ()
   }
 });
 
+test("entity clicks navigate inside the app and Node-to-Node links retain a safe return marker", () => {
+  const dom = new JSDOM("<!doctype html>", { url: "https://mango.test/nodes/source-node" });
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
+  let popStateCount = 0;
+  let historyBackCount = 0;
+  dom.window.addEventListener("popstate", () => { popStateCount += 1; });
+  Object.defineProperty(dom.window.history, "back", { configurable: true, value: () => { historyBackCount += 1; } });
+  try {
+    openEditorEntityLink({ entityType: "node", entityID: "target-node", label: "Target Node" });
+    assert.equal(dom.window.location.pathname, "/nodes/target-node");
+    assert.equal(popStateCount, 1);
+    assert.equal(readEditorEntitySourceNodePath("target-node", dom.window.history.state), "/nodes/source-node");
+    assert.equal(returnToEditorEntitySourceNode("target-node"), true);
+    assert.equal(historyBackCount, 1);
+    assert.equal(returnToEditorEntitySourceNode("another-node"), false);
+
+    dom.window.history.replaceState({}, "", "/nodes/source-node");
+    openEditorEntityLink({ entityType: "project", entityID: "project-1", label: "Project One" });
+    assert.equal(dom.window.location.pathname, "/projects/project-1");
+    assert.equal(popStateCount, 2);
+    assert.equal(readEditorEntitySourceNodePath("target-node", dom.window.history.state), null);
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as Record<string, unknown>).window;
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
+    dom.window.close();
+  }
+});
+
+test("Backspace unwrapping replaces a legacy entity chip with its ordinary label text", () => {
+  const dom = new JSDOM('<!doctype html><body><div id="editor" contenteditable="true"></div></body>');
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const previousHTMLElement = globalThis.HTMLElement;
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
+  try {
+    const root = dom.window.document.querySelector<HTMLElement>("#editor");
+    if (!root) throw new Error("missing editor");
+    root.append("Before ");
+    root.append(createEditorEntityLinkElement(dom.window.document, {
+      entityType: "node",
+      entityID: "node-1",
+      label: "Restored Node title",
+    }));
+    const range = dom.window.document.createRange();
+    range.setStart(root, root.childNodes.length);
+    range.collapse(true);
+    const selection = dom.window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    assert.equal(replaceEditorEntityLinkWithLabel(root), true);
+    assert.equal(root.querySelector('[data-mango-entity-link="true"]'), null);
+    assert.equal(root.textContent, "Before Restored Node title");
+    assert.equal(selection?.anchorNode?.textContent, "Restored Node title");
+    assert.equal(selection?.anchorOffset, "Restored Node title".length);
+  } finally {
+    if (previousHTMLElement === undefined) delete (globalThis as Record<string, unknown>).HTMLElement;
+    else Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: previousHTMLElement });
+    dom.window.close();
+  }
+});
+
 test("legacy rich HTML sanitization retains only canonical entity-link data", () => {
   const dom = new JSDOM("<!doctype html>");
   const domGlobals = dom.window as unknown as typeof globalThis;
@@ -217,6 +336,20 @@ test("# entity menu selects its top result with Tab and the entity participates 
     assert.equal(editor.commands.undo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
     assert.equal(editor.commands.redo(), true);
+    assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
+
+    let entityEnd = -1;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name !== "mangoEntityLink") return true;
+      entityEnd = position + node.nodeSize;
+      return false;
+    });
+    assert.ok(entityEnd > 0);
+    editor.commands.setTextSelection(entityEnd);
+    editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
+    assert.match(editor.state.doc.textContent, /Most recent project/);
+    assert.equal(editor.commands.undo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
   } finally {
     editor.destroy();

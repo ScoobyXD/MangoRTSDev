@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../company-explorer/CompanyExplorerEntityIcon.js";
-import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType } from "../editorEntityLinks.js";
+import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 
 export type MangoStaticAttachmentImageProps = {
   attachmentId: string;
@@ -142,6 +142,11 @@ function renderNode(
           data-mango-entity-label={label}
           aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
           href={editorEntityRoute({ entityType, entityID })}
+          onClick={(event) => {
+            if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            event.preventDefault();
+            openEditorEntityLink({ entityType, entityID, label });
+          }}
         >
           <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />
           <span className="mango-editor-entity-label">{label}</span>

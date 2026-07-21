@@ -45,6 +45,7 @@ import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPi
 import { createSidebarPin, deleteSidebarPin, fetchSidebarPins, reorderSidebarPins } from "./sidebarPinsApi";
 import { hasMangoDragPayload, hasSidebarPinSectionDrop, isSidebarPinKind, sidebarPinsFromDrop } from "./sidebarPinDrops";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
+import { returnToEditorEntitySourceNode } from "../modules/editor/editorEntityLinks";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
@@ -2195,13 +2196,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           focusRequestID={explorerNodePopup.focusRequestID}
           onClose={() => {
             const wasRouteManaged = routeManagedExplorerNodePopupRef.current || deepLink?.kind === "node";
+            const returnedToSourceNode = wasRouteManaged && returnToEditorEntitySourceNode(explorerNodePopup.nodeID);
             setExplorerNodePopup(null);
             setActiveDockTabID((current) => {
               const activeTab = dockTabs.find((tab) => tab.id === current);
               return activeTab?.kind === "node" && activeTab.entityID === explorerNodePopup.nodeID ? null : current;
             });
-            if (wasRouteManaged && onNavigate) {
-              routeManagedExplorerNodePopupRef.current = false;
+            if (wasRouteManaged) routeManagedExplorerNodePopupRef.current = false;
+            if (wasRouteManaged && !returnedToSourceNode && onNavigate) {
               onNavigate("/", { replace: true });
             }
           }}
