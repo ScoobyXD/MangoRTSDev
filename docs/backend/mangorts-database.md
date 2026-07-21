@@ -37,6 +37,10 @@ backend/db/migrations/
 
 These tables are intentionally empty for existing HTML data. The application does not backfill, parse stored HTML, dual-write document content, or apply migrations to a live database as part of the editor implementation. Email bodies, drafts, signatures, imported snapshots, display, and delivery remain rich HTML in their existing domain tables and are never stored in the Tiptap JSON tables.
 
+Schema version 1 includes the additive inline atom `mangoEntityLink` with required `entityType`, `entityId`, and `label` attributes. The strict API validator permits only `node`, `logic_gate`, or `project`, requires bounded nonblank identity/display values, and permits the atom only where inline content is valid. Existing legacy editor documents persist the equivalent canonical `data-mango-entity-*` attributes inside their already-owned rich-HTML columns.
+
+Inline entity links add no database tables, columns, seed data, or migration. Their durable identity is stored inside the existing editor document payload. The editor's recent/relevant combined search is a read-only Company Explorer query mode over existing resource timestamps and authorization predicates; it does not create placement rows or denormalized entity-link records.
+
 Auth and membership tables were added in:
 
 ```text

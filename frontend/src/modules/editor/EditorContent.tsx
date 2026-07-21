@@ -2575,6 +2575,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: strokeColor,
+    entityLinkContext: { companyID, requestJSON },
     editorImageAttachmentContext,
   });
   const {

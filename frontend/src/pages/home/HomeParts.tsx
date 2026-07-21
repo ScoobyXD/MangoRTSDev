@@ -5565,6 +5565,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           onSelectionInlineFormatChange={setBodySelectionInlineFormat}
           onSelectionHighlightColorChange={setBodyHighlightColor}
           onSelectionTextAlignmentChange={setBodyTextAlignment}
+          entityLinkContext={{ companyID, requestJSON: attachmentRequestJSON }}
           editorImageAttachmentContext={composeEditorImageAttachmentContext}
           eagerEditorImageHydration
           onEditorImageAttachmentError={setAttachmentError}
@@ -5706,6 +5707,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               onSelectionInlineFormatChange={setSignatureSelectionInlineFormat}
               onSelectionHighlightColorChange={setSignatureHighlightColor}
               onSelectionTextAlignmentChange={setSignatureTextAlignment}
+              entityLinkContext={{ companyID, requestJSON: attachmentRequestJSON }}
               editorImageAttachmentContext={signatureEditorImageAttachmentContext}
               eagerEditorImageHydration
               onEditorImageAttachmentError={setAttachmentError}

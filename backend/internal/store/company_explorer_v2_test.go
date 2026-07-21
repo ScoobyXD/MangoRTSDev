@@ -994,6 +994,24 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	}
 	requireCompanyExplorerSearchPath(t, filtered.Results, EntityTypeLogicGate, gateID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultLogicGatesFolderName})
 	requireCompanyExplorerSearchPath(t, filtered.Results, CompanyExplorerV2EntityFolder, folder.EntityID, []string{})
+
+	recent, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID: companyID, Query: "", PermissionUserID: user.UserID, Limit: 10,
+		ResourceTypes: []string{EntityTypeNode, EntityTypeLogicGate, EntityTypeProject}, EditorEntityRanking: true,
+	})
+	if err != nil || len(recent.Results) < 3 {
+		t.Fatalf("editor recent search = %+v err=%v", recent.Results, err)
+	}
+	for index := 1; index < len(recent.Results); index++ {
+		if recent.Results[index].UpdatedTimestamp.After(recent.Results[index-1].UpdatedTimestamp) {
+			t.Fatalf("editor recent results are not newest-first: %+v", recent.Results)
+		}
+	}
+	for _, result := range recent.Results {
+		if result.ResourceType == CompanyExplorerV2EntityFolder || result.MatchReason != "recent" {
+			t.Fatalf("editor recent result = %+v, want only recent product entities", result)
+		}
+	}
 }
 
 func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T) {
@@ -1094,6 +1112,16 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 	if standaloneResult.DisplayName != standaloneNode.Title {
 		t.Fatalf("standalone node result = %+v, want %q", standaloneResult, standaloneNode.Title)
 	}
+	recent, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID: companyID, Query: "", PermissionUserID: viewer.UserID, Limit: 10,
+		ResourceTypes: []string{EntityTypeNode, EntityTypeLogicGate, EntityTypeProject}, EditorEntityRanking: true,
+	})
+	if err != nil {
+		t.Fatalf("editor recent SearchCompanyExplorer: %v", err)
+	}
+	requireCompanyExplorerSearchMissing(t, recent.Results, EntityTypeLogicGate, hiddenGate.LogicGateID)
+	requireCompanyExplorerSearchMissing(t, recent.Results, EntityTypeNode, hiddenNode.NodeID)
+	requireCompanyExplorerSearchPath(t, recent.Results, EntityTypeNode, standaloneNode.NodeID, []string{})
 }
 
 func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string) (domain.Project, domain.LogicGate, domain.Node) {

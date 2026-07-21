@@ -34,6 +34,7 @@ const nodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
   tableHeader: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
   tableCell: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
   mention: new Set(["userId", "label", "kind"]),
+  mangoEntityLink: new Set(["entityType", "entityId", "label"]),
   mangoAttachmentImage: new Set([
     "attachmentId", "filename", "mimeType", "width", "height", "displayWidth",
     "displayHeight", "alignment", "position", "layout", "alt", "title",
@@ -51,7 +52,7 @@ const markAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
   link: new Set(["href", "target", "rel", "class", "title"]),
 };
 
-const inlineNodes = new Set(["text", "hardBreak", "mention"]);
+const inlineNodes = new Set(["text", "hardBreak", "mention", "mangoEntityLink"]);
 const textContainers = new Set(["paragraph", "heading"]);
 const blockNodes = new Set([
   "paragraph", "heading", "blockquote", "codeBlock", "horizontalRule", "bulletList",
@@ -59,7 +60,7 @@ const blockNodes = new Set([
 ]);
 const blockContainers = new Set(["doc", "blockquote", "tableCell", "tableHeader"]);
 const listContainers = new Set(["bulletList", "orderedList", "taskList"]);
-const atomNodes = new Set(["text", "hardBreak", "horizontalRule", "mention", "mangoAttachmentImage"]);
+const atomNodes = new Set(["text", "hardBreak", "horizontalRule", "mention", "mangoEntityLink", "mangoAttachmentImage"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -100,6 +101,11 @@ function validateAttributes(
   }
   if (kind === "mention" && !["normal", "urgent"].includes(String(attrs.kind))) {
     return `${path}.attrs.kind must be normal or urgent`;
+  }
+  if (kind === "mangoEntityLink") {
+    if (!["node", "logic_gate", "project"].includes(String(attrs.entityType))) return `${path}.attrs.entityType is invalid`;
+    if (typeof attrs.entityId !== "string" || !attrs.entityId.trim() || attrs.entityId.length > 160) return `${path}.attrs.entityId is required`;
+    if (typeof attrs.label !== "string" || !attrs.label.trim() || attrs.label.length > 500) return `${path}.attrs.label is required`;
   }
   if (kind === "mangoAttachmentImage") {
     if (typeof attrs.attachmentId !== "string" || !attrs.attachmentId.trim()) return `${path}.attrs.attachmentId is required`;

@@ -102,6 +102,11 @@ ED77 - Ordinary native or shared scripted typing uses one document-input batch a
 ED78 - Node and Project text-box lists use one bounded fixed-row window. Only visible rows, two-row overscan, and a small number of active pinned rows may mount; height-preserving spacers retain full scroll geometry, animation-frame scroll scheduling moves the window without mounting intervening rows, and the scroll root does not let browser anchoring undo a window change. A normal open starts at the top, while block, chat, email, highlight/change, selection, search/navigation, and restoration targets mount and scroll their owning neighborhood exactly once; unresolved intent waits for loaded projections and a handled target or restoration anchor must not replay after the user scrolls away. Node rows use editor-middle and optional chat-right controls, while the one node-wide email column sits left of the whole bounded list and has its own accessible toggle and width separator. With no attached email that column is absent. Project rows keep their existing independent email/editor/chat controls. Late block IDs receive the normal editor/chat defaults, explicit manual closures persist through projection updates, narrow windows scroll horizontally, pending input flushes before unmount, and Logic Gate remains outside this virtualization contract.
 ED79 - A Node chat opened beside an editor uses a compact 340-pixel default width instead of claiming half of the available text workspace; an explicit user drag may still resize and persist that individual chat width. A Node-wide email column with visible text-box rows exposes an accessible email-focus toggle in its header. Activating it animates the email column across the workspace in 180 milliseconds while retaining only the 38-pixel text-box line-and-circle timeline rail on the right; editor/chat controls in that clipped rail are inert and hidden from accessibility. Restoring focus returns the prior normal email width and editor/chat layout without overwriting saved separator widths. The obsolete email-header collapse-column arrow is absent; the Node-level Email toggle remains the hide/show control.
 ED80 - A Node text box linked to an email message exposes a header-level Show email control. Activating it opens the existing full provider-message viewer inside that fixed-height row and shows the message body plus available From, To, Cc, and Bcc metadata without copying any of that content into the editable document. The control becomes Hide email and removes the preview on a second activation. Expanding, hiding, virtualizing, or remounting the row does not mutate the text-box document or its persisted email association.
+ED81 - Every ED2 unified editor surface exposes one shared inline workspace-entity contract. A surface may supply its own persistence callback and navigation adapter, but it must not implement a local `#` picker, selection-to-Node action, chip schema, sanitization rule, or entity keyboard behavior.
+ED82 - A nonblank editor selection exposes the contextual action named `Create node from this highlighted piece of text.` The action uses the existing Node-title whitespace normalization and 500-character limit, creates a real company-scoped Node, and replaces only the unchanged selection with an atomic Node entity. Failure leaves editable content intact; a post-create selection/target change clearly says the Node exists and must not insert into another document.
+ED83 - Typing `#` at a valid text boundary opens one permission-filtered Nodes/Logic Gates/Projects picker. Blank search is deterministic most-recent-first, typed search prioritizes text relevance then recency, Arrow keys move selection, Enter and plain Tab insert the highlighted/top result, Escape closes it, and pointer selection matches the shared mention menu. The inserted value is an entity object with the correct type icon/name, not text or a generic tag.
+ED84 - Inline entity identity survives undo/redo, atomic keyboard navigation/deletion, copy/paste, legacy rich-HTML sanitization, JSON schema validation, persistence, static/read-only rendering, and remount. Pointer click, Enter, and Space open the deep route determined by the stored entity type and ID. Legacy HTML keeps only canonical `data-mango-entity-*` attributes; JSON schema version 1 keeps a strict `mangoEntityLink` atom.
+ED85 - Entity search and Node creation preserve company/workspace scope and effective resource access. Blank recent search cannot reveal inaccessible entities, hidden path resources, unsupported types, folders, or cross-company results. No entity link creates an Explorer placement or requires a database migration.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1392,3 +1397,24 @@ This scenario covers the inactive `tiptap_json` workspace mode added on 2026-07-
 The later HTML-to-JSON conversion is deliberately not part of this scenario. A cutover test environment must convert and validate the complete workspace before flipping the gate.
 
 This scenario is not yet the complete migration acceptance suite. The permanent Word/Google/PDF paste fixture library, complete image-action parity in production hosts, and broader production-path browser/PostgreSQL JSON-mode tests remain required before Step 4 can be approved.
+
+### Scenario ED-S19: Create And Insert Workspace Entity Links
+
+Business logic covered:
+- ED81
+- ED82
+- ED83
+- ED84
+- ED85
+
+Given:
+- The user opens any unified legacy-HTML or JSON editor surface with access to several Nodes, Logic Gates, and Projects, while other resources are denied.
+- The user highlights text containing repeated whitespace, creates a Node, types `#` with no query and with a multiword query, navigates results with keyboard and pointer, and later copies, pastes, saves, remounts, and opens the resulting chips.
+
+Expected:
+- The exact contextual label is exposed; one real Node is created with the normalized selected title and the unchanged selection becomes a Node chip. API failure preserves the selection. If the target changes after creation, no stale insertion occurs and the message explains that the already-created Node can be inserted with `#`.
+- The blank picker orders accessible entities by recent update with deterministic ties. Typed results contain only Nodes, Logic Gates, and Projects, rank text matches before recency, identify every type, and never include denied, hidden-path, folder, unsupported, or cross-company resources.
+- Tab inserts the current top/highlighted result, Arrow keys and Enter work, Escape closes, and mouse selection inserts the same strict entity object. A chip shows the correct type icon/name and opens the exact Node, Logic Gate, or Project route by click, Enter, or Space.
+- Undo removes the complete atom and redo restores it. Legacy sanitization reconstructs only canonical entity attributes; JSON validation rejects unsupported types or missing identity; copy/paste, durable save, sleeping static render, read-only render, and remount retain the entity ID, type, and label.
+
+Focused coverage lives in `editorEntityLinks.test.ts`, `mangoTiptapEditorIntegration.test.tsx`, backend `editor_json_test.go`, backend Company Explorer ranking/permission tests, and the normal unified-editor contract suites. Full repository verification must run after these focused tests.

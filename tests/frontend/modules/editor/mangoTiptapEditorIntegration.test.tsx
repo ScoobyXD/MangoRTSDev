@@ -43,7 +43,10 @@ function structuredDocument(): MangoTiptapDocument {
     format: "mango-tiptap-json",
     schema_version: 1,
     document: { type: "doc", content: [
-      { type: "paragraph", attrs: { blockId: "paragraph-1", indentLevel: 0 }, content: [{ type: "text", text: "Alpha" }] },
+      { type: "paragraph", attrs: { blockId: "paragraph-1", indentLevel: 0 }, content: [
+        { type: "text", text: "Alpha" },
+        { type: "mangoEntityLink", attrs: { entityType: "project", entityId: "project-1", label: "Project One" } },
+      ] },
       { type: "paragraph", attrs: { blockId: "empty-paragraph" } },
       { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "List item" }] }] }] },
       { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 1, rowspan: 1 }, content: [{ type: "paragraph", content: [{ type: "text", text: "Cell" }] }] }] }] },
@@ -106,6 +109,8 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /<ul>/);
   assert.match(html, /<table/);
   assert.match(html, /data-static-image="image-1"/);
+  assert.match(html, /data-mango-entity-id="project-1"/);
+  assert.match(html, /href="\/projects\/project-1"/);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {

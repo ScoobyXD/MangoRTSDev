@@ -10,6 +10,7 @@ import {
   EDITOR_MENTION_USER_ID_ATTRIBUTE,
   isEditorMentionElement,
 } from "./editorMentions.js";
+import { createEditorEntityLinkElement, readEditorEntityLinkElement } from "./editorEntityLinks.js";
 
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
@@ -860,6 +861,12 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     return;
   }
 
+  const entityLink = readEditorEntityLinkElement(element);
+  if (entityLink) {
+    target.appendChild(createEditorEntityLinkElement(ownerDocument, entityLink));
+    return;
+  }
+
   if (tagName === "a") {
     const href = normalizeEditorURL(element.getAttribute("href") ?? "");
     if (!href) {
@@ -1122,7 +1129,7 @@ export function editorBodyHasEmailContent(value: string): boolean {
   if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
   const richHTML = body.slice(EDITOR_RICH_TEXT_PREFIX.length);
   if (/<(?:img|table|ol|ul|li|hr)\b/i.test(richHTML)) return true;
-  if (/\bdata-mango-(?:mention|editor-(?:image|table|list|list-item))\s*=/i.test(richHTML)) return true;
+  if (/\bdata-mango-(?:mention|entity-link|editor-(?:image|table|list|list-item))\s*=/i.test(richHTML)) return true;
   return richHTML
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")

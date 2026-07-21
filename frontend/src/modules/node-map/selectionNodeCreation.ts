@@ -1,13 +1,13 @@
-import { readAuthConfig } from "../../auth/cognitoAuth";
-import { createRequestJSON } from "../api/requestJSON";
-import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache";
-import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
-import type { NodeMapCommandRequest } from "./nodeMapCommands";
-import { getNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph";
-import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
-import { buildLinkedNodePayloadFromSourceSide } from "./relationshipProjection";
-import { MINI_GRID, NODE_H, NODE_W, resolveOpenNodeMapPosition, type NodeDirection, type NodeRecord, type NodeRelationship, type PersistedMapPosition } from "./shared";
+import { readAuthConfig } from "../../auth/cognitoAuth.js";
+import { createRequestJSON } from "../api/requestJSON.js";
+import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands.js";
+import type { NodeMapCommandRequest } from "./nodeMapCommands.js";
+import { getNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph.js";
+import { primeNodeRecordStoreCaches } from "./NodeRecordStore.js";
+import { buildLinkedNodePayloadFromSourceSide } from "./relationshipProjection.js";
+import { MINI_GRID, NODE_H, NODE_W, resolveOpenNodeMapPosition, type NodeDirection, type NodeRecord, type NodeRelationship, type PersistedMapPosition } from "./shared.js";
 
 const WORLD_W = 12800;
 const WORLD_H = 8800;

@@ -15,6 +15,20 @@ Mango owns the frontend-backend textbox sync and every server responsibility. No
 
 The old editor remains authoritative until a future whole-workspace conversion validates every document and flips the atomic gate. Do not create JSON-only documents in a legacy production workspace.
 
+## Inline Workspace Entity Links (2026-07-21)
+
+All unified rich-editor surfaces use the same inline workspace-entity behavior. This includes Node and Project text boxes, standalone Logic Gate/Editor documents, project inline Node editors, personal/shared mail compose and reply, attached-email reply, and mailbox signature editors. The shared legacy handler and shared Tiptap extension own the behavior; individual screens must not implement a separate picker or chip format.
+
+Selecting nonblank text exposes the contextual action named **Create node from this highlighted piece of text.** The action collapses whitespace and applies the existing 500-character Node-title limit, creates the real Node through the scoped workspace entity-batch API, then replaces the still-current selection with a Node entity chip. If creation fails, the selection remains editable and the error is shown. If the document or selection changes after the server creates the Node, the editor clearly reports that the Node exists and instructs the user to insert that existing Node with `#`; it never silently inserts into a different document.
+
+Typing `#` at a text boundary opens one searchable picker containing accessible Nodes, Logic Gates, and Projects. The request uses `/v1/company-explorer/search` with `resource_types=node,logic_gate,project` and `ranking=editor_entities`. Blank search ranks the most recently updated accessible entity first; a typed query ranks stronger text matches first, then recency, type, and name deterministically. Arrow keys move the highlighted option, Enter or unshifted Tab inserts it, Escape closes the picker, and pointer selection follows the existing mention-menu behavior. Each result and inserted chip shows its entity type and the corresponding Node, Logic Gate, or Project icon.
+
+Entity links are atomic editor objects, not generic tags or plain text. Legacy rich HTML persists a sanitized, noneditable element containing `data-mango-entity-link="true"`, `data-mango-entity-type`, `data-mango-entity-id`, and `data-mango-entity-label`. JSON mode persists `{ "type": "mangoEntityLink", "attrs": { "entityType": "node|logic_gate|project", "entityId": "...", "label": "..." } }` under schema version 1. Unknown types, blank IDs, blank labels, event handlers, and untrusted styling fail validation or are removed at the sanitization boundary.
+
+A chip participates in native editor undo/redo, atomic keyboard navigation/deletion, selection, HTML copy/paste, JSON serialization, static/read-only rendering, and sanitized persistence. It is focusable and opens the actual entity with pointer click, Enter, or Space. Read-only JSON rendering uses a real deep-link anchor. The stored label is the display snapshot while the durable entity ID and type determine navigation.
+
+Search and creation retain the current company/workspace scope and existing effective-access checks. The combined picker cannot reveal inaccessible Nodes, Logic Gates, or Projects, and creating a Node requires the existing editable workspace path. No entity-link feature adds a new persistence table or bypasses domain authorization.
+
 ## Unified Editor Direction (2026-07-08)
 - The rich editor must become a shared user-facing behavior source for node text boxes, Logic Gate text, project text boxes, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
 - Shared behavior means editing semantics: indentation, Delete/Backspace, copy/cut/paste, paste cleanup, lists, checklist, link creation, font size, bold, underline, table insertion where supported, selection behavior, keyboard routing, sanitization, and legacy plain-text loading.

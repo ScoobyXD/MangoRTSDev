@@ -95,6 +95,18 @@ import {
   type MentionableCompanyUser,
 } from "./editorMentions";
 import {
+  createEditorEntityLinkElement,
+  createNodeEntityFromSelection,
+  editorEntityTypeLabel,
+  openEditorEntityLink,
+  readActiveEntityLinkDraft,
+  readEditorEntityLinkElement,
+  searchEditorEntityLinks,
+  type ActiveEntityLinkDraft,
+  type EditorEntityLink,
+  type EditorEntityLinkContext,
+} from "./editorEntityLinks.js";
+import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   EDITOR_IMAGE_HYDRATION_STATE_ATTRIBUTE,
   DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
@@ -196,6 +208,7 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   mentionSurfaceText?: string;
   mentionStrokeColor?: string;
   mentionMenuPosition?: "fixed" | "absolute";
+  entityLinkContext?: EditorEntityLinkContext;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
   onEditorImageAttachmentError?: (message: string) => void;
 };
@@ -279,7 +292,7 @@ function clampEditorFontSize(value: number): number {
 }
 
 const PENDING_TYPING_STYLE_CANCEL_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Backspace", "Delete", "End", "Home", "PageDown", "PageUp"]);
-const EDITOR_MENTION_SELECTOR = `[${EDITOR_MENTION_ATTRIBUTE}="true"]`;
+const EDITOR_MENTION_SELECTOR = `[${EDITOR_MENTION_ATTRIBUTE}="true"], [data-mango-entity-link="true"]`;
 
 function rootContainsRange(root: HTMLElement, range: Range): boolean {
   const container = range.commonAncestorContainer;
@@ -2926,6 +2939,21 @@ type RichTextMentionDraft = ActiveMentionDraft & {
   position: "fixed" | "absolute";
 };
 
+type RichTextEntityDraft = ActiveEntityLinkDraft & {
+  left: number;
+  top: number;
+  position: "fixed" | "absolute";
+};
+
+type RichTextSelectionNodeDraft = {
+  root: HTMLElement;
+  range: Range;
+  quote: string;
+  left: number;
+  top: number;
+  position: "fixed" | "absolute";
+};
+
 type RichTextTableContextMenu = {
   left: number;
   top: number;
@@ -3016,7 +3044,7 @@ const EDITOR_TABLE_CONTEXT_MENU_MAX_HEIGHT_PX = 330;
 function closestMentionElement(root: HTMLElement, node: Node | null): HTMLElement | null {
   if (!node) return null;
   const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-  const mention = element?.closest?.("[data-mango-mention='true']") as HTMLElement | null;
+  const mention = element?.closest?.(EDITOR_MENTION_SELECTOR) as HTMLElement | null;
   return mention && root.contains(mention) ? mention : null;
 }
 
@@ -3064,6 +3092,48 @@ function readRichTextMentionDraft(root: HTMLElement, position: "fixed" | "absolu
     ...draft,
     left: Math.max(minLeft, Math.min(coordinateLeft, maxLeft)),
     top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(coordinateTop, maxTop)),
+    position,
+  };
+}
+
+function readRichTextEntityDraft(root: HTMLElement, position: "fixed" | "absolute" = "fixed"): RichTextEntityDraft | null {
+  const range = getEditorSelectionRange(root);
+  if (!range || !range.collapsed || closestMentionElement(root, range.startContainer)) return null;
+  const beforeRange = range.cloneRange();
+  beforeRange.selectNodeContents(root);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const beforeCaret = beforeRange.toString();
+  const draft = readActiveEntityLinkDraft(beforeCaret, beforeCaret.length);
+  if (!draft) return null;
+  const rect = getCaretRect(root, range);
+  const container = position === "absolute" ? root.parentElement : null;
+  const containerRect = container?.getBoundingClientRect() ?? null;
+  const rootRect = root.getBoundingClientRect();
+  const view = root.ownerDocument.defaultView;
+  const viewportWidth = view?.innerWidth ?? 1280;
+  const viewportHeight = view?.innerHeight ?? 720;
+  const left = position === "absolute" && containerRect ? rect.left - containerRect.left : rect.left;
+  const top = position === "absolute" && containerRect ? rect.bottom - containerRect.top + 6 : rect.bottom + 6;
+  const minLeft = position === "absolute" ? EDITOR_MENTION_MENU_MARGIN_PX : Math.max(EDITOR_MENTION_MENU_MARGIN_PX, rootRect.left);
+  const maxLeft = Math.max(minLeft, (position === "absolute" && containerRect ? containerRect.width : viewportWidth) - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX);
+  const maxTop = (position === "absolute" && containerRect ? containerRect.height : viewportHeight) - EDITOR_MENTION_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  return { ...draft, left: Math.max(minLeft, Math.min(left, maxLeft)), top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(top, maxTop)), position };
+}
+
+function readRichTextSelectionNodeDraft(root: HTMLElement, position: "fixed" | "absolute" = "fixed"): RichTextSelectionNodeDraft | null {
+  const range = getEditorSelectionRange(root);
+  if (!range || range.collapsed) return null;
+  const quote = range.toString();
+  if (!quote.replace(/\s+/g, " ").trim()) return null;
+  const rect = getCaretRect(root, range);
+  const container = position === "absolute" ? root.parentElement : null;
+  const containerRect = container?.getBoundingClientRect() ?? null;
+  return {
+    root,
+    range: range.cloneRange(),
+    quote,
+    left: Math.max(8, Math.round(position === "absolute" && containerRect ? rect.left - containerRect.left : rect.left)),
+    top: Math.max(8, Math.round(position === "absolute" && containerRect ? rect.bottom - containerRect.top + 6 : rect.bottom + 6)),
     position,
   };
 }
@@ -3128,6 +3198,34 @@ function replaceEditorMentionDraft(
   const trailingSpace = root.ownerDocument.createTextNode(" ");
   const fragment = root.ownerDocument.createDocumentFragment();
   fragment.append(mentionElement, trailingSpace);
+  range.deleteContents();
+  range.insertNode(fragment);
+  range.setStart(trailingSpace, trailingSpace.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "typing");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+function replaceEditorEntityDraft(
+  root: HTMLElement,
+  draft: ActiveEntityLinkDraft,
+  entity: EditorEntityLink,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  removeEditorTerminalBreaks(root);
+  setEditorSelectionByOffsets(root, draft.start, draft.end);
+  const range = getEditorSelectionRange(root);
+  if (!range) return;
+  const entityElement = createEditorEntityLinkElement(root.ownerDocument, entity);
+  const trailingSpace = root.ownerDocument.createTextNode(" ");
+  const fragment = root.ownerDocument.createDocumentFragment();
+  fragment.append(entityElement, trailingSpace);
   range.deleteContents();
   range.insertNode(fragment);
   range.setStart(trailingSpace, trailingSpace.data.length);
@@ -4212,11 +4310,13 @@ export function useEditorDocumentSurfaceHandlers({
   mentionSurfaceText = "#111827",
   mentionStrokeColor = "rgba(15,23,42,0.18)",
   mentionMenuPosition = "fixed",
+  entityLinkContext,
   editorImageAttachmentContext,
   onEditorImageAttachmentError,
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeStyledInsertionRef = useRef<{ text: string; style: EditorPendingTypingStyle } | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
+  const activeEntityRootRef = useRef<HTMLElement | null>(null);
   const lastEditorSelectionRangeRef = useRef<Range | null>(null);
   const editorInputBatchFlushRef = useRef<(batch: PendingEditorNativeInputBatch) => string | undefined>(() => undefined);
   const editorInputBatcherRef = useRef<EditorNativeInputBatcher | null>(null);
@@ -4234,12 +4334,25 @@ export function useEditorDocumentSurfaceHandlers({
   editorImageAttachmentContextIdentityRef.current = editorImageAttachmentContextIdentity(editorImageAttachmentContext);
   const [activeMentionDraft, setActiveMentionDraft] = useState<RichTextMentionDraft | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [activeEntityDraft, setActiveEntityDraft] = useState<RichTextEntityDraft | null>(null);
+  const [activeEntityIndex, setActiveEntityIndex] = useState(0);
+  const [entityOptions, setEntityOptions] = useState<EditorEntityLink[]>([]);
+  const [entitySearchState, setEntitySearchState] = useState<"idle" | "loading" | "error">("idle");
+  const [entitySearchError, setEntitySearchError] = useState("");
+  const [selectionNodeDraft, setSelectionNodeDraft] = useState<RichTextSelectionNodeDraft | null>(null);
+  const [selectionNodeState, setSelectionNodeState] = useState<"idle" | "creating" | "error">("idle");
+  const [selectionNodeError, setSelectionNodeError] = useState("");
   const [activeTableContextMenu, setActiveTableContextMenu] = useState<RichTextTableContextMenu | null>(null);
   const [activeImagePreview, setActiveImagePreview] = useState<EditorImagePreviewDraft | null>(null);
   const mentionOptions = useMemo(() => (
     activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
   ), [activeMentionDraft?.query, mentionUsers]);
   const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
+  const resolvedEntityLinkContext = entityLinkContext ?? (editorImageAttachmentContext ? {
+    companyID: editorImageAttachmentContext.companyID,
+    requestJSON: editorImageAttachmentContext.requestJSON,
+  } : undefined);
+  const entityMenuOpen = activeEntityDraft !== null && (entityOptions.length > 0 || entitySearchState !== "idle");
 
   const clearPendingTypingStyle = useCallback(() => {
     pendingEditorFontSizeRef.current = null;
@@ -4293,6 +4406,38 @@ export function useEditorDocumentSurfaceHandlers({
   }, [mentionOptions.length]);
 
   useEffect(() => {
+    setActiveEntityIndex(0);
+  }, [activeEntityDraft?.start, activeEntityDraft?.query]);
+
+  useEffect(() => {
+    setActiveEntityIndex((current) => Math.min(current, Math.max(0, entityOptions.length - 1)));
+  }, [entityOptions.length]);
+
+  useEffect(() => {
+    if (!activeEntityDraft || !resolvedEntityLinkContext) {
+      setEntityOptions([]);
+      setEntitySearchState("idle");
+      setEntitySearchError("");
+      return undefined;
+    }
+    let current = true;
+    setEntitySearchState("loading");
+    setEntityOptions([]);
+    setEntitySearchError("");
+    void searchEditorEntityLinks(resolvedEntityLinkContext, activeEntityDraft.query).then((options) => {
+      if (!current) return;
+      setEntityOptions(options);
+      setEntitySearchState("idle");
+    }).catch((cause) => {
+      if (!current) return;
+      setEntityOptions([]);
+      setEntitySearchState("error");
+      setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search workspace entities");
+    });
+    return () => { current = false; };
+  }, [activeEntityDraft?.query, activeEntityDraft?.start, resolvedEntityLinkContext?.companyID, resolvedEntityLinkContext?.requestJSON]);
+
+  useEffect(() => {
     const root = activeTableContextMenu?.root;
     if (!root) return undefined;
     const ownerDocument = root.ownerDocument;
@@ -4314,15 +4459,18 @@ export function useEditorDocumentSurfaceHandlers({
   }, [activeTableContextMenu?.root]);
 
   const refreshMentionDraft = useCallback((root: HTMLElement) => {
-    if (mentionUsers.length === 0) {
-      activeMentionRootRef.current = null;
-      setActiveMentionDraft(null);
-      return;
+    const mentionDraft = mentionUsers.length > 0 ? readRichTextMentionDraft(root, mentionMenuPosition) : null;
+    activeMentionRootRef.current = mentionDraft ? root : null;
+    setActiveMentionDraft(mentionDraft);
+    const entityDraft = resolvedEntityLinkContext ? readRichTextEntityDraft(root, mentionMenuPosition) : null;
+    activeEntityRootRef.current = entityDraft ? root : null;
+    setActiveEntityDraft(entityDraft);
+    if (!entityDraft) {
+      setEntityOptions([]);
+      setEntitySearchState("idle");
+      setEntitySearchError("");
     }
-    const draft = readRichTextMentionDraft(root, mentionMenuPosition);
-    activeMentionRootRef.current = draft ? root : null;
-    setActiveMentionDraft(draft);
-  }, [mentionMenuPosition, mentionUsers.length]);
+  }, [mentionMenuPosition, mentionUsers.length, resolvedEntityLinkContext]);
 
   const syncActiveSelectionFormat = useCallback((root: HTMLElement) => {
     const pendingFontSize = pendingEditorFontSizeRef.current;
@@ -4341,6 +4489,53 @@ export function useEditorDocumentSurfaceHandlers({
     activeMentionRootRef.current = null;
     setActiveMentionDraft(null);
   }, [documentUndoHistoryRef, editorInputBatcher, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  const insertEntity = useCallback((root: HTMLElement, draft: ActiveEntityLinkDraft, entity: EditorEntityLink) => {
+    editorInputBatcher.flush(root);
+    replaceEditorEntityDraft(root, draft, entity, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    activeEntityRootRef.current = null;
+    setActiveEntityDraft(null);
+    setEntityOptions([]);
+    setEntitySearchState("idle");
+  }, [documentUndoHistoryRef, editorInputBatcher, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  const createNodeFromSelection = useCallback(async () => {
+    const draft = selectionNodeDraft;
+    if (!draft || selectionNodeState === "creating") return;
+    if (!resolvedEntityLinkContext) {
+      setSelectionNodeState("error");
+      setSelectionNodeError("Node creation is not available in this editor yet.");
+      return;
+    }
+    const documentAtStart = serializeEditorDocumentHTML(draft.root);
+    const targetKeyAtStart = currentDocumentTargetKeyRef.current;
+    const undoBefore = snapshotEditorDocumentRoot(draft.root);
+    setSelectionNodeState("creating");
+    setSelectionNodeError("");
+    try {
+      const entity = await createNodeEntityFromSelection(resolvedEntityLinkContext, draft.quote);
+      if (!draft.root.isConnected || currentDocumentTargetKeyRef.current !== targetKeyAtStart || serializeEditorDocumentHTML(draft.root) !== documentAtStart || !rangeIsStillInsideRoot(draft.root, draft.range)) {
+        throw new Error("The Node was created, but the highlighted text changed before its link could be inserted. Select the text again and link the existing Node with #.");
+      }
+      setEditorSelectionRange(draft.root, draft.range);
+      const range = getEditorSelectionRange(draft.root);
+      if (!range || range.collapsed || range.toString() !== draft.quote) throw new Error("The Node was created, but the highlighted text changed before its link could be inserted. Select the text again and link the existing Node with #.");
+      const entityElement = createEditorEntityLinkElement(draft.root.ownerDocument, entity);
+      range.deleteContents();
+      range.insertNode(entityElement);
+      range.setStartAfter(entityElement);
+      range.collapse(true);
+      draft.root.ownerDocument.getSelection()?.removeAllRanges();
+      draft.root.ownerDocument.getSelection()?.addRange(range);
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, draft.root, undoBefore, "typing");
+      commitEditorDocument(draft.root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+      setSelectionNodeDraft(null);
+      setSelectionNodeState("idle");
+    } catch (cause) {
+      setSelectionNodeState("error");
+      setSelectionNodeError(cause instanceof Error ? cause.message : "Unable to create a Node from the highlighted text");
+    }
+  }, [currentDocumentTargetKeyRef, documentUndoHistoryRef, resolvedEntityLinkContext, scheduleDocumentSave, scheduleIndentGuideUpdate, selectionNodeDraft, selectionNodeState]);
 
   const openTableContextMenu = useCallback((root: HTMLElement, event: React.MouseEvent<HTMLDivElement>) => {
     editorInputBatcher.flush(root);
@@ -4586,6 +4781,88 @@ export function useEditorDocumentSurfaceHandlers({
           ),
         );
       }),
+    )
+    : null;
+
+  const entityMenu = entityMenuOpen && activeEntityDraft
+    ? React.createElement(
+      "div",
+      {
+        role: "listbox",
+        "aria-label": "Link a workspace entity",
+        style: {
+          position: activeEntityDraft.position,
+          left: activeEntityDraft.left,
+          top: activeEntityDraft.top,
+          zIndex: 2001,
+          width: EDITOR_MENTION_MENU_WIDTH_PX,
+          maxWidth: "calc(100vw - 16px)",
+          maxHeight: EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
+          overflowY: "auto",
+          display: "grid",
+          gap: 2,
+          padding: 4,
+          border: `1px solid ${mentionStrokeColor}`,
+          borderRadius: 8,
+          background: "#ffffff",
+          boxShadow: "0 16px 36px rgba(15,23,42,0.20)",
+          color: mentionSurfaceText,
+          fontFamily: "var(--mango-font-family)",
+        } satisfies React.CSSProperties,
+      },
+      entitySearchState === "loading" && entityOptions.length === 0
+        ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, "Searching Nodes, Logic Gates, and Projects…")
+        : entitySearchState === "error"
+          ? React.createElement("div", { role: "alert", style: { padding: "9px", fontSize: 11, color: "#b91c1c" } }, entitySearchError)
+          : entityOptions.length === 0
+            ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, "No matching entities")
+            : entityOptions.map((entity, index) => React.createElement(
+              "button",
+              {
+                key: `${entity.entityType}:${entity.entityID}`,
+                type: "button",
+                role: "option",
+                "aria-selected": index === activeEntityIndex,
+                onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault(),
+                onClick: () => {
+                  const root = activeEntityRootRef.current;
+                  if (root && activeEntityDraft) insertEntity(root, activeEntityDraft, entity);
+                },
+                style: {
+                  width: "100%", minHeight: 36, display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto",
+                  gap: 7, alignItems: "center", border: 0, borderRadius: 6, padding: "6px 8px", textAlign: "left",
+                  background: index === activeEntityIndex ? "#e0f2fe" : "transparent", color: mentionSurfaceText, cursor: "pointer",
+                } satisfies React.CSSProperties,
+              },
+              React.createElement("span", { "aria-hidden": "true", className: `mango-editor-entity-icon mango-editor-entity-icon--${entity.entityType}` }),
+              React.createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 } }, entity.label),
+              React.createElement("span", { style: { color: "#64748b", fontSize: 9.5, fontWeight: 800 } }, editorEntityTypeLabel(entity.entityType)),
+            )),
+    )
+    : null;
+
+  const selectionNodeMenu = selectionNodeDraft
+    ? React.createElement(
+      "div",
+      {
+        role: "toolbar",
+        "aria-label": "Highlighted text actions",
+        onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => event.preventDefault(),
+        style: {
+          position: selectionNodeDraft.position, left: selectionNodeDraft.left, top: selectionNodeDraft.top, zIndex: 2002,
+          display: "grid", gridTemplateColumns: "auto minmax(0,220px)", alignItems: "center", gap: 6,
+          padding: 4, border: `1px solid ${mentionStrokeColor}`, borderRadius: 8, background: "#fff", boxShadow: "0 12px 30px rgba(15,23,42,.18)",
+        } satisfies React.CSSProperties,
+      },
+      React.createElement("button", {
+        type: "button",
+        "aria-label": "Create node from this highlighted piece of text.",
+        title: "Create node from this highlighted piece of text.",
+        disabled: selectionNodeState === "creating",
+        onClick: () => void createNodeFromSelection(),
+        style: { width: 30, height: 30, border: 0, borderRadius: 6, background: "#ecfdf5", color: "#0f766e", cursor: selectionNodeState === "creating" ? "wait" : "pointer", fontWeight: 900 } satisfies React.CSSProperties,
+      }, selectionNodeState === "creating" ? "…" : "+▣"),
+      selectionNodeState === "error" ? React.createElement("span", { role: "alert", style: { color: "#b91c1c", fontSize: 10.5 } }, selectionNodeError) : null,
     )
     : null;
 
@@ -5085,6 +5362,7 @@ export function useEditorDocumentSurfaceHandlers({
         pendingEditorTypingCaretRef.current = getEditorTypingCaretBookmark(event.currentTarget);
       }
       syncActiveSelectionFormat(root);
+      setSelectionNodeDraft(null);
       refreshMentionDraft(root);
       setActiveTableContextMenu(null);
       clearEditorTableCellSelections(root);
@@ -5121,11 +5399,18 @@ export function useEditorDocumentSurfaceHandlers({
       rememberEditorSelectionRange(root);
       if (range && !range.collapsed) {
         setActiveMentionDraft(null);
+        activeMentionRootRef.current = null;
+        setActiveEntityDraft(null);
+        activeEntityRootRef.current = null;
+        setSelectionNodeState("idle");
+        setSelectionNodeError("");
+        setSelectionNodeDraft(readRichTextSelectionNodeDraft(root, mentionMenuPosition));
         setActiveTableContextMenu(null);
         clearPendingTypingStyle();
         syncActiveSelectionFormat(root);
         return;
       }
+      setSelectionNodeDraft(null);
       refreshMentionDraft(root);
       syncActiveSelectionFormat(root);
     },
@@ -5141,6 +5426,14 @@ export function useEditorDocumentSurfaceHandlers({
       }
       if (!retainsPendingTypingStyle) clearPendingTypingStyle();
       syncActiveSelectionFormat(root);
+      const entityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
+      const entity = entityElement && root.contains(entityElement) ? readEditorEntityLinkElement(entityElement) : null;
+      if (entity) {
+        event.preventDefault();
+        event.stopPropagation();
+        openEditorEntityLink(entity, entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined);
+        return;
+      }
       const checklistItem = getChecklistItemForPointer(root, event);
       if (checklistItem) {
         event.preventDefault();
@@ -5261,16 +5554,22 @@ export function useEditorDocumentSurfaceHandlers({
       const root = event.currentTarget;
       rememberEditorSelectionRange(root);
       setActiveMentionDraft(null);
+      setActiveEntityDraft(null);
+      setSelectionNodeDraft(null);
       setActiveTableContextMenu(null);
       activeMentionRootRef.current = null;
+      activeEntityRootRef.current = null;
       pendingNativeStyledInsertionRef.current = null;
       rememberCurrentDocumentScroll();
       flushPendingDocumentSave(flushPendingInput(root) ?? serializeEditorDocumentHTML(root));
     },
     onScroll(event) {
       setActiveMentionDraft(null);
+      setActiveEntityDraft(null);
+      setSelectionNodeDraft(null);
       setActiveTableContextMenu(null);
       activeMentionRootRef.current = null;
+      activeEntityRootRef.current = null;
       if (restoringScrollRef.current) return;
       const targetKey = currentDocumentTargetKeyRef.current;
       if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
@@ -5281,6 +5580,17 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onKeyDown(event) {
       const root = event.currentTarget;
+      const keyboardEntityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
+      const keyboardEntity = keyboardEntityElement && root.contains(keyboardEntityElement)
+        ? readEditorEntityLinkElement(keyboardEntityElement)
+        : null;
+      if (keyboardEntity && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        event.stopPropagation();
+        editorInputBatcher.flush(root);
+        openEditorEntityLink(keyboardEntity, entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined);
+        return;
+      }
       if (!event.nativeEvent.isComposing) {
         if (event.key === "Backspace" || event.key === "Delete") {
           editorInputBatcher.flushBoundary(root, "delete");
@@ -5290,6 +5600,30 @@ export function useEditorDocumentSurfaceHandlers({
           editorInputBatcher.flushBoundary(root, "tab");
         } else if (event.ctrlKey || event.metaKey || event.altKey || event.key === "Escape" || PENDING_TYPING_STYLE_CANCEL_KEYS.has(event.key)) {
           editorInputBatcher.flush(root);
+        }
+      }
+
+      if (entityMenuOpen && activeEntityDraft && entityOptions.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setActiveEntityIndex((current) => (current + 1) % entityOptions.length);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setActiveEntityIndex((current) => (current - 1 + entityOptions.length) % entityOptions.length);
+          return;
+        }
+        if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+          event.preventDefault();
+          insertEntity(root, activeEntityDraft, entityOptions[activeEntityIndex] ?? entityOptions[0]);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setActiveEntityDraft(null);
+          activeEntityRootRef.current = null;
+          return;
         }
       }
 
@@ -5676,6 +6010,8 @@ export function useEditorDocumentSurfaceHandlers({
       commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
     },
   }), [
+    activeEntityDraft,
+    activeEntityIndex,
     activeMentionDraft,
     activeMentionIndex,
     clearPendingTypingStyle,
@@ -5684,7 +6020,11 @@ export function useEditorDocumentSurfaceHandlers({
     documentUndoHistoryRef,
     editorInputBatcher,
     editorImageAttachmentContext,
+    entityMenuOpen,
+    entityOptions,
+    entityLinkContext,
     flushPendingDocumentSave,
+    insertEntity,
     insertMention,
     flushPendingInput,
     mentionMenuOpen,
@@ -5703,6 +6043,7 @@ export function useEditorDocumentSurfaceHandlers({
     rememberCurrentDocumentScroll,
     rememberEditorSelectionRange,
     refreshMentionDraft,
+    resolvedEntityLinkContext,
     restoringScrollRef,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
@@ -5727,6 +6068,6 @@ export function useEditorDocumentSurfaceHandlers({
   }, [clearPendingTypingStyle, documentUndoHistoryRef, editorInputBatcher, rememberEditorSelectionRange, restoreEditorSelectionRange, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
   const blockingImagePreview = imagePreviewModal;
-  const overlay = React.createElement(React.Fragment, null, mentionMenu, tableContextMenu, blockingImagePreview);
+  const overlay = React.createElement(React.Fragment, null, mentionMenu, entityMenu, selectionNodeMenu, tableContextMenu, blockingImagePreview);
   return { ...handlers, mentionMenu: overlay, insertTable, restoreSelection: restoreEditorSelectionRange, flushPendingInput };
 }

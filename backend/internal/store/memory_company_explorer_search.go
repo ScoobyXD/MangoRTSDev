@@ -235,13 +235,25 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 	sort.Slice(matches, func(i, j int) bool {
 		leftType, _ := companyExplorerSearchTypePriority(matches[i].ResourceType)
 		rightType, _ := companyExplorerSearchTypePriority(matches[j].ResourceType)
-		if leftType != rightType {
-			return leftType < rightType
-		}
 		leftMatch, _, _ := companyExplorerSearchMatch(matches[i].DisplayName, matches[i].EntityID, query.Query)
 		rightMatch, _, _ := companyExplorerSearchMatch(matches[j].DisplayName, matches[j].EntityID, query.Query)
-		if leftMatch != rightMatch {
-			return leftMatch < rightMatch
+		if query.EditorEntityRanking {
+			if leftMatch != rightMatch {
+				return leftMatch < rightMatch
+			}
+			if !matches[i].UpdatedTimestamp.Equal(matches[j].UpdatedTimestamp) {
+				return matches[i].UpdatedTimestamp.After(matches[j].UpdatedTimestamp)
+			}
+			if leftType != rightType {
+				return leftType < rightType
+			}
+		} else {
+			if leftType != rightType {
+				return leftType < rightType
+			}
+			if leftMatch != rightMatch {
+				return leftMatch < rightMatch
+			}
 		}
 		if !strings.EqualFold(matches[i].DisplayName, matches[j].DisplayName) {
 			return strings.ToLower(matches[i].DisplayName) < strings.ToLower(matches[j].DisplayName)
@@ -327,7 +339,7 @@ func companyExplorerSearchMatch(name, entityID, query string) (int, string, bool
 	query = strings.ToLower(strings.TrimSpace(query))
 	lowerName := strings.ToLower(name)
 	if query == "" {
-		return 0, "", false
+		return 0, "recent", true
 	}
 	if lowerName == query {
 		return 0, "name_exact", true

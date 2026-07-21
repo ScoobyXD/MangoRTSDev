@@ -2,6 +2,7 @@ import React from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
+import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType } from "../editorEntityLinks.js";
 
 export type MangoStaticAttachmentImageProps = {
   attachmentId: string;
@@ -47,7 +48,7 @@ function markContent(content: React.ReactNode, mark: NonNullable<JSONContent["ma
 function staticNodeSize(node: JSONContent): number {
   if (node.type === "text") return node.text?.length ?? 0;
   if (node.type === "doc") return (node.content ?? []).reduce((total, child) => total + staticNodeSize(child), 0);
-  if (["hardBreak", "horizontalRule", "mention", "mangoAttachmentImage"].includes(node.type ?? "")) return 1;
+  if (["hardBreak", "horizontalRule", "mention", "mangoEntityLink", "mangoAttachmentImage"].includes(node.type ?? "")) return 1;
   return 2 + (node.content ?? []).reduce((total, child) => total + staticNodeSize(child), 0);
 }
 
@@ -125,6 +126,24 @@ function renderNode(
     case "blockquote": return <blockquote key={key} {...blockProps}>{children}</blockquote>;
     case "codeBlock": return <pre key={key} {...blockProps}><code>{children}</code></pre>;
     case "horizontalRule": return <hr key={key} {...blockProps} />;
+    case "mangoEntityLink": {
+      const entityType = attrs.entityType;
+      const entityID = String(attrs.entityId || "");
+      const label = String(attrs.label || "Entity");
+      if (!isEditorEntityType(entityType) || !entityID) return <span key={key}>{label}</span>;
+      return (
+        <a
+          key={key}
+          className={`mango-editor-entity-link mango-editor-entity-link--${entityType}`}
+          data-mango-entity-link="true"
+          data-mango-entity-type={entityType}
+          data-mango-entity-id={entityID}
+          data-mango-entity-label={label}
+          aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
+          href={editorEntityRoute({ entityType, entityID })}
+        >{label}</a>
+      );
+    }
     case "hardBreak": return <br key={key} />;
     case "bulletList": return <ul key={key} {...blockProps}>{children}</ul>;
     case "orderedList": return <ol key={key} {...blockProps} start={Number(attrs.start) || 1}>{children}</ol>;

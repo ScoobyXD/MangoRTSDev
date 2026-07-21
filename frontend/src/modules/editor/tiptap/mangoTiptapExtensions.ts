@@ -9,6 +9,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
 import { Plugin } from "@tiptap/pm/state";
+import { editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -177,6 +178,8 @@ export type MangoTiptapExtensionOptions = {
   onImageFiles?: (files: File[], position: number | null) => void;
   attachmentImageExtension?: AnyExtension;
   mentionUsers?: ReadonlyArray<{ userID: string; name: string; email?: string }>;
+  searchEntityLinks?: (query: string) => Promise<EditorEntityLink[]>;
+  onEntityLinkSearchError?: (message: string) => void;
 };
 
 export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions): Extensions {
@@ -296,7 +299,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             onStart: (props) => {
               if (typeof document === "undefined") return;
               close();
-              current = props as typeof current;
+              current = props as unknown as typeof current;
               menu = document.createElement("div");
               menu.setAttribute("role", "listbox");
               menu.setAttribute("aria-label", kind === "urgent" ? "Urgently mention people" : "Mention people");
@@ -310,7 +313,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               paint();
             },
             onUpdate: (props) => {
-              current = props as typeof current;
+              current = props as unknown as typeof current;
               selectedIndex = 0;
               paint();
             },
@@ -338,6 +341,159 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           };
         },
       })),
+    }),
+    Mention.extend({
+      name: "mangoEntityLink",
+      addAttributes() {
+        return {
+          entityType: {
+            default: "node",
+            parseHTML: (element) => element.getAttribute("data-mango-entity-type") ?? "node",
+            renderHTML: () => ({}),
+          },
+          entityId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-entity-id"),
+            renderHTML: () => ({}),
+          },
+          label: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-entity-label") ?? element.textContent,
+            renderHTML: () => ({}),
+          },
+        };
+      },
+      parseHTML() {
+        return [{ tag: 'span[data-mango-entity-link="true"]' }, { tag: 'a[data-mango-entity-link="true"]' }];
+      },
+      renderHTML({ node, HTMLAttributes }) {
+        const type = String(node.attrs.entityType || "node");
+        const label = String(node.attrs.label || "Entity");
+        return ["span", mergeAttributes(HTMLAttributes, {
+          "data-mango-entity-link": "true",
+          "data-mango-entity-type": type,
+          "data-mango-entity-id": node.attrs.entityId,
+          "data-mango-entity-label": label,
+          role: "link",
+          tabindex: "0",
+          "aria-label": `Open ${editorEntityTypeLabel(type === "logic_gate" || type === "project" ? type : "node")} ${label}`,
+          class: `mango-editor-entity-link mango-editor-entity-link--${type}`,
+        }), label];
+      },
+    }).configure({
+      renderText: ({ node }) => String(node.attrs.label || "Entity"),
+      deleteTriggerWithBackspace: true,
+      suggestions: [{
+        char: "#",
+        allowSpaces: true,
+        items: async ({ query }) => {
+          if (!options.searchEntityLinks) return [];
+          try {
+            return await options.searchEntityLinks(query);
+          } catch (cause) {
+            options.onEntityLinkSearchError?.(cause instanceof Error ? cause.message : "Unable to search workspace entities");
+            return [];
+          }
+        },
+        command: ({ editor, range, props }) => {
+          const entity = props as unknown as EditorEntityLink;
+          editor.chain().focus().insertContentAt(range, [{
+            type: "mangoEntityLink",
+            attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label },
+          }, { type: "text", text: " " }]).run();
+        },
+        render: () => {
+          let menu: HTMLDivElement | null = null;
+          let selectedIndex = 0;
+          let current: { items: EditorEntityLink[]; command: (item: EditorEntityLink) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
+          const close = () => {
+            menu?.remove();
+            menu = null;
+            current = null;
+          };
+          const paint = () => {
+            if (!menu || !current) return;
+            menu.replaceChildren();
+            selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, current.items.length - 1)));
+            current.items.forEach((item, index) => {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.setAttribute("role", "option");
+              button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
+              button.dataset.mangoEditorEntityType = item.entityType;
+              Object.assign(button.style, {
+                display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto", alignItems: "center", gap: "7px",
+                width: "100%", border: "0", borderRadius: "6px", padding: "7px 8px", textAlign: "left",
+                cursor: "pointer", background: index === selectedIndex ? "#e0f2fe" : "#ffffff", color: "#0f172a",
+              });
+              const icon = document.createElement("span");
+              icon.className = `mango-editor-entity-icon mango-editor-entity-icon--${item.entityType}`;
+              icon.setAttribute("aria-hidden", "true");
+              const label = document.createElement("span");
+              label.textContent = item.label;
+              label.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750";
+              const type = document.createElement("span");
+              type.textContent = editorEntityTypeLabel(item.entityType);
+              type.style.cssText = "font-size:10px;color:#64748b;font-weight:700";
+              button.append(icon, label, type);
+              button.addEventListener("mousedown", (event) => {
+                event.preventDefault();
+                current?.command(item);
+              });
+              menu?.appendChild(button);
+            });
+            const rect = current.clientRect?.();
+            if (rect) {
+              menu.style.left = `${Math.round(rect.left)}px`;
+              menu.style.top = `${Math.round(rect.bottom + 4)}px`;
+            }
+          };
+          return {
+            onStart: (props) => {
+              if (typeof document === "undefined") return;
+              close();
+              current = props as unknown as typeof current;
+              menu = document.createElement("div");
+              menu.setAttribute("role", "listbox");
+              menu.setAttribute("aria-label", "Link a Node, Logic Gate, or Project");
+              menu.setAttribute("data-mango-tiptap-entity-menu", "true");
+              Object.assign(menu.style, {
+                position: "fixed", zIndex: "2100", minWidth: "280px", maxWidth: "min(420px, calc(100vw - 16px))",
+                maxHeight: "280px", overflowY: "auto", padding: "4px", border: "1px solid #cbd5e1",
+                borderRadius: "8px", background: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,.18)",
+              });
+              document.body.appendChild(menu);
+              paint();
+            },
+            onUpdate: (props) => {
+              current = props as unknown as typeof current;
+              selectedIndex = 0;
+              paint();
+            },
+            onKeyDown: ({ event }) => {
+              if (!current) return false;
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                selectedIndex = (selectedIndex + direction + current.items.length) % Math.max(1, current.items.length);
+                paint();
+                return true;
+              }
+              if ((event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) && current.items[selectedIndex]) {
+                event.preventDefault();
+                current.command(current.items[selectedIndex]);
+                return true;
+              }
+              if (event.key === "Escape") {
+                close();
+                return true;
+              }
+              return false;
+            },
+            onExit: close,
+          };
+        },
+      }],
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,
     MangoBlockIdentity,

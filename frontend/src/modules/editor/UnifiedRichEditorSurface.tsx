@@ -27,6 +27,7 @@ import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDoc
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import type { MentionableCompanyUser } from "./editorMentions";
+import type { EditorEntityLinkContext } from "./editorEntityLinks.js";
 
 export type UnifiedRichEditorFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -47,6 +48,7 @@ type UnifiedRichEditorSurfaceProps = {
   scrollbarTrack?: string;
   mentionUsers?: MentionableCompanyUser[];
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
+  entityLinkContext?: EditorEntityLinkContext;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
   eagerEditorImageHydration?: boolean;
   onEditorImageAttachmentError?: (message: string) => void;
@@ -75,6 +77,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   scrollbarTrack = "transparent",
   mentionUsers = [],
   formattingControllerRef,
+  entityLinkContext,
   editorImageAttachmentContext,
   eagerEditorImageHydration = false,
   onEditorImageAttachmentError,
@@ -243,6 +246,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
+    entityLinkContext,
     editorImageAttachmentContext,
     onEditorImageAttachmentError,
   });
