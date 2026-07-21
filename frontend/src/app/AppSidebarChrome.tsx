@@ -5,10 +5,10 @@ import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
@@ -105,6 +105,7 @@ const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_ACCOUNT_ICON_COLOR = "#14b8a6";
 const SIDEBAR_TEAMS_ICON_COLOR = "#6366f1";
+const SIDEBAR_FIELDS_ICON_COLOR = "#8b5cf6";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
@@ -126,7 +127,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
+type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1422,6 +1423,16 @@ export function AppSidebar({
           onFocus={preloadTeamsSurface}
           onPointerDown={preloadTeamsSurface}
           onClick={() => onPageSelect("teams")}
+        />
+        <AppSidebarButton
+          label="Fields"
+          active={activePage === "fields"}
+          icon={<HeaderFieldsIcon color={SIDEBAR_FIELDS_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadFieldsSurface}
+          onFocus={preloadFieldsSurface}
+          onPointerDown={preloadFieldsSurface}
+          onClick={() => onPageSelect("fields")}
         />
       </section>
 

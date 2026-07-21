@@ -46,6 +46,7 @@ func (e *ProjectionRevisionConflictError) Unwrap() error { return ErrVersionConf
 type Repository interface {
 	IdentityRepository
 	AccountRepository
+	EntityFieldRepository
 	CommunicationsRepository
 	AttachmentRepository
 	WorkGraphRepository
@@ -70,6 +71,14 @@ type Repository interface {
 	EditorCollaborationRepository
 	EditorJSONRepository
 	DomainEventRepository
+}
+
+type EntityFieldRepository interface {
+	ListEntityFields(companyID string) ([]domain.EntityField, error)
+	CreateEntityField(input EntityFieldInput) (domain.EntityField, error)
+	UpdateEntityField(input EntityFieldInput) (domain.EntityField, error)
+	DeleteEntityField(companyID, fieldID, actorUserID string) error
+	SetEntityFieldAssignments(input EntityFieldAssignmentInput) ([]domain.EntityField, error)
 }
 
 type AccountRepository interface {
@@ -1177,6 +1186,24 @@ type ProjectInput struct {
 	TeamIDsSet                      bool
 	ActorUserID                     string
 	CompanyExplorerDefaultPlacement bool
+}
+
+type EntityFieldInput struct {
+	CompanyID   string
+	FieldID     string
+	Name        string
+	Color       string
+	Position    int
+	PositionSet bool
+	ActorUserID string
+}
+
+type EntityFieldAssignmentInput struct {
+	CompanyID    string
+	ResourceType string
+	ResourceID   string
+	FieldIDs     []string
+	ActorUserID  string
 }
 
 type ResourceGVICAssignmentInput struct {

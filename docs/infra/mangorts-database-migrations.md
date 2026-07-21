@@ -38,6 +38,11 @@ The later human-run conversion/cutover is separate: drain editor writes or enter
 
 `backend/db/migrations/20260719_zz_tiptap_annotation_positions.sql` adds bounded JSONB annotation-position arrays to the inactive canonical document, stable-operation, and immutable-version tables. Positions are accepted atomically with their document revision so mapped comment/change/chat/highlight ranges do not revert after reload. Apply this migration through the normal reviewed deployment process before enabling code that commits JSON editor documents. It does not convert HTML, insert gate rows, flip a workspace, or touch email HTML storage.
 
+
+### 20260721 Entity fields
+
+`backend/db/migrations/20260721_entity_fields.sql` adds the company-scoped `entity_fields` definition table and the `entity_field_assignments` projection table for Projects, Nodes, and Logic Gates. It is additive and does not backfill or assign labels. Apply it through the normal reviewed migration process before deploying the entity-fields API; never apply it to a live database from an agent task.
+
 MangoRTS uses both migration history and a current schema snapshot:
 
 - `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.

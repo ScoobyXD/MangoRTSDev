@@ -23,6 +23,13 @@ Bootstrap schema:
 backend/db/schema.sql
 ```
 
+
+### Entity field labels (2026-07-21)
+
+`entity_fields` stores company-scoped reusable label definitions with case-insensitively unique names, validated colors, and stable display positions. `entity_field_assignments` is the projection table for assigning those definitions to exactly one Project, Node, or Logic Gate. Its check constraint enforces the target type/column pairing, its generated `resource_id` supports one generic lookup path, and its composite foreign keys prevent cross-company assignments.
+
+The additive migration is `backend/db/migrations/20260721_entity_fields.sql`. Apply it through the normal reviewed migration workflow before deploying an API version that reads or writes entity fields. No agent task should apply it to a live database. Deleting a field or target entity cascades only its assignment rows.
+
 Incremental migrations:
 
 ```text

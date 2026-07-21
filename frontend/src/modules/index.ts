@@ -48,6 +48,7 @@ const accountManagerModule = createLazyModule(() => import("./accounts/AccountMa
 const teamsModule = createLazyModule(() => import("./teams/TeamsContent").then((module) => ({
   default: ((props: ModuleProps) => React.createElement(module.TeamsContent, { accent: props.accent })) as ModuleComponent,
 })));
+const fieldsModule = createLazyModule(() => import("./fields/FieldsContent").then((module) => ({ default: module.FieldsContent as ModuleComponent })));
 
 const moduleEntries = [
   { kind: "company-explorer", label: "Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
@@ -57,6 +58,7 @@ const moduleEntries = [
   { kind: "project-management", label: "Projects", defaultW: 42, defaultH: 30, ...projectManagementModule },
   { kind: "account-manager", label: "Accounts", defaultW: 42, defaultH: 30, ...accountManagerModule },
   { kind: "teams", label: "Teams", defaultW: 42, defaultH: 30, ...teamsModule },
+  { kind: "fields", label: "Fields", defaultW: 42, defaultH: 30, ...fieldsModule },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
 ];
 

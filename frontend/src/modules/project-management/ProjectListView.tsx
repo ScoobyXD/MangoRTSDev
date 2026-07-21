@@ -3,6 +3,7 @@ import { AppModalPortal } from "../../app/AppModalPortal.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyUserGroup } from "../communications/communicationsApi.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import type { EntityField } from "../fields/entityFieldsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalGroupingSetting, type UniversalNestedGroup } from "../grouping/universalGrouping.js";
 import type { ProjectHealth, ProjectRecord } from "./projectManagementApi.js";
@@ -12,7 +13,12 @@ import {
   projectStatusChoices,
   type ProjectFieldTone,
 } from "./ProjectFieldControl.js";
-import { PROJECT_LIST_GROUPING_FIELDS, projectFolderSubtreeIDs, type ProjectListGroupingField } from "./projectListViewModel.js";
+import {
+  entityFieldIDFromGrouping,
+  PROJECT_LIST_GROUPING_FIELDS,
+  projectFolderSubtreeIDs,
+  type ProjectListGroupingField,
+} from "./projectListViewModel.js";
 export { PROJECT_LIST_GROUPING_FIELDS, normalizeProjectListGroupings, projectFolderSubtreeIDs, resolveProjectFolderRootID } from "./projectListViewModel.js";
 export type { ProjectListGroupingField } from "./projectListViewModel.js";
 
@@ -26,6 +32,7 @@ export type ProjectListFieldUpdate = Partial<{
   health: ProjectHealth;
   accountIDs: string[];
   teamIDs: string[];
+  fieldIDs: string[];
 }>;
 
 type ProjectTreeRow =
@@ -43,6 +50,9 @@ export function ProjectListView({
   groupings,
   accounts,
   teams,
+  fields,
+  visibleFieldIDs,
+  onVisibleFieldIDsChange,
   savingProjectIDs,
   onProjectOpen,
   onProjectFieldChange,
@@ -58,6 +68,9 @@ export function ProjectListView({
   groupings: Array<UniversalGroupingSetting<ProjectListGroupingField>>;
   accounts: Account[];
   teams: CompanyUserGroup[];
+  fields: EntityField[];
+  visibleFieldIDs: string[];
+  onVisibleFieldIDsChange: (fieldIDs: string[]) => void;
   savingProjectIDs: Set<string>;
   onProjectOpen: (projectID: string) => void;
   onProjectFieldChange: (project: ProjectRecord, update: ProjectListFieldUpdate) => void | Promise<void>;
@@ -74,6 +87,11 @@ export function ProjectListView({
   const [selectedProjectIDs, setSelectedProjectIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorID, setSelectionAnchorID] = useState("");
   const [dropFolderID, setDropFolderID] = useState("");
+  const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
+  const fieldByID = useMemo(() => new Map(fields.map((field) => [field.field_id, field])), [fields]);
+  const visibleFields = useMemo(() => visibleFieldIDs.map((fieldID) => fieldByID.get(fieldID)).filter((field): field is EntityField => Boolean(field)), [fieldByID, visibleFieldIDs]);
+  const addableFields = useMemo(() => fields.filter((field) => !visibleFieldIDs.includes(field.field_id)), [fields, visibleFieldIDs]);
+  const columnCount = 6 + visibleFields.length;
 
   useEffect(() => {
     setExpandedFolderIDs((current) => {
@@ -101,9 +119,9 @@ export function ProjectListView({
   const groupedProjects = useMemo(() => buildUniversalNestedGroups(sortedProjects, groupings, {
     rootID: "projects",
     rowKey: (project) => project.project_id,
-    getValues: projectGroupingValues,
+    getValues: (project, field) => projectGroupingValues(project, field, fieldByID),
     sortRows: sortProjects,
-  }), [groupings, sortedProjects]);
+  }), [fieldByID, groupings, sortedProjects]);
 
   useEffect(() => {
     if (groupings.length === 0) return;
@@ -182,6 +200,28 @@ export function ProjectListView({
             <span style={nameTextStyle}>{project.name || project.project_id}</span>
           </span>
         </td>
+        {visibleFields.map((field) => {
+          const currentFieldIDs = project.fields?.map((item) => item.field_id) ?? [];
+          const assigned = currentFieldIDs.includes(field.field_id);
+          return (
+            <td key={field.field_id} style={customFieldCellStyle(field.color)}>
+              <ProjectFieldControl
+                ariaLabel={`${field.name} for ${project.name || "project"}`}
+                values={assigned ? [field.field_id] : []}
+                choices={[{ id: field.field_id, label: field.name }]}
+                multiple
+                placeholder="Not set"
+                disabled={saving}
+                onChange={(values) => onProjectFieldChange(project, {
+                  fieldIDs: values.includes(field.field_id)
+                    ? [...currentFieldIDs.filter((fieldID) => fieldID !== field.field_id), field.field_id]
+                    : currentFieldIDs.filter((fieldID) => fieldID !== field.field_id),
+                })}
+              />
+            </td>
+          );
+        })}
+        <td aria-hidden="true" style={addFieldCellStyle} />
         <td style={editableCellStyle}>
           <ProjectFieldControl
             ariaLabel={`Status for ${project.name || "project"}`}
@@ -232,10 +272,10 @@ export function ProjectListView({
     return (
       <React.Fragment key={group.id}>
         <tr data-project-row="group" style={groupRowStyle(group.depth)} onClick={() => setExpandedGroupIDs((current) => toggleSet(current, group.id))}>
-          <td colSpan={5} style={groupCellStyle}>
+          <td colSpan={columnCount} style={groupCellStyle}>
             <span style={groupCellInnerStyle(group.depth)}>
               <span style={disclosureStyle}><ExplorerDisclosureIcon open={expanded} color="#64748b" /></span>
-              <span style={groupAxisStyle}>{groupingFieldLabel(group.field)}</span>
+              <span style={groupAxisStyle}>{groupingFieldLabel(group.field, fieldByID)}</span>
               <span style={groupLabelStyle}>{group.label}</span>
               <span style={countStyle}>{rows.length}</span>
             </span>
@@ -283,10 +323,49 @@ export function ProjectListView({
         }
       }}
     >
-      <table style={tableStyle}>
+      <table style={tableStyle(visibleFields.length)}>
         <thead>
           <tr>
             <th style={headerCellStyle}>Project Name</th>
+            {visibleFields.map((field) => (
+              <th key={field.field_id} style={customFieldHeaderStyle(field.color)}>
+                <span style={customFieldHeaderInnerStyle}>
+                  <span aria-hidden="true" style={customFieldHeaderDotStyle(field.color)} />
+                  <span style={customFieldHeaderLabelStyle}>{field.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Hide ${field.name} column`}
+                    title={`Hide ${field.name} column`}
+                    style={hideFieldColumnButtonStyle}
+                    onClick={() => onVisibleFieldIDsChange(visibleFieldIDs.filter((fieldID) => fieldID !== field.field_id))}
+                  >×</button>
+                </span>
+              </th>
+            ))}
+            <th style={addFieldHeaderStyle}>
+              <button type="button" aria-label="Add field column" title="Add field column" style={addFieldColumnButtonStyle(fieldPickerOpen)} onClick={() => setFieldPickerOpen((open) => !open)}>+</button>
+              {fieldPickerOpen ? (
+                <div role="dialog" aria-label="Add field column" style={fieldPickerStyle}>
+                  <div style={fieldPickerTitleStyle}>Add field column</div>
+                  {addableFields.length === 0 ? (
+                    <div style={fieldPickerEmptyStyle}>{fields.length === 0 ? "Create fields from Entities → Fields first." : "Every field is already visible."}</div>
+                  ) : addableFields.map((field) => (
+                    <button
+                      key={field.field_id}
+                      type="button"
+                      style={fieldPickerOptionStyle}
+                      onClick={() => {
+                        onVisibleFieldIDsChange([...visibleFieldIDs, field.field_id]);
+                        setFieldPickerOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true" style={customFieldHeaderDotStyle(field.color)} />
+                      <span>{field.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </th>
             <th style={headerCellStyle}>Status</th>
             <th style={headerCellStyle}>Health</th>
             <th style={headerCellStyle}>Account</th>
@@ -325,7 +404,7 @@ export function ProjectListView({
                 }}
                 onDrop={(event) => acceptDrop(event, row.folder.folder_id)}
               >
-                <td colSpan={5} style={folderCellStyle}>
+                <td colSpan={columnCount} style={folderCellStyle}>
                   <span style={nameCellInnerStyle(row.depth)}>
                     <span style={disclosureStyle}>{row.hasChildren ? <ExplorerDisclosureIcon open={row.expanded} color="#64748b" /> : null}</span>
                     <span style={iconStyle}><ExplorerRowIcon kind="folder" /></span>
@@ -336,7 +415,7 @@ export function ProjectListView({
             );
           })}
           {(groupings.length > 0 ? groupedProjects.length : treeRows.length) === 0 ? (
-            <tr><td colSpan={5} style={emptyCellStyle}>No projects</td></tr>
+            <tr><td colSpan={columnCount} style={emptyCellStyle}>No projects</td></tr>
           ) : null}
         </tbody>
       </table>
@@ -489,7 +568,16 @@ function buildFolderChoices(folders: CompanyExplorerFolder[], rootFolderID: stri
   return choices.filter((choice) => choice.folderID);
 }
 
-function projectGroupingValues(project: ProjectRecord, field: ProjectListGroupingField): UniversalGroupValue[] {
+function projectGroupingValues(project: ProjectRecord, field: ProjectListGroupingField, fieldByID: Map<string, EntityField>): UniversalGroupValue[] {
+  const customFieldID = entityFieldIDFromGrouping(field);
+  if (customFieldID) {
+    const definition = fieldByID.get(customFieldID);
+    const label = definition?.name?.trim() || "Field";
+    const assigned = project.fields?.some((item) => item.field_id === customFieldID) === true;
+    return assigned
+      ? [{ key: customFieldID, label, sortValue: label }]
+      : [{ key: "__unassigned", label: `No ${label}`, sortValue: "", sortLast: true }];
+  }
   if (field === "account") return entityGroupValues(project.accounts?.map((account) => ({ id: account.account_id, label: account.name })) ?? []);
   if (field === "team") return entityGroupValues(project.teams?.map((team) => ({ id: team.group_id, label: team.name })) ?? []);
   if (field === "status") return singleGroupValue(project.status || "Unassigned");
@@ -569,7 +657,9 @@ function toggleSet(current: Set<string>, value: string): Set<string> {
   return next;
 }
 
-function groupingFieldLabel(field: ProjectListGroupingField): string {
+function groupingFieldLabel(field: ProjectListGroupingField, fieldByID: Map<string, EntityField>): string {
+  const customFieldID = entityFieldIDFromGrouping(field);
+  if (customFieldID) return fieldByID.get(customFieldID)?.name ?? "Field";
   return PROJECT_LIST_GROUPING_FIELDS.find((option) => option.value === field)?.label ?? field;
 }
 
@@ -588,10 +678,23 @@ const listScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   borderRadius: 10,
   background: dropActive ? "rgba(239, 246, 255, 0.88)" : "rgba(255, 255, 255, 0.82)",
 });
-const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 720, color: "#0f172a" };
+const tableStyle = (customFieldCount: number): React.CSSProperties => ({ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 760 + customFieldCount * 150, color: "#0f172a" });
 const headerCellStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 5, height: 42, padding: "0 14px", background: "#f8fafc", borderBottom: "1px solid rgba(148, 163, 184, 0.26)", color: "#475569", fontSize: 12, fontWeight: 900, textAlign: "left" };
+const customFieldHeaderStyle = (color: string): React.CSSProperties => ({ ...headerCellStyle, minWidth: 142, padding: "0 10px", background: `linear-gradient(180deg, ${color}12, #f8fafc 78%)` });
+const customFieldHeaderInnerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "10px minmax(0, 1fr) 20px", alignItems: "center", gap: 6 };
+const customFieldHeaderDotStyle = (color: string): React.CSSProperties => ({ width: 9, height: 9, borderRadius: 999, background: color, boxShadow: `0 0 0 3px ${color}18`, flexShrink: 0 });
+const customFieldHeaderLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const hideFieldColumnButtonStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", border: 0, borderRadius: 6, background: "transparent", color: "#94a3b8", cursor: "pointer", padding: 0, font: "inherit", fontSize: 15, lineHeight: 1 };
+const addFieldHeaderStyle: React.CSSProperties = { ...headerCellStyle, position: "relative", width: 44, minWidth: 44, padding: 0, textAlign: "center", overflow: "visible" };
+const addFieldColumnButtonStyle = (open: boolean): React.CSSProperties => ({ width: 28, height: 28, display: "inline-grid", placeItems: "center", border: `1px solid ${open ? "#6366f1" : "rgba(99,102,241,.28)"}`, borderRadius: 9, background: open ? "#eef2ff" : "rgba(255,255,255,.92)", color: "#6366f1", boxShadow: open ? "0 0 0 3px rgba(99,102,241,.12)" : "0 4px 10px rgba(15,23,42,.06)", cursor: "pointer", padding: 0, font: "inherit", fontSize: 18, fontWeight: 800, lineHeight: 1 });
+const fieldPickerStyle: React.CSSProperties = { position: "absolute", top: 37, left: 0, zIndex: 80, width: 230, maxHeight: 280, overflow: "auto", display: "grid", alignContent: "start", gap: 4, padding: 8, border: "1px solid rgba(99,102,241,.24)", borderRadius: 12, background: "rgba(255,255,255,.98)", boxShadow: "0 18px 44px rgba(15,23,42,.20), inset 1px 1px 0 rgba(255,255,255,.9)", textAlign: "left", boxSizing: "border-box" };
+const fieldPickerTitleStyle: React.CSSProperties = { padding: "3px 5px 7px", borderBottom: "1px solid rgba(226,232,240,.9)", color: "#334155", fontSize: 11, fontWeight: 950 };
+const fieldPickerOptionStyle: React.CSSProperties = { minHeight: 34, display: "grid", gridTemplateColumns: "12px minmax(0,1fr)", alignItems: "center", gap: 8, border: 0, borderRadius: 8, background: "transparent", color: "#334155", cursor: "pointer", padding: "0 8px", textAlign: "left", font: "inherit", fontSize: 12, fontWeight: 850 };
+const fieldPickerEmptyStyle: React.CSSProperties = { padding: "10px 7px", color: "#64748b", fontSize: 11, fontWeight: 750, lineHeight: 1.45 };
 const cellStyle: React.CSSProperties = { height: 44, padding: "0 14px", borderBottom: "1px solid rgba(226, 232, 240, 0.9)", fontSize: 13, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", verticalAlign: "middle" };
 const editableCellStyle: React.CSSProperties = { ...cellStyle, minWidth: 142, padding: "5px 14px" };
+const customFieldCellStyle = (color: string): React.CSSProperties => ({ ...editableCellStyle, background: `linear-gradient(90deg, ${color}06, transparent)` });
+const addFieldCellStyle: React.CSSProperties = { ...cellStyle, width: 44, minWidth: 44, padding: 0 };
 const nameCellStyle: React.CSSProperties = { ...cellStyle, color: "#0f172a", fontWeight: 900 };
 const projectRowStyle = (selected: boolean): React.CSSProperties => ({ cursor: "pointer", background: selected ? "linear-gradient(90deg, rgba(219, 234, 254, 0.92), rgba(239, 246, 255, 0.72))" : "transparent", outline: selected ? "2px solid rgba(37, 99, 235, 0.30)" : "2px solid transparent", outlineOffset: -2 });
 const folderRowStyle = (dropActive: boolean): React.CSSProperties => ({ cursor: "pointer", background: dropActive ? "rgba(219, 234, 254, 0.92)" : "rgba(248, 250, 252, 0.78)" });

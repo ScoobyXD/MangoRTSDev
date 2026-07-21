@@ -7,8 +7,9 @@ export const HOME_MODULE_KINDS = ["home"];
 export const PROJECT_MANAGEMENT_MODULE_KINDS = ["project-management"];
 export const ACCOUNT_MANAGER_MODULE_KINDS = ["account-manager"];
 export const TEAMS_MODULE_KINDS = ["teams"];
+export const FIELDS_MODULE_KINDS = ["fields"];
 
-export type DashboardRouteSurface = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
+export type DashboardRouteSurface = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
 
 export type DashboardPreloadPlan = {
   moduleKinds: string[];
@@ -43,6 +44,9 @@ export function planLikelyDashboardPreload(activeTab: ({ page?: ViewTab["page"];
   }
   if (activeTab.page === "teams") {
     return { moduleKinds: TEAMS_MODULE_KINDS, routeSurfaces: ["teams"] };
+  }
+  if (activeTab.page === "fields") {
+    return { moduleKinds: FIELDS_MODULE_KINDS, routeSurfaces: ["fields"] };
   }
   const moduleKinds = uniqueKinds(activeTab.frames);
   return {
