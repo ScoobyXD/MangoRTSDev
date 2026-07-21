@@ -189,19 +189,11 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		node.Priority = &priority
 	}
 	r.nodes[key(input.CompanyID, node.NodeID)] = node
-	informationID, textBlockID, collaborationID := newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
+	informationID, collaborationID := newUUIDv7String(), newUUIDv7String()
 	information := communicationsEmailAttachedProjectionPayloadWithThread(informationID, collaborationID, thread.EmailThreadID, input)
 	projection := domain.NodeProjection{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}
-	textBlockInformation := communicationsEmailLinkedTextBlockPayload(input)
-	textBlockProjection := domain.NodeProjection{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: textBlockID, Type: "Text box", Information: textBlockInformation, CreatedTimestamp: now, UpdatedTimestamp: now}
-	r.nodeText[key(input.CompanyID, node.NodeID)] = map[string]domain.NodeProjection{
-		informationID: projection,
-		textBlockID:   textBlockProjection,
-	}
-	r.nodeInfo[key(input.CompanyID, node.NodeID)] = []domain.NodeInformation{
-		{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now},
-		{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: textBlockID, Type: "Text box", Information: textBlockInformation, CreatedTimestamp: now, UpdatedTimestamp: now},
-	}
+	r.nodeText[key(input.CompanyID, node.NodeID)] = map[string]domain.NodeProjection{informationID: projection}
+	r.nodeInfo[key(input.CompanyID, node.NodeID)] = []domain.NodeInformation{{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}}
 	r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
 	r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, node.NodeID, node.Title, now, now)
 	if !r.placeEmailCollaborationNodeInDefaultFolderLocked(input.CompanyID, node.NodeID) {
