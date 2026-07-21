@@ -26,6 +26,20 @@ export type EmailCollaborationChatSession = {
   visible: boolean;
 } | null;
 
+export type EmailCollaborationPanelAction = "chat" | "create" | "import";
+
+export type EmailCollaborationActionRequest = {
+  action: EmailCollaborationPanelAction;
+  requestID: number;
+} | null;
+
+export function nextEmailCollaborationActionRequest(
+  current: EmailCollaborationActionRequest,
+  action: EmailCollaborationPanelAction,
+): NonNullable<EmailCollaborationActionRequest> {
+  return { action, requestID: (current?.requestID ?? 0) + 1 };
+}
+
 export function toggleEmailCollaborationChatSession(
   current: EmailCollaborationChatSession,
   key: string,

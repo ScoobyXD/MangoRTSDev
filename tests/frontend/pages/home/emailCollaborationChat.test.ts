@@ -14,6 +14,7 @@ import {
   emailCollaborationChatSessionMounted,
   emailCollaborationChatSessionVisible,
   formatEmailCollaborationChatError,
+  nextEmailCollaborationActionRequest,
   reconcileEmailCollaborationChatSession,
   resolveEmailCollaborationChatPlacement,
   toggleEmailCollaborationChatSession,
@@ -112,6 +113,17 @@ test("email chat session is default-closed, preserves same-email state, and rese
   assert.equal(toggleEmailCollaborationChatSession(session, ""), null);
 });
 
+test("email toolbar action requests are monotonic and preserve the selected operation", () => {
+  let request = nextEmailCollaborationActionRequest(null, "create");
+  assert.deepEqual(request, { action: "create", requestID: 1 });
+
+  request = nextEmailCollaborationActionRequest(request, "import");
+  assert.deepEqual(request, { action: "import", requestID: 2 });
+
+  request = nextEmailCollaborationActionRequest(request, "chat");
+  assert.deepEqual(request, { action: "chat", requestID: 3 });
+});
+
 test("email collaboration chat resolves to a real linked text box and only reads legacy attached-email chat as fallback", () => {
   const linkedTextBox = {
     information_id: "text-box-1",
@@ -186,7 +198,11 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(workspace, /gridTemplateRows: !showDetailResizeHandle && emailChatVisible/);
   assert.match(workspace, /chatAvailable=\{emailChatAvailable\}[\s\S]*chatOpen=\{emailChatVisible\}[\s\S]*onToggleChat=\{toggleEmailChat\}/);
   assert.match(workspace, /\{emailChatMounted && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
+  assert.match(detail, /data-email-node-actions="true"[\s\S]*Create Node From Email[\s\S]*Add Email to Node[\s\S]*aria-controls="email-collaboration-chat"/);
   assert.match(detail, /aria-controls="email-collaboration-chat"[\s\S]*aria-expanded=\{chatOpen\}[\s\S]*aria-pressed=\{chatOpen\}/);
+  assert.match(workspace, /requestEmailPanelAction\("create"\)/);
+  assert.match(workspace, /requestEmailPanelAction\("import"\)/);
+  assert.match(surface, /actionRequest[\s\S]*setPendingAction\(actionRequest\.action\)[\s\S]*setPriorityMenuOpen\(actionRequest\.action !== "chat"\)/);
   assert.match(sharedChat, /headerTrailing\?: React\.ReactNode/);
   assert.match(sharedChat, /\{headerTrailing && \(/);
   assert.match(surface, /hidden=\{!active\}/);
@@ -211,7 +227,7 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /emailMessageID,[\s\S]{0,160}emailAccent: editorEmailMessageAccent/);
   assert.match(surface, /const activeBlockID = await ensureLinkedEmailTextBlock\(activeCollaboration\)/);
   assert.match(surface, /blockID: activeBlockID,[\s\S]{0,500}selectionMessageID: !replyTargetID \? \(selection\?\.messageID \?\? message\.id\)/);
-  assert.match(surface, /const linkedTextBlockID = await saveCurrentDraftToCollaboration\(created\)/);
+  assert.match(surface, /const linkedTextBlockID = await ensureLinkedEmailTextBlock\(created\);[\s\S]*saveCurrentDraftToCollaboration\(created, linkedTextBlockID\)/);
   assert.match(surface, /informationID: activeBlockID,[\s\S]{0,120}editorSurface: "email_collaboration_chat"/);
 });
 
@@ -223,7 +239,11 @@ test("email-created nodes reuse canonical chat data with one node email column",
   const projection = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorProjection.ts"), "utf8");
 
   assert.match(workspace, /message\.collaboration_node_id\?\.trim\(\)[\s\S]*onOpenCollaborationNode\(message\)/);
+  assert.match(workspace, /<ExplorerRowIcon kind="node" \/>/);
+  assert.doesNotMatch(workspace, /function EmailNodeIndicatorIcon/);
   assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
+  assert.match(detail, /Open existing email node[\s\S]*<ExplorerRowIcon kind="node" \/>/);
+  assert.doesNotMatch(detail, /<MailIcon color="#7c3aed" \/>/);
   assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);

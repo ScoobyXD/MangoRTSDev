@@ -43,6 +43,7 @@ import { EmailCollaborationParticipantRoster } from "./EmailCollaborationPartici
 import {
   formatEmailCollaborationChatError,
   resolveEmailCollaborationChatPlacement,
+  type EmailCollaborationActionRequest,
 } from "./emailCollaborationChat";
 import { INBOX_PRIORITIES } from "./homeConstants";
 
@@ -65,6 +66,7 @@ type EmailCollaborationChatSurfaceProps = {
   companyUserGroups: CompanyUserGroup[];
   companyUserGroupMembers: CompanyUserGroupMember[];
   nodes: NodeRecord[];
+  actionRequest: EmailCollaborationActionRequest;
   onOpenImportedNode?: (nodeID: string, informationID: string, emailMessageID: string) => void;
   selection: EmailCollaborationSelection | null;
   onClearSelection: () => void;
@@ -141,6 +143,7 @@ export function EmailCollaborationChatSurface({
   companyUserGroups,
   companyUserGroupMembers,
   nodes,
+  actionRequest,
   onOpenImportedNode,
   selection,
   onClearSelection,
@@ -178,6 +181,12 @@ export function EmailCollaborationChatSurface({
     () => JSON.stringify([companyID, sharedInboxID?.trim() ?? "", accountEmail?.trim().toLowerCase() ?? "", message.id.trim(), message.thread_id?.trim() ?? ""]),
     [accountEmail, companyID, message.id, message.thread_id, sharedInboxID],
   );
+  React.useEffect(() => {
+    if (!active || !actionRequest) return;
+    setPendingAction(actionRequest.action);
+    setPriorityMenuOpen(actionRequest.action !== "chat");
+    if (actionRequest.action === "import") setNodeSearch("");
+  }, [active, actionRequest?.requestID]);
   const principals = React.useMemo(
     () => collaborationMentionPrincipals(companyUsers, companyUserGroups, companyUserGroupMembers),
     [companyUserGroupMembers, companyUserGroups, companyUsers],
@@ -546,6 +555,7 @@ export function EmailCollaborationChatSurface({
       setSelectedMentionPrincipals([]);
       setReplyTargetID("");
       setDetectedNodeID(cleanNodeID);
+      setPriorityMenuOpen(false);
       onClearSelection();
       onSuccess();
       onOpenImportedNode?.(cleanNodeID, textBlockID, emailMessageID);
@@ -602,11 +612,11 @@ export function EmailCollaborationChatSurface({
     return textBlockID;
   }, [accountEmail, apiBase, companyID, message.id, message.subject, selection?.messageID, sharedInboxID]);
 
-  const saveCurrentDraftToCollaboration = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
+  const saveCurrentDraftToCollaboration = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration, ensuredTextBlockID = ""): Promise<string> => {
     const cleanDraft = draft.trim();
     if (!cleanDraft && draftAttachments.length === 0) return "";
     const activeNodeID = activeCollaboration.node_id.trim();
-    const activeBlockID = await ensureLinkedEmailTextBlock(activeCollaboration);
+    const activeBlockID = ensuredTextBlockID.trim() || await ensureLinkedEmailTextBlock(activeCollaboration);
     if (!activeNodeID || !activeBlockID) throw new Error("email_collaboration_node_missing");
     const informationID = generateStableInformationID();
     const createdTimestamp = new Date().toISOString();
@@ -675,21 +685,22 @@ export function EmailCollaborationChatSurface({
     return activeBlockID;
   }, [author.name, author.userID, companyID, draft, draftAttachments, ensureLinkedEmailTextBlock, message.id, onClearSelection, onError, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selection]);
 
-  const createEmailNode = React.useCallback(async (priorityOverride: number) => {
+  const createEmailNode = React.useCallback(async (priorityOverride?: number) => {
     if (submitting) return;
     setPriorityMenuOpen(false);
     setSubmitting(true);
     try {
       const created = await ensureCollaboration(priorityOverride);
-      const linkedTextBlockID = await saveCurrentDraftToCollaboration(created);
+      const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
+      await saveCurrentDraftToCollaboration(created, linkedTextBlockID);
       onSuccess();
-      onOpenImportedNode?.(created.node_id, linkedTextBlockID || created.attached_email_information_id, message.id);
+      onOpenImportedNode?.(created.node_id, linkedTextBlockID, message.id);
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to create a node for this email."));
     } finally {
       setSubmitting(false);
     }
-  }, [ensureCollaboration, message.id, onError, onOpenImportedNode, onSuccess, saveCurrentDraftToCollaboration, submitting]);
+  }, [ensureCollaboration, ensureLinkedEmailTextBlock, message.id, onError, onOpenImportedNode, onSuccess, saveCurrentDraftToCollaboration, submitting]);
 
   const submit = React.useCallback(async (priorityOverride?: number) => {
     const cleanDraft = draft.trim();
@@ -827,7 +838,7 @@ export function EmailCollaborationChatSurface({
           </div>
         </div>
       )}
-      {priorityMenuOpen && !collaboration && (
+      {priorityMenuOpen && !loading && (pendingAction === "import" || pendingAction === "create" || !collaboration) && (
         <div role="dialog" aria-label="Place email in a node" style={{ margin: "0 8px", display: "grid", gap: 6, border: "1px solid rgba(249,115,22,0.36)", borderRadius: 10, background: "rgba(255,247,237,0.96)", padding: 8, boxShadow: "0 8px 20px rgba(15,23,42,0.10)" }}>
           {pendingAction !== "create" && (
             <>
@@ -835,7 +846,14 @@ export function EmailCollaborationChatSurface({
               <input value={nodeSearch} onChange={(event) => setNodeSearch(event.target.value)} placeholder="Search nodes" aria-label="Search existing nodes" style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.3)", borderRadius: 8, background: "#ffffff", padding: "4px 8px", fontSize: 11 }} />
               <div style={{ maxHeight: 180, overflowY: "auto", display: "grid", gap: 4 }}>
                 {filteredNodes.map((node) => (
-                  <button key={node.node_id} type="button" disabled={submitting} onClick={() => { void importIntoExistingNode(node.node_id, pendingAction === "chat"); }} style={{ minHeight: 28, border: "1px solid rgba(14,165,233,0.24)", borderRadius: 8, background: node.node_id === detectedNodeID ? "rgba(240,253,250,0.94)" : "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                  <button key={node.node_id} type="button" disabled={submitting} onClick={() => {
+                    if (node.node_id === detectedNodeID) {
+                      setPriorityMenuOpen(false);
+                      onOpenImportedNode?.(node.node_id, "", message.id);
+                      return;
+                    }
+                    void importIntoExistingNode(node.node_id, pendingAction === "chat");
+                  }} style={{ minHeight: 28, border: "1px solid rgba(14,165,233,0.24)", borderRadius: 8, background: node.node_id === detectedNodeID ? "rgba(240,253,250,0.94)" : "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
                     {node.name || node.node_id}{node.node_id === detectedNodeID ? " - thread already attached" : ""}
                   </button>
                 ))}
@@ -843,7 +861,15 @@ export function EmailCollaborationChatSurface({
               </div>
             </>
           )}
-          {pendingAction !== "import" && (
+          {pendingAction === "create" && collaboration && (
+            <>
+              <strong style={{ color: "#0f766e", fontSize: 11 }}>This email already has a Node</strong>
+              <button type="button" disabled={submitting} onClick={() => { void createEmailNode(); }} style={{ minHeight: 28, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 8, background: "#ffffff", color: "#0f766e", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                Open the Node and ensure its linked email text box
+              </button>
+            </>
+          )}
+          {pendingAction !== "import" && !collaboration && (
             <>
               <strong style={{ color: "#9a3412", fontSize: 11 }}>{pendingAction === "create" ? "Choose a priority to create this email node" : "Or choose a priority for a new email node"}</strong>
               {INBOX_PRIORITIES.map((priority) => (
@@ -866,7 +892,7 @@ export function EmailCollaborationChatSurface({
           <button type="button" onClick={() => setPriorityMenuOpen(false)} style={{ minHeight: 26, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}>Cancel</button>
         </div>
       )}
-      {submitting && <div role="status" style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800, padding: "0 8px" }}>Saving comment and email node</div>}
+      {submitting && <div role="status" style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800, padding: "0 8px" }}>{pendingAction === "chat" ? "Saving comment and email node" : "Saving email node"}</div>}
       <ChatPane
         blockID={blockID || "email-collaboration"}
         editable

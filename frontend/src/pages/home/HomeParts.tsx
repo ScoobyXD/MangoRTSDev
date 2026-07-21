@@ -35,7 +35,7 @@ import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../m
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
-import { ChatIcon, MailIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
+import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
@@ -6198,9 +6198,9 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               title="Open existing email node"
               aria-label={`Open node for this reply from ${formatAddressList(message.from) || "Unknown sender"}`}
               onClick={() => onOpenCollaborationNode(message)}
-              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px", color: "#7c3aed", borderColor: "rgba(124,58,237,0.28)", background: "rgba(245,243,255,0.86)" }}
+              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px", borderColor: "rgba(51,221,213,0.3)", background: "rgba(236,254,255,0.86)" }}
             >
-              <MailIcon color="#7c3aed" />
+              <ExplorerRowIcon kind="node" />
             </button>
           )}
           <details data-email-message-actions="true" style={{ position: "relative", flex: "0 0 auto" }}>
@@ -6287,7 +6287,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onCreateEmailNode, onAddEmailToNode, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6306,6 +6306,8 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onReplyAll: (message: EmailMessage) => void;
   onCreateSharedDraft: (message: EmailMessage) => void;
   onToggleChat: () => void;
+  onCreateEmailNode: () => void;
+  onAddEmailToNode: () => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -6432,55 +6434,59 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
-      <div style={toolbarStyle}>
-        {!singleMessage && (
-          <>
-            <label style={{ ...mutedSmallStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              Order
-              <select
-                aria-label="Email conversation order"
-                style={{ ...mailPanelInputStyle, minHeight: 30, height: 30, width: 132, padding: "0 8px" }}
-                value={conversationOrder}
-                onChange={(event) => setConversationOrder(event.currentTarget.value as EmailConversationOrder)}
-              >
-                <option value="oldest">Oldest first</option>
-                <option value="newest">Newest first</option>
-              </select>
-            </label>
-            <button
-              style={mailPanelSmallButtonStyle}
-              disabled={allConversationMessagesExpanded}
-              onClick={expandAllConversationMessages}
-            >
-              Expand all threads
-            </button>
-          </>
-        )}
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
+      <div style={{ ...toolbarStyle, alignItems: "center" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          {!singleMessage && (
+            <>
+              <label style={{ ...mutedSmallStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Order
+                <select
+                  aria-label="Email conversation order"
+                  style={{ ...mailPanelInputStyle, minHeight: 30, height: 30, width: 132, padding: "0 8px" }}
+                  value={conversationOrder}
+                  onChange={(event) => setConversationOrder(event.currentTarget.value as EmailConversationOrder)}
+                >
+                  <option value="oldest">Oldest first</option>
+                  <option value="newest">Newest first</option>
+                </select>
+              </label>
+              <button type="button" style={mailPanelSmallButtonStyle} disabled={allConversationMessagesExpanded} onClick={expandAllConversationMessages}>Expand all threads</button>
+            </>
+          )}
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
+          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
+          <button type="button" style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
+        </div>
         {chatAvailable && (
-          <button
-            type="button"
-            aria-controls="email-collaboration-chat"
-            aria-expanded={chatOpen}
-            aria-pressed={chatOpen}
-            title={chatOpen ? "Close email chat" : "Open email chat"}
-            style={{
-              ...mailPanelSmallButtonStyle,
-              borderColor: chatOpen ? "rgba(249,115,22,0.72)" : mailPanelSmallButtonStyle.borderColor,
-              color: chatOpen ? "#c2410c" : mailPanelSmallButtonStyle.color,
-            }}
-            onClick={onToggleChat}
-          >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ChatIcon color={chatOpen ? "#f97316" : "rgba(71,85,105,0.85)"} />Chat</span>
-          </button>
+          <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)" }}>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onCreateEmailNode}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ExplorerRowIcon kind="node" />{message.collaboration_node_id?.trim() ? "Open Email Node" : "Create Node From Email"}</span>
+            </button>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onAddEmailToNode}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ExplorerRowIcon kind="node" />Add Email to Node</span>
+            </button>
+            <button
+              type="button"
+              aria-controls="email-collaboration-chat"
+              aria-expanded={chatOpen}
+              aria-pressed={chatOpen}
+              title={chatOpen ? "Close email chat" : "Open email chat"}
+              style={{
+                ...mailPanelSmallButtonStyle,
+                borderColor: chatOpen ? "rgba(249,115,22,0.72)" : mailPanelSmallButtonStyle.borderColor,
+                color: chatOpen ? "#c2410c" : mailPanelSmallButtonStyle.color,
+              }}
+              onClick={onToggleChat}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ChatIcon color={chatOpen ? "#f97316" : "rgba(71,85,105,0.85)"} />Chat</span>
+            </button>
+          </div>
         )}
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
-        <button style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
       <div ref={conversationScrollRef} data-email-conversation-scroll="true" data-email-conversation-count={conversationMessages.length} style={bodyContainerStyle}>
         {conversationMessages.map((conversationMessage, index) => (
