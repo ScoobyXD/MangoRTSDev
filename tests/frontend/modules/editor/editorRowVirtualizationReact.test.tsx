@@ -446,9 +446,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     for (const rowID of initialNodeRows) {
       const row = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${rowID}"]`);
       assert.ok(row);
-      assertNodePaneToggles(row, [true, true]);
+      const chatOpen = rowID === "node-block-59";
+      assertNodePaneToggles(row, [true, chatOpen]);
       assert.ok(row.querySelector(`[data-node-text-block-id="${rowID}"]`), "open Node editor should be mounted");
-      assert.ok(row.querySelector(`[data-node-chat-block-id="${rowID}"]`), "open Node chat should be mounted");
+      assert.equal(Boolean(row.querySelector(`[data-node-chat-block-id="${rowID}"]`)), chatOpen, "only a text box with existing chat should open chat by default");
     }
 
     const nodeScrollElement = nodeContainer.firstElementChild as HTMLElement | null;
@@ -624,8 +625,16 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     for (const version of ["v4", "v3", "v2"]) {
       dom.window.localStorage.removeItem(`node-editor-pane-layout-${version}:${COMPANY_ID}:${NODE_ID}`);
     }
+    const emailLinkedProjection = nodeProjections(1)[0];
+    assert.ok(emailLinkedProjection);
+    const emailLinkedPayload = JSON.parse(emailLinkedProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
+    emailLinkedProjection.information = TEXT_BLOCK_PREFIX + JSON.stringify({
+      ...emailLinkedPayload,
+      email_message_id: "message-node-block-0",
+      email_accent: "#2563eb",
+    });
     currentNodeProjectionItems = [
-      ...nodeProjections(1),
+      emailLinkedProjection,
       nodeChatProjection("node-block-0"),
       nodeEmailProjection("node-block-0"),
     ];
@@ -652,8 +661,41 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(Number.parseFloat(emailColumn.style.height) >= 240, "the email column should fill the remaining Node viewport instead of using the old short height cap");
     assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-0"]'));
     assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
+    assert.equal(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"] [data-chat-pane-header="true"]'), null, "embedded Node chat should use the shared row header instead of rendering a second header");
     assert.match(nodeContainer.textContent ?? "", /Email for node-block-0/, "attached email should stay in the node-wide column");
 
+    assert.equal(emailNodeRow.querySelector('[data-node-pane-header="editor"]')?.textContent?.includes("Editor"), true);
+    assert.equal(emailNodeRow.querySelector('[data-node-pane-header="chat"]')?.textContent?.includes("Chat"), true);
+    assert.doesNotMatch(emailColumn.textContent ?? "", /Attached emails/, "the email column should not repeat a redundant second header");
+    assert.ok(Number.parseFloat(emailColumn.style.height) >= 700, "the email column should cover at least the full fixed row while viewport sizing settles");
+
+    const linkedEmailToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Expand linked email"]');
+    assert.ok(linkedEmailToggle, "an email-linked text box should expose a direct body expansion button");
+    await act(async () => { linkedEmailToggle.click(); });
+    await flushWork();
+    assert.equal(linkedEmailToggle.getAttribute("aria-expanded"), "true");
+    assert.ok(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), "linked email should expand inside its text box");
+    await act(async () => { linkedEmailToggle.click(); });
+    await flushWork();
+    assert.equal(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), null);
+
+    const textBoxActions = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Text box actions"]');
+    assert.ok(textBoxActions);
+    await act(async () => { textBoxActions.click(); });
+    await flushWork();
+    const textBoxActionsMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Text box actions"]');
+    assert.ok(textBoxActionsMenu, "the three-dot button should reveal its Delete action");
+    assert.equal(textBoxActionsMenu.style.position, "fixed", "the menu should escape the clipped fixed-height text-box row");
+    const deleteTextBoxAction = Array.from(textBoxActionsMenu.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === "Delete");
+    assert.ok(deleteTextBoxAction);
+    await act(async () => { deleteTextBoxAction.click(); });
+    await flushWork();
+    assert.match(dom.window.document.body.textContent ?? "", /Are you sure you want to delete this\?/);
+    const cancelDelete = Array.from(dom.window.document.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === "Cancel");
+    if (cancelDelete) {
+      await act(async () => { cancelDelete.click(); });
+      await flushWork();
+    }
     await act(async () => { chatToggle.click(); });
     await flushWork();
     assertNodePaneToggles(emailNodeRow, [true, false]);
