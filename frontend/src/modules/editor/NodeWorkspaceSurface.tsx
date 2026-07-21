@@ -2311,23 +2311,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [accent, blocks]);
 
-  const revealNodeEmailMessage = useCallback((messageID: string) => {
-    const cleanMessageID = messageID.trim();
-    if (!cleanMessageID) return;
-    setNodeEmailNavigationRequest((current) => ({
-      messageID: cleanMessageID,
-      requestID: (current?.requestID ?? 0) + 1,
-    }));
-    setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
-    setClosedEmailBlockIDs((current) => {
-      if (!current.has(NODE_EMAIL_COLUMN_LAYOUT_ID)) return current;
-      const next = new Set(current);
-      next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
-      return next;
-    });
-    setFocusedTextBlockID("");
-  }, []);
-
   const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
     if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth, maxWidth);
@@ -3262,10 +3245,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 : "none";
           const textBlockIsFocused = focusedTextBlockID === block.id;
           const blockEmailAccent = block.emailMessageID ? (block.emailAccent?.trim() || editorEmailMessageAccent(block.emailMessageID)) : "";
-          const linkedEmail = block.emailMessageID
-            ? nodeAttachedEmails.find((email) => email.messageID === block.emailMessageID || email.id === block.emailMessageID) ?? null
-            : null;
-          const linkedEmailExpanded = Boolean(linkedEmail && expandedLinkedEmailBlockIDs.has(block.id));
+          const linkedEmailMessageID = block.emailMessageID?.trim() ?? "";
+          const linkedEmailExpanded = Boolean(linkedEmailMessageID && expandedLinkedEmailBlockIDs.has(block.id));
           const linkedEmailPreviewHeight = linkedEmailExpanded ? Math.round(TEXT_BLOCK_MIN_HEIGHT * 0.42) : 0;
           const communicationPaneHeight = TEXT_BLOCK_MIN_HEIGHT - linkedEmailPreviewHeight;
           const selectionAnchor = chatSelectionAnchors[chatBlockID];
@@ -3403,7 +3384,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             });
           };
           const toggleLinkedEmail = () => {
-            if (!linkedEmail) return;
+            if (!linkedEmailMessageID) return;
             setExpandedLinkedEmailBlockIDs((current) => {
               const next = new Set(current);
               if (next.has(block.id)) next.delete(block.id);
@@ -3428,15 +3409,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   >
                     <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${blockEmailAccent ? 128 : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 96}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
-                        {linkedEmail ? (
+                        {linkedEmailMessageID ? (
                           <button type="button" aria-label={linkedEmailExpanded ? "Hide linked email" : "Show linked email"} aria-expanded={linkedEmailExpanded} title={linkedEmailExpanded ? "Hide the linked email" : "Show the linked email"} onClick={toggleLinkedEmail} style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${blockEmailAccent || EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: linkedEmailExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: blockEmailAccent || accent, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
                             <MailIcon color={blockEmailAccent || accent} />
                             <span>{linkedEmailExpanded ? "Hide email" : "Show email"}</span>
-                          </button>
-                        ) : block.emailMessageID ? (
-                          <button type="button" aria-label="Show linked email in email column" title="Show the linked email in the email column" onClick={() => revealNodeEmailMessage(block.emailMessageID || "")} style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${blockEmailAccent || EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: blockEmailAccent || accent, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
-                            <MailIcon color={blockEmailAccent || accent} />
-                            <span>Show email</span>
                           </button>
                         ) : null}
                       </div>
@@ -3470,9 +3446,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       </div>
                     </div>
                   </div>
-                  {linkedEmailExpanded && linkedEmail && (
+                  {linkedEmailExpanded && linkedEmailMessageID && (
                     <LinkedEmailPreviewPane
-                      email={linkedEmail}
+                      messageID={linkedEmailMessageID}
+                      emails={nodeAttachedEmails}
                       nodeID={nodeID}
                       apiBase={apiBase}
                       companyID={companyID}

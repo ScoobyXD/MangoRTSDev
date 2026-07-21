@@ -75,9 +75,12 @@ test("node email and linked text boxes expose animated two-way navigation and co
   const triageChat = source("frontend/src/pages/home/EmailCollaborationChatSurface.tsx");
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
+  assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
+  assert.match(nodeSurface, /messageID=\{linkedEmailMessageID\}/);
+  assert.match(nodeSurface, /emails=\{nodeAttachedEmails\}/);
+  assert.doesNotMatch(nodeSurface, /Show linked email in email column/);
   assert.match(nodeSurface, /data-node-text-box-row/);
   assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
-  assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
@@ -111,6 +114,9 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /data-node-pane-header="chat"/);
   assert.match(nodeSurface, /<ChatPane[\s\S]{0,420}hideHeader/);
   assert.match(nodeParts, /data-node-linked-email-preview="true"/);
+  assert.match(nodeParts, /resolveLinkedEmailPreview/);
+  assert.match(nodeParts, /loadAttachedEmailThreadPreview/);
+  assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
   assert.match(nodeParts, /data-node-email-thread-list="true"/);
   assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);

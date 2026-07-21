@@ -4574,7 +4574,8 @@ const AttachedEmailThreadCard: React.FC<{
 };
 
 type LinkedEmailPreviewPaneProps = {
-  email: EditorAttachedEmail;
+  messageID: string;
+  emails: EditorAttachedEmail[];
   nodeID?: string;
   apiBase?: string;
   companyID: string;
@@ -4598,9 +4599,75 @@ type LinkedEmailPreviewPaneProps = {
   onError: (message: string) => void;
 };
 
+type ResolvedLinkedEmailPreview = {
+  email: EditorAttachedEmail;
+  focusMessageID: string;
+};
+
+async function resolveLinkedEmailPreview(
+  messageID: string,
+  emails: EditorAttachedEmail[],
+  companyID: string,
+  nodeID: string,
+): Promise<ResolvedLinkedEmailPreview | null> {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return null;
+  const directMessage = emails.find((email) => email.messageID.trim() === cleanMessageID);
+  if (directMessage) return { email: directMessage, focusMessageID: cleanMessageID };
+  const directProjection = emails.find((email) => email.id.trim() === cleanMessageID);
+  if (directProjection) return { email: directProjection, focusMessageID: directProjection.messageID };
+
+  const threadResults = await Promise.allSettled(emails.map(async (email) => ({
+    email,
+    messages: await loadAttachedEmailThreadPreview(email, companyID, nodeID),
+  })));
+  for (const result of threadResults) {
+    if (result.status !== "fulfilled") continue;
+    if (result.value.messages.some((message) => message.id.trim() === cleanMessageID)) {
+      return { email: result.value.email, focusMessageID: cleanMessageID };
+    }
+  }
+
+  const mailboxCandidates: Array<EditorAttachedEmail | null> = emails.length > 0 ? emails : [null];
+  const attemptedScopes = new Set<string>();
+  for (const candidate of mailboxCandidates) {
+    if (candidate?.collaborationID?.trim()) continue;
+    const mailboxScope = resolveEditorEmailMailboxScope(candidate?.sharedInboxID, candidate?.accountEmail);
+    const scopeKey = `${mailboxScope.sharedInboxID ?? ""}\u0000${mailboxScope.accountEmail ?? ""}`;
+    if (attemptedScopes.has(scopeKey)) continue;
+    attemptedScopes.add(scopeKey);
+    try {
+      const message = await getEmailMessage(cleanMessageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
+      return {
+        email: {
+          ...(candidate ?? {
+            id: `linked-email:${cleanMessageID}`,
+            messageID: cleanMessageID,
+            attachedTimestamp: "",
+            subject: message.subject || "(no subject)",
+          }),
+          collaborationID: undefined,
+          emailThreadID: undefined,
+          messageID: message.id || cleanMessageID,
+          threadID: message.thread_id?.trim() || candidate?.threadID,
+          subject: message.subject || candidate?.subject || "(no subject)",
+          snippet: message.snippet || candidate?.snippet,
+          from: formatAddressList(message.from) || candidate?.from,
+          date: message.date ?? candidate?.date,
+        },
+        focusMessageID: message.id || cleanMessageID,
+      };
+    } catch {
+      // Try the next attached mailbox scope before reporting that the link is unavailable.
+    }
+  }
+  return null;
+}
+
 /** Full email conversation card embedded below a linked text-box header. */
 export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
-  email,
+  messageID,
+  emails,
   nodeID = "",
   apiBase = "",
   companyID,
@@ -4624,44 +4691,87 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   onError,
 }) => {
   const [replyTarget, setReplyTarget] = useState<{ messageID: string; replyAll: boolean } | null>(null);
+  const [resolvedPreview, setResolvedPreview] = useState<ResolvedLinkedEmailPreview | null>(null);
+  const [resolving, setResolving] = useState(true);
+  const [resolveError, setResolveError] = useState("");
+  const [resolveRequestID, setResolveRequestID] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReplyTarget(null);
+    setResolvedPreview(null);
+    setResolveError("");
+    setResolving(true);
+    void resolveLinkedEmailPreview(messageID, emails, companyID, nodeID)
+      .then((resolved) => {
+        if (cancelled) return;
+        if (resolved) setResolvedPreview(resolved);
+        else setResolveError("The linked email could not be loaded from this Node's attached email threads.");
+      })
+      .catch(() => {
+        if (!cancelled) setResolveError("The linked email could not be loaded from this Node's attached email threads.");
+      })
+      .finally(() => {
+        if (!cancelled) setResolving(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, emails, messageID, nodeID, resolveRequestID]);
+
   return (
     <div data-node-linked-email-preview="true" className="editor-document-scroll" style={{ minWidth: 0, minHeight: 0, overflow: "auto", padding: 8, background: "rgba(248,250,252,0.82)", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-      <AttachedEmailThreadCard
-        email={email}
-        nodeID={nodeID}
-        apiBase={apiBase}
-        companyID={companyID}
-        companyUsers={companyUsers}
-        attachmentRequestJSON={attachmentRequestJSON}
-        attachmentResourceType={attachmentResourceType}
-        attachmentResourceID={attachmentResourceID}
-        attachmentInformationID={attachmentInformationID}
-        attachmentEditorSurface={attachmentEditorSurface}
-        editable={editable}
-        accent={accent}
-        surfaceText={surfaceText}
-        strokeColor={strokeColor}
-        ruleColor={ruleColor}
-        selected
-        collapsed={false}
-        draggable={false}
-        replyTargetMessageID={replyTarget?.messageID ?? ""}
-        replyAll={replyTarget?.replyAll ?? false}
-        onToggleCollapsed={() => undefined}
-        onSelect={() => undefined}
-        onMessageActivate={onEmailMessageActivate}
-        onReply={(messageID, replyAll) => setReplyTarget({ messageID, replyAll })}
-        onReplyComplete={() => setReplyTarget(null)}
-        onReplyEditorFocus={onReplyEditorFocus}
-        onError={onError}
-        onDragStart={() => undefined}
-        onDragEnd={() => undefined}
-        onDropOnEmail={(event) => event.preventDefault()}
-        onSelectionChatRequest={onEmailSelectionChatRequest}
-        onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
-        onSelectionNodeRequest={onEmailSelectionNodeRequest}
-        onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
-      />
+      {resolving && (
+        <div role="status" style={{ minHeight: 72, display: "grid", placeItems: "center", color: accent, fontSize: 11, fontWeight: 850 }}>
+          Loading linked email
+        </div>
+      )}
+      {!resolving && resolveError && (
+        <div role="alert" style={{ minHeight: 72, display: "grid", placeItems: "center", gap: 8, color: "#991b1b", fontSize: 11, fontWeight: 800, textAlign: "center", padding: 10 }}>
+          <span>{resolveError}</span>
+          <button type="button" onClick={() => setResolveRequestID((current) => current + 1)} style={{ minHeight: 28, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "0 10px", fontSize: 10.5, fontWeight: 900 }}>
+            Retry
+          </button>
+        </div>
+      )}
+      {resolvedPreview && (
+        <AttachedEmailThreadCard
+          email={resolvedPreview.email}
+          nodeID={nodeID}
+          apiBase={apiBase}
+          companyID={companyID}
+          companyUsers={companyUsers}
+          attachmentRequestJSON={attachmentRequestJSON}
+          attachmentResourceType={attachmentResourceType}
+          attachmentResourceID={attachmentResourceID}
+          attachmentInformationID={attachmentInformationID}
+          attachmentEditorSurface={attachmentEditorSurface}
+          editable={editable}
+          accent={accent}
+          surfaceText={surfaceText}
+          strokeColor={strokeColor}
+          ruleColor={ruleColor}
+          selected
+          collapsed={false}
+          draggable={false}
+          initialFocusMessageID={resolvedPreview.focusMessageID}
+          initialFocusMessageRequestID={resolveRequestID + 1}
+          replyTargetMessageID={replyTarget?.messageID ?? ""}
+          replyAll={replyTarget?.replyAll ?? false}
+          onToggleCollapsed={() => undefined}
+          onSelect={() => undefined}
+          onMessageActivate={onEmailMessageActivate}
+          onReply={(messageID, replyAll) => setReplyTarget({ messageID, replyAll })}
+          onReplyComplete={() => setReplyTarget(null)}
+          onReplyEditorFocus={onReplyEditorFocus}
+          onError={onError}
+          onDragStart={() => undefined}
+          onDragEnd={() => undefined}
+          onDropOnEmail={(event) => event.preventDefault()}
+          onSelectionChatRequest={onEmailSelectionChatRequest}
+          onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
+          onSelectionNodeRequest={onEmailSelectionNodeRequest}
+          onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
+        />
+      )}
     </div>
   );
 };
@@ -6367,7 +6477,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       const target = Array.from(conversationRootRef.current?.querySelectorAll<HTMLElement>("[data-email-message-id]") ?? [])
         .find((element) => element.dataset.emailMessageId === targetMessageID);
       target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-      target?.animate([
+      target?.animate?.([
         { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
         { transform: "translateX(3px)", boxShadow: "0 0 0 3px rgba(14,165,233,0.22)" },
         { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },

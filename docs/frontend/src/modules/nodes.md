@@ -68,6 +68,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - The Node scroll root disables browser scroll anchoring and contains vertical overscroll. Inner editor, chat, and email scroll areas retain their own scrolling, while the outer text-box list remains monotonic from the first row through the last.
 - An email-associated text box exposes a clear **Show email** button in its header. It expands the existing full email conversation viewer inside that fixed-height text-box card without inserting provider content into the editable document.
 - The expanded viewer shows the provider message body and available From, To, Cc, and Bcc metadata. **Hide email** removes that viewer and restores the full editor/chat height; this display state is local UI only and does not alter the text-box document or email association.
+- The header toggle remains an in-text-box expansion when the text box references a child message but the Node's attached-email projection references the thread root. The preview resolves the matching attached thread and mailbox scope, focuses the exact linked message, and reports a retryable inline error instead of redirecting to the separate Node email column.
 
 ### Node Email Focus And Compact Chat Note (2026-07-21)
 

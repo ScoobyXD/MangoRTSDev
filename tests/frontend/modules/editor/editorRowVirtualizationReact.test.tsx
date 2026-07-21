@@ -78,7 +78,8 @@ function nodeEmailProjection(blockID: string): NodeProjectionItem {
     type: "Attached email",
     information: buildEditorAttachedEmailPayload({
       blockID,
-      messageID: `message-${blockID}`,
+      messageID: `thread-root-${blockID}`,
+      threadID: `thread-${blockID}`,
       subject: `Email for ${blockID}`,
       from: "sender@example.test",
       attachedTimestamp: createdTimestamp,
@@ -300,9 +301,24 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   let committedEditorOperations = 0;
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
+    if (url.pathname === "/v1/communications/messages/thread-root-node-block-0") return jsonResponse({
+      message: {
+        id: "thread-root-node-block-0",
+        thread_id: "thread-node-block-0",
+        subject: "Email for node-block-0",
+        snippet: "Earlier message in linked thread",
+        body: "Earlier linked email body.",
+        date: 1_768_521_500,
+        unread: false,
+        starred: false,
+        from: [{ name: "Earlier Sender", email: "earlier@example.test" }],
+        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+      },
+    });
     if (url.pathname === "/v1/communications/messages/message-node-block-0") return jsonResponse({
       message: {
         id: "message-node-block-0",
+        thread_id: "thread-node-block-0",
         subject: "Email for node-block-0",
         snippet: "Full linked message preview",
         body: "Complete linked email body.",
@@ -313,6 +329,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
         to: [{ name: "Recipient Person", email: "recipient@example.test" }],
         cc: [{ name: "Copy Person", email: "copy@example.test" }],
         bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
+      },
+    });
+    if (url.pathname === "/v1/communications/threads/thread-node-block-0") return jsonResponse({
+      thread: {
+        id: "thread-node-block-0",
+        subject: "Email for node-block-0",
+        message_ids: ["thread-root-node-block-0", "message-node-block-0"],
       },
     });
     if (url.pathname === "/v1/editor-data-format") return jsonResponse({
@@ -711,13 +734,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(nodeContainer.querySelector('[data-node-email-timeline-rail="true"]'), null);
 
     const linkedEmailToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Show linked email"]');
-    assert.ok(linkedEmailToggle, "an email-linked text box should expose a direct body expansion button");
+    assert.ok(linkedEmailToggle, "a child-message-linked text box should expose a direct body expansion button");
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(linkedEmailToggle.getAttribute("aria-expanded"), "true");
     assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Hide linked email");
     const linkedEmailPreview = emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-preview="true"]');
-    assert.ok(linkedEmailPreview, "linked email should expand inside its text box");
+    assert.ok(linkedEmailPreview, "the exact child message should resolve through its attached root thread and expand inside the text box");
     assert.match(linkedEmailPreview.textContent ?? "", /From:\s*Sender Person <sender@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /To:\s*Recipient Person <recipient@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
