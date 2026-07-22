@@ -207,6 +207,66 @@ func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T)
 	}
 }
 
+func TestPostgresCompanyExplorerEditorSearchUsesLeanPriorityBuckets(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_editor_search.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_editor_search.go: %v", err)
+	}
+	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, want := range []string{
+		"with recursive visible_folders as",
+		"visible_items as",
+		"and item.target_type in ('project', 'logic_gate') and (item.parent_folder_id",
+		"node_organization_links as",
+		"visible_node_links as",
+		"lower(node.name) like '%' || lower($2) || '%'",
+		"lower(project.name) like '%' || lower($2) || '%'",
+		"lower(logic_gate.header) like '%' || lower($2) || '%'",
+		"when candidate.resource_type='node' and lower(btrim(candidate.status))='done' then 3",
+		"when candidate.resource_type='node' then 0",
+		"when candidate.resource_type='project' and lower(btrim(candidate.status)) in ('done', 'completed', 'archived') then 4",
+		"when candidate.resource_type='project' then 1",
+		"when candidate.resource_type='logic_gate' then 2",
+		"order by matched.editor_priority, matched.match_priority",
+		"'[]'::text as location_path",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("editor entity search SQL missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"jsonb_build_array",
+		"ranked_locations",
+		"companyexplorerfinalhaschildrenexpr",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("editor entity search SQL kept unused Explorer path work %q", forbidden)
+		}
+	}
+}
+
+func TestEditorEntitySearchTrigramIndexesAreCanonical(t *testing.T) {
+	for _, path := range []string{"../../db/schema.sql", "../../db/migrations/20260722_editor_entity_search_indexes.sql"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+		for _, want := range []string{
+			"create extension if not exists pg_trgm",
+			"idx_nodes_name_trgm",
+			"on nodes using gin (lower(name) gin_trgm_ops)",
+			"idx_projects_name_trgm",
+			"on projects using gin (lower(name) gin_trgm_ops)",
+			"idx_logic_gates_header_trgm",
+			"on logic_gates using gin (lower(header) gin_trgm_ops)",
+		} {
+			if !strings.Contains(source, want) {
+				t.Fatalf("%s missing %q", path, want)
+			}
+		}
+	}
+}
 func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {

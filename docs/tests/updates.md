@@ -1,10 +1,10 @@
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, and U74's pure current Logic Gate label and saved grouping-label/sort resolution. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
@@ -96,6 +96,9 @@ U84 - The Updates page header provides Collapse all and Expand all actions. Coll
 U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Each icon and number has its own fixed, centered row with visible breathing room between them. A zero-count cell stays neutral; a nonzero urgent cell uses a four-stop fiery red-orange gradient, a nonzero normal-mention cell uses a four-stop teal-blue gradient, and a nonzero regular-update cell uses a four-stop yellow-orange gradient. The active gradients use the same light-leading-edge, saturated-middle, and darker-trailing-edge treatment as Mango's Node and Company Explorer folder icons.
 U86 - Priority grouping orders assigned priorities by their numeric value: 1, 2, 3, 4, then 5 in ascending order. The shared `Unassigned to a Logic Gate` priority-zero group and any equivalent no-priority fallback always remain after assigned priorities, including when the saved grouping direction is descending.
 U87 - An Updates row keeps its existing horizontal width and fixed time/Seen controls. Within that unchanged row, the Node title area consumes the remaining title-line space after the actor/action copy and before any priority/status tokens, and truncates only at that available edge instead of using an early fixed-width cap.
+U88 - Update actor identity remains keyed by `actor_user_id`, but user-facing Updates copy never displays that opaque ID. Rendering prefers the current company-directory display name or email, uses the signed-in profile for the current actor when the directory list omits them, then falls back to the readable historical actor label stored in notification copy, and finally `Someone`. A resolver value equal to the actor ID or shaped like a UUID is not a display label.
+U89 - Seen Updates exposes separate From and To editable text fields in exact `DD/MM/YYYY` format. A date commits on blur or Enter only after strict calendar validation; impossible dates, other formats, and dates outside the available Seen-history bounds are marked invalid and do not issue a new feed query.
+U90 - Seen-history date queries use inclusive UTC calendar days. The initial window ends on the newest available Seen update and includes at most the latest 30 days. Any edited range remains within available history and at most 90 inclusive days; moving one edge beyond that maximum moves the opposite edge rather than sending an invalid backend request.
 
 ## Update Row Copy And Visual Language
 
@@ -177,7 +180,7 @@ Entity icons in Updates must also be shared tokens. Individual row copy may use 
 | Shared triage or shared inbox permission changed | Purple | `{User} changed {Subject}'s access on <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox permission revoked | Dark mellow red | `{User} removed {Subject}'s access from <folder icon> {Shared Surface}` |
 
-U88 - Email-node chat continues to use the existing node comment/mention event path. Committed normal or urgent mentions create the established Updates event only after the atomic chat-and-participant transaction succeeds; metadata may navigate to the exact authorized node/chat/email reply but must not imply provider recipient or mailbox participation.
+U91 - Email-node chat continues to use the existing node comment/mention event path. Committed normal or urgent mentions create the established Updates event only after the atomic chat-and-participant transaction succeeds; metadata may navigate to the exact authorized node/chat/email reply but must not imply provider recipient or mailbox participation.
 
 ## Scenarios
 
@@ -565,3 +568,20 @@ Expected:
 - Only Bob receives the assignment update. Alice, Charlie, unrelated users, and the actor receive no assignment update.
 - Node updates store and display the Node priority. Missing priority stays No priority rather than becoming priority zero.
 - Visibility checks the Node for Node-owned notifications even when the notification also stores a Logic Gate grouping ID.
+
+### Scenario U-S15: Readable Actors And Editable Seen-History Dates
+
+Business logic covered:
+- U88
+- U89
+- U90
+
+Given:
+- A mention notification has an actor UUID, readable historical actor copy, and a company-directory resolver that may return either a real display label or merely echo the UUID.
+- The user opens Seen Updates with history spanning more than 90 days and edits either date field.
+
+Expected:
+- The mention row displays the current readable directory/profile name when available, otherwise the readable historical actor name, and never the raw UUID. If no readable label exists it says `Someone`.
+- The Seen Updates header shows From and To fields formatted `DD/MM/YYYY`, not stacked range sliders.
+- Valid dates commit on blur or Enter and reload the inclusive selected window. Invalid formats, impossible dates, or dates outside available history stay visibly invalid without querying.
+- The default window is the latest 30 inclusive days and all edited windows stay within the backend's 90-inclusive-day limit.

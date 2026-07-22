@@ -5,7 +5,8 @@ import test from "node:test";
 
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
-import { createSeenUpdatesDateWindow, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
+import { resolveUpdateActorLabel } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
+import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
   const orderedIDs = ["a", "b", "c", "d"];
@@ -163,7 +164,7 @@ test("Updates resolves current Logic Gate labels without rewriting historical no
   });
 });
 
-test("seen Updates date sliders default to a bounded window and never query more than 90 days", () => {
+test("seen Updates date fields default to a bounded window and never query more than 90 days", () => {
   const bounds = seenUpdatesDateBounds({
     oldest_created_timestamp: "2025-01-01T12:00:00Z",
     newest_created_timestamp: "2026-07-21T18:00:00Z",
@@ -184,4 +185,32 @@ test("seen Updates date sliders default to a bounded window and never query more
   const movedEnd = moveSeenUpdatesDateWindow(movedStart, "end", bounds.newestDay);
   assert.equal(movedEnd.endDay - movedEnd.startDay + 1, 90);
   assert.equal(seenUpdatesDateQuery(movedEnd).toDate, "2026-07-21");
+});
+
+test("seen Updates dates use strict DD/MM/YYYY entry without timezone drift", () => {
+  const leapDay = displayDateToUTCDay("29/02/2024");
+  assert.notEqual(leapDay, null);
+  assert.equal(utcDayToDisplayDate(leapDay!), "29/02/2024");
+  assert.equal(displayDateToUTCDay("29/02/2023"), null);
+  assert.equal(displayDateToUTCDay("2024-02-29"), null);
+  assert.equal(displayDateToUTCDay("1/02/2024"), null);
+
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  assert.ok(source.includes('"Seen updates from date"'));
+  assert.ok(source.includes('"Seen updates to date"'));
+  assert.ok(source.includes('placeholder="DD/MM/YYYY"'));
+  assert.ok(!source.includes("SeenUpdatesDateSlider"));
+});
+
+test("Updates never replaces a readable mention actor with a raw user UUID", () => {
+  const actorID = "1955a2ed-cdfb-0845-b344-f176783824c2";
+  const notification = {
+    actor_user_id: actorID,
+    title: "Test User mentioned you in Account - Deal Flow Management",
+    body_preview: "",
+  };
+
+  assert.equal(resolveUpdateActorLabel(notification, () => actorID), "Test User");
+  assert.equal(resolveUpdateActorLabel(notification, () => "Jonathan Kim"), "Jonathan Kim");
+  assert.equal(resolveUpdateActorLabel({ ...notification, title: `${actorID} mentioned you` }, () => actorID), "Someone");
 });

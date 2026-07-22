@@ -28,6 +28,24 @@ export function utcDayToDateInput(day: number): string {
   return new Date(Math.trunc(day) * DAY_MS).toISOString().slice(0, 10);
 }
 
+export function utcDayToDisplayDate(day: number): string {
+  const [year, month, date] = utcDayToDateInput(day).split("-");
+  return `${date}/${month}/${year}`;
+}
+
+export function displayDateToUTCDay(value: string): number | null {
+  const match = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+  const date = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (year < 1000 || month < 1 || month > 12 || date < 1 || date > 31) return null;
+  const timestamp = Date.UTC(year, month - 1, date);
+  const parsed = new Date(timestamp);
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== date) return null;
+  return Math.floor(timestamp / DAY_MS);
+}
+
 export function seenUpdatesDateBounds(range: SeenUpdatesRange): SeenUpdatesDateBounds | null {
   const oldestDay = timestampToUTCDay(range.oldest_created_timestamp);
   const newestDay = timestampToUTCDay(range.newest_created_timestamp);
