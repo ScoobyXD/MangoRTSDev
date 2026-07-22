@@ -761,6 +761,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(linkedEmailToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-layout]')?.dataset.nodeLinkedEmailLayout, "content-column");
     assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Hide linked email");
     const linkedEmailPreview = emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-preview="true"]');
     assert.ok(linkedEmailPreview, "the exact child message should resolve through its attached root thread and expand inside the text box");
@@ -773,6 +774,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Bcc:\s*Blind Copy <blind@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Complete linked email body\./);
+    const textBoxContentColumn = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-content-column="true"]');
+    const textBoxPaneLayout = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-columns="editor-chat"]');
+    const fullHeightChat = emailNodeRow.querySelector<HTMLElement>('[data-node-chat-block-id="node-block-0"]');
+    assert.ok(textBoxContentColumn?.contains(linkedEmailPreview), "the linked email should stay inside the left content column");
+    assert.ok(textBoxPaneLayout);
+    assert.ok(fullHeightChat?.parentElement);
+    assert.equal(fullHeightChat.parentElement.style.height, textBoxPaneLayout.style.height, "opening linked email must not shorten the independent chat column");
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), null);
@@ -780,13 +788,19 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
 
     await act(async () => { nodeEmailToggle.click(); });
     await flushWork();
-    assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null, "the Node-level email control should still hide the left column");
+    const closedEmailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
+    assert.ok(closedEmailColumn, "the Node-level email column shell should remain mounted for its exit transition");
+    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "closed");
+    assert.equal(closedEmailColumn.getAttribute("aria-hidden"), "true");
+    assert.equal(closedEmailColumn.style.opacity, "0");
+    assert.match(emailWorkspace.style.gridTemplateColumns, /^0px 0px /, "the closed email track should animate to zero width without changing track count");
     scrolledIntoView.length = 0;
     const linkedTextBoxHeader = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-header="true"]');
     assert.ok(linkedTextBoxHeader);
     await act(async () => { linkedTextBoxHeader.click(); });
     await flushWork(24);
-    assert.ok(nodeContainer.querySelector('[data-node-email-column="true"]'), "clicking the linked text-box header should reopen the left email column");
+    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "open", "clicking the linked text-box header should animate the retained email column open");
+    assert.equal(closedEmailColumn.getAttribute("aria-hidden"), "false");
     assert.ok(scrolledIntoView.some((element) => element.dataset.emailMessageId === "message-node-block-0"), "the left email column should scroll to the exact child message linked to the text box");
 
     const textBoxActions = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Text box actions"]');
@@ -819,7 +833,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
 
     await act(async () => { nodeEmailToggle.click(); });
     await flushWork();
-    assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null);
+    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "closed");
+    assert.equal(closedEmailColumn.style.pointerEvents, "none");
     assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "text-only");
 
     await act(async () => { editorToggle.click(); });
