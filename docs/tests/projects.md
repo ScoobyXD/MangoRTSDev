@@ -1,4 +1,4 @@
-Last updated: 2026-07-20
+Last updated: 2026-07-22
 
 # Projects Tests
 
@@ -56,6 +56,9 @@ P45 - The Project editor header keeps Editor, Permissions, the shared formatting
 P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes editor remains in normal document flow beneath its selected row except while its explicit fullscreen action temporarily mounts it in that shared modal layer.
 P47 - Expanding a node in Logic Gates / Nodes removes the row-depth indentation from the editor surface so the editor spans the full relationship-panel width while the collapsed relationship row keeps its normal grouping indentation.
 P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes and Logic Gates. Choosing a result creates or reuses the project relationship, selecting a Logic Gate includes its known child nodes just like an Explorer drop, and resources already related to the Project are marked as added and disabled.
+
+P49 - Project Field, Status, Health, Account, and Team dropdowns commit and close on the selected option. They do not display Apply or Cancel actions; multi-value controls toggle the clicked assignment without discarding other selected IDs, and Not set clears the control.
+P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
 
 ## Scenarios
 
@@ -329,3 +332,19 @@ Expected:
 - Reconnect subscribes first, loads the full canonical snapshot/ETag, orders buffered events, reapplies/resubmits stable pending operations, and returns green only after acknowledgement.
 - Duplicate operation/event delivery is harmless; a gap requests a full snapshot rather than showing a merge conflict.
 - Delete commits an exact tombstone after the intended local flush, unsubscribes the terminal document, and a late operation cannot recreate it.
+
+### Scenario P-S14: Immediate Metadata Dropdowns And Fields Header
+
+Business logic covered:
+- P49
+- P50
+
+Given:
+- The active company has enabled the generic Field column.
+- A user opens a project row metadata dropdown or the matching Project Summary header control.
+
+Expected:
+- Clicking a Field, Status, Health, Account, or Team option immediately saves and closes the dropdown.
+- Multi-value controls preserve existing choices except for the one assignment being toggled.
+- Choosing Not set clears that control, with no Apply or Cancel footer.
+- Project Summary shows **Fields** immediately left of Status and reflects the same assignments shown in the list row.

@@ -1375,6 +1375,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     return (
       <ProjectSummaryContent
         projectID={activeProjectID}
+        entityFields={entityFields}
+        showFieldMetadata={visibleProjectFieldIDs.length > 0}
         focusInformationID={targetProjectID?.trim() === activeProjectID ? targetProjectInformationID : undefined}
         focusRequestID={targetProjectID?.trim() === activeProjectID ? targetProjectRequestID : undefined}
         accent={accent}

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { toggleProjectFieldValue } from "../../../../frontend/src/modules/project-management/ProjectFieldControl.js";
 import {
   activeProjectListGroupings,
   entityFieldGroupingValue,
@@ -68,6 +69,32 @@ test("project fields are selected per row and grouping stays generic", () => {
   assert.match(listSource, /choices=\{fields\.map/);
   assert.doesNotMatch(listSource, /Choose field for column/);
   assert.doesNotMatch(contentSource, /fieldVariant=\{/);
+});
+
+test("project metadata dropdowns commit each option immediately and summary mirrors the enabled Field column", () => {
+  assert.deepEqual(toggleProjectFieldValue(["field-a", "field-a"], "field-b"), ["field-a", "field-b"]);
+  assert.deepEqual(toggleProjectFieldValue(["field-a", "field-b"], "field-a"), ["field-b"]);
+  assert.deepEqual(toggleProjectFieldValue([" field-a "], " "), ["field-a"]);
+
+  const controlSource = readFileSync(
+    resolve(process.cwd(), "frontend/src/modules/project-management/ProjectFieldControl.tsx"),
+    "utf8",
+  );
+  const contentSource = readFileSync(
+    resolve(process.cwd(), "frontend/src/modules/project-management/ProjectManagementContent.tsx"),
+    "utf8",
+  );
+  const summarySource = readFileSync(
+    resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"),
+    "utf8",
+  );
+
+  assert.match(controlSource, /const commitMultiple = [\s\S]*setOpen\(false\);[\s\S]*onChange\(toggleProjectFieldValue/);
+  assert.doesNotMatch(controlSource, />Apply</);
+  assert.doesNotMatch(controlSource, />Cancel</);
+  assert.match(contentSource, /entityFields=\{entityFields\}[\s\S]*showFieldMetadata=\{visibleProjectFieldIDs\.length > 0\}/);
+  assert.match(summarySource, /setEntityFieldAssignments/);
+  assert.match(summarySource, /showFieldMetadata \? \([\s\S]*>Fields<[\s\S]*ariaLabel="Project fields"[\s\S]*>Status</);
 });
 
 test("project surfaces retain the elevated visual system and compact-width layout hooks", () => {

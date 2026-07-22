@@ -1,4 +1,4 @@
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 # Entity Fields Tests
 
@@ -22,6 +22,8 @@ F11 - Field-column visibility is a browser-local preference scoped by company; h
 F12 - Project grouping offers one generic `Group by Fields` choice with no field-definition sub-selector. Projects group beneath each assigned field label, while projects without fields group beneath `Unassigned`.
 F13 - Older saved field-specific grouping values migrate to the generic Fields axis without mutating assignments.
 F14 - The Fields page, Projects list, timeline, Project Summary, Logic Gates / Nodes, and Critical Path surfaces use the established elevated surfaces, color highlights, keyboard labels, and narrow-layout patterns.
+F15 - Project Field, Status, Health, Account, and Team dropdowns commit an option as soon as it is selected and immediately close; they never stage changes behind Apply or Cancel buttons.
+F16 - When the generic Project Field column is enabled for the active company, Project Summary mirrors it as a **Fields** metadata control immediately left of Status and edits the same assignments.
 
 ## Scenarios
 
@@ -47,7 +49,10 @@ Expected:
 - The user selects the plus control immediately left of Status to enable a generic Field column.
 - The resulting column header reads `Field` without another configuration step.
 - The user chooses FX from a project row's Field dropdown.
+- The click saves immediately and closes the dropdown; no Apply or Cancel footer appears.
 - Assigning FX updates that project without changing Status, Health, Account, or Team.
+- Opening that project shows a **Fields** metadata dropdown immediately left of Status because the Field column is enabled.
+- The Project Summary dropdown shows the same assignment and uses the same immediate-save interaction.
 - Reloading the Projects page restores the generic Field column for the same company.
 
 ### Scenario F-S3: Group Projects By A Field
@@ -75,6 +80,6 @@ Expected:
 
 - `backend/internal/store/entity_fields_test.go` covers validation, case-insensitive uniqueness, ordering, assignment replacement, project read models, assignment counts, deletion cleanup, and schema/migration markers.
 - `backend/internal/http/entity_field_handlers_test.go` covers create, list, Project assignment, and target edit-access enforcement.
-- `tests/frontend/modules/project-management/projectListView.test.ts` covers the generic Field column, per-row field selection, generic Fields grouping, legacy preference normalization, and elevated responsive surface hooks.
+- `tests/frontend/modules/project-management/projectListView.test.ts` covers the generic Field column, immediate-close metadata selection, Project Summary field parity, generic Fields grouping, legacy preference normalization, and elevated responsive surface hooks.
 - `tests/frontend/app/preloadDashboardPlan.test.ts` covers isolated Fields route preloading.
 - `npm run build` type-checks the Fields surface, routing, navigation, Project column controls, assignment API, and grouping integration.
