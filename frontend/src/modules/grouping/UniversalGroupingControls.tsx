@@ -6,9 +6,18 @@ export type UniversalGroupingFieldOption<Field extends string> = Readonly<{
   label: string;
 }>;
 
+export type UniversalGroupingFieldVariant<Field extends string> = Readonly<{
+  parentValue: Field;
+  matches: (field: Field) => boolean;
+  options: ReadonlyArray<UniversalGroupingFieldOption<Field>>;
+  placeholder?: string;
+  selectionLabel?: string;
+}>;
+
 export type UniversalGroupingControlsProps<Field extends string> = {
   groupings: ReadonlyArray<UniversalGroupingSetting<Field>>;
   fieldOptions: ReadonlyArray<UniversalGroupingFieldOption<Field>>;
+  fieldVariant?: UniversalGroupingFieldVariant<Field>;
   onChange: (nextStack: Array<UniversalGroupingSetting<Field>>) => void;
   buttonLabel?: string;
   popoverLabel?: string;
@@ -28,6 +37,7 @@ type GroupingDropTarget = {
 export function UniversalGroupingControls<Field extends string>({
   groupings,
   fieldOptions,
+  fieldVariant,
   onChange,
   buttonLabel = "Group",
   popoverLabel = "Grouping settings",
@@ -47,8 +57,20 @@ export function UniversalGroupingControls<Field extends string>({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const popoverID = useId();
   const uniqueFieldOptions = useMemo(() => dedupeFieldOptions(fieldOptions), [fieldOptions]);
+  const uniqueVariantOptions = fieldVariant ? dedupeFieldOptions(fieldVariant.options) : [];
   const usedFields = new Set(groupings.map((grouping) => grouping.field));
-  const addableFields = uniqueFieldOptions.filter((option) => !usedFields.has(option.value));
+  const variantPending = fieldVariant ? groupings.some((grouping) => grouping.field === fieldVariant.parentValue) : false;
+  const isVariantField = (field: Field) => Boolean(fieldVariant && (
+    field === fieldVariant.parentValue || fieldVariant.matches(field)
+  ));
+  const isPrimaryOptionAddable = (option: UniversalGroupingFieldOption<Field>) => {
+    if (fieldVariant && option.value === fieldVariant.parentValue) {
+      return !variantPending && uniqueVariantOptions.some((variant) => !usedFields.has(variant.value));
+    }
+    return !usedFields.has(option.value);
+  };
+  const addableFields = uniqueFieldOptions.filter(isPrimaryOptionAddable);
+  const popoverWidth = fieldVariant ? 448 : 326;
 
   useEffect(() => {
     if (!disabled) return;
@@ -63,7 +85,7 @@ export function UniversalGroupingControls<Field extends string>({
       if (disabled) return;
       const detail = (event as CustomEvent<Partial<{ left: number; top: number; right: number; bottom: number }>>).detail;
       if (!detail || typeof detail.top !== "number") return;
-      const width = 326;
+      const width = popoverWidth;
       const estimatedHeight = 330;
       const requestedLeft = typeof detail.right === "number" ? detail.right + 8 : (detail.left ?? 8);
       setExternalPopoverPosition({
@@ -74,7 +96,7 @@ export function UniversalGroupingControls<Field extends string>({
     };
     window.addEventListener(openRequestEventName, handleOpenRequest);
     return () => window.removeEventListener(openRequestEventName, handleOpenRequest);
-  }, [disabled, openRequestEventName]);
+  }, [disabled, openRequestEventName, popoverWidth]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -161,7 +183,7 @@ export function UniversalGroupingControls<Field extends string>({
           id={popoverID}
           role="dialog"
           aria-label={popoverLabel}
-          style={groupPopoverStyle(popoverAlign, externalPopoverPosition)}
+          style={groupPopoverStyle(popoverAlign, externalPopoverPosition, popoverWidth)}
         >
           <div style={popoverHeaderStyle}>
             <span style={popoverTitleStyle}>{popoverLabel}</span>
@@ -178,14 +200,20 @@ export function UniversalGroupingControls<Field extends string>({
           <div style={groupingStackStyle}>
             {groupings.length === 0 && <div style={emptyStackStyle}>{emptyLabel}</div>}
             {groupings.map((grouping, index) => {
-              const currentFieldKnown = uniqueFieldOptions.some((option) => option.value === grouping.field);
+              const variantActive = isVariantField(grouping.field);
+              const primaryField = variantActive && fieldVariant ? fieldVariant.parentValue : grouping.field;
+              const currentFieldKnown = uniqueFieldOptions.some((option) => option.value === primaryField);
               const availableForRow = uniqueFieldOptions.filter((option) => (
+                option.value === primaryField || isPrimaryOptionAddable(option)
+              ));
+              const currentVariantKnown = uniqueVariantOptions.some((option) => option.value === grouping.field);
+              const availableVariantsForRow = uniqueVariantOptions.filter((option) => (
                 option.value === grouping.field || !usedFields.has(option.value)
               ));
               const activeDropPlacement = dropTarget?.index === index ? dropTarget.placement : null;
               return (
                 <div
-                  key={grouping.field}
+                  key={String(index) + ":" + grouping.field}
                   style={groupingRowStyle(index, draggedIndex === index, activeDropPlacement, accent)}
                   onDragOver={(event) => {
                     if (draggedIndex === null) return;
@@ -240,20 +268,39 @@ export function UniversalGroupingControls<Field extends string>({
                     <span aria-hidden="true">::</span>
                   </button>
                   <span aria-hidden="true" style={levelNumberStyle(accent)}>{index + 1}</span>
-                  <select
-                    value={grouping.field}
-                    aria-label={`Grouping level ${index + 1} field`}
-                    style={fieldSelectStyle}
-                    onChange={(event) => replaceGrouping(index, {
-                      field: event.currentTarget.value as Field,
-                      direction: grouping.direction,
-                    })}
-                  >
-                    {!currentFieldKnown && <option value={grouping.field}>{grouping.field}</option>}
-                    {availableForRow.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
+                  <div style={fieldSelectionStyle(variantActive)}>
+                    <select
+                      value={primaryField}
+                      aria-label={`Grouping level ${index + 1} field`}
+                      style={fieldSelectStyle}
+                      onChange={(event) => replaceGrouping(index, {
+                        field: event.currentTarget.value as Field,
+                        direction: grouping.direction,
+                      })}
+                    >
+                      {!currentFieldKnown && <option value={primaryField}>{primaryField}</option>}
+                      {availableForRow.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    {variantActive && fieldVariant ? (
+                      <select
+                        value={grouping.field === fieldVariant.parentValue ? "" : grouping.field}
+                        aria-label={`Grouping level ${index + 1} ${fieldVariant.selectionLabel ?? "selection"}`}
+                        style={fieldSelectStyle}
+                        onChange={(event) => replaceGrouping(index, {
+                          field: event.currentTarget.value as Field,
+                          direction: grouping.direction,
+                        })}
+                      >
+                        <option value="" disabled>{fieldVariant.placeholder ?? "Choose option"}</option>
+                        {!currentVariantKnown && grouping.field !== fieldVariant.parentValue ? <option value={grouping.field}>{grouping.field}</option> : null}
+                        {availableVariantsForRow.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     aria-label={`Sort ${grouping.direction === "asc" ? "descending" : "ascending"} for grouping level ${index + 1}`}
@@ -405,15 +452,15 @@ function groupCountStyle(open: boolean, accent: string): React.CSSProperties {
   };
 }
 
-function groupPopoverStyle(align: "start" | "end", externalPosition: { left: number; top: number } | null): React.CSSProperties {
+function groupPopoverStyle(align: "start" | "end", externalPosition: { left: number; top: number } | null, width: number): React.CSSProperties {
   return {
     position: externalPosition ? "fixed" : "absolute",
     ...(externalPosition
       ? { left: externalPosition.left, top: externalPosition.top }
       : { top: "calc(100% + 6px)", ...(align === "start" ? { left: 0 } : { right: 0 }) }),
     zIndex: externalPosition ? 10020 : 60,
-    width: 326,
-    maxWidth: "min(326px, calc(100vw - 24px))",
+    width,
+    maxWidth: "min(" + width + "px, calc(100vw - 24px))",
     display: "grid",
     gap: 9,
     border: "1px solid rgba(100, 116, 139, 0.28)",
@@ -540,6 +587,15 @@ function levelNumberStyle(accent: string): React.CSSProperties {
     color: accent,
     fontSize: 10,
     fontWeight: 900,
+  };
+}
+
+function fieldSelectionStyle(compound: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: compound ? "minmax(86px, 0.72fr) minmax(110px, 1fr)" : "minmax(0, 1fr)",
+    gap: 5,
   };
 }
 

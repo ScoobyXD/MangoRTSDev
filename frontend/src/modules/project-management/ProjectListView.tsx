@@ -11,7 +11,13 @@ import {
   projectStatusChoices,
   type ProjectFieldTone,
 } from "./ProjectFieldControl.js";
-import { entityFieldIDFromGrouping, PROJECT_LIST_GROUPING_FIELDS, type ProjectListGroupingField } from "./projectListViewModel.js";
+import {
+  activeProjectListGroupings,
+  entityFieldIDFromGrouping,
+  PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER,
+  PROJECT_LIST_GROUPING_FIELDS,
+  type ProjectListGroupingField,
+} from "./projectListViewModel.js";
 export { PROJECT_LIST_GROUPING_FIELDS, normalizeProjectListGroupings } from "./projectListViewModel.js";
 export type { ProjectListGroupingField } from "./projectListViewModel.js";
 
@@ -30,6 +36,11 @@ export type ProjectListFieldUpdate = Partial<{
   teamIDs: string[];
   fieldIDs: string[];
 }>;
+type ProjectListFieldColumn = {
+  key: string;
+  sourceIndex: number;
+  field?: EntityField;
+};
 
 export function ProjectListView({
   projects,
@@ -62,11 +73,29 @@ export function ProjectListView({
   const [selectedProjectIDs, setSelectedProjectIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorID, setSelectionAnchorID] = useState("");
 
-  const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
   const fieldByID = useMemo(() => new Map(fields.map((field) => [field.field_id, field])), [fields]);
-  const visibleFields = useMemo(() => visibleFieldIDs.map((fieldID) => fieldByID.get(fieldID)).filter((field): field is EntityField => Boolean(field)), [fieldByID, visibleFieldIDs]);
-  const addableFields = useMemo(() => fields.filter((field) => !visibleFieldIDs.includes(field.field_id)), [fields, visibleFieldIDs]);
-  const columnCount = 6 + visibleFields.length;
+  const fieldColumns = useMemo<ProjectListFieldColumn[]>(() => {
+    const columns: ProjectListFieldColumn[] = [];
+    visibleFieldIDs.forEach((fieldID, sourceIndex) => {
+      if (fieldID === PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER) {
+        columns.push({ key: "pending:" + sourceIndex, sourceIndex });
+        return;
+      }
+      const field = fieldByID.get(fieldID);
+      if (field) columns.push({ key: field.field_id, sourceIndex, field });
+    });
+    return columns;
+  }, [fieldByID, visibleFieldIDs]);
+  const selectedFieldIDs = new Set(fieldColumns.flatMap((column) => column.field ? [column.field.field_id] : []));
+  const hasPendingFieldColumn = fieldColumns.some((column) => !column.field);
+  const canEnableFieldColumn = !hasPendingFieldColumn && fields.some((field) => !selectedFieldIDs.has(field.field_id));
+  const enableFieldColumnTitle = canEnableFieldColumn
+    ? "Enable field column"
+    : fields.length === 0
+      ? "Create a field from Entities → Fields first"
+      : hasPendingFieldColumn ? "Choose a field for the enabled column first" : "Every field is already visible";
+  const columnCount = 6 + fieldColumns.length;
+  const activeGroupings = useMemo(() => activeProjectListGroupings(groupings), [groupings]);
 
   useEffect(() => {
     const known = new Set(projects.map((project) => project.project_id));
@@ -75,15 +104,15 @@ export function ProjectListView({
 
   const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
   const visibleProjectIDs = useMemo(() => sortedProjects.map((project) => project.project_id), [sortedProjects]);
-  const groupedProjects = useMemo(() => buildUniversalNestedGroups(sortedProjects, groupings, {
+  const groupedProjects = useMemo(() => buildUniversalNestedGroups(sortedProjects, activeGroupings, {
     rootID: "projects",
     rowKey: (project) => project.project_id,
     getValues: (project, field) => projectGroupingValues(project, field, fieldByID),
     sortRows: sortProjects,
-  }), [fieldByID, groupings, sortedProjects]);
+  }), [activeGroupings, fieldByID, sortedProjects]);
 
   useEffect(() => {
-    if (groupings.length === 0) return;
+    if (activeGroupings.length === 0) return;
     const all = new Set<string>();
     const visit = (groups: Array<UniversalNestedGroup<ProjectRecord, ProjectListGroupingField>>) => {
       for (const group of groups) {
@@ -93,7 +122,7 @@ export function ProjectListView({
     };
     visit(groupedProjects);
     setExpandedGroupIDs(all);
-  }, [groupedProjects, groupings.length]);
+  }, [activeGroupings.length, groupedProjects]);
 
   if (loading) return <div style={emptyStyle}>Loading projects</div>;
 
@@ -152,11 +181,15 @@ export function ProjectListView({
             <span style={nameTextStyle}>{project.name || project.project_id}</span>
           </span>
         </td>
-        {visibleFields.map((field) => {
+        {fieldColumns.map((column) => {
+          const field = column.field;
+          if (!field) {
+            return <td key={column.key} style={pendingFieldCellStyle}>Choose field above</td>;
+          }
           const currentFieldIDs = project.fields?.map((item) => item.field_id) ?? [];
           const assigned = currentFieldIDs.includes(field.field_id);
           return (
-            <td key={field.field_id} style={customFieldCellStyle(field.color)}>
+            <td key={column.key} style={customFieldCellStyle(field.color)}>
               <ProjectFieldControl
                 ariaLabel={`${field.name} for ${project.name || "project"}`}
                 values={assigned ? [field.field_id] : []}
@@ -249,48 +282,58 @@ export function ProjectListView({
         }
       }}
     >
-      <table style={tableStyle(visibleFields.length)}>
+      <table style={tableStyle(fieldColumns.length)}>
         <thead>
           <tr>
             <th style={headerCellStyle}>Project Name</th>
-            {visibleFields.map((field) => (
-              <th key={field.field_id} style={customFieldHeaderStyle(field.color)}>
-                <span style={customFieldHeaderInnerStyle}>
-                  <span aria-hidden="true" style={customFieldHeaderDotStyle(field.color)} />
-                  <span style={customFieldHeaderLabelStyle}>{field.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Hide ${field.name} column`}
-                    title={`Hide ${field.name} column`}
-                    style={hideFieldColumnButtonStyle}
-                    onClick={() => onVisibleFieldIDsChange(visibleFieldIDs.filter((fieldID) => fieldID !== field.field_id))}
-                  >×</button>
-                </span>
-              </th>
-            ))}
-            <th style={addFieldHeaderStyle}>
-              <button type="button" aria-label="Add field column" title="Add field column" style={addFieldColumnButtonStyle(fieldPickerOpen)} onClick={() => setFieldPickerOpen((open) => !open)}>+</button>
-              {fieldPickerOpen ? (
-                <div role="dialog" aria-label="Add field column" style={fieldPickerStyle}>
-                  <div style={fieldPickerTitleStyle}>Add field column</div>
-                  {addableFields.length === 0 ? (
-                    <div style={fieldPickerEmptyStyle}>{fields.length === 0 ? "Create fields from Entities → Fields first." : "Every field is already visible."}</div>
-                  ) : addableFields.map((field) => (
-                    <button
-                      key={field.field_id}
-                      type="button"
-                      style={fieldPickerOptionStyle}
-                      onClick={() => {
-                        onVisibleFieldIDsChange([...visibleFieldIDs, field.field_id]);
-                        setFieldPickerOpen(false);
+            {fieldColumns.map((column) => {
+              const field = column.field;
+              const color = field?.color ?? "#6366f1";
+              const selectableFields = fields.filter((candidate) => (
+                candidate.field_id === field?.field_id || !selectedFieldIDs.has(candidate.field_id)
+              ));
+              return (
+                <th key={column.key} style={customFieldHeaderStyle(color)}>
+                  <span style={customFieldHeaderInnerStyle}>
+                    <span aria-hidden="true" style={customFieldHeaderDotStyle(color)} />
+                    <select
+                      value={field?.field_id ?? ""}
+                      aria-label={`Choose field for column ${column.sourceIndex + 1}`}
+                      title="Choose which field this column displays"
+                      style={customFieldHeaderSelectStyle}
+                      onChange={(event) => {
+                        const fieldID = event.currentTarget.value.trim();
+                        if (!fieldID) return;
+                        const nextFieldIDs = [...visibleFieldIDs];
+                        nextFieldIDs[column.sourceIndex] = fieldID;
+                        onVisibleFieldIDsChange(nextFieldIDs);
                       }}
                     >
-                      <span aria-hidden="true" style={customFieldHeaderDotStyle(field.color)} />
-                      <span>{field.name}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+                      <option value="" disabled>Select field</option>
+                      {selectableFields.map((candidate) => (
+                        <option key={candidate.field_id} value={candidate.field_id}>{candidate.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${field?.name ?? "field"} column`}
+                      title="Remove field column"
+                      style={hideFieldColumnButtonStyle}
+                      onClick={() => onVisibleFieldIDsChange(visibleFieldIDs.filter((_, index) => index !== column.sourceIndex))}
+                    >{"\u00d7"}</button>
+                  </span>
+                </th>
+              );
+            })}
+            <th style={addFieldHeaderStyle}>
+              <button
+                type="button"
+                aria-label="Enable field column"
+                title={enableFieldColumnTitle}
+                disabled={!canEnableFieldColumn}
+                style={addFieldColumnButtonStyle(!canEnableFieldColumn)}
+                onClick={() => onVisibleFieldIDsChange([...visibleFieldIDs, PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER])}
+              >+</button>
             </th>
             <th style={headerCellStyle}>Status</th>
             <th style={headerCellStyle}>Health</th>
@@ -299,10 +342,10 @@ export function ProjectListView({
           </tr>
         </thead>
         <tbody>
-          {groupings.length > 0
+          {activeGroupings.length > 0
             ? renderGroups(groupedProjects)
             : sortedProjects.map((project) => projectRow(project, 0, project.project_id))}
-          {(groupings.length > 0 ? groupedProjects.length : sortedProjects.length) === 0 ? (
+          {(activeGroupings.length > 0 ? groupedProjects.length : sortedProjects.length) === 0 ? (
             <tr><td colSpan={columnCount} style={emptyCellStyle}>No projects</td></tr>
           ) : null}
         </tbody>
@@ -394,17 +437,14 @@ const headerCellStyle: React.CSSProperties = { position: "sticky", top: 0, zInde
 const customFieldHeaderStyle = (color: string): React.CSSProperties => ({ ...headerCellStyle, minWidth: 142, padding: "0 10px", background: `linear-gradient(180deg, ${color}12, #f8fafc 78%)` });
 const customFieldHeaderInnerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "10px minmax(0, 1fr) 20px", alignItems: "center", gap: 6 };
 const customFieldHeaderDotStyle = (color: string): React.CSSProperties => ({ width: 9, height: 9, borderRadius: 999, background: color, boxShadow: `0 0 0 3px ${color}18`, flexShrink: 0 });
-const customFieldHeaderLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const customFieldHeaderSelectStyle: React.CSSProperties = { width: "100%", minWidth: 0, height: 28, border: "1px solid rgba(99,102,241,.22)", borderRadius: 8, background: "rgba(255,255,255,.88)", color: "#334155", font: "inherit", fontSize: 12, fontWeight: 900, padding: "0 5px", cursor: "pointer", outline: "none" };
 const hideFieldColumnButtonStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", border: 0, borderRadius: 6, background: "transparent", color: "#94a3b8", cursor: "pointer", padding: 0, font: "inherit", fontSize: 15, lineHeight: 1 };
 const addFieldHeaderStyle: React.CSSProperties = { ...headerCellStyle, position: "relative", width: 44, minWidth: 44, padding: 0, textAlign: "center", overflow: "visible" };
-const addFieldColumnButtonStyle = (open: boolean): React.CSSProperties => ({ width: 28, height: 28, display: "inline-grid", placeItems: "center", border: `1px solid ${open ? "#6366f1" : "rgba(99,102,241,.28)"}`, borderRadius: 9, background: open ? "#eef2ff" : "rgba(255,255,255,.92)", color: "#6366f1", boxShadow: open ? "0 0 0 3px rgba(99,102,241,.12)" : "0 4px 10px rgba(15,23,42,.06)", cursor: "pointer", padding: 0, font: "inherit", fontSize: 18, fontWeight: 800, lineHeight: 1 });
-const fieldPickerStyle: React.CSSProperties = { position: "absolute", top: 37, left: 0, zIndex: 80, width: 230, maxHeight: 280, overflow: "auto", display: "grid", alignContent: "start", gap: 4, padding: 8, border: "1px solid rgba(99,102,241,.24)", borderRadius: 12, background: "rgba(255,255,255,.98)", boxShadow: "0 18px 44px rgba(15,23,42,.20), inset 1px 1px 0 rgba(255,255,255,.9)", textAlign: "left", boxSizing: "border-box" };
-const fieldPickerTitleStyle: React.CSSProperties = { padding: "3px 5px 7px", borderBottom: "1px solid rgba(226,232,240,.9)", color: "#334155", fontSize: 11, fontWeight: 950 };
-const fieldPickerOptionStyle: React.CSSProperties = { minHeight: 34, display: "grid", gridTemplateColumns: "12px minmax(0,1fr)", alignItems: "center", gap: 8, border: 0, borderRadius: 8, background: "transparent", color: "#334155", cursor: "pointer", padding: "0 8px", textAlign: "left", font: "inherit", fontSize: 12, fontWeight: 850 };
-const fieldPickerEmptyStyle: React.CSSProperties = { padding: "10px 7px", color: "#64748b", fontSize: 11, fontWeight: 750, lineHeight: 1.45 };
+const addFieldColumnButtonStyle = (disabled: boolean): React.CSSProperties => ({ width: 28, height: 28, display: "inline-grid", placeItems: "center", border: "1px solid rgba(99,102,241,.28)", borderRadius: 9, background: disabled ? "rgba(248,250,252,.82)" : "rgba(255,255,255,.92)", color: disabled ? "#cbd5e1" : "#6366f1", boxShadow: disabled ? "none" : "0 4px 10px rgba(15,23,42,.06)", cursor: disabled ? "default" : "pointer", padding: 0, font: "inherit", fontSize: 18, fontWeight: 800, lineHeight: 1, opacity: disabled ? 0.74 : 1 });
 const cellStyle: React.CSSProperties = { height: 44, padding: "0 14px", borderBottom: "1px solid rgba(226, 232, 240, 0.9)", fontSize: 13, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", verticalAlign: "middle" };
 const editableCellStyle: React.CSSProperties = { ...cellStyle, minWidth: 142, padding: "5px 14px" };
 const customFieldCellStyle = (color: string): React.CSSProperties => ({ ...editableCellStyle, background: `linear-gradient(90deg, ${color}06, transparent)` });
+const pendingFieldCellStyle: React.CSSProperties = { ...editableCellStyle, background: "linear-gradient(90deg, rgba(99,102,241,.035), transparent)", color: "#94a3b8", fontSize: 11, fontWeight: 800, textAlign: "center" };
 const addFieldCellStyle: React.CSSProperties = { ...cellStyle, width: 44, minWidth: 44, padding: 0 };
 const nameCellStyle: React.CSSProperties = { ...cellStyle, color: "#0f172a", fontWeight: 900 };
 const projectRowStyle = (selected: boolean): React.CSSProperties => ({ cursor: "pointer", background: selected ? "linear-gradient(90deg, rgba(219, 234, 254, 0.92), rgba(239, 246, 255, 0.72))" : "transparent", outline: selected ? "2px solid rgba(37, 99, 235, 0.30)" : "2px solid transparent", outlineOffset: -2 });

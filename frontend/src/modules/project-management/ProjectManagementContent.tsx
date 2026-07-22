@@ -67,7 +67,12 @@ import {
   type ProjectListGroupingField,
 } from "./ProjectListView.js";
 import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
-import { projectListGroupingFields } from "./projectListViewModel.js";
+import {
+  isProjectListFieldGrouping,
+  PROJECT_LIST_FIELD_GROUPING,
+  projectListGroupingFields,
+  projectListSpecificFieldGroupingOptions,
+} from "./projectListViewModel.js";
 import { EVENT_PROJECT_VIEW_SETTINGS_REQUESTED } from "./projectViewEvents.js";
 
 type ProjectManagementContentProps = {
@@ -674,7 +679,14 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [entityFields, setEntityFields] = useState<EntityField[]>([]);
   const [visibleProjectFieldIDs, setVisibleProjectFieldIDs] = useState(() => readProjectListFieldColumns(companyID));
-  const projectListGroupingOptions = useMemo(() => projectListGroupingFields(entityFields), [entityFields]);
+  const projectListGroupingOptions = useMemo(projectListGroupingFields, []);
+  const projectListGroupingFieldVariant = useMemo(() => ({
+    parentValue: PROJECT_LIST_FIELD_GROUPING,
+    matches: isProjectListFieldGrouping,
+    options: projectListSpecificFieldGroupingOptions(entityFields),
+    placeholder: "Choose field",
+    selectionLabel: "specific field",
+  }), [entityFields]);
   const [projectFieldSavingIDs, setProjectFieldSavingIDs] = useState<Set<string>>(() => new Set());
   const [activeProjectID, setActiveProjectID] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
@@ -1413,6 +1425,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <UniversalGroupingControls<ProjectListGroupingField>
               groupings={projectListGroupings}
               fieldOptions={projectListGroupingOptions}
+              fieldVariant={projectListGroupingFieldVariant}
               onChange={setProjectListGroupings}
               buttonLabel="•••"
               popoverLabel="Edit Projects view"
