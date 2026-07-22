@@ -2,15 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { EntityField } from "../../../../frontend/src/modules/fields/entityFieldsApi.js";
 import {
   activeProjectListGroupings,
   entityFieldGroupingValue,
-  isProjectListFieldGrouping,
+  normalizeProjectListFieldColumns,
   normalizeProjectListGroupings,
+  PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER,
   PROJECT_LIST_FIELD_GROUPING,
   projectListGroupingFields,
-  projectListSpecificFieldGroupingOptions,
 } from "../../../../frontend/src/modules/project-management/projectListViewModel.js";
 
 test("project grouping preferences keep supported unique levels and normalize direction", () => {
@@ -27,45 +26,32 @@ test("project grouping preferences keep supported unique levels and normalize di
   assert.deepEqual(normalizeProjectListGroupings({ field: "team" }), []);
 });
 
-test("project grouping preferences support reusable entity fields", () => {
-  const field: EntityField = {
-    company_id: "company-1",
-    field_id: "field-fx",
-    name: "FX",
-    color: "#6366f1",
-    position: 0,
-    assignment_count: 2,
-    created_timestamp: "2026-07-21T00:00:00Z",
-    updated_timestamp: "2026-07-21T00:00:00Z",
-  };
-  const groupingValue = entityFieldGroupingValue(field.field_id);
+test("project grouping exposes one generic Fields level and migrates legacy field-specific preferences", () => {
+  const legacyGroupingValue = entityFieldGroupingValue("field-fx");
 
-  assert.equal(groupingValue, "field:field-fx");
+  assert.equal(legacyGroupingValue, "field:field-fx");
   assert.deepEqual(projectListGroupingFields().slice(-1)[0], {
     value: PROJECT_LIST_FIELD_GROUPING,
-    label: "Field",
+    label: "Group by Fields",
   });
-  assert.deepEqual(projectListSpecificFieldGroupingOptions([field])[0], {
-    value: groupingValue,
-    label: "FX",
-  });
-  assert.equal(isProjectListFieldGrouping(groupingValue), true);
   const normalized = normalizeProjectListGroupings([
+    { field: legacyGroupingValue, direction: "desc" },
     { field: PROJECT_LIST_FIELD_GROUPING, direction: "asc" },
-    { field: groupingValue, direction: "desc" },
-    { field: groupingValue, direction: "asc" },
     { field: "field:", direction: "asc" },
   ]);
   assert.deepEqual(normalized, [
-    { field: PROJECT_LIST_FIELD_GROUPING, direction: "asc" },
-    { field: groupingValue, direction: "desc" },
+    { field: PROJECT_LIST_FIELD_GROUPING, direction: "desc" },
   ]);
-  assert.deepEqual(activeProjectListGroupings(normalized), [
-    { field: groupingValue, direction: "desc" },
-  ]);
-
+  assert.deepEqual(activeProjectListGroupings(normalized), normalized);
 });
-test("project field controls separate enabling from choosing a specific field", () => {
+
+test("project field column preferences collapse to one generic column", () => {
+  assert.deepEqual(normalizeProjectListFieldColumns([]), []);
+  assert.deepEqual(normalizeProjectListFieldColumns(["field-fx", "field-ax"]), [PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER]);
+  assert.deepEqual(normalizeProjectListFieldColumns([PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER]), [PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER]);
+});
+
+test("project fields are selected per row and grouping stays generic", () => {
   const listSource = readFileSync(
     resolve(process.cwd(), "frontend/src/modules/project-management/ProjectListView.tsx"),
     "utf8",
@@ -77,7 +63,23 @@ test("project field controls separate enabling from choosing a specific field", 
 
   assert.match(listSource, /aria-label="Enable field column"/);
   assert.match(listSource, /PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER/);
-  assert.match(listSource, /Choose field for column/);
-  assert.match(contentSource, /fieldVariant=\{projectListGroupingFieldVariant\}/);
-  assert.match(contentSource, /placeholder: "Choose field"/);
+  assert.match(listSource, /customFieldHeaderLabelStyle}>Field</);
+  assert.match(listSource, /values=\{project\.fields\?\.map/);
+  assert.match(listSource, /choices=\{fields\.map/);
+  assert.doesNotMatch(listSource, /Choose field for column/);
+  assert.doesNotMatch(contentSource, /fieldVariant=\{/);
+});
+
+test("project surfaces retain the elevated visual system and compact-width layout hooks", () => {
+  const managementSource = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectManagementContent.tsx"), "utf8");
+  const summarySource = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const cssSource = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+
+  assert.match(managementSource, /mango-project-management-surface/);
+  assert.match(managementSource, /radial-gradient\(circle at 6% 0%/);
+  assert.match(summarySource, /mango-project-summary-timeline/);
+  assert.match(summarySource, /mango-project-summary-work-panel/);
+  assert.match(summarySource, /mango-project-summary-tabs/);
+  assert.match(cssSource, /@media \(max-width: 860px\)/);
+  assert.match(cssSource, /mango-project-summary-split-handle/);
 });

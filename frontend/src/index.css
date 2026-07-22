@@ -1103,3 +1103,75 @@ button, input, textarea, select {
   outline: 2px solid #0284c7;
   outline-offset: 2px;
 }
+@media (max-width: 1100px) {
+  .mango-project-management-header {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .mango-project-management-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start !important;
+  }
+
+  .mango-project-summary-header {
+    align-items: flex-start !important;
+  }
+
+  .mango-project-summary-meta {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .mango-project-summary-shell {
+    overflow: auto !important;
+  }
+
+  .mango-project-summary-body {
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    overflow: visible !important;
+  }
+
+  .mango-project-summary-timeline,
+  .mango-project-summary-work-panel {
+    width: 100% !important;
+    min-height: 620px !important;
+    flex: 0 0 auto !important;
+  }
+
+  .mango-project-summary-split-handle {
+    display: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .mango-project-management-page {
+    padding: 8px !important;
+  }
+
+  .mango-project-management-surface {
+    padding: 11px !important;
+    border-radius: 16px !important;
+  }
+
+  .mango-project-management-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .mango-project-summary-header {
+    margin: 8px 8px 0 !important;
+    padding: 12px !important;
+  }
+
+  .mango-project-summary-meta > div {
+    flex: 1 1 132px;
+    max-width: none !important;
+  }
+
+  .mango-project-summary-body {
+    padding: 8px !important;
+  }
+}
