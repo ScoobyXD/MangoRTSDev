@@ -28,7 +28,7 @@ func nodeUpdatedWorkspaceEventInput(item domain.Node) DomainEventInput {
 	return workspaceDomainEventInput(item.CompanyID, "node_updated", map[string]any{"node_id": item.NodeID, "node": item})
 }
 
-func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, after domain.Node, beforeGeneratedUserIDs, afterGeneratedUserIDs []string) DomainEventInput {
+func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, after domain.Node) DomainEventInput {
 	event := nodeUpdatedWorkspaceEventInput(after)
 	event.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	payload := event.Payload
@@ -38,9 +38,8 @@ func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, afte
 	}
 
 	changedFields := nodeNotificationChangedFields(input, before, after)
-	if len(afterGeneratedUserIDs) > 0 && len(changedFields) > 0 {
+	if len(changedFields) > 0 {
 		payload["notification_event_type"] = domain.NotificationEventNodeFieldsChanged
-		payload["recipient_user_ids"] = afterGeneratedUserIDs
 		payload["changed_fields"] = changedFields
 		if input.StatusSet {
 			payload["status"] = nodeOptionalString(after.Status)

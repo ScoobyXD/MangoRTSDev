@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-21
 
 # Updates Tests
 
@@ -29,7 +29,7 @@ U17 - Notifications without a project, logic gate, or node context fall under th
 U18 - Update group IDs are stable and use updates/<field>:<id> or updates/update:all shapes.
 U19 - Groups sort by project, logic gate, node, then fallback update groups, with labels sorted alphabetically within each type.
 U20 - Notifications sort newest first, then by title or ID to keep ordering stable.
-U21 - Updates visibility filters out notifications whose project, logic gate, or node is not viewable by the current user.
+U21 - Updates visibility uses the action's owning resource. A notification with a Node target checks the Node before any stored Logic Gate context; a direct Logic Gate notification checks the Logic Gate; a project notification checks the project. Inaccessible targets are filtered out.
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
 U23 - One app-lifetime notification coordinator owns `notifications:user:{user_id}`. Every first or reconnect `subscription.accepted` performs one coalesced canonical notification-summary reconciliation; a later local handler joining an already accepted shared scope receives immediate acceptance, and created/deleted/cleared hints use the same coalescer to update urgent `!`, normal `@`, and regular unread badges.
 U24 - Updates registers with the notification coordinator only while open. First/reconnect subscription acceptance reconciles notification summary only and does not reload the feed. External notification-created/deleted/cleared hints run one canonical feed load at a time with at most one queued final load; they never overlap or restart a slow load and cause no feed request while closed. HTTP-first local Seen keeps its existing optimistic no-reload behavior.
@@ -38,21 +38,21 @@ U26 - The update trigger canon is limited to the rules in U27 through U49; addin
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
 U28 - Moving a node from one Logic Gate status or state to another creates an update.
 U29 - The screen or API entry point does not create a separate update category: Logic Gate Work, GVIC Matrix, Kanban, and Home actions are classified by the semantic action they perform.
-U30 - A normal @ mention in a node text box creates a mention update for the mentioned user.
-U31 - An urgent ! mention in a node text box creates an urgent mention update for the mentioned user.
-U32 - A normal @ mention in node chat creates a mention update for the mentioned user.
-U33 - An urgent ! mention in node chat creates an urgent mention update for the mentioned user.
-U34 - Any new node chat message creates a chat-message update even when it contains no @ mention or ! mention.
-U35 - A normal @ mention in the Logic Gate text editor creates a mention update for the mentioned user.
-U36 - An urgent ! mention in the Logic Gate text editor creates an urgent mention update for the mentioned user.
+U30 - A normal @ mention in a Node text box creates a mention update for the mentioned user and labels it with that user's current effective Node GVIC role; it never substitutes the parent Logic Gate's GVIC role.
+U31 - An urgent ! mention in a Node text box creates an urgent mention update for the mentioned user and uses the same current effective Node GVIC routing as U30.
+U32 - A normal @ mention in Node chat creates a mention update for the mentioned user and uses current effective Node GVIC routing.
+U33 - An urgent ! mention in Node chat creates an urgent mention update for the mentioned user and uses current effective Node GVIC routing.
+U34 - Any new Node chat message creates a chat-message update for current effective Node GVIC users even when it contains no @ mention or ! mention. Parent Logic Gate-only users are not Node chat recipients, and a mentioned user receives the mention row instead of a duplicate chat row.
+U35 - A normal @ mention in the Logic Gate text editor creates a mention update for the mentioned user using that Logic Gate's current effective GVIC role.
+U36 - An urgent ! mention in the Logic Gate text editor creates an urgent mention update for the mentioned user using that Logic Gate's current effective GVIC role.
 U37 - Logic Gates do not have a chat surface for Updates purposes; only the Logic Gate text editor can create Logic Gate mention updates.
 U38 - Attaching an email directly to a node creates an attached-email update.
 U39 - Dropping or merging an email-node card onto an existing node creates the same attached-email update as a direct node email attachment.
 U40 - Removing a node from a Logic Gate creates an update.
 U41 - Deleting a node creates an update.
-U42 - GVIC assignment changes on update-relevant nodes or Logic Gates create updates.
+U42 - A Node or Logic Gate GVIC assignment change creates an assignment update only for each user who is newly assigned or whose effective role changed. Existing unchanged users, removed users, and unrelated GVIC users receive no assignment update; the actor never receives their own notification.
 U43 - Permission or access changes on update-relevant nodes or Logic Gates create updates.
-U44 - Node field changes create updates only for work-relevant field changes such as status, due date, priority, and similar non-name work fields.
+U44 - Node field changes create updates only for work-relevant field changes such as status, due date, priority, and similar non-name work fields. Recipients and Generated/Verified/Consulted/Informed labels come from the Node's current effective GVIC assignments, never its parent Logic Gate assignments and never a blanket Other role.
 U45 - Rename-only changes do not create updates, including node renames, Logic Gate renames, and project renames.
 U46 - Logic Gate issue-flag changes do not create updates; the issue-flag feature is not part of the Updates trigger canon.
 U47 - Project-level notifications are not part of the Updates trigger canon yet, including project create, delete, rename, GVIC, and permission changes.
@@ -62,7 +62,7 @@ U50 - Update row copy keeps the actor first, the specific verb second, and the p
 U51 - Logic Gate IDs and labels remain available for grouping, filtering, resource opening, sorting, and navigation, but are not repeated inside individual Updates row copy. Node rows still name the node; a direct Logic Gate notification uses concise action copy without a per-row Logic Gate chip or label.
 U52 - Update row tone is determined by update type: urgent mentions reserve red with a ! marker, normal mentions reserve orange with an @ marker, new/added/appended actions use blue, changed/updated actions use purple, and deleted/removed actions use dark mellow red.
 U53 - Mention tones override other row tones for the notification sent to the mentioned user: urgent ! mention is highest priority, then normal @ mention, then the underlying chat, editor, field, or attachment action.
-U54 - Status and priority values shown inside update rows must reuse the same shared visual tokens as node status and node priority controls; Updates must not hardcode separate status or priority colors, fonts, icons, or pill styles.
+U54 - Status and priority values shown inside update rows must reuse the same shared visual tokens as node status and node priority controls; Updates must not hardcode separate status or priority colors, fonts, icons, or pill styles. Node notifications persist the current Node priority as update context, row/group rendering prefers that stored value, and a missing priority remains No priority rather than being invented as priority zero.
 U55 - Entity icons shown inside update rows must come from a shared app icon registry or equivalent shared token source for nodes, emails, folders, projects, and future reusable entities; Updates must not define local copies of those icons. Logic Gate icons remain shared for grouping headers and other resource surfaces, but U51 excludes them from individual row copy.
 U56 - Assignment and permission tones follow the exact action subtype: newly assigned, newly granted, or newly attached uses blue; changed or updated uses purple; removed or revoked uses dark mellow red.
 U57 - The canonical row wording in the Update Row Copy table is the source of truth for update display text; changing row wording requires updating this file.
@@ -536,3 +536,32 @@ Expected:
 - Descending Priority grouping renders priorities 5, 4, 3, 2, and 1 before the unassigned group.
 - The outer row width, timestamp column, and Seen button stay unchanged.
 - Each Node title uses the remaining title-line width and ellipsizes only when it reaches the neighboring tokens or fixed right-side controls.
+
+### Scenario U-S14: Editor-Owned GVIC Routing, Targeted Assignment, And Priority Context
+
+Business logic covered:
+- U21
+- U30
+- U31
+- U32
+- U33
+- U34
+- U35
+- U36
+- U42
+- U44
+- U54
+
+Given:
+- A Node belongs to a Logic Gate, but the Node and Logic Gate currently have different GVIC users and roles.
+- A user creates normal and urgent mentions, ordinary chat, and work-field changes from the Node editor.
+- A user creates a mention from the Logic Gate editor.
+- Bob is newly assigned to the Node while Alice remains unchanged and Charlie is removed.
+- The Node has a concrete priority.
+
+Expected:
+- Every Node-origin mention, chat, and field update uses current effective Node GVIC routing and role labels; Logic Gate-only users receive none of those Node updates.
+- The Logic Gate-origin mention uses current effective Logic Gate GVIC routing.
+- Only Bob receives the assignment update. Alice, Charlie, unrelated users, and the actor receive no assignment update.
+- Node updates store and display the Node priority. Missing priority stays No priority rather than becoming priority zero.
+- Visibility checks the Node for Node-owned notifications even when the notification also stores a Logic Gate grouping ID.

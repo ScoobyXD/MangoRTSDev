@@ -153,18 +153,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		return nil
 	}
-	addLogicGateRecipients := func(logicGateID, nodeID string) error {
-		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
-		stop()
-		if err != nil {
-			return err
-		}
-		for userID, role := range roles {
-			addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, nodeID))
-		}
-		return nil
-	}
 	addNodeWorkRecipients := func(logicGateID, nodeID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
 		roles, err := s.gvicRecipientRoles(event.CompanyID, store.EntityTypeNode, nodeID)
@@ -278,9 +266,13 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		if err != nil {
 			return nil, err
 		}
-		recipientUserIDs := payloadStringSlice(payload, "recipient_user_ids")
-		if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, recipientUserIDs, func(string) notificationRecipientMeta {
-			return notificationMetaForNode(node)
+		recipientUserIDs := append(payloadStringSlice(payload, "assignment_user_ids"), payloadStringSlice(payload, "recipient_user_ids")...)
+		roles, err := s.gvicRecipientRoles(event.CompanyID, store.EntityTypeNode, node.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, recipientUserIDs, func(userID string) notificationRecipientMeta {
+			return notificationMetaForEffectiveNodeUser(node, roles[userID])
 		}); err != nil {
 			return nil, err
 		}
@@ -289,16 +281,13 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			nodeTitle = "a node"
 		}
 		title = "Node assigned to you"
-		body = nodeTitle + " is now in your triage."
+		body = "You were assigned to " + nodeTitle + "."
 	case domain.NotificationEventNodeFieldsChanged:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
 			return nil, err
 		}
-		recipientUserIDs := payloadStringSlice(payload, "recipient_user_ids")
-		if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, recipientUserIDs, func(string) notificationRecipientMeta {
-			return notificationMetaForNode(node)
-		}); err != nil {
+		if err := addNodeWorkRecipients(firstCleanString(node.LogicGateIDs), node.NodeID); err != nil {
 			return nil, err
 		}
 		nodeTitle := strings.TrimSpace(node.Title)
@@ -329,10 +318,8 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		if err != nil {
 			return nil, err
 		}
-		for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
-			if err := addLogicGateRecipients(logicGateID, node.NodeID); err != nil {
-				return nil, err
-			}
+		if err := addNodeWorkRecipients(firstCleanString(node.LogicGateIDs), node.NodeID); err != nil {
+			return nil, err
 		}
 		for _, mentionedUserID := range payloadStringSlice(payload, "mentioned_user_ids") {
 			delete(recipients, mentionedUserID)
@@ -379,20 +366,16 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				}
 				break
 			}
-			logicGateRolesByID := map[string]map[string]string{}
-			for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
-				roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
-				if err != nil {
-					return nil, err
-				}
-				logicGateRolesByID[logicGateID] = roles
+			roles, err := s.gvicRecipientRoles(event.CompanyID, store.EntityTypeNode, node.NodeID)
+			if err != nil {
+				return nil, err
 			}
 			entityTitle = strings.TrimSpace(node.Title)
 			if entityTitle == "" {
 				entityTitle = "a node"
 			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
-				return notificationMetaForMentionedNodeUser(node, userID, logicGateRolesByID)
+				return notificationMetaForEffectiveNodeUser(node, roles[userID])
 			}); err != nil {
 				return nil, err
 			}
@@ -469,6 +452,22 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		return nil, nil
 	}
 
+	var notificationPriority *int
+	notificationNodeID := ""
+	for _, meta := range recipients {
+		if notificationNodeID = strings.TrimSpace(meta.NodeID); notificationNodeID != "" {
+			break
+		}
+	}
+	if notificationNodeID == "" && event.EntityType == store.EntityTypeNode {
+		notificationNodeID = strings.TrimSpace(event.EntityID)
+	}
+	if notificationNodeID != "" {
+		if node, err := s.Repo.GetNode(event.CompanyID, notificationNodeID); err == nil && node.Priority != nil {
+			priority := *node.Priority
+			notificationPriority = &priority
+		}
+	}
 	items := make([]store.NotificationCreateInput, 0, len(recipients))
 	for userID, meta := range recipients {
 		items = append(items, store.NotificationCreateInput{
@@ -486,6 +485,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			LogicGateID:     meta.LogicGateID,
 			NodeID:          meta.NodeID,
 			InformationID:   meta.InformationID,
+			Priority:        notificationPriority,
 		})
 	}
 	return items, nil
@@ -537,6 +537,10 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		if entityID == "" {
 			entityID = payloadString(payload, "entity_id")
 		}
+	case store.NodeGVICUpdatedEventType:
+		notificationType = domain.NotificationEventNodeAssigned
+		entityType = store.EntityTypeNode
+		entityID = payloadString(payload, "node_id")
 	case store.LogicGateGVICUpdatedEventType:
 		notificationType = domain.NotificationEventLogicGateGVICUpdated
 		entityType = store.EntityTypeLogicGate
@@ -652,6 +656,15 @@ func (s *Service) notificationEffectiveUsers(companyID, resourceType, resourceID
 	}
 	if err != nil {
 		return nil, err
+	}
+	if resourceType == store.EntityTypeNode || resourceType == store.EntityTypeLogicGate {
+		roles, rolesErr := s.gvicRecipientRoles(companyID, resourceType, resourceID)
+		if rolesErr != nil {
+			return nil, rolesErr
+		}
+		for userID := range roles {
+			userIDs = append(userIDs, userID)
+		}
 	}
 	return cleanStrings(userIDs), nil
 }
@@ -1001,32 +1014,16 @@ func notificationMetaForEffectiveLogicGateUser(role, logicGateID, nodeID string)
 	return notificationMetaForLogicGateRole(role, logicGateID, nodeID)
 }
 
-func notificationMetaForMentionedNodeUser(node domain.Node, userID string, logicGateRolesByID map[string]map[string]string) notificationRecipientMeta {
-	userID = strings.TrimSpace(userID)
-	nodeID := strings.TrimSpace(node.NodeID)
-	firstLogicGateID := firstCleanString(node.LogicGateIDs)
-	meta := notificationRecipientMeta{}
-	for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
-		role := ""
-		if roles := logicGateRolesByID[logicGateID]; roles != nil {
-			role = roles[userID]
-		}
-		if role != "" {
-			meta = mergeNotificationRecipientMeta(meta, notificationMetaForLogicGateRole(role, logicGateID, nodeID))
-		}
-	}
-	if meta.Surface == "" && meta.Role == "" {
+func notificationMetaForEffectiveNodeUser(node domain.Node, role string) notificationRecipientMeta {
+	if normalizeNotificationRole(role) == "" {
 		return notificationRecipientMeta{
 			Surface:     domain.NotificationSurfaceACIInbox,
 			Role:        domain.NotificationRoleOther,
-			LogicGateID: firstLogicGateID,
-			NodeID:      nodeID,
+			LogicGateID: firstCleanString(node.LogicGateIDs),
+			NodeID:      strings.TrimSpace(node.NodeID),
 		}
 	}
-	if meta.NodeID == "" {
-		meta.NodeID = nodeID
-	}
-	return meta
+	return notificationMetaForLogicGateRole(role, firstCleanString(node.LogicGateIDs), node.NodeID)
 }
 
 func notificationMetaForSharedInboxRole(role string) notificationRecipientMeta {
@@ -1037,15 +1034,6 @@ func notificationMetaForSharedInboxRole(role string) notificationRecipientMeta {
 	return notificationRecipientMeta{
 		Surface: domain.NotificationSurfaceSharedTriage,
 		Role:    role,
-	}
-}
-
-func notificationMetaForNode(node domain.Node) notificationRecipientMeta {
-	return notificationRecipientMeta{
-		Surface:     domain.NotificationSurfaceMyTriage,
-		Role:        domain.NotificationRoleOther,
-		LogicGateID: firstCleanString(node.LogicGateIDs),
-		NodeID:      node.NodeID,
 	}
 }
 

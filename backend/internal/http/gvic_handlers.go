@@ -95,7 +95,7 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 				IdempotencyKey:     req.IdempotencyKey,
 				ApplyToDescendants: req.ApplyToDescendants,
 			})
-			writeGVICMutationResult(w, err, result)
+			s.writeGVICMutationResult(w, err, result)
 			return
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -157,7 +157,7 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 		} else {
 			result, err = s.repo.RemoveResourceGVICAssignments(input)
 		}
-		writeGVICMutationResult(w, err, result)
+		s.writeGVICMutationResult(w, err, result)
 		return
 	}
 
@@ -179,7 +179,7 @@ func decodeGVICAssignmentsRequest(w http.ResponseWriter, r *http.Request) (resou
 	return req, true
 }
 
-func writeGVICMutationResult(w http.ResponseWriter, err error, result store.ResourceGVICAssignmentMutationResult) {
+func (s *Server) writeGVICMutationResult(w http.ResponseWriter, err error, result store.ResourceGVICAssignmentMutationResult) {
 	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
 		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
 		return
@@ -204,5 +204,6 @@ func writeGVICMutationResult(w http.ResponseWriter, err error, result store.Reso
 		writeError(w, http.StatusInternalServerError, "failed_to_update_gvic")
 		return
 	}
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

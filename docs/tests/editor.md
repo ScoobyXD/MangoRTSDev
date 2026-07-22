@@ -6,6 +6,7 @@ Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial overall. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. `scripts/run_realtime_production_path_tests.mjs` covers simultaneous multi-user/tab editing, exact scopes, lost acknowledgements, reconnect, rich-HTML migration compatibility, PostgreSQL, WebSockets, actual editor DOM, and hydrated images.
+- ED88 selected-text chat cancellation is covered by unifiedRichEditorContract.test.ts, including both the quote X and whole-chat close paths.
 
 ## Business Logic
 
@@ -109,6 +110,7 @@ ED84 - Inline entity identity survives undo/redo, atomic keyboard navigation, co
 ED85 - Entity search and Node creation preserve company/workspace scope and effective resource access. Blank recent search cannot reveal inaccessible entities, hidden path resources, unsupported types, folders, or cross-company results. No entity link creates an Explorer placement or requires a database migration.
 ED86 - Editable entity activation uses in-app history and route notification without `location.assign`, browser reload, authentication restart, or a login-page flash. A Node opened through an inline Node entity from another Node records only a validated target-specific source-Node return marker. The target Node's X invokes browser Back exactly once and restores that source Node. Direct opens, non-Node source routes, non-Node targets, and stale or mismatched markers keep the existing close-to-home behavior.
 ED87 - Backspace on a selected/focused inline entity, or at a collapsed caret immediately after it, replaces the entity atom with its stored label as ordinary text and places the caret after the label. This operation changes only document markup; it never deletes or edits the real Node, Logic Gate, or Project. Undo restores the entity and its identity, while subsequent ordinary-text Backspace follows native text editing. Delete retains the editor's existing atomic deletion behavior.
+ED88 - Turning selected Node text into a pending chat quote preserves only the temporary source annotation needed while composing. Clicking the quote X or closing that pending chat removes the quote/annotation and collapses the native/ProseMirror selection, so no selected-text highlight survives cancellation. Sending successfully may replace the temporary annotation with the durable chat annotation.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1423,3 +1425,24 @@ Expected:
 - Backspace on/after a chip unwraps it to its label without deleting the product entity. Undo restores the chip. Legacy sanitization reconstructs only canonical entity attributes; JSON validation rejects unsupported types or missing identity; copy/paste, durable save, sleeping static render, read-only render, and remount retain the entity ID, type, and label.
 
 Focused coverage lives in `editorEntityLinks.test.ts`, `mangoTiptapEditorIntegration.test.tsx`, backend `editor_json_test.go`, backend Company Explorer ranking/permission tests, and the normal unified-editor contract suites. Full repository verification must run after these focused tests.
+
+### Scenario ED-S20: Cancel Selected Text Chat Completely
+
+Business logic covered:
+- ED88
+
+Given:
+- The user selects text in a Node text block and chooses Turn into Chat.
+
+When:
+- The user clicks X on the quoted text before sending.
+- The user repeats the action and closes the pending chat instead.
+
+Expected:
+- The pending quoted-text prefill is removed in both cancellation paths.
+- The temporary source annotation is removed.
+- The browser and ProseMirror selection is collapsed, so no selection highlight remains.
+- Unrelated draft text in the chat is not erased by clearing only the quote.
+- A successful send may replace the temporary annotation with the normal durable chat annotation.
+
+Focused automated coverage lives in tests/frontend/modules/editor/unifiedRichEditorContract.test.ts; the mounted editor suites continue to cover selection-to-chat creation and durable annotation behavior.

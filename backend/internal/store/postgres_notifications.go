@@ -13,6 +13,7 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 	var item domain.Notification
 	var companyID sql.NullString
 	var actorUserID sql.NullString
+	var priority sql.NullInt64
 	err := row.Scan(
 		&item.NotificationID,
 		&companyID,
@@ -29,6 +30,7 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 		&item.LogicGateID,
 		&item.NodeID,
 		&item.InformationID,
+		&priority,
 		&item.ReadTimestamp,
 		&item.CreatedTimestamp,
 	)
@@ -41,29 +43,47 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 	if actorUserID.Valid {
 		item.ActorUserID = &actorUserID.String
 	}
+	if priority.Valid {
+		value := int(priority.Int64)
+		item.Priority = &value
+	}
 	return item, nil
 }
 
 const notificationSelectColumns = `
 notification_id::text, company_id::text, recipient_user_id::text, actor_user_id::text,
 notification_type, source_event_id::text, entity_type, entity_id, title, body_preview,
-surface, role, logic_gate_id, node_id, information_id, read_timestamp, created_timestamp`
+surface, role, logic_gate_id, node_id, information_id, priority, read_timestamp, created_timestamp`
 
 const notificationRecipientVisibilityWhereSQL = `
   and (
     company_id is null
     or case
-        when btrim(logic_gate_id) <> '' then mangorts_user_can_access_resource(
-          notifications.company_id,
-          'logic_gate',
-          notifications.logic_gate_id::uuid,
-          notifications.recipient_user_id,
-          'edit'
-        )
+        when btrim(node_id) <> ''
+          and role in ('generated', 'verified', 'consulted', 'informed') then exists (
+            select 1
+            from nodes
+            where nodes.company_id=notifications.company_id
+              and nodes.node_id=notifications.node_id::uuid
+          )
+        when btrim(logic_gate_id) <> ''
+          and role in ('generated', 'verified', 'consulted', 'informed') then exists (
+            select 1
+            from logic_gates
+            where logic_gates.company_id=notifications.company_id
+              and logic_gates.logic_gate_id=notifications.logic_gate_id::uuid
+          )
         when btrim(node_id) <> '' then mangorts_user_can_access_resource(
           notifications.company_id,
           'node',
           notifications.node_id::uuid,
+          notifications.recipient_user_id,
+          'edit'
+        )
+        when btrim(logic_gate_id) <> '' then mangorts_user_can_access_resource(
+          notifications.company_id,
+          'logic_gate',
+          notifications.logic_gate_id::uuid,
           notifications.recipient_user_id,
           'edit'
         )
@@ -123,6 +143,9 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
 		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
 		candidate.InformationID = strings.TrimSpace(candidate.InformationID)
+		if candidate.Priority != nil && (*candidate.Priority < 1 || *candidate.Priority > 5) {
+			return nil, ErrInvalid
+		}
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
@@ -130,14 +153,14 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
 insert into notifications (
   notification_id, company_id, recipient_user_id, actor_user_id, notification_type,
-  source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, information_id, created_timestamp
-) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+  source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, information_id, priority, created_timestamp
+) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 on conflict (recipient_user_id, source_event_id, notification_type, entity_type, entity_id)
 do nothing
 returning `+notificationSelectColumns,
 			newUUIDv7String(), candidate.CompanyID, candidate.RecipientUserID, candidate.ActorUserID,
 			candidate.Type, candidate.SourceEventID, candidate.EntityType, candidate.EntityID,
-			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID, candidate.InformationID,
+			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID, candidate.InformationID, candidate.Priority,
 		))
 		stop()
 		if err != nil {

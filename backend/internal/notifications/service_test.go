@@ -458,7 +458,7 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesGVICRecipients(t *test
 	}
 }
 
-func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *testing.T) {
+func TestProcessDomainEventNodeMentionsUseCurrentNodeGVICAndSkipUnassignedAndActor(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666621"
@@ -471,12 +471,47 @@ func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *t
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Mention Parent Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateGVICAssignmentInput{{
+			Role:   domain.GVICRoleGenerated,
+			UserID: allowed.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    testPriority(1),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleConsulted,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   allowed.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node: %v", err)
+	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
 		EntityType: store.EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: allowed.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
@@ -505,6 +540,36 @@ func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *t
 	}
 	if items[0].Type != domain.NotificationEventMentionCreated || items[0].EntityType != store.EntityTypeNode || items[0].EntityID != node.NodeID {
 		t.Fatalf("mention notification target = %+v, want node mention", items[0])
+	}
+	if items[0].Surface != domain.NotificationSurfaceACIInbox || items[0].Role != domain.GVICRoleConsulted || items[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("mention routing = %+v, want current node consulted role instead of parent Logic Gate generated role", items[0])
+	}
+	urgentItems, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666623",
+		CompanyID:   companyID,
+		StreamType:  "notification",
+		StreamID:    "node:" + node.NodeID,
+		Type:        store.NodeMentionCreatedEventType,
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":            node.NodeID,
+			"comment":            "!allowed",
+			"mention_kind":       "urgent",
+			"mentioned_user_ids": []string{allowed.UserID},
+			"actor_display_name": "Mention Actor",
+		},
+	})
+	if err != nil {
+		t.Fatalf("urgent ProcessDomainEvent: %v", err)
+	}
+	if len(urgentItems) != 1 || urgentItems[0].RecipientUserID != allowed.UserID {
+		t.Fatalf("urgent mention notifications = %+v, want allowed user only", urgentItems)
+	}
+	if urgentItems[0].Type != domain.NotificationEventUrgentMentionCreated {
+		t.Fatalf("urgent mention type = %q, want urgent", urgentItems[0].Type)
+	}
+	if urgentItems[0].Role != domain.GVICRoleConsulted || urgentItems[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("urgent mention routing = %+v, want current node consulted role", urgentItems[0])
 	}
 }
 
@@ -536,7 +601,7 @@ func TestProcessDomainEventUnsupportedMentionCreatesNoNotification(t *testing.T)
 	}
 }
 
-func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActor(t *testing.T) {
+func TestProcessDomainEventNodeAssignmentUsesCurrentNodeGVICAndSkipsActor(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666631"
@@ -561,6 +626,18 @@ func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActo
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   assignee.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments: %v", err)
+	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666632",
@@ -582,8 +659,8 @@ func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActo
 	if len(items) != 1 || items[0].RecipientUserID != assignee.UserID {
 		t.Fatalf("assignment notifications = %+v, want assignee only", items)
 	}
-	if items[0].Surface != domain.NotificationSurfaceMyTriage || items[0].Role != domain.NotificationRoleOther {
-		t.Fatalf("assignment metadata = %+v, want my triage other", items[0])
+	if items[0].Surface != domain.NotificationSurfaceRInbox || items[0].Role != domain.GVICRoleGenerated {
+		t.Fatalf("assignment metadata = %+v, want current node generated role", items[0])
 	}
 	if items[0].NodeID != node.NodeID || items[0].EntityType != store.EntityTypeNode || items[0].EntityID != node.NodeID {
 		t.Fatalf("assignment target = %+v, want node target", items[0])

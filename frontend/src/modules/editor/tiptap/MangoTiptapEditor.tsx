@@ -1115,6 +1115,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
               title="Comment on selection"
               onClick={() => {
                 onSelectionChatRequest(selectionAction);
+                editorRef.current?.commands.setTextSelection(selectionAction.to);
                 setSelectionAction(null);
               }}
               style={{ width: 30, height: 30, display: "inline-grid", placeItems: "center", padding: 0, borderRadius: 7, border: 0, background: "transparent", color: "#0369a1", cursor: "pointer" }}

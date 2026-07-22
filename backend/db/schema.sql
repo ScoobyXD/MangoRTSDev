@@ -2647,6 +2647,7 @@ create table if not exists notifications (
   logic_gate_id text not null default '',
   node_id text not null default '',
   information_id text not null default '',
+  priority smallint,
   read_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   constraint notifications_type_nonblank_chk check (btrim(notification_type) <> ''),
@@ -2655,6 +2656,7 @@ create table if not exists notifications (
   constraint notifications_title_nonblank_chk check (btrim(title) <> ''),
   constraint notifications_surface_chk check (surface = '' or surface in ('r_inbox', 'aci_inbox', 'my_triage', 'shared_triage')),
   constraint notifications_role_chk check (role = '' or role in ('generated', 'verified', 'consulted', 'informed', 'other')),
+  constraint notifications_priority_chk check (priority is null or priority between 1 and 5),
   primary key (notification_id),
   foreign key (recipient_user_id) references users (user_id) on delete cascade,
   foreign key (actor_user_id) references users (user_id) on delete set null

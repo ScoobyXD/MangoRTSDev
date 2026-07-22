@@ -108,6 +108,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	}
 
 	before := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+	beforeEffective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	changed := false
 	now := time.Now().UTC()
 	switch operation {
@@ -185,7 +186,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	if keyValue.resourceType == EntityTypeNode && changed {
 		r.bumpNodeViewVersionLocked(keyValue.companyID, keyValue.resourceID)
 	}
-	return ResourceGVICAssignmentMutationResult{
+	result := ResourceGVICAssignmentMutationResult{
 		CompanyID:            keyValue.companyID,
 		ResourceType:         keyValue.resourceType,
 		ResourceID:           keyValue.resourceID,
@@ -194,7 +195,16 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 		GVICAssignments:      cloneResourceGVICAssignments(after),
 		EffectiveAssignments: cloneResourceGVICEffectiveAssignments(effective),
 		Events:               []domain.DomainEvent{},
-	}, nil
+	}
+	if eventInput, ok := resourceGVICUpdatedWorkspaceEventInput(result, beforeEffective, input.ActorUserID, input.IdempotencyKey); ok {
+		event, err := r.appendDomainEventLocked(eventInput)
+		if err != nil {
+			restore()
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
+		result.Events = []domain.DomainEvent{event}
+	}
+	return result, nil
 }
 
 func (r *MemoryRepo) applyResourceGVICCommandToDescendantsLocked(keyValue resourceGVICKey, policySequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {

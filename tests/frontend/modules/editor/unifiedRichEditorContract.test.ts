@@ -1529,3 +1529,14 @@ test("signature attachment previews restart after editor lifecycle replay and ex
   assert.match(editorStyles, /data-mango-editor-image-hydration="loading"/);
   assert.match(editorStyles, /content: "Preview unavailable"/);
 });
+
+test("canceling selected-text chat clears both temporary annotation and editor selection", () => {
+  const tiptap = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+
+  assert.match(tiptap, /onSelectionChatRequest\(selectionAction\);\s*editorRef\.current\?\.commands\.setTextSelection\(selectionAction\.to\);\s*setSelectionAction\(null\);/);
+  assert.match(nodeSurface, /const clearSelectionAnchor = \(\) => \{[\s\S]{0,320}delete next\[chatBlockID\];/);
+  assert.match(nodeSurface, /if \(chatPaneIsVisible\) \{\s*clearSelectionAnchor\(\);/);
+  assert.match(nodeParts, /aria-label="Clear selected text"[\s\S]{0,260}onClick=\{onClearSelectionAnchor\}/);
+});

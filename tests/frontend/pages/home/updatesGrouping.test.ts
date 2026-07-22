@@ -74,6 +74,9 @@ test("priority grouping orders 1 through 5 and keeps unassigned last", () => {
   const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
   assert.match(source, /const priorityOrder = resolveUpdatePriorityGroupOrder\(priority\)/);
   assert.match(source, /label: option\.label\.replace\(\/\\u00a0\/g, " "\), \.\.\.priorityOrder/);
+  assert.match(source, /updatePriorityValue\(item\.priority \?\? nodeDetails\?\.priority\)/);
+  assert.match(source, /updatePriorityValue\(row\.item\.priority \?\? \(nodeID \? resolveNodeDetails\?\.\(nodeID\)\?\.priority : null\)\)/);
+  assert.match(source, /if \(typeof value !== "number" \|\| !Number\.isFinite\(value\)\) return null;/);
 });
 
 test("the built-in Updates setting remains first without rewriting custom settings", () => {
