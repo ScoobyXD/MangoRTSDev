@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updateNotificationVisibleInView, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
-import { resolveUpdateActorLabel } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
+import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
@@ -187,19 +187,46 @@ test("seen Updates date fields default to a bounded window and never query more 
   assert.equal(seenUpdatesDateQuery(movedEnd).toDate, "2026-07-21");
 });
 
-test("seen Updates dates use strict DD/MM/YYYY entry without timezone drift", () => {
-  const leapDay = displayDateToUTCDay("29/02/2024");
+test("seen Updates accepts ranges that begin before the oldest stored row", () => {
+  const bounds = seenUpdatesDateBounds({
+    oldest_created_timestamp: "2026-07-10T12:00:00Z",
+    newest_created_timestamp: "2026-07-22T18:00:00Z",
+  });
+  if (!bounds) {
+    throw new Error("expected a seen Updates date range");
+  }
+  const earlierDay = displayDateToUTCDay("06/05/2026");
+  if (earlierDay === null) {
+    throw new Error("expected a valid earlier date");
+  }
+
+  const movedStart = moveSeenUpdatesDateWindow(createSeenUpdatesDateWindow(bounds), "start", earlierDay);
+  assert.deepEqual(seenUpdatesDateQuery(movedStart), {
+    fromDate: "2026-06-05",
+    toDate: "2026-07-22",
+  });
+});
+
+test("seen Updates dates use strict MM/DD/YYYY entry without timezone drift", () => {
+  const leapDay = displayDateToUTCDay("02/29/2024");
   assert.notEqual(leapDay, null);
-  assert.equal(utcDayToDisplayDate(leapDay!), "29/02/2024");
-  assert.equal(displayDateToUTCDay("29/02/2023"), null);
+  assert.equal(utcDayToDisplayDate(leapDay!), "02/29/2024");
+  assert.equal(displayDateToUTCDay("02/29/2023"), null);
   assert.equal(displayDateToUTCDay("2024-02-29"), null);
-  assert.equal(displayDateToUTCDay("1/02/2024"), null);
+  assert.equal(displayDateToUTCDay("2/29/2024"), null);
 
   const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
   assert.ok(source.includes('"Seen updates from date"'));
   assert.ok(source.includes('"Seen updates to date"'));
-  assert.ok(source.includes('placeholder="DD/MM/YYYY"'));
+  assert.ok(source.includes('placeholder="MM/DD/YYYY"'));
   assert.ok(!source.includes("SeenUpdatesDateSlider"));
+});
+
+test("seen Updates retain read notifications while current Updates retain unread notifications", () => {
+  assert.equal(updateNotificationVisibleInView({}, "current"), true);
+  assert.equal(updateNotificationVisibleInView({ read_timestamp: "2026-07-22T12:00:00Z" }, "current"), false);
+  assert.equal(updateNotificationVisibleInView({}, "seen"), false);
+  assert.equal(updateNotificationVisibleInView({ read_timestamp: "2026-07-22T12:00:00Z" }, "seen"), true);
 });
 
 test("Updates never replaces a readable mention actor with a raw user UUID", () => {
@@ -213,4 +240,16 @@ test("Updates never replaces a readable mention actor with a raw user UUID", () 
   assert.equal(resolveUpdateActorLabel(notification, () => actorID), "Test User");
   assert.equal(resolveUpdateActorLabel(notification, () => "Jonathan Kim"), "Jonathan Kim");
   assert.equal(resolveUpdateActorLabel({ ...notification, title: `${actorID} mentioned you` }, () => actorID), "Someone");
+});
+
+test("Updates replaces stored recipient UUID mention previews with the display name", () => {
+  const recipientID = "955a2eed-cdfb-9845-b344-f87683824ca2";
+  const notification = {
+    title: "Test User mentioned you",
+    recipient_user_id: recipientID,
+    body_preview: `!${recipientID} please review this`,
+  };
+
+  assert.equal(resolveUpdateBodyPreview(notification, () => "Jonathan Kim"), "!Jonathan Kim please review this");
+  assert.equal(resolveUpdateBodyPreview({ ...notification, body_preview: `@${recipientID}` }, () => "Jonathan Kim"), "@Jonathan Kim");
 });

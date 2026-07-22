@@ -30,14 +30,14 @@ export function utcDayToDateInput(day: number): string {
 
 export function utcDayToDisplayDate(day: number): string {
   const [year, month, date] = utcDayToDateInput(day).split("-");
-  return `${date}/${month}/${year}`;
+  return `${month}/${date}/${year}`;
 }
 
 export function displayDateToUTCDay(value: string): number | null {
   const match = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!match) return null;
-  const date = Number(match[1]);
-  const month = Number(match[2]);
+  const month = Number(match[1]);
+  const date = Number(match[2]);
   const year = Number(match[3]);
   if (year < 1000 || month < 1 || month > 12 || date < 1 || date > 31) return null;
   const timestamp = Date.UTC(year, month - 1, date);
@@ -67,12 +67,12 @@ export function moveSeenUpdatesDateWindow(
   edge: "start" | "end",
   nextValue: number,
 ): SeenUpdatesDateWindow {
-  const value = Math.min(window.newestDay, Math.max(window.oldestDay, Math.trunc(nextValue)));
+  const value = Math.trunc(nextValue);
   let startDay = edge === "start" ? Math.min(value, window.endDay) : window.startDay;
   let endDay = edge === "end" ? Math.max(value, window.startDay) : window.endDay;
   if (endDay - startDay + 1 > SEEN_UPDATES_MAX_WINDOW_DAYS) {
-    if (edge === "start") endDay = Math.min(window.newestDay, startDay + SEEN_UPDATES_MAX_WINDOW_DAYS - 1);
-    else startDay = Math.max(window.oldestDay, endDay - SEEN_UPDATES_MAX_WINDOW_DAYS + 1);
+    if (edge === "start") endDay = startDay + SEEN_UPDATES_MAX_WINDOW_DAYS - 1;
+    else startDay = endDay - SEEN_UPDATES_MAX_WINDOW_DAYS + 1;
   }
   return { ...window, startDay, endDay };
 }

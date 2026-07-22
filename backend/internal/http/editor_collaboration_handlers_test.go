@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -239,6 +240,9 @@ func TestEditorCollaborationHTTPCreatesUpdatesForNewMentionsAcrossResources(t *t
 	seen := map[string]string{}
 	for _, notification := range notifications {
 		seen[notification.EntityType] = notification.Type
+		if !strings.Contains(notification.BodyPreview, mentioned.DisplayName) || strings.Contains(notification.BodyPreview, mentioned.UserID) {
+			t.Fatalf("mention body preview=%q, want display name without user UUID", notification.BodyPreview)
+		}
 	}
 	if seen[store.EntityTypeNode] != domain.NotificationEventMentionCreated ||
 		seen[store.EntityTypeProject] != domain.NotificationEventMentionCreated ||

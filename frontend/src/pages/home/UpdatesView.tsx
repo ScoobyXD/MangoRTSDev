@@ -37,8 +37,8 @@ import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
-import { resolveUpdateActorLabel } from "./updatesActorLabel";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updateNotificationVisibleInView, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "./updatesActorLabel";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
 import {
   DEFAULT_UPDATE_GROUPINGS,
@@ -512,7 +512,10 @@ export function UpdatesView({
   }, [companyID]);
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
-  const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
+  const updateRows = useMemo(
+    () => flattenUpdateRows(sourceGroups, hiddenNotificationIDs, viewMode),
+    [hiddenNotificationIDs, sourceGroups, viewMode],
+  );
   const displayGroups = useMemo(
     () => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, resolveNodeDetails, resolveLogicGateDetails),
     [resolveLogicGateDetails, resolveNodeDetails, selectedSetting.groupings, updateRows],
@@ -1040,7 +1043,7 @@ function SeenUpdatesDateFields({
   const commit = (edge: "start" | "end") => {
     const draft = edge === "start" ? startDraft : endDraft;
     const day = displayDateToUTCDay(draft);
-    if (day === null || day < window.oldestDay || day > window.newestDay) {
+    if (day === null) {
       setInvalidEdge(edge);
       return;
     }
@@ -1057,12 +1060,12 @@ function SeenUpdatesDateFields({
       value={value}
       inputMode="numeric"
       maxLength={10}
-      placeholder="DD/MM/YYYY"
+      placeholder="MM/DD/YYYY"
       aria-label={edge === "start" ? "Seen updates from date" : "Seen updates to date"}
       aria-invalid={invalidEdge === edge}
       title={invalidEdge === edge
-        ? `Enter a date from ${utcDayToDisplayDate(window.oldestDay)} to ${utcDayToDisplayDate(window.newestDay)} in DD/MM/YYYY format`
-        : "DD/MM/YYYY"}
+        ? "Enter a date in MM/DD/YYYY format"
+        : "MM/DD/YYYY"}
       style={seenUpdatesDateInputStyle(invalidEdge === edge)}
       onChange={(event) => {
         setInvalidEdge((current) => current === edge ? null : current);
@@ -1084,7 +1087,7 @@ function SeenUpdatesDateFields({
       <span aria-hidden="true" style={seenUpdatesDateSeparatorStyle}>–</span>
       <span style={seenUpdatesDateLabelStyle}>To</span>
       {input("end", endDraft, setEndDraft)}
-      {invalidEdge && <span role="alert" style={seenUpdatesDateErrorStyle}>Use DD/MM/YYYY within available history</span>}
+      {invalidEdge && <span role="alert" style={seenUpdatesDateErrorStyle}>Use MM/DD/YYYY</span>}
     </div>
   );
 }
@@ -1282,7 +1285,7 @@ function UpdateRows({
         const item = row.item;
         const notificationKey = updateNotificationSelectionKey(item);
         const rowTone = updateRowTone(item);
-        const rowBody = formatUpdateRowBody(row);
+        const rowBody = formatUpdateRowBody(row, resolveUserLabel);
         return (
           <div
             key={`${row.rowKey}:${index}`}
@@ -1594,7 +1597,7 @@ function UpdatesNodePanel({
 }) {
   const details = resolveNodeDetails?.(panel.nodeID) ?? null;
   const nodeTitle = details?.title?.trim() || panel.nodeTitle;
-  const body = panel.row ? formatUpdateRowBody(panel.row) : "";
+  const body = panel.row ? formatUpdateRowBody(panel.row, resolveUserLabel) : "";
   return (
     <aside style={updatesNodePanelStyle(Boolean(panel.row))} aria-label="Selected update node">
       {panel.row && (
@@ -1657,9 +1660,9 @@ function UpdatesNodePanel({
   );
 }
 
-function formatUpdateRowBody(row: UpdateFeedRow): string {
+function formatUpdateRowBody(row: UpdateFeedRow, resolveUserLabel?: (userID: string) => string): string {
   if (!updateRowShowsPreview(row)) return "";
-  const body = (row.item.body_preview ?? "").trim();
+  const body = resolveUpdateBodyPreview(row.item, resolveUserLabel);
   if (!body) return "";
   return body;
 }
@@ -1755,13 +1758,13 @@ function updateStatusColor(status: string): string {
   return "#64748b";
 }
 
-function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<string>): UpdateFeedRow[] {
+function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<string>, viewMode: UpdateFeedView): UpdateFeedRow[] {
   const rows: UpdateFeedRow[] = [];
   const visit = (group: UpdateGroup, path: { project?: UpdateRowResource; logicGate?: UpdateRowResource; node?: UpdateRowResource }) => {
     const nextPath = updatePathWithGroup(path, group);
     for (const item of group.notifications ?? []) {
       const notificationKey = item.notification_id?.trim() || item.source_event_id?.trim() || `${item.entity_type}:${item.entity_id}:${item.created_timestamp}`;
-      if (item.read_timestamp || hiddenNotificationIDs.has(notificationKey)) continue;
+      if (!updateNotificationVisibleInView(item, viewMode) || hiddenNotificationIDs.has(notificationKey)) continue;
       const pathKey = [nextPath.project?.id, nextPath.logicGate?.id, nextPath.node?.id].filter(Boolean).join("/");
       rows.push({
         rowKey: `${notificationKey}:${pathKey || "updates"}`,

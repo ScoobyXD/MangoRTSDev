@@ -757,6 +757,17 @@ func (s *Server) mentionNotificationEventAlreadyRecorded(companyID, idempotencyK
 }
 
 func (s *Server) addedEditorHTMLMentionNotificationHTML(companyID, before, after string) string {
+	mentionLabels := map[string]string{}
+	if users, err := s.repo.ListMentionableCompanyUsers(companyID); err == nil {
+		for _, user := range users {
+			userID := strings.TrimSpace(user.UserID)
+			if userID == "" {
+				continue
+			}
+			mentionLabels[userID] = firstNonEmptyString(user.DisplayName, user.Email, userID)
+		}
+	}
+
 	var output strings.Builder
 	for _, mentionKind := range []string{"regular", "urgent"} {
 		beforeUserIDs, beforeErr := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, before, mentionKind)
@@ -790,7 +801,7 @@ func (s *Server) addedEditorHTMLMentionNotificationHTML(companyID, before, after
 			} else {
 				output.WriteByte('@')
 			}
-			output.WriteString(htmlpkg.EscapeString(userID))
+			output.WriteString(htmlpkg.EscapeString(firstNonEmptyString(mentionLabels[userID], userID)))
 			output.WriteString(`</span>`)
 		}
 	}

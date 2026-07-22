@@ -40,6 +40,13 @@ export type UpdateSeenRow = {
   notificationKey: string;
 };
 
+export function updateNotificationVisibleInView(
+  item: { read_timestamp?: string },
+  viewMode: "current" | "seen",
+): boolean {
+  return viewMode === "seen" ? Boolean(item.read_timestamp) : !item.read_timestamp;
+}
+
 export function resolveUpdateSeenSuccessor(
   orderedRows: readonly UpdateSeenRow[],
   seenRowKey: string,

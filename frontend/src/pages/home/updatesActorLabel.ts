@@ -1,5 +1,6 @@
 export type UpdateActorNotification = {
   actor_user_id?: string;
+  recipient_user_id?: string;
   title: string;
   body_preview?: string;
 };
@@ -21,6 +22,19 @@ export function isReadableActorLabel(value: string, actorUserID = ""): boolean {
   if (!candidate) return false;
   if (actorUserID.trim() && candidate.localeCompare(actorUserID.trim(), undefined, { sensitivity: "accent" }) === 0) return false;
   return !UUID_PATTERN.test(candidate);
+}
+
+export function resolveUpdateBodyPreview(
+  item: UpdateActorNotification,
+  resolveUserLabel?: (userID: string) => string,
+): string {
+  const body = (item.body_preview ?? "").trim();
+  const recipientID = item.recipient_user_id?.trim() ?? "";
+  if (!body || !recipientID) return body;
+  const recipientLabel = resolveUserLabel?.(recipientID)?.trim() ?? "";
+  if (!isReadableActorLabel(recipientLabel, recipientID)) return body;
+  const escapedRecipientID = recipientID.replace(/[^A-Za-z0-9]/g, "\\$&");
+  return body.replace(new RegExp(`([@!])${escapedRecipientID}(?=$|[^A-Za-z0-9-])`, "gi"), `$1${recipientLabel}`);
 }
 
 function extractActorFromNotification(item: UpdateActorNotification): string {
