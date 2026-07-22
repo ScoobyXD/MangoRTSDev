@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updateNotificationVisibleInView, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
 import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
@@ -125,6 +125,11 @@ test("local Seen events do not reload Updates, while external same-company event
     localSeenSource,
     summaryOnlySource: "realtime-accepted-summary",
   }), true);
+});
+
+test("Updates rows invert Seen into Unsee in seen-history mode", () => {
+  assert.deepEqual(updateSeenActionForView("current"), { label: "Seen", read: true });
+  assert.deepEqual(updateSeenActionForView("seen"), { label: "Unsee", read: false });
 });
 
 test("Updates resolves current Logic Gate labels without rewriting historical notification text", () => {

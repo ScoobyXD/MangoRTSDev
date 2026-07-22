@@ -47,6 +47,15 @@ export function updateNotificationVisibleInView(
   return viewMode === "seen" ? Boolean(item.read_timestamp) : !item.read_timestamp;
 }
 
+export function updateSeenActionForView(viewMode: "current" | "seen"): {
+  label: "Seen" | "Unsee";
+  read: boolean;
+} {
+  return viewMode === "seen"
+    ? { label: "Unsee", read: false }
+    : { label: "Seen", read: true };
+}
+
 export function resolveUpdateSeenSuccessor(
   orderedRows: readonly UpdateSeenRow[],
   seenRowKey: string,

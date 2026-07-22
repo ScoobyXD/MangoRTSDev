@@ -37,7 +37,7 @@ import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updateNotificationVisibleInView, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "./updatesSelection";
 import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "./updatesActorLabel";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
 import {
@@ -720,14 +720,14 @@ export function UpdatesView({
     selectUpdateRow(visibleUpdateRows[nextIndex], undefined, { open: true, focus: true });
   }, [selectUpdateRow, visibleUpdateRows]);
 
-  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceFromRowKey?: string; previewRow?: UpdateFeedRow } = {}) => {
+  const changeUpdatesSeenState = useCallback((items: NotificationItem[], read: boolean, confirmMessage = "", options: { advanceFromRowKey?: string; previewRow?: UpdateFeedRow } = {}) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
     const notificationIDs = uniqueItems.map((item) => item.notification_id?.trim() ?? "").filter(Boolean);
     if (notificationIDs.length === 0) return;
     if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
     const hiddenKeys = uniqueItems.map(updateNotificationSelectionKey);
     const hiddenKeySet = new Set(hiddenKeys);
-    const seenPresentation = options.advanceFromRowKey
+    const removalPresentation = options.advanceFromRowKey
       ? resolveUpdateSeenPresentation(
         visibleUpdateRows.map((row) => ({
           rowKey: row.rowKey,
@@ -737,11 +737,11 @@ export function UpdatesView({
         hiddenKeySet,
       )
       : { previewRowKey: "", successorRowKey: "" };
-    const nextRowKey = seenPresentation.successorRowKey;
+    const nextRowKey = removalPresentation.successorRowKey;
     const nextRow = nextRowKey ? visibleUpdateRows.find((row) => row.rowKey === nextRowKey) ?? null : null;
     const retainedClickedPreview = Boolean(!nextRow
       && options.previewRow
-      && seenPresentation.previewRowKey === options.previewRow.rowKey
+      && removalPresentation.previewRowKey === options.previewRow.rowKey
       && updateRowNodeID(options.previewRow));
     if (options.previewRow && retainedClickedPreview) openUpdateNodePanel(options.previewRow, { focusRow: false });
     setHiddenNotificationIDs((current) => {
@@ -768,24 +768,25 @@ export function UpdatesView({
       if (!retainedClickedPreview) setActiveNodePanel(null);
     }
     setContextMenu(null);
-    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, read, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
         return next;
       });
-      setError(nextError instanceof Error ? nextError.message : "Failed to mark update as seen");
+      setError(nextError instanceof Error ? nextError.message : (read ? "Failed to mark update as seen" : "Failed to unsee update"));
     });
-  }, [companyID, focusUpdateRow, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
+  }, [focusUpdateRow, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
 
-  const markUpdateSeen = useCallback((row: UpdateFeedRow) => {
-    removeSeenUpdates([row.item], "", { advanceFromRowKey: row.rowKey, previewRow: row });
-  }, [removeSeenUpdates]);
+  const changeUpdateSeenState = useCallback((row: UpdateFeedRow) => {
+    const action = updateSeenActionForView(viewMode);
+    changeUpdatesSeenState([row.item], action.read, "", { advanceFromRowKey: row.rowKey, previewRow: row });
+  }, [changeUpdatesSeenState, viewMode]);
 
   const markSelectedUpdatesSeen = useCallback(() => {
     const items = selectedNotificationItems.length > 0 ? selectedNotificationItems : visibleNotifications;
-    removeSeenUpdates(items, `Are you sure you want to mark ${items.length === 1 ? "this update" : `${items.length} updates`} as seen?`);
-  }, [removeSeenUpdates, selectedNotificationItems, visibleNotifications]);
+    changeUpdatesSeenState(items, true, `Are you sure you want to mark ${items.length === 1 ? "this update" : `${items.length} updates`} as seen?`);
+  }, [changeUpdatesSeenState, selectedNotificationItems, visibleNotifications]);
 
   const markAllUpdatesSeen = useCallback(() => {
     if (!companyID.trim()) return;
@@ -965,7 +966,8 @@ export function UpdatesView({
               onToggleGroup={toggleGroup}
               onSelectRow={selectUpdateRow}
               onSelectAdjacent={selectAdjacentUpdate}
-              onMarkSeen={viewMode === "current" ? markUpdateSeen : undefined}
+              onChangeSeen={changeUpdateSeenState}
+              seenActionLabel={updateSeenActionForView(viewMode).label}
               selectedNotificationKey={selectedNotificationKey}
               selectedNotificationKeys={selectedNotificationKeys}
               hoveredNotificationKey={hoveredNotificationKey}
@@ -1099,7 +1101,8 @@ function UpdateGroupList({
   onToggleGroup,
   onSelectRow,
   onSelectAdjacent,
-  onMarkSeen,
+  onChangeSeen,
+  seenActionLabel,
   selectedNotificationKey,
   selectedNotificationKeys,
   hoveredNotificationKey,
@@ -1115,7 +1118,8 @@ function UpdateGroupList({
   onToggleGroup: (groupID: string) => void;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen?: (row: UpdateFeedRow) => void;
+  onChangeSeen: (row: UpdateFeedRow) => void;
+  seenActionLabel: "Seen" | "Unsee";
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
@@ -1173,7 +1177,8 @@ function UpdateGroupList({
                 onToggleGroup={onToggleGroup}
                 onSelectRow={onSelectRow}
                 onSelectAdjacent={onSelectAdjacent}
-                onMarkSeen={onMarkSeen}
+                onChangeSeen={onChangeSeen}
+                seenActionLabel={seenActionLabel}
                 selectedNotificationKey={selectedNotificationKey}
                 selectedNotificationKeys={selectedNotificationKeys}
                 hoveredNotificationKey={hoveredNotificationKey}
@@ -1190,7 +1195,8 @@ function UpdateGroupList({
                 depth={group.depth + 1}
                 onSelectRow={onSelectRow}
                 onSelectAdjacent={onSelectAdjacent}
-                onMarkSeen={onMarkSeen}
+                onChangeSeen={onChangeSeen}
+                seenActionLabel={seenActionLabel}
                 selectedNotificationKey={selectedNotificationKey}
                 selectedNotificationKeys={selectedNotificationKeys}
                 hoveredNotificationKey={hoveredNotificationKey}
@@ -1257,7 +1263,8 @@ function UpdateRows({
   depth,
   onSelectRow,
   onSelectAdjacent,
-  onMarkSeen,
+  onChangeSeen,
+  seenActionLabel,
   selectedNotificationKey,
   selectedNotificationKeys,
   hoveredNotificationKey,
@@ -1270,7 +1277,8 @@ function UpdateRows({
   depth: number;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen?: (row: UpdateFeedRow) => void;
+  onChangeSeen: (row: UpdateFeedRow) => void;
+  seenActionLabel: "Seen" | "Unsee";
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
@@ -1334,19 +1342,18 @@ function UpdateRows({
               {rowBody && <span style={updateRowBodyStyle}>{rowBody}</span>}
             </span>
             <span style={updateRowTimeStyle}>{formatNotificationTimestamp(item.created_timestamp)}</span>
-            {onMarkSeen && (
-              <button
-                type="button"
-                style={updateMarkReadButtonStyle}
-                disabled={!item.notification_id?.trim()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onMarkSeen(row);
-                }}
-              >
-                Seen
-              </button>
-            )}
+            <button
+              type="button"
+              aria-label={`${seenActionLabel} update`}
+              style={updateMarkReadButtonStyle}
+              disabled={!item.notification_id?.trim()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onChangeSeen(row);
+              }}
+            >
+              {seenActionLabel}
+            </button>
           </div>
         );
       })}

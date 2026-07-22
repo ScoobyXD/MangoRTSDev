@@ -4,7 +4,7 @@ Last updated: 2026-07-22
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
@@ -99,6 +99,7 @@ U87 - An Updates row keeps its existing horizontal width and fixed time/Seen con
 U88 - Update actor identity remains keyed by `actor_user_id`, but user-facing Updates copy never displays that opaque ID. Rendering prefers the current company-directory display name or email, uses the signed-in profile for the current actor when the directory list omits them, then falls back to the readable historical actor label stored in notification copy, and finally `Someone`. A resolver value equal to the actor ID or shaped like a UUID is not a display label.
 U89 - Seen Updates exposes separate From and To editable text fields in exact `DD/MM/YYYY` format. A date commits on blur or Enter only after strict calendar validation; impossible dates, other formats, and dates outside the available Seen-history bounds are marked invalid and do not issue a new feed query.
 U90 - Seen-history date queries use inclusive UTC calendar days. The initial window ends on the newest available Seen update and includes at most the latest 30 days. Any edited range remains within available history and at most 90 inclusive days; moving one edge beyond that maximum moves the opposite edge rather than sending an invalid backend request.
+U91 - Every row in Seen Updates replaces the normal **Seen** action with **Unsee**. Unsee clears only that notification's read timestamp through the existing current-user notification mutation, removes the row optimistically from Seen Updates without a full-feed reload or blink, and makes it eligible for the normal Updates inbox and unread badge counts. Failure restores the Seen Updates row and reports the error; unrelated notifications and the selected date window are unchanged.
 
 ## Update Row Copy And Visual Language
 
@@ -585,3 +586,26 @@ Expected:
 - The Seen Updates header shows From and To fields formatted `DD/MM/YYYY`, not stacked range sliders.
 - Valid dates commit on blur or Enter and reload the inclusive selected window. Invalid formats, impossible dates, or dates outside available history stay visibly invalid without querying.
 - The default window is the latest 30 inclusive days and all edited windows stay within the backend's 90-inclusive-day limit.
+
+### Scenario U-S16: Return A Seen Update To Current Updates
+
+Business logic covered:
+- U9
+- U24
+- U66
+- U91
+
+Given:
+- Seen Updates contains several read notifications in the selected date window.
+
+When:
+- The user clicks **Unsee** on one row.
+
+Expected:
+- Every Seen Updates row shows **Unsee** in the same action position where current Updates shows **Seen**.
+- The clicked row disappears immediately from Seen Updates and the next remaining row below receives the existing successor selection/focus behavior.
+- The notification's read timestamp is cleared through the author-scoped unread endpoint, so switching to current Updates shows that row again and unread badges reconcile.
+- No unrelated row changes, no full Seen Updates reload or visible blink occurs, and the date window remains unchanged.
+- If the unread mutation fails, the row returns to Seen Updates and an actionable error is displayed.
+
+Focused coverage lives in `tests/frontend/pages/home/updatesSelection.test.ts` and `tests/frontend/modules/notifications/notificationsApi.test.ts`.
