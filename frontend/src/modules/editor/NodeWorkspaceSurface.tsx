@@ -3146,6 +3146,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         <div
           data-node-email-workspace="true"
+          className="mango-pane-layout-transition"
           data-node-email-workspace-mode={nodeEmailWorkspaceMode}
           data-node-email-focus-mode={nodeEmailFocusActive ? "expanded" : "normal"}
           style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch", transition: nodeEmailColumnVisible && !nodeEmailOnly ? "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" : undefined }}
@@ -3153,6 +3154,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {nodeEmailColumnVisible && (
           <div
             data-node-email-column="true"
+            className="mango-pane-enter"
             style={{ position: "sticky", top: 38, minWidth: 0, height: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}
           >
             <AttachedEmailOrganizerPane
@@ -3498,9 +3500,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     />
                   )}
                   <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
-                    <div data-node-text-box-columns="editor-chat" data-node-visible-panes={visiblePaneMode} style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: communicationPaneHeight, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch" }}>
+                    <div className="mango-pane-layout-transition" data-node-text-box-columns="editor-chat" data-node-visible-panes={visiblePaneMode} style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: communicationPaneHeight, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
                       {editorPaneIsVisible && (
-                        <div style={{ minWidth: 0, height: communicationPaneHeight, overflow: "hidden" }}>
+                        <div className="mango-pane-enter" style={{ minWidth: 0, height: communicationPaneHeight, overflow: "hidden" }}>
                           <NodeTextBlockEditor
                             blockID={block.id}
                             editable={editorTextCanEdit}
@@ -3562,7 +3564,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       )}
                       {editorPaneIsVisible && chatPaneIsVisible && renderTextSidePaneResizeHandle(chatBlockID, "chat", "before", chatPaneWidth, chatPaneMaxWidth)}
                       {chatPaneIsVisible && (
-                        <div style={{ minWidth: 0, height: communicationPaneHeight, borderLeft: editorPaneIsVisible ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : 0, overflow: "hidden" }}>
+                        <div className="mango-pane-enter" style={{ minWidth: 0, height: communicationPaneHeight, borderLeft: editorPaneIsVisible ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : 0, overflow: "hidden" }}>
                           <ChatPane
                     blockID={chatBlockID}
                     editable={canEdit}

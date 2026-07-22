@@ -1938,6 +1938,7 @@ type ChatPaneProps = {
   replyTargetID: string;
   heightStorageKey: string;
   fixedHeight?: number;
+  fillHeight?: boolean;
   active: boolean;
   currentUserID: string;
   activeMessageID: string;
@@ -1990,6 +1991,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   replyTargetID,
   heightStorageKey,
   fixedHeight,
+  fillHeight = false,
   active,
   currentUserID,
   activeMessageID,
@@ -2026,6 +2028,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const height = fixedHeight ?? storedHeight;
+  const resizableHeight = fixedHeight === undefined && !fillHeight;
   const composerMaxHeight = Math.max(CHAT_COMPOSER_MIN_HEIGHT, height - CHAT_COMPOSER_PANE_HEIGHT_RESERVE);
   const [composerSizing, setComposerSizing] = useState({ height: CHAT_COMPOSER_MIN_HEIGHT, scrolls: false });
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
@@ -2067,8 +2070,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [composerMaxHeight]);
 
   useEffect(() => {
-    if (fixedHeight === undefined) setStoredHeight(readStoredChatPaneHeight(heightStorageKey));
-  }, [fixedHeight, heightStorageKey]);
+    if (resizableHeight) setStoredHeight(readStoredChatPaneHeight(heightStorageKey));
+  }, [heightStorageKey, resizableHeight]);
 
   useEffect(() => () => {
     if (mentionCloseTimerRef.current !== null) window.clearTimeout(mentionCloseTimerRef.current);
@@ -2242,7 +2245,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!editable || fixedHeight !== undefined) return;
+    if (!editable || !resizableHeight) return;
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
@@ -2270,16 +2273,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         }}
         style={{
           minWidth: 0,
-          height,
+          height: fillHeight ? "100%" : height,
           marginTop: 0,
           display: "grid",
           gridTemplateRows: hideHeader
             ? showingEmail
-              ? (fixedHeight === undefined ? "minmax(0, 1fr) 7px" : "minmax(0, 1fr)")
-              : (fixedHeight === undefined ? "minmax(0, 1fr) auto 7px" : "minmax(0, 1fr) auto")
+              ? (resizableHeight ? "minmax(0, 1fr) 7px" : "minmax(0, 1fr)")
+              : (resizableHeight ? "minmax(0, 1fr) auto 7px" : "minmax(0, 1fr) auto")
             : showingEmail
-              ? (fixedHeight === undefined ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr)")
-              : (fixedHeight === undefined ? "auto minmax(0, 1fr) auto 7px" : "auto minmax(0, 1fr) auto"),
+              ? (resizableHeight ? "auto minmax(0, 1fr) 7px" : "auto minmax(0, 1fr)")
+              : (resizableHeight ? "auto minmax(0, 1fr) auto 7px" : "auto minmax(0, 1fr) auto"),
           border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
           borderRadius: 14,
           background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
@@ -2360,12 +2363,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
         )}
         {showingEmail ? (
-          <div style={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
+          <div className="mango-pane-enter" style={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
             {emailPane}
           </div>
         ) : (
           <>
-            <div ref={messageListRef} className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+            <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
               {threads.map((thread) => (
                 <ChatThreadItem
                   key={thread.message.id}
@@ -2669,7 +2672,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             </div>
           </>
         )}
-        {fixedHeight === undefined && (
+        {resizableHeight && (
           <div
             role="separator"
             aria-orientation="horizontal"
@@ -4466,8 +4469,9 @@ const AttachedEmailThreadCard: React.FC<{
               minWidth: 0,
               display: replyComposerOpen ? "grid" : "block",
               gridTemplateRows: replyComposerOpen ? "minmax(0, 1fr)" : undefined,
-              height: replyComposerOpen ? "clamp(420px, calc(100vh - 380px), 640px)" : undefined,
-              maxHeight: replyComposerOpen ? undefined : "min(620px, 72vh)",
+              height: replyComposerOpen ? "clamp(420px, calc(100vh - 300px), 760px)" : "min(820px, calc(100vh - 250px))",
+              minHeight: replyComposerOpen ? undefined : 420,
+              maxHeight: undefined,
               overflow: replyComposerOpen ? "hidden" : "visible",
               padding: replyComposerOpen ? "0 10px" : "0 10px 10px",
               boxSizing: "border-box",

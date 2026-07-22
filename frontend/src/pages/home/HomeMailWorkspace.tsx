@@ -3,6 +3,7 @@ import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
 import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { NodeRecord } from "../../modules/node-map/shared";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
@@ -244,6 +245,7 @@ export function HomeMailWorkspace({
   companyUserGroups,
   companyUserGroupMembers,
   nodes,
+  logicGates,
   notice,
   noticeAction,
   emailConnectionPrompt,
@@ -299,7 +301,6 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly,
   onEmailCollaborationChange,
   onOpenCollaborationNode,
-  onOpenImportedNode,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -330,6 +331,7 @@ export function HomeMailWorkspace({
   companyUserGroups: CompanyUserGroup[];
   companyUserGroupMembers: CompanyUserGroupMember[];
   nodes: NodeRecord[];
+  logicGates: LogicGateRecord[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
   emailConnectionPrompt?: { onConnect: (provider: EmailProvider) => void };
@@ -385,7 +387,6 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
   onOpenCollaborationNode: (message: EmailMessage) => void;
-  onOpenImportedNode: (nodeID: string, informationID: string, emailMessageID: string) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
@@ -395,6 +396,7 @@ export function HomeMailWorkspace({
   const [emailChatSession, setEmailChatSession] = React.useState<EmailCollaborationChatSession>(null);
   const [emailActionRequest, setEmailActionRequest] = React.useState<EmailCollaborationActionRequest>(null);
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
+  const [emailActionNotice, setEmailActionNotice] = React.useState<{ message: string; requestID: number } | null>(null);
   const emailChatAvailable = activeViewID === "my-triage" || activeViewID.startsWith("shared:");
   const emailChatKey = emailChatAvailable && selectedMessageRowKey
     ? JSON.stringify([activeViewID, mailbox, selectedMessageRowKey])
@@ -403,6 +405,7 @@ export function HomeMailWorkspace({
   const emailChatVisible = emailCollaborationChatSessionVisible(emailChatSession, emailChatKey);
   const visibleError = emailCollaborationError || error;
   const clearEmailCollaborationError = React.useCallback(() => setEmailCollaborationError(""), []);
+  const clearEmailActionRequest = React.useCallback(() => setEmailActionRequest(null), []);
   const emailNavigationSequenceRef = React.useRef(0);
   const clearEmailSelection = React.useCallback(() => setEmailSelection(null), []);
   const navigateToEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
@@ -412,33 +415,49 @@ export function HomeMailWorkspace({
   const requestEmailPanelAction = React.useCallback((action: EmailCollaborationPanelAction) => {
     if (!emailChatKey) return;
     setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, action));
-    setEmailChatSession({ key: emailChatKey, visible: true });
   }, [emailChatKey]);
   const toggleEmailChat = React.useCallback(() => {
     if (!emailChatKey) return;
-    if (!emailChatVisible) setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, "chat"));
+    if (!emailChatVisible) {
+      if (selectedMessage) setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
+      setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, "chat"));
+    }
     setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
-  }, [emailChatKey, emailChatVisible]);
+  }, [emailChatKey, emailChatVisible, selectedMessage]);
   const createNodeFromEmail = React.useCallback(() => {
     if (!selectedMessage) return;
     if (selectedMessage.collaboration_node_id?.trim()) {
       onOpenCollaborationNode(selectedMessage);
       return;
     }
+    setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
     requestEmailPanelAction("create");
   }, [onOpenCollaborationNode, requestEmailPanelAction, selectedMessage]);
-  const addEmailToNode = React.useCallback(() => requestEmailPanelAction("import"), [requestEmailPanelAction]);
+  const addEmailToNode = React.useCallback(() => {
+    if (!selectedMessage) return;
+    setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
+    requestEmailPanelAction("import");
+  }, [requestEmailPanelAction, selectedMessage]);
   const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
     if (!emailChatKey) return;
     setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
     setEmailChatSession({ key: emailChatKey, visible: true });
   }, [emailChatKey]);
+  const showEmailActionNotice = React.useCallback((message: string) => {
+    setEmailActionNotice((current) => ({ message, requestID: (current?.requestID ?? 0) + 1 }));
+  }, []);
+  React.useEffect(() => {
+    if (!emailActionNotice) return undefined;
+    const timeoutID = window.setTimeout(() => setEmailActionNotice(null), 2_600);
+    return () => window.clearTimeout(timeoutID);
+  }, [emailActionNotice?.requestID]);
   React.useEffect(() => {
     setEmailSelection(null);
     setEmailNavigation(null);
     setEmailChatSession((current) => reconcileEmailCollaborationChatSession(current, emailChatKey));
     setEmailActionRequest(null);
     setEmailCollaborationError("");
+    setEmailActionNotice(null);
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
@@ -896,6 +915,7 @@ export function HomeMailWorkspace({
           />
         ) : selectedMessage ? (
           <div
+            className="mango-pane-layout-transition"
             style={{
               minWidth: 0,
               minHeight: 0,
@@ -903,11 +923,15 @@ export function HomeMailWorkspace({
               display: "grid",
               gridTemplateColumns: showDetailResizeHandle && emailChatVisible
                 ? "minmax(0, 1fr) minmax(320px, 38%)"
-                : "minmax(0, 1fr)",
+                : showDetailResizeHandle
+                  ? "minmax(0, 1fr) minmax(0, 0fr)"
+                  : "minmax(0, 1fr)",
               gridTemplateRows: !showDetailResizeHandle && emailChatVisible
                 ? "auto auto"
                 : "minmax(0, 1fr)",
               overflow: "hidden",
+              position: "relative",
+              transition: "grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
             }}
           >
             {selectedConversationLoading ? (
@@ -925,6 +949,7 @@ export function HomeMailWorkspace({
                 busy={!!busy}
                 chatAvailable={emailChatAvailable}
                 chatOpen={emailChatVisible}
+                actionNotice={emailActionNotice?.message ?? ""}
                 onToggleChat={toggleEmailChat}
                 onCreateEmailNode={createNodeFromEmail}
                 onAddEmailToNode={addEmailToNode}
@@ -944,27 +969,30 @@ export function HomeMailWorkspace({
                 onOpenCollaborationNode={onOpenCollaborationNode}
               />
             )}
-            {emailChatMounted && (
+            {(emailChatMounted || emailActionRequest) && (
               <EmailCollaborationChatSurface
                 active={emailChatVisible}
                 id="email-collaboration-chat"
                 companyID={companyID}
                 currentUserID={currentUserID}
                 message={selectedMessage}
+                targetMessage={selectedThreadMessages.find((threadMessage) => threadMessage.id === emailSelection?.messageID)}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
                 accountEmail={selectedMessage.collaboration_account_email || accountEmail}
                 companyUsers={companyUsers}
                 companyUserGroups={companyUserGroups}
                 companyUserGroupMembers={companyUserGroupMembers}
                 nodes={nodes}
+                logicGates={logicGates}
                 actionRequest={emailActionRequest}
                 selection={emailSelection}
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
                 onCollaborationChange={onEmailCollaborationChange}
-                onOpenImportedNode={onOpenImportedNode}
                 onError={setEmailCollaborationError}
                 onSuccess={clearEmailCollaborationError}
+                onActionSuccess={showEmailActionNotice}
+                onActionRequestHandled={clearEmailActionRequest}
               />
             )}
           </div>

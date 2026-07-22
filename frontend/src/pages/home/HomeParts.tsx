@@ -6203,6 +6203,18 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               <ExplorerRowIcon kind="node" />
             </button>
           )}
+          {onCommentOnMessage && (
+            <button
+              type="button"
+              disabled={busy}
+              title="Chat about this email message"
+              aria-label={`Chat about message from ${formatAddressList(message.from) || "Unknown sender"}`}
+              onClick={() => onCommentOnMessage(message)}
+              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px" }}
+            >
+              <ChatIcon color="rgba(71,85,105,0.85)" />
+            </button>
+          )}
           <details data-email-message-actions="true" style={{ position: "relative", flex: "0 0 auto" }}>
             <summary
               aria-label={`Actions for message from ${formatAddressList(message.from) || "Unknown sender"}`}
@@ -6212,7 +6224,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               •••
             </summary>
             <div aria-label="Message actions" style={{ position: "absolute", zIndex: 5, top: "calc(100% + 5px)", right: 0, minWidth: 172, display: "grid", gap: 5, padding: 7, border: "1px solid rgba(148,163,184,0.24)", borderRadius: 10, background: "rgba(248,250,252,0.98)", boxShadow: "7px 7px 18px rgba(148,163,184,0.25), -4px -4px 12px rgba(255,255,255,0.9)" }}>
-              {onCommentOnMessage && <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCommentOnMessage(message)}>Comment</button>}
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
               <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
@@ -6287,7 +6298,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onCreateEmailNode, onAddEmailToNode, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, actionNotice = "", selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onCreateEmailNode, onAddEmailToNode, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6300,6 +6311,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   deleteAvailable: boolean;
   chatAvailable: boolean;
   chatOpen: boolean;
+  actionNotice?: string;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
@@ -6428,14 +6440,19 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   };
   return (
     <div style={detailStyle}>
+      {actionNotice && (
+        <div role="status" data-email-action-success="true" style={{ margin: "7px 9px 0", border: "1px solid rgba(34,197,94,0.36)", borderRadius: 9, background: "rgba(240,253,244,0.96)", color: "#166534", padding: "7px 10px", fontSize: 11.5, fontWeight: 850, boxShadow: "0 8px 18px rgba(22,101,52,0.10)", animation: "mango-pane-enter 180ms ease-out" }}>
+          {actionNotice}
+        </div>
+      )}
       <div style={panelHeaderStyle}>
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
-      <div style={{ ...toolbarStyle, alignItems: "center" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+      <div style={{ ...toolbarStyle, alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
+        <div className="mango-editor-header-scroll" style={{ minWidth: 0, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
           {!singleMessage && (
             <>
               <label style={{ ...mutedSmallStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -6463,7 +6480,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
           <button type="button" style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
         </div>
         {chatAvailable && (
-          <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)" }}>
+          <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", flex: "0 0 auto", display: "flex", flexWrap: "nowrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)", whiteSpace: "nowrap" }}>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onCreateEmailNode}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ExplorerRowIcon kind="node" />{message.collaboration_node_id?.trim() ? "Open Email Node" : "Create Node From Email"}</span>
             </button>

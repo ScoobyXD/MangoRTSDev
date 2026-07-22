@@ -1175,3 +1175,29 @@ button, input, textarea, select {
     padding: 8px !important;
   }
 }
+
+@keyframes mango-pane-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mango-pane-enter {
+  animation: mango-pane-enter 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mango-pane-enter {
+    animation: none;
+  }
+
+  .mango-pane-layout-transition {
+    transition: none !important;
+  }
+}

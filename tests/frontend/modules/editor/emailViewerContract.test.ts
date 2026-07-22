@@ -74,6 +74,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const emailBodyHighlights = source("frontend/src/modules/editor/emailBodyHighlights.ts");
   const triageChat = source("frontend/src/pages/home/EmailCollaborationChatSurface.tsx");
+  const indexCSS = source("frontend/src/index.css");
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
@@ -101,6 +102,12 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.doesNotMatch(nodeSurface, /Math\.round\(nodeTextCommunicationContentWidth \/ 2\)/);
   assert.match(nodeSurface, /data-node-email-focus-mode=\{nodeEmailFocusActive \? "expanded" : "normal"\}/);
   assert.match(nodeSurface, /grid-template-columns 180ms/);
+  assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,120}className="mango-pane-enter"/);
+  assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);
+  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "min\(820px, calc\(100vh - 250px\)\)"/);
+  assert.match(nodeParts, /fillHeight\?: boolean/);
+  assert.match(indexCSS, /@keyframes mango-pane-enter/);
+  assert.match(indexCSS, /prefers-reduced-motion: reduce/);
   assert.match(nodeSurface, /data-node-email-timeline-rail=\{nodeEmailFocusActive \? "true" : undefined\}/);
   assert.match(nodeSurface, /onRequestEmailFocusToggle=/);
   assert.match(nodeParts, /"Expand email column"/);

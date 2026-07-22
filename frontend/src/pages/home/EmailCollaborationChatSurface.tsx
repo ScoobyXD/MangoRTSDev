@@ -38,6 +38,8 @@ import {
   invalidateNodeRecordStoreCaches,
 } from "../../modules/node-map/NodeRecordStore";
 import type { NodeRecord } from "../../modules/node-map/shared";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { EmailCollaborationParticipantRoster } from "./EmailCollaborationParticipantRoster";
 import {
@@ -60,27 +62,26 @@ type EmailCollaborationChatSurfaceProps = {
   companyID: string;
   currentUserID: string;
   message: EmailMessage;
+  targetMessage?: EmailMessage;
   sharedInboxID?: string;
   accountEmail?: string;
   companyUsers: CompanyUser[];
   companyUserGroups: CompanyUserGroup[];
   companyUserGroupMembers: CompanyUserGroupMember[];
   nodes: NodeRecord[];
+  logicGates: LogicGateRecord[];
   actionRequest: EmailCollaborationActionRequest;
-  onOpenImportedNode?: (nodeID: string, informationID: string, emailMessageID: string) => void;
   selection: EmailCollaborationSelection | null;
   onClearSelection: () => void;
   onNavigateToEmailSelection: (selection: EmailCollaborationSelection) => void;
   onCollaborationChange?: (collaboration: CommunicationsEmailCollaboration) => void;
   onError: (message: string) => void;
   onSuccess: () => void;
+  onActionSuccess: (message: string) => void;
+  onActionRequestHandled: () => void;
 };
 
 const GROUP_MENTION_PREFIX = "group:";
-
-function collaborationMessageSnapshot(collaboration: CommunicationsEmailCollaboration): EmailMessage | null {
-  return collaboration.latest_message ?? collaboration.message_snapshot ?? collaboration.message ?? null;
-}
 
 function collaborationMentionPrincipals(
   users: CompanyUser[],
@@ -137,20 +138,23 @@ export function EmailCollaborationChatSurface({
   companyID,
   currentUserID,
   message,
+  targetMessage,
   sharedInboxID,
   accountEmail,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
   nodes,
+  logicGates,
   actionRequest,
-  onOpenImportedNode,
   selection,
   onClearSelection,
   onNavigateToEmailSelection,
   onCollaborationChange,
   onError,
   onSuccess,
+  onActionSuccess,
+  onActionRequestHandled,
 }: EmailCollaborationChatSurfaceProps) {
   const apiBase = readAuthConfig().apiBase;
   const requestJSON = React.useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -169,6 +173,8 @@ export function EmailCollaborationChatSurface({
   const [detectedNodeID, setDetectedNodeID] = React.useState("");
   const [resolvingNode, setResolvingNode] = React.useState(false);
   const [selectedPriority, setSelectedPriority] = React.useState<number | null>(null);
+  const [createStep, setCreateStep] = React.useState<"priority" | "logic_gate">("priority");
+  const [logicGateSearch, setLogicGateSearch] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
   const collaborationRef = React.useRef<CommunicationsEmailCollaboration | null>(null);
@@ -177,16 +183,23 @@ export function EmailCollaborationChatSurface({
   const messageCollaborationID = message.collaboration_id?.trim() ?? "";
   const messageCollaborationIDRef = React.useRef(messageCollaborationID);
   messageCollaborationIDRef.current = messageCollaborationID;
+  const enabled = active || Boolean(actionRequest);
+  const targetEmailMessageID = selection?.messageID?.trim() || message.id.trim();
+  const collaborationTargetMessage = targetMessage?.id.trim() === targetEmailMessageID ? targetMessage : message;
   const sourceKey = React.useMemo(
     () => JSON.stringify([companyID, sharedInboxID?.trim() ?? "", accountEmail?.trim().toLowerCase() ?? "", message.id.trim(), message.thread_id?.trim() ?? ""]),
     [accountEmail, companyID, message.id, message.thread_id, sharedInboxID],
   );
   React.useEffect(() => {
-    if (!active || !actionRequest) return;
+    if (!actionRequest) return;
     setPendingAction(actionRequest.action);
     setPriorityMenuOpen(actionRequest.action !== "chat");
+    setCreateStep("priority");
+    setSelectedPriority(null);
+    setLogicGateSearch("");
     if (actionRequest.action === "import") setNodeSearch("");
-  }, [active, actionRequest?.requestID]);
+    if (actionRequest.action === "chat") onActionRequestHandled();
+  }, [actionRequest?.requestID, onActionRequestHandled]);
   const principals = React.useMemo(
     () => collaborationMentionPrincipals(companyUsers, companyUserGroups, companyUserGroupMembers),
     [companyUserGroupMembers, companyUserGroups, companyUsers],
@@ -225,12 +238,12 @@ export function EmailCollaborationChatSurface({
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return;
     const placement = resolveEmailCollaborationChatPlacement(
       projections,
-      message.id,
+      targetEmailMessageID,
       nextCollaboration?.attached_email_information_id,
     );
     setActiveTextBlockID(placement.blockID);
     setMessages(placement.messages);
-  }, [apiBase, companyID, message.id]);
+  }, [apiBase, companyID, targetEmailMessageID]);
 
   const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null) => {
     collaborationRef.current = nextCollaboration;
@@ -271,16 +284,20 @@ export function EmailCollaborationChatSurface({
       setDraft("");
       setDraftAttachments([]);
       setSelectedMentionPrincipals([]);
-      setPriorityMenuOpen(false);
-      setSelectedPriority(null);
-      setPendingAction("chat");
-      setNodeSearch("");
+      if (!actionRequest) {
+        setPriorityMenuOpen(false);
+        setSelectedPriority(null);
+        setCreateStep("priority");
+        setLogicGateSearch("");
+        setPendingAction("chat");
+        setNodeSearch("");
+      }
       setDetectedNodeID("");
       setResolvingNode(false);
       setSubmitting(false);
       if (previousSourceKey) onClearSelection();
     }
-    if (!active) {
+    if (!enabled) {
       setLoading(false);
       return undefined;
     }
@@ -317,10 +334,10 @@ export function EmailCollaborationChatSurface({
     return () => {
       if (loadSequenceRef.current === requestSequence) loadSequenceRef.current += 1;
     };
-  }, [acceptCollaboration, accountEmail, active, companyID, loadProjection, message.id, message.thread_id, onClearSelection, onError, onSuccess, sharedInboxID, sourceKey]);
+  }, [acceptCollaboration, accountEmail, companyID, enabled, loadProjection, message.id, message.thread_id, onClearSelection, onError, onSuccess, sharedInboxID, sourceKey]);
 
   React.useEffect(() => {
-    if (!active || loading || collaboration || !message.id.trim() || nodes.length === 0) {
+    if (!enabled || loading || collaboration || !message.id.trim() || nodes.length === 0) {
       if (collaboration) setDetectedNodeID("");
       return undefined;
     }
@@ -362,10 +379,10 @@ export function EmailCollaborationChatSurface({
     return () => {
       cancelled = true;
     };
-  }, [accountEmail, active, apiBase, collaboration, companyID, loading, message.id, message.thread_id, nodes, sharedInboxID]);
+  }, [accountEmail, apiBase, collaboration, companyID, enabled, loading, message.id, message.thread_id, nodes, sharedInboxID]);
 
   React.useEffect(() => {
-    if (!active || !messageCollaborationID) return undefined;
+    if (!enabled || !messageCollaborationID) return undefined;
     if (collaborationRef.current?.collaboration_id?.trim() === messageCollaborationID) return undefined;
     if (requestedCollaborationIDRef.current === messageCollaborationID) return undefined;
     requestedCollaborationIDRef.current = messageCollaborationID;
@@ -391,7 +408,7 @@ export function EmailCollaborationChatSurface({
     return () => {
       if (loadSequenceRef.current === requestSequence) loadSequenceRef.current += 1;
     };
-  }, [acceptCollaboration, active, companyID, loadProjection, messageCollaborationID, onError, onSuccess, sourceKey]);
+  }, [acceptCollaboration, companyID, enabled, loadProjection, messageCollaborationID, onError, onSuccess, sourceKey]);
 
   React.useEffect(() => {
     if (!active || !companyID || !collaborationID || !nodeID) return undefined;
@@ -428,8 +445,8 @@ export function EmailCollaborationChatSurface({
     if (!priority || priority < 1 || priority > 5) throw new Error("email_node_priority_required");
     const created = await ensureEmailCollaboration({
       companyID,
-      message,
-      messageID: message.id,
+      message: collaborationTargetMessage,
+      messageID: targetEmailMessageID,
       threadID: message.thread_id,
       sharedInboxID,
       accountEmail,
@@ -438,7 +455,7 @@ export function EmailCollaborationChatSurface({
     acceptCollaboration(created);
     setSelectedPriority(priority);
     return created;
-  }, [acceptCollaboration, accountEmail, collaboration, companyID, message, selectedPriority, sharedInboxID]);
+  }, [acceptCollaboration, accountEmail, collaboration, collaborationTargetMessage, companyID, message.thread_id, selectedPriority, sharedInboxID, targetEmailMessageID]);
 
   const changeDraft = React.useCallback((nextDraft: string) => {
     setDraft(nextDraft);
@@ -457,23 +474,25 @@ export function EmailCollaborationChatSurface({
     const cleanNodeID = targetNodeID.trim();
     if (!cleanNodeID || submitting) return;
     const cleanDraft = draft.trim();
-    setPriorityMenuOpen(false);
     setSubmitting(true);
     try {
       const shouldAttachEmail = cleanNodeID !== detectedNodeID;
-      const textBlockID = generateStableInformationID();
       const emailMessageID = selection?.messageID?.trim() || message.id.trim();
       const createdTimestamp = new Date().toISOString();
       const subject = message.subject?.trim() || "Email";
       const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
-      const existingEmailContents = listEditorTextBlockProjections(targetProjections)
-        .map((projection) => parseEditorTextBlockContent(projection.information));
+      const existingTextBlockProjections = listEditorTextBlockProjections(targetProjections);
+      const existingLinkedProjection = existingTextBlockProjections.find((projection) => (
+        parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === emailMessageID
+      ));
+      const textBlockID = existingLinkedProjection?.information_id ?? generateStableInformationID();
+      const existingEmailContents = existingTextBlockProjections.map((projection) => parseEditorTextBlockContent(projection.information));
       const existingMessageAccent = existingEmailContents
         .find((content) => content.emailMessageID?.trim() === emailMessageID)?.emailAccent?.trim() ?? "";
       const existingEmailAccents = existingEmailContents
         .filter((content) => content.emailMessageID?.trim() !== emailMessageID)
         .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
-      const textBlockWrite = {
+      const textBlockWrite = existingLinkedProjection ? undefined : {
         type: EDITOR_TEXT_BLOCK_TYPE,
         informationID: textBlockID,
         information: buildEditorTextBlockProjectionPayload({
@@ -528,15 +547,17 @@ export function EmailCollaborationChatSurface({
           initialChat: initialChatWrite,
         });
       } else {
-        await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
-          method: "POST",
-          json: {
-            company_id: companyID,
-            type: textBlockWrite.type,
-            information_id: textBlockWrite.informationID,
-            information: textBlockWrite.information,
-          },
-        });
+        if (textBlockWrite) {
+          await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
+            method: "POST",
+            json: {
+              company_id: companyID,
+              type: textBlockWrite.type,
+              information_id: textBlockWrite.informationID,
+              information: textBlockWrite.information,
+            },
+          });
+        }
         if (initialChatWrite) {
           await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
             method: "POST",
@@ -558,13 +579,14 @@ export function EmailCollaborationChatSurface({
       setPriorityMenuOpen(false);
       onClearSelection();
       onSuccess();
-      onOpenImportedNode?.(cleanNodeID, textBlockID, emailMessageID);
+      onActionSuccess("Email was added to node.");
+      onActionRequestHandled();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, includeChat ? "Failed to import this email chat into the node." : "Failed to import this email into the node."));
     } finally {
       setSubmitting(false);
     }
-  }, [accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, onClearSelection, onError, onOpenImportedNode, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+  }, [accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();
@@ -685,22 +707,35 @@ export function EmailCollaborationChatSurface({
     return activeBlockID;
   }, [author.name, author.userID, companyID, draft, draftAttachments, ensureLinkedEmailTextBlock, message.id, onClearSelection, onError, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selection]);
 
-  const createEmailNode = React.useCallback(async (priorityOverride?: number) => {
+  const createEmailNode = React.useCallback(async (priorityOverride?: number, logicGateID = "") => {
     if (submitting) return;
-    setPriorityMenuOpen(false);
     setSubmitting(true);
     try {
       const created = await ensureCollaboration(priorityOverride);
       const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
+      const cleanLogicGateID = logicGateID.trim();
+      if (cleanLogicGateID) {
+        await assignNodeToLogicGateStatus({
+          apiBase,
+          companyID,
+          logicGateID: cleanLogicGateID,
+          nodeID: created.node_id,
+          status: "requested",
+          priority: priorityOverride ?? selectedPriority,
+          nodeTitle: message.subject?.trim() || undefined,
+        });
+      }
       await saveCurrentDraftToCollaboration(created, linkedTextBlockID);
+      setPriorityMenuOpen(false);
       onSuccess();
-      onOpenImportedNode?.(created.node_id, linkedTextBlockID, message.id);
+      onActionSuccess("Node was created.");
+      onActionRequestHandled();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to create a node for this email."));
     } finally {
       setSubmitting(false);
     }
-  }, [ensureCollaboration, ensureLinkedEmailTextBlock, message.id, onError, onOpenImportedNode, onSuccess, saveCurrentDraftToCollaboration, submitting]);
+  }, [apiBase, companyID, ensureCollaboration, ensureLinkedEmailTextBlock, message.subject, onActionRequestHandled, onActionSuccess, onError, onSuccess, saveCurrentDraftToCollaboration, selectedPriority, submitting]);
 
   const submit = React.useCallback(async (priorityOverride?: number) => {
     const cleanDraft = draft.trim();
@@ -713,6 +748,7 @@ export function EmailCollaborationChatSurface({
     if (!collaboration && (!priority || priority < 1 || priority > 5)) {
       setPendingAction("chat");
       setPriorityMenuOpen(true);
+      setCreateStep("priority");
       return;
     }
     setPriorityMenuOpen(false);
@@ -732,6 +768,8 @@ export function EmailCollaborationChatSurface({
     if (candidates.length === 0) return;
     if (!collaboration && !selectedPriority) {
       setPriorityMenuOpen(true);
+      setPendingAction("chat");
+      setCreateStep("priority");
       onError("Choose the email node priority, then attach the files again.");
       return;
     }
@@ -788,112 +826,89 @@ export function EmailCollaborationChatSurface({
     }
   }, [messages, onNavigateToEmailSelection]);
 
-  const snapshot = collaboration ? collaborationMessageSnapshot(collaboration) : null;
   const cleanNodeSearch = nodeSearch.trim().toLowerCase();
   const filteredNodes = nodes.filter((node) => (
     !cleanNodeSearch
     || node.name.toLowerCase().includes(cleanNodeSearch)
     || node.node_id.toLowerCase().includes(cleanNodeSearch)
   )).slice(0, 12);
-  const detectedNode = nodes.find((node) => node.node_id === detectedNodeID);
+  const cleanLogicGateSearch = logicGateSearch.trim().toLowerCase();
+  const filteredLogicGates = logicGates.filter((logicGate) => (
+    !cleanLogicGateSearch
+    || logicGate.header.toLowerCase().includes(cleanLogicGateSearch)
+    || logicGate.logic_gate_id.toLowerCase().includes(cleanLogicGateSearch)
+  )).slice(0, 12);
+  const closeActionMenu = () => {
+    setPriorityMenuOpen(false);
+    setCreateStep("priority");
+    setSelectedPriority(null);
+    onActionRequestHandled();
+  };
+  const actionMenuVisible = priorityMenuOpen && !loading;
 
   return (
-    <aside
-      id={id}
-      hidden={!active}
-      aria-hidden={!active}
-      aria-label="Email collaboration chat"
-      style={{ minWidth: 0, minHeight: 0, display: active ? "grid" : "none", alignContent: "start", gap: 6, padding: "8px 8px 8px 0", overflowY: "auto", background: EDITOR_NEU_SURFACE }}
-    >
-      {loading && <div style={{ color: "rgba(100,116,139,0.78)", fontSize: 11, fontWeight: 800, padding: "4px 8px" }}>Loading chat</div>}
-      {!loading && !collaboration && (
-        <div style={{ color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, padding: "1px 8px" }}>
-          The email stays unchanged until the first comment, mention, attachment, or shared draft.
-        </div>
-      )}
-      {snapshot?.subject && snapshot.subject !== message.subject && (
-        <div style={{ color: "rgba(100,116,139,0.72)", fontSize: 10, padding: "0 8px" }}>Thread: {snapshot.subject}</div>
-      )}
-      {!collaboration && (
-        <div style={{ margin: "0 8px", display: "grid", gap: 5 }}>
-          {resolvingNode && <div role="status" style={{ color: "#64748b", fontSize: 10, fontWeight: 800 }}>Checking whether this thread is already in a node</div>}
-          {detectedNode && (
-            <button type="button" onClick={() => onOpenImportedNode?.(detectedNode.node_id, "", message.id)} style={{ minHeight: 30, border: "1px solid rgba(20,184,166,0.36)", borderRadius: 9, background: "rgba(240,253,250,0.94)", color: "#0f766e", cursor: "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 900 }}>
-              This email thread is already in {detectedNode.name || "this node"}
-            </button>
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
-            <button type="button" disabled={submitting} onClick={() => {
-              setPendingAction("create");
-              setPriorityMenuOpen(true);
-            }} style={{ minHeight: 30, border: "1px solid rgba(249,115,22,0.34)", borderRadius: 9, background: "#ffffff", color: "#9a3412", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", fontSize: 10.5, fontWeight: 900 }}>
-              Create node for this email
-            </button>
-            <button type="button" disabled={submitting} onClick={() => {
-              setPendingAction("import");
-              setPriorityMenuOpen(true);
-            }} style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.34)", borderRadius: 9, background: "#ffffff", color: "#0369a1", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", fontSize: 10.5, fontWeight: 900 }}>
-              Import into existing node
-            </button>
-          </div>
-        </div>
-      )}
-      {priorityMenuOpen && !loading && (pendingAction === "import" || pendingAction === "create" || !collaboration) && (
-        <div role="dialog" aria-label="Place email in a node" style={{ margin: "0 8px", display: "grid", gap: 6, border: "1px solid rgba(249,115,22,0.36)", borderRadius: 10, background: "rgba(255,247,237,0.96)", padding: 8, boxShadow: "0 8px 20px rgba(15,23,42,0.10)" }}>
-          {pendingAction !== "create" && (
-            <>
-              <strong style={{ color: "#0369a1", fontSize: 11 }}>{pendingAction === "chat" ? "Import this email and chat into an existing node" : "Import this email into an existing node"}</strong>
-              <input value={nodeSearch} onChange={(event) => setNodeSearch(event.target.value)} placeholder="Search nodes" aria-label="Search existing nodes" style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.3)", borderRadius: 8, background: "#ffffff", padding: "4px 8px", fontSize: 11 }} />
-              <div style={{ maxHeight: 180, overflowY: "auto", display: "grid", gap: 4 }}>
+    <>
+      {actionMenuVisible && (
+        <div data-email-action-popover="true" style={{ position: "absolute", zIndex: 50, top: 84, right: 10, maxWidth: "calc(100% - 20px)", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", gap: 8, animation: "mango-pane-enter 160ms ease-out" }}>
+          {pendingAction === "import" ? (
+            <div role="dialog" aria-label="Add email to node" style={{ width: 290, maxWidth: "min(290px, calc(100vw - 32px))", display: "grid", gap: 6, border: "1px solid rgba(14,165,233,0.34)", borderRadius: 11, background: "rgba(255,255,255,0.98)", padding: 9, boxShadow: "0 16px 34px rgba(15,23,42,0.18)" }}>
+              <strong style={{ color: "#0369a1", fontSize: 11 }}>Add email to a node</strong>
+              <input autoFocus value={nodeSearch} onChange={(event) => setNodeSearch(event.target.value)} placeholder="Search nodes" aria-label="Search existing nodes" style={{ minHeight: 32, border: "1px solid rgba(14,165,233,0.3)", borderRadius: 8, background: "#ffffff", padding: "4px 8px", fontSize: 11 }} />
+              <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
                 {filteredNodes.map((node) => (
-                  <button key={node.node_id} type="button" disabled={submitting} onClick={() => {
-                    if (node.node_id === detectedNodeID) {
-                      setPriorityMenuOpen(false);
-                      onOpenImportedNode?.(node.node_id, "", message.id);
-                      return;
-                    }
-                    void importIntoExistingNode(node.node_id, pendingAction === "chat");
-                  }} style={{ minHeight: 28, border: "1px solid rgba(14,165,233,0.24)", borderRadius: 8, background: node.node_id === detectedNodeID ? "rgba(240,253,250,0.94)" : "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                  <button key={node.node_id} type="button" disabled={submitting} onClick={() => { void importIntoExistingNode(node.node_id, false); }} style={{ minHeight: 30, border: "1px solid rgba(14,165,233,0.24)", borderRadius: 8, background: node.node_id === detectedNodeID ? "rgba(240,253,250,0.94)" : "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
                     {node.name || node.node_id}{node.node_id === detectedNodeID ? " - thread already attached" : ""}
                   </button>
                 ))}
-                {filteredNodes.length === 0 && <div style={{ color: "#64748b", fontSize: 10.5 }}>No matching nodes</div>}
+                {filteredNodes.length === 0 && <div style={{ color: "#64748b", fontSize: 10.5, padding: 6 }}>No matching nodes</div>}
               </div>
-            </>
-          )}
-          {pendingAction === "create" && collaboration && (
+              {resolvingNode && <div role="status" style={{ color: "#64748b", fontSize: 10, fontWeight: 800 }}>Checking existing email attachments</div>}
+              {submitting && <div role="status" style={{ color: "#64748b", fontSize: 10.5, fontWeight: 800 }}>Attaching the email thread and linked text box</div>}
+              <button type="button" onClick={closeActionMenu} style={{ minHeight: 26, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}>Cancel</button>
+            </div>
+          ) : (
             <>
-              <strong style={{ color: "#0f766e", fontSize: 11 }}>This email already has a Node</strong>
-              <button type="button" disabled={submitting} onClick={() => { void createEmailNode(); }} style={{ minHeight: 28, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 8, background: "#ffffff", color: "#0f766e", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
-                Open the Node and ensure its linked email text box
-              </button>
+              <div role="dialog" aria-label="Choose email node priority" style={{ width: 250, maxWidth: "min(250px, calc(100vw - 32px))", display: "grid", gap: 5, border: "1px solid rgba(249,115,22,0.34)", borderRadius: 11, background: "rgba(255,255,255,0.98)", padding: 9, boxShadow: "0 16px 34px rgba(15,23,42,0.18)" }}>
+                <strong style={{ color: "#9a3412", fontSize: 11 }}>{pendingAction === "chat" ? "Choose a priority to send this chat" : "Choose a priority"}</strong>
+                {INBOX_PRIORITIES.map((priority) => (
+                  <button key={priority.value} type="button" disabled={submitting} onClick={() => { setSelectedPriority(priority.value); setCreateStep("logic_gate"); }} style={{ minHeight: 30, border: `1px solid ${selectedPriority === priority.value ? "rgba(249,115,22,0.72)" : "rgba(249,115,22,0.24)"}`, borderRadius: 8, background: selectedPriority === priority.value ? "rgba(255,247,237,0.98)" : "#ffffff", color: "#7c2d12", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                    {priority.label}
+                  </button>
+                ))}
+                <button type="button" onClick={closeActionMenu} style={{ minHeight: 26, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}>Cancel</button>
+              </div>
+              {createStep === "logic_gate" && selectedPriority && (
+                <div data-email-logic-gate-picker="true" role="dialog" aria-label="Choose Logic Gate for email node" style={{ width: 310, maxWidth: "min(310px, calc(100vw - 32px))", display: "grid", gap: 6, border: "1px solid rgba(20,184,166,0.34)", borderRadius: 11, background: "rgba(255,255,255,0.99)", padding: 9, boxShadow: "0 18px 38px rgba(15,23,42,0.2), 0 0 18px rgba(20,184,166,0.08)", animation: "mango-pane-enter 160ms ease-out" }}>
+                  <strong style={{ color: "#0f766e", fontSize: 11 }}>Place the node in a Logic Gate</strong>
+                  <input autoFocus value={logicGateSearch} onChange={(event) => setLogicGateSearch(event.target.value)} placeholder="Search Logic Gates" aria-label="Search Logic Gates" style={{ minHeight: 32, border: "1px solid rgba(20,184,166,0.3)", borderRadius: 8, background: "#ffffff", padding: "4px 8px", fontSize: 11 }} />
+                  <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
+                    {filteredLogicGates.map((logicGate) => (
+                      <button key={logicGate.logic_gate_id} type="button" disabled={submitting} onClick={() => { void createEmailNode(selectedPriority, logicGate.logic_gate_id); }} style={{ minHeight: 30, border: "1px solid rgba(20,184,166,0.24)", borderRadius: 8, background: "#ffffff", color: "#0f172a", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                        {logicGate.header || logicGate.logic_gate_id}
+                      </button>
+                    ))}
+                    {filteredLogicGates.length === 0 && <div style={{ color: "#64748b", fontSize: 10.5, padding: 6 }}>No matching Logic Gates</div>}
+                  </div>
+                  <button type="button" disabled={submitting} onClick={() => { void createEmailNode(selectedPriority); }} style={{ minHeight: 30, border: "1px solid rgba(148,163,184,0.28)", borderRadius: 8, background: "rgba(248,250,252,0.96)", color: "#475569", cursor: submitting ? "wait" : "pointer", padding: "5px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}>
+                    Create without a Logic Gate
+                  </button>
+                  {submitting && <div role="status" style={{ color: "#64748b", fontSize: 10.5, fontWeight: 800 }}>Creating node and attaching the email thread</div>}
+                </div>
+              )}
             </>
           )}
-          {pendingAction !== "import" && !collaboration && (
-            <>
-              <strong style={{ color: "#9a3412", fontSize: 11 }}>{pendingAction === "create" ? "Choose a priority to create this email node" : "Or choose a priority for a new email node"}</strong>
-              {INBOX_PRIORITIES.map((priority) => (
-                <button
-                  key={priority.value}
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => {
-                    setSelectedPriority(priority.value);
-                    if (pendingAction === "create") void createEmailNode(priority.value);
-                    else void submit(priority.value);
-                  }}
-                  style={{ minHeight: 28, border: "1px solid rgba(249,115,22,0.28)", borderRadius: 8, background: "#ffffff", color: "#7c2d12", cursor: submitting ? "wait" : "pointer", padding: "4px 8px", textAlign: "left", fontSize: 10.5, fontWeight: 850 }}
-                >
-                  {priority.label}
-                </button>
-              ))}
-            </>
-          )}
-          <button type="button" onClick={() => setPriorityMenuOpen(false)} style={{ minHeight: 26, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}>Cancel</button>
         </div>
       )}
-      {submitting && <div role="status" style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800, padding: "0 8px" }}>{pendingAction === "chat" ? "Saving comment and email node" : "Saving email node"}</div>}
-      <ChatPane
+      <aside
+        id={id}
+        hidden={!active}
+        aria-hidden={!active}
+        aria-label="Email collaboration chat"
+        className={active ? "mango-pane-enter" : undefined}
+        style={{ minWidth: 0, minHeight: 0, height: "100%", display: active ? "grid" : "none", gridTemplateRows: loading || submitting ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 6, padding: "8px 8px 8px 0", overflow: "hidden", background: EDITOR_NEU_SURFACE }}
+      >
+        {(loading || submitting) && <div role="status" style={{ color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 800, padding: "2px 8px" }}>{loading ? "Loading chat" : pendingAction === "chat" ? "Saving chat" : "Saving"}</div>}
+        <ChatPane
         blockID={blockID || "email-collaboration"}
         editable
         apiBase={apiBase}
@@ -906,6 +921,7 @@ export function EmailCollaborationChatSurface({
         draftAttachments={draftAttachments}
         replyTargetID={replyTargetID}
         heightStorageKey={"mangorts.email-collaboration-chat-height:" + companyID}
+        fillHeight
         active={active}
         currentUserID={currentUserID}
         activeMessageID={activeMessageID}
@@ -926,7 +942,8 @@ export function EmailCollaborationChatSurface({
         onAttachFiles={(files) => { void attachFiles(files); }}
         onRemoveDraftAttachment={(attachmentID) => setDraftAttachments((current) => current.filter((item) => item.id !== attachmentID))}
         onSubmit={() => { if (!submitting) void submit(); }}
-      />
-    </aside>
+        />
+      </aside>
+    </>
   );
 }
