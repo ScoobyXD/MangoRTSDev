@@ -1993,8 +1993,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }
 
   return (
-    <div style={summaryShellStyle}>
-      <div style={summaryHeaderStyle}>
+    <div className="mango-project-summary-shell" style={summaryShellStyle}>
+      <div className="mango-project-summary-header" style={summaryHeaderStyle}>
         <div style={summaryTitleClusterStyle}>
           <div style={summaryEyebrowStyle}>Project Summary</div>
           {projectTitleEditing ? (
@@ -2036,7 +2036,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             </h2>
           )}
         </div>
-        <div style={summaryMetaPillsStyle}>
+        <div className="mango-project-summary-meta" style={summaryMetaPillsStyle}>
           <div style={summaryMetaFieldStyle}>
             <span style={summaryMetaFieldLabelStyle}>Status</span>
             <ProjectFieldControl
@@ -2114,8 +2114,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         />
       ) : null}
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
-      <div ref={bodyRef} style={summaryBodyStyle}>
-        <section style={textColumnStyle(summarySplitPct)}>
+      <div ref={bodyRef} className="mango-project-summary-body" style={summaryBodyStyle}>
+        <section className="mango-project-summary-timeline" style={textColumnStyle(summarySplitPct)}>
           <div style={columnToolbarStyle}>
             <div style={columnTitleStyle}>Timeline</div>
             <div style={toolbarActionsStyle}>
@@ -2410,10 +2410,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             </div>
           </div>
         </section>
-        <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
-        <aside style={relationshipsColumnStyle(summarySplitPct)}>
-          <div style={projectWorkPanelToolbarStyle}>
-            <div role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
+        <div className="mango-project-summary-split-handle" role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
+        <aside className="mango-project-summary-work-panel" style={relationshipsColumnStyle(summarySplitPct)}>
+          <div className="mango-project-summary-work-toolbar" style={projectWorkPanelToolbarStyle}>
+            <div className="mango-project-summary-tabs" role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
               <button
                 type="button"
                 role="tab"
@@ -3691,8 +3691,9 @@ const summaryShellStyle: React.CSSProperties = {
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  background: "#f8fbff",
+  background: "radial-gradient(circle at 5% 0%, rgba(103,232,249,.13), transparent 28%), radial-gradient(circle at 96% 3%, rgba(196,181,253,.17), transparent 29%), linear-gradient(145deg, #f7f9fc, #edf2f8)",
   color: PROJECT_SUMMARY_SURFACE_TEXT,
+  overflow: "hidden",
 };
 
 const summaryLoadingStyle: React.CSSProperties = {
@@ -3705,13 +3706,18 @@ const summaryLoadingStyle: React.CSSProperties = {
 };
 
 const summaryHeaderStyle: React.CSSProperties = {
-  minHeight: 78,
+  minHeight: 88,
   display: "flex",
   alignItems: "center",
+  flexWrap: "wrap",
   gap: 14,
-  padding: "12px 18px",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
-  background: "#ffffff",
+  margin: "14px 14px 0",
+  padding: "16px 18px",
+  border: "1px solid rgba(255,255,255,.86)",
+  borderRadius: 18,
+  background: "linear-gradient(145deg, rgba(255,255,255,.96), rgba(239,244,250,.86))",
+  boxShadow: "12px 12px 28px rgba(148,163,184,.20), -10px -10px 26px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)",
+  boxSizing: "border-box",
   flexShrink: 0,
 };
 
@@ -3722,19 +3728,19 @@ const summaryTitleClusterStyle: React.CSSProperties = {
 
 const summaryEyebrowStyle: React.CSSProperties = {
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 950,
   textTransform: "uppercase",
-  color: "#64748b",
-  letterSpacing: 0,
+  color: "#6366f1",
+  letterSpacing: ".12em",
 };
 
 const summaryTitleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 22,
+  fontSize: 24,
   lineHeight: 1.1,
-  fontWeight: 850,
+  fontWeight: 950,
   color: "#0f172a",
-  letterSpacing: 0,
+  letterSpacing: "-.025em",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -3767,10 +3773,16 @@ const summaryMetaPillsStyle: React.CSSProperties = {
 };
 
 const summaryMetaFieldStyle: React.CSSProperties = {
-  minWidth: 124,
-  maxWidth: 210,
+  minWidth: 132,
+  maxWidth: 220,
   display: "grid",
-  gap: 3,
+  gap: 5,
+  padding: "7px 8px",
+  border: "1px solid rgba(255,255,255,.78)",
+  borderRadius: 12,
+  background: "linear-gradient(145deg, rgba(255,255,255,.82), rgba(241,245,249,.72))",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,.90), 4px 4px 11px rgba(148,163,184,.13), -4px -4px 11px rgba(255,255,255,.78)",
+  boxSizing: "border-box",
 };
 
 const summaryMetaFieldLabelStyle: React.CSSProperties = {
@@ -3943,6 +3955,7 @@ const summaryBodyStyle: React.CSSProperties = {
   alignItems: "stretch",
   gap: 0,
   padding: 14,
+  overflow: "hidden",
 };
 
 const textColumnStyle = (splitPct: number): React.CSSProperties => ({
@@ -3950,16 +3963,23 @@ const textColumnStyle = (splitPct: number): React.CSSProperties => ({
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  flex: `0 0 calc(${splitPct}% - 5px)`,
+  flex: `0 0 calc(${splitPct}% - 10px)`,
+  padding: 12,
+  border: "1px solid rgba(255,255,255,.84)",
+  borderRadius: 18,
+  background: "linear-gradient(145deg, rgba(255,255,255,.90), rgba(240,244,249,.82))",
+  boxShadow: "10px 10px 24px rgba(148,163,184,.17), -8px -8px 22px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.92)",
+  boxSizing: "border-box",
+  overflow: "hidden",
 });
 
 const summarySplitHandleStyle: React.CSSProperties = {
   flex: "0 0 10px",
   cursor: "col-resize",
   position: "relative",
-  margin: "40px 8px 0",
+  margin: "46px 5px 4px",
   borderRadius: 999,
-  background: "linear-gradient(180deg, rgba(148,163,184,0.12), rgba(91,141,239,0.30), rgba(148,163,184,0.12))",
+  background: "linear-gradient(180deg, transparent, rgba(99,102,241,.34), transparent)",
 };
 
 const relationshipsColumnStyle = (splitPct: number): React.CSSProperties => ({
@@ -3968,15 +3988,21 @@ const relationshipsColumnStyle = (splitPct: number): React.CSSProperties => ({
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  borderLeft: "1px solid rgba(148, 163, 184, 0.26)",
-  paddingLeft: 14,
-  flex: `1 1 calc(${100 - splitPct}% - 5px)`,
+  padding: 12,
+  border: "1px solid rgba(255,255,255,.84)",
+  borderRadius: 18,
+  background: "linear-gradient(145deg, rgba(255,255,255,.90), rgba(240,244,249,.82))",
+  boxShadow: "10px 10px 24px rgba(148,163,184,.17), -8px -8px 22px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.92)",
+  boxSizing: "border-box",
+  overflow: "hidden",
+  flex: `1 1 calc(${100 - splitPct}% - 10px)`,
 });
 
 const columnToolbarStyle: React.CSSProperties = {
-  minHeight: 40,
+  minHeight: 44,
   display: "flex",
   alignItems: "center",
+  padding: "2px 2px 10px",
   flexWrap: "wrap",
   alignContent: "center",
   justifyContent: "space-between",
@@ -3988,7 +4014,7 @@ const projectWorkPanelToolbarStyle: React.CSSProperties = {
   ...columnToolbarStyle,
   flexWrap: "wrap",
   alignContent: "center",
-  padding: "4px 0",
+  padding: "2px 2px 10px",
 };
 
 const projectWorkPanelActionsStyle: React.CSSProperties = {
@@ -4051,22 +4077,25 @@ const rightPanelTabsStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   padding: 3,
+  border: "1px solid rgba(255,255,255,.76)",
   borderRadius: 999,
-  background: "#e2e8f0",
+  background: "linear-gradient(145deg, rgba(226,232,240,.92), rgba(241,245,249,.84))",
   gap: 2,
+  boxShadow: "inset 3px 3px 8px rgba(148,163,184,.18), inset -3px -3px 8px rgba(255,255,255,.70)",
 };
 
 const rightPanelTabStyle = (active: boolean): React.CSSProperties => ({
-  minHeight: 28,
+  minHeight: 31,
   border: 0,
   borderRadius: 999,
-  padding: "0 11px",
-  background: active ? "#ffffff" : "transparent",
-  color: active ? "#0f172a" : "#64748b",
+  padding: "0 13px",
+  background: active ? "linear-gradient(145deg, #ffffff, #f8fafc)" : "transparent",
+  color: active ? "#3730a3" : "#64748b",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: 12,
-  fontWeight: 900,
+  fontWeight: 950,
+  boxShadow: active ? "4px 4px 10px rgba(148,163,184,.17), -3px -3px 9px rgba(255,255,255,.90), inset 1px 1px 0 rgba(255,255,255,.96)" : undefined,
 });
 
 const criticalPathPanelStyle: React.CSSProperties = {
@@ -4074,7 +4103,7 @@ const criticalPathPanelStyle: React.CSSProperties = {
   flex: "1 1 auto",
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 8,
+  gap: 10,
 };
 
 const criticalPathActionsStyle: React.CSSProperties = {
@@ -4085,17 +4114,17 @@ const criticalPathActionsStyle: React.CSSProperties = {
 };
 
 const criticalPathAddButtonStyle = (accent: string): React.CSSProperties => ({
-  minHeight: 30,
+  minHeight: 34,
   border: 0,
-  borderRadius: 8,
-  background: accent,
+  borderRadius: 10,
+  background: `linear-gradient(135deg, ${accent}, #8b5cf6)`,
   color: "#ffffff",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: 12,
-  fontWeight: 900,
-  padding: "0 11px",
-  boxShadow: "0 8px 18px rgba(37, 99, 235, 0.15)",
+  fontWeight: 950,
+  padding: "0 14px",
+  boxShadow: `0 9px 20px ${accent}32, inset 1px 1px 0 rgba(255,255,255,.34)`,
 });
 
 const criticalPathTableStyle: React.CSSProperties = {
@@ -4103,9 +4132,10 @@ const criticalPathTableStyle: React.CSSProperties = {
   overflow: "auto",
   display: "grid",
   alignContent: "start",
-  border: "1px solid rgba(148, 163, 184, 0.24)",
-  borderRadius: 8,
-  background: "rgba(255, 255, 255, 0.68)",
+  border: "1px solid rgba(255,255,255,.82)",
+  borderRadius: 14,
+  background: "linear-gradient(145deg, rgba(255,255,255,.84), rgba(241,245,249,.72))",
+  boxShadow: "inset 3px 3px 9px rgba(148,163,184,.11), inset -3px -3px 9px rgba(255,255,255,.82)",
 };
 
 const criticalPathGridColumns = "minmax(130px, 1.15fr) minmax(150px, 1fr) minmax(92px, 0.68fr) 128px minmax(132px, 0.9fr)";
@@ -4117,9 +4147,10 @@ const criticalPathHeaderRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: criticalPathGridColumns,
   minWidth: 760,
-  minHeight: 36,
-  background: "#f8fafc",
+  minHeight: 42,
+  background: "linear-gradient(180deg, rgba(255,255,255,.97), rgba(241,245,249,.92))",
   borderBottom: "1px solid rgba(148, 163, 184, 0.24)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.96)",
 };
 
 const criticalPathHeaderCellStyle: React.CSSProperties = {
@@ -4139,7 +4170,7 @@ function criticalPathRowStyle(current: boolean, dropActive: boolean, previewOpen
     display: "grid",
     gridTemplateColumns: criticalPathGridColumns,
     minWidth: 760,
-    minHeight: 54,
+    minHeight: 58,
     paddingRight: current ? 160 : 92,
     borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
     background: current
@@ -4148,7 +4179,7 @@ function criticalPathRowStyle(current: boolean, dropActive: boolean, previewOpen
         ? "linear-gradient(90deg, rgba(240, 249, 255, 0.98), rgba(255, 255, 255, 0.96))"
       : dropActive
         ? "rgba(239, 246, 255, 0.90)"
-        : "#ffffff",
+        : "rgba(255,255,255,.82)",
     outline: current
       ? "2px solid rgba(249, 115, 22, 0.58)"
       : previewOpen
@@ -4158,6 +4189,7 @@ function criticalPathRowStyle(current: boolean, dropActive: boolean, previewOpen
     boxShadow: previewOpen ? "0 10px 22px rgba(14, 165, 233, 0.12)" : undefined,
     zIndex: previewOpen ? 3 : 1,
     boxSizing: "border-box",
+    transition: "background 150ms ease, box-shadow 150ms ease, outline-color 150ms ease",
   };
 }
 
@@ -4806,11 +4838,12 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   overflow: "auto",
   display: "grid",
   alignContent: "start",
-  gap: 2,
-  padding: "6px 10px 24px 2px",
-  border: dropActive ? "1px dashed rgba(91, 141, 239, 0.58)" : "1px dashed rgba(148, 163, 184, 0.34)",
-  borderRadius: 8,
-  background: dropActive ? "rgba(239, 246, 255, 0.76)" : "rgba(255, 255, 255, 0.54)",
+  gap: 5,
+  padding: "9px 10px 24px",
+  border: dropActive ? "1px dashed rgba(99,102,241,.58)" : "1px solid rgba(255,255,255,.78)",
+  borderRadius: 14,
+  background: dropActive ? "linear-gradient(145deg, rgba(238,242,255,.88), rgba(239,246,255,.76))" : "linear-gradient(145deg, rgba(255,255,255,.76), rgba(241,245,249,.66))",
+  boxShadow: "inset 3px 3px 9px rgba(148,163,184,.11), inset -3px -3px 9px rgba(255,255,255,.80)",
 });
 
 function relationshipContextMenuStyle(x: number, y: number): React.CSSProperties {
@@ -4870,17 +4903,19 @@ function relationshipGroupHeaderStyle(depth: number, isLogicGate: boolean): Reac
   return {
     width: "calc(100% - " + leftOffset + "px)",
     minWidth: 0,
-    minHeight: 32,
+    minHeight: 36,
     display: "grid",
     gridTemplateColumns: "16px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
     marginLeft: leftOffset,
-    borderBottom: "1px solid rgba(148, 163, 184, 0.25)",
-    background: isLogicGate ? "rgba(240, 253, 244, 0.48)" : "transparent",
+    border: "1px solid rgba(255,255,255,.70)",
+    borderRadius: 10,
+    background: isLogicGate ? "linear-gradient(90deg, rgba(236,253,245,.88), rgba(255,255,255,.72))" : "linear-gradient(90deg, rgba(241,245,249,.84), rgba(255,255,255,.68))",
     color: "#111827",
-    padding: "0 8px 0 3px",
+    padding: "0 9px 0 5px",
     boxSizing: "border-box",
+    boxShadow: "3px 3px 9px rgba(148,163,184,.10), -3px -3px 9px rgba(255,255,255,.70)",
   };
 }
 
@@ -4965,17 +5000,19 @@ function relationshipLogicGateRowStyle(depth: number): React.CSSProperties {
   return {
     width: "calc(100% - " + leftOffset + "px)",
     minWidth: 0,
-    minHeight: 34,
+    minHeight: 38,
     display: "grid",
     gridTemplateColumns: "16px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 7,
     marginLeft: leftOffset,
-    borderBottom: "1px solid rgba(148, 163, 184, 0.24)",
-    background: "rgba(255, 255, 255, 0.78)",
+    border: "1px solid rgba(16,185,129,.12)",
+    borderRadius: 10,
+    background: "linear-gradient(90deg, rgba(236,253,245,.82), rgba(255,255,255,.82))",
     color: "#111827",
-    padding: "0 8px",
+    padding: "0 10px",
     boxSizing: "border-box",
+    boxShadow: "3px 3px 9px rgba(148,163,184,.09), -3px -3px 9px rgba(255,255,255,.68)",
   };
 }
 
@@ -4984,25 +5021,25 @@ function relationshipNodeRowStyle(depth: number, hovered: boolean, selected: boo
   return {
     width: "calc(100% - " + leftOffset + "px)",
     minWidth: 0,
-    minHeight: 36,
+    minHeight: 40,
     display: "grid",
     gridTemplateColumns: "16px minmax(0, 1fr) 16px auto auto",
     alignItems: "center",
     gap: 6,
     marginLeft: leftOffset,
-    border: selected ? "1px solid rgba(37, 99, 235, 0.55)" : "1px solid transparent",
-    borderBottom: "1px solid rgba(148, 163, 184, 0.26)",
-    borderRadius: selected ? 5 : 0,
-    background: selected ? "rgba(37, 99, 235, 0.08)" : hovered ? "rgba(15, 23, 42, 0.035)" : "#ffffff",
+    border: selected ? "1px solid rgba(99,102,241,.48)" : "1px solid rgba(255,255,255,.72)",
+    borderRadius: 10,
+    background: selected ? "linear-gradient(90deg, rgba(224,231,255,.94), rgba(239,246,255,.84))" : hovered ? "linear-gradient(90deg, rgba(241,245,249,.94), rgba(255,255,255,.84))" : "rgba(255,255,255,.76)",
     color: "#111827",
     font: "inherit",
-    padding: "0 8px",
+    padding: "0 10px",
     textAlign: "left",
     cursor: "pointer",
     boxSizing: "border-box",
+    boxShadow: selected ? "0 7px 17px rgba(99,102,241,.12), inset 3px 0 0 #6366f1" : "2px 2px 7px rgba(148,163,184,.08), -2px -2px 7px rgba(255,255,255,.62)",
     userSelect: "none",
     WebkitUserSelect: "none",
-    transition: "background 120ms ease, border-color 120ms ease",
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 140ms ease",
   };
 }
 

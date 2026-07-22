@@ -1,4 +1,3 @@
-import type { EntityField } from "../fields/entityFieldsApi.js";
 import type { UniversalGroupingSetting } from "../grouping/universalGrouping.js";
 
 export type ProjectListBuiltInGroupingField = "account" | "team" | "status" | "health" | "created_month" | "updated_month";
@@ -13,15 +12,11 @@ export const PROJECT_LIST_GROUPING_FIELDS: ReadonlyArray<{ value: ProjectListBui
   { value: "health", label: "Health" },
   { value: "created_month", label: "Date created" },
   { value: "updated_month", label: "Date updated" },
-  { value: PROJECT_LIST_FIELD_GROUPING, label: "Field" },
+  { value: PROJECT_LIST_FIELD_GROUPING, label: "Group by Fields" },
 ];
 
 export function projectListGroupingFields(): Array<{ value: ProjectListGroupingField; label: string }> {
   return [...PROJECT_LIST_GROUPING_FIELDS];
-}
-
-export function projectListSpecificFieldGroupingOptions(fields: ReadonlyArray<EntityField>): Array<{ value: ProjectListGroupingField; label: string }> {
-  return fields.map((field) => ({ value: entityFieldGroupingValue(field.field_id), label: field.name }));
 }
 
 export function entityFieldGroupingValue(fieldID: string): `field:${string}` {
@@ -32,16 +27,15 @@ export function entityFieldIDFromGrouping(field: ProjectListGroupingField): stri
   return field.startsWith("field:") ? field.slice("field:".length).trim() : "";
 }
 
-export function isProjectListFieldGrouping(field: ProjectListGroupingField): boolean {
-  return field === PROJECT_LIST_FIELD_GROUPING || Boolean(entityFieldIDFromGrouping(field));
-}
-
 export function activeProjectListGroupings(
   groupings: ReadonlyArray<UniversalGroupingSetting<ProjectListGroupingField>>,
 ): Array<UniversalGroupingSetting<ProjectListGroupingField>> {
-  return groupings
-    .filter((grouping) => grouping.field !== PROJECT_LIST_FIELD_GROUPING)
-    .map((grouping) => ({ field: grouping.field, direction: grouping.direction }));
+  return normalizeProjectListGroupings(groupings);
+}
+
+export function normalizeProjectListFieldColumns(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  return value.some((item) => String(item ?? "").trim()) ? [PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER] : [];
 }
 
 export function normalizeProjectListGroupings(value: unknown): Array<UniversalGroupingSetting<ProjectListGroupingField>> {
@@ -51,9 +45,9 @@ export function normalizeProjectListGroupings(value: unknown): Array<UniversalGr
   const result: Array<UniversalGroupingSetting<ProjectListGroupingField>> = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const field = String((item as { field?: unknown }).field ?? "") as ProjectListGroupingField;
-    const dynamicFieldID = entityFieldIDFromGrouping(field);
-    if ((!allowed.has(field) && !dynamicFieldID) || seen.has(field)) continue;
+    const storedField = String((item as { field?: unknown }).field ?? "") as ProjectListGroupingField;
+    const field = entityFieldIDFromGrouping(storedField) ? PROJECT_LIST_FIELD_GROUPING : storedField;
+    if (!allowed.has(field) || seen.has(field)) continue;
     seen.add(field);
     result.push({ field, direction: (item as { direction?: unknown }).direction === "desc" ? "desc" : "asc" });
   }

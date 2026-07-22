@@ -67,12 +67,7 @@ import {
   type ProjectListGroupingField,
 } from "./ProjectListView.js";
 import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
-import {
-  isProjectListFieldGrouping,
-  PROJECT_LIST_FIELD_GROUPING,
-  projectListGroupingFields,
-  projectListSpecificFieldGroupingOptions,
-} from "./projectListViewModel.js";
+import { normalizeProjectListFieldColumns, projectListGroupingFields } from "./projectListViewModel.js";
 import { EVENT_PROJECT_VIEW_SETTINGS_REQUESTED } from "./projectViewEvents.js";
 
 type ProjectManagementContentProps = {
@@ -193,9 +188,7 @@ function readProjectListGroupings(companyID: string) {
 function readProjectListFieldColumns(companyID: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const value = JSON.parse(window.localStorage.getItem(`${PROJECT_LIST_FIELD_COLUMNS_STORAGE_PREFIX}:${companyID}`) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    return Array.from(new Set(value.map(String).map((fieldID) => fieldID.trim()).filter(Boolean)));
+    return normalizeProjectListFieldColumns(JSON.parse(window.localStorage.getItem(`${PROJECT_LIST_FIELD_COLUMNS_STORAGE_PREFIX}:${companyID}`) ?? "[]"));
   } catch {
     return [];
   }
@@ -680,13 +673,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [entityFields, setEntityFields] = useState<EntityField[]>([]);
   const [visibleProjectFieldIDs, setVisibleProjectFieldIDs] = useState(() => readProjectListFieldColumns(companyID));
   const projectListGroupingOptions = useMemo(projectListGroupingFields, []);
-  const projectListGroupingFieldVariant = useMemo(() => ({
-    parentValue: PROJECT_LIST_FIELD_GROUPING,
-    matches: isProjectListFieldGrouping,
-    options: projectListSpecificFieldGroupingOptions(entityFields),
-    placeholder: "Choose field",
-    selectionLabel: "specific field",
-  }), [entityFields]);
   const [projectFieldSavingIDs, setProjectFieldSavingIDs] = useState<Set<string>>(() => new Set());
   const [activeProjectID, setActiveProjectID] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
@@ -1408,9 +1394,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }
 
   return (
-    <div ref={pageRef} style={pageStyle(showLocalProjectExplorer, verticalSplit)}>
-      <section style={timelineSurfaceStyle}>
-        <div style={surfaceHeaderStyle}>
+    <div ref={pageRef} className="mango-project-management-page" style={pageStyle(showLocalProjectExplorer, verticalSplit)}>
+      <section className="mango-project-management-surface" style={timelineSurfaceStyle}>
+        <div className="mango-project-management-header" style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
             <h2 style={surfaceTitleStyle}>Projects</h2>
             <div style={surfaceMetaStyle}>{viewMode === "timeline" ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}` : `${projects.length} projects`}</div>
@@ -1420,12 +1406,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <button type="button" style={viewToggleButtonStyle(viewMode === "list")} onClick={() => setViewMode("list")}>List View</button>
             <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>
           </div>
-          <div style={surfaceHeaderActionsStyle}>
+          <div className="mango-project-management-actions" style={surfaceHeaderActionsStyle}>
           {viewMode === "list" ? (
             <UniversalGroupingControls<ProjectListGroupingField>
               groupings={projectListGroupings}
               fieldOptions={projectListGroupingOptions}
-              fieldVariant={projectListGroupingFieldVariant}
               onChange={setProjectListGroupings}
               buttonLabel="•••"
               popoverLabel="Edit Projects view"
@@ -2120,9 +2105,9 @@ function pageStyle(showLocalProjectExplorer: boolean, verticalSplit: number): Re
     display: "grid",
     gridTemplateRows: showLocalProjectExplorer ? `minmax(260px, ${verticalSplit}%) 8px minmax(220px, 1fr)` : "minmax(0, 1fr)",
     gap: 0,
-    padding: 12,
+    padding: "16px clamp(12px, 1.7vw, 24px)",
     borderRadius: 0,
-    background: "linear-gradient(145deg, #f8fafc 0%, #eef2f7 100%)",
+    background: "radial-gradient(circle at 6% 0%, rgba(103,232,249,.13), transparent 27%), radial-gradient(circle at 96% 3%, rgba(196,181,253,.17), transparent 28%), linear-gradient(145deg, #f7f9fc 0%, #edf2f8 100%)",
     boxSizing: "border-box",
     color: "#111827",
     overflow: "hidden",
@@ -2133,12 +2118,12 @@ const timelineSurfaceStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "auto auto minmax(0, 1fr)",
-  gap: 8,
-  padding: 12,
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  borderRadius: 12,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 247, 251, 0.92))",
-  boxShadow: "9px 9px 20px rgba(174, 174, 192, 0.26), -8px -8px 18px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
+  gap: 12,
+  padding: "16px clamp(12px, 1.4vw, 20px)",
+  border: "1px solid rgba(255, 255, 255, 0.84)",
+  borderRadius: 20,
+  background: "linear-gradient(145deg, rgba(255,255,255,.95), rgba(239,244,250,.88))",
+  boxShadow: "13px 13px 30px rgba(148,163,184,.21), -11px -11px 28px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)",
   boxSizing: "border-box",
   overflow: "hidden",
 };
@@ -2157,11 +2142,14 @@ const bottomExplorerStyle: React.CSSProperties = {
 };
 
 const surfaceHeaderStyle: React.CSSProperties = {
-  minHeight: 38,
+  minHeight: 52,
   display: "grid",
   gridTemplateColumns: "minmax(150px, 1fr) 224px minmax(220px, 1fr)",
   alignItems: "center",
-  gap: 12,
+  gap: 16,
+  padding: "0 2px 12px",
+  borderBottom: "1px solid rgba(148,163,184,.16)",
+  boxShadow: "0 1px 0 rgba(255,255,255,.78)",
 };
 
 const viewToggleStyle: React.CSSProperties = {
@@ -2172,10 +2160,12 @@ const viewToggleStyle: React.CSSProperties = {
   gridTemplateColumns: "1fr 1fr",
   alignItems: "center",
   padding: 3,
+  border: "1px solid rgba(255,255,255,.78)",
   borderRadius: 999,
-  background: "#e2e8f0",
+  background: "linear-gradient(145deg, rgba(226,232,240,.92), rgba(241,245,249,.84))",
   overflow: "hidden",
   boxSizing: "border-box",
+  boxShadow: "inset 3px 3px 8px rgba(148,163,184,.20), inset -3px -3px 8px rgba(255,255,255,.72)",
 };
 
 const viewToggleThumbStyle = (viewMode: ProjectManagementViewMode): React.CSSProperties => ({
@@ -2185,8 +2175,8 @@ const viewToggleThumbStyle = (viewMode: ProjectManagementViewMode): React.CSSPro
   width: "calc((100% - 6px) / 2)",
   height: 28,
   borderRadius: 999,
-  background: "#ffffff",
-  boxShadow: "0 1px 4px rgba(15, 23, 42, 0.10)",
+  background: "linear-gradient(145deg, #ffffff, #f8fafc)",
+  boxShadow: "4px 4px 10px rgba(148,163,184,.18), -3px -3px 9px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.98)",
   transform: viewMode === "timeline" ? "translateX(100%)" : "translateX(0)",
   transition: "transform 190ms cubic-bezier(0.2, 0, 0, 1)",
   pointerEvents: "none",
@@ -2257,15 +2247,15 @@ const projectGroupSelectStyle: React.CSSProperties = {
 };
 
 const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
-  minHeight: 32,
+  minHeight: 36,
   border: 0,
-  borderRadius: 8,
-  background: accent,
+  borderRadius: 11,
+  background: `linear-gradient(135deg, ${accent}, #8b5cf6)`,
   color: "#ffffff",
-  padding: "0 12px",
-  fontWeight: 900,
+  padding: "0 16px",
+  fontWeight: 950,
   cursor: "pointer",
-  boxShadow: "0 8px 18px rgba(37, 99, 235, 0.16)",
+  boxShadow: `0 10px 22px ${accent}36, inset 1px 1px 0 rgba(255,255,255,.34)`,
 });
 
 const titleClusterStyle: React.CSSProperties = {
@@ -2280,9 +2270,9 @@ const surfaceTitleStyle: React.CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   color: "#111827",
-  fontSize: 16,
+  fontSize: 20,
   fontWeight: 950,
-  letterSpacing: 0,
+  letterSpacing: "-.02em",
 };
 
 const surfaceMetaStyle: React.CSSProperties = {
@@ -2356,9 +2346,10 @@ const timelineMessageSlotStyle: React.CSSProperties = {
 const timelineScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
-  border: "1px solid rgba(148, 163, 184, 0.20)",
-  borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.74)",
+  border: "1px solid rgba(255,255,255,.84)",
+  borderRadius: 16,
+  background: "linear-gradient(145deg, rgba(255,255,255,.90), rgba(241,245,249,.80))",
+  boxShadow: "inset 3px 3px 9px rgba(148,163,184,.12), inset -3px -3px 10px rgba(255,255,255,.88), 7px 7px 18px rgba(148,163,184,.13)",
 };
 
 function timelineGridStyle(bodyRowCount: number): React.CSSProperties {
@@ -2762,12 +2753,12 @@ const entityPanelStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 8,
-  padding: 12,
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  borderRadius: 12,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 247, 251, 0.92))",
-  boxShadow: "8px 8px 18px rgba(174, 174, 192, 0.18), -7px -7px 16px rgba(255, 255, 255, 0.86)",
+  gap: 11,
+  padding: 14,
+  border: "1px solid rgba(255, 255, 255, 0.84)",
+  borderRadius: 18,
+  background: "linear-gradient(145deg, rgba(255,255,255,.94), rgba(240,244,249,.86))",
+  boxShadow: "11px 11px 25px rgba(148,163,184,.18), -9px -9px 23px rgba(255,255,255,.88), inset 1px 1px 0 rgba(255,255,255,.94)",
   boxSizing: "border-box",
   overflow: "hidden",
 };
@@ -2790,10 +2781,11 @@ const entityPanelTitleStyle: React.CSSProperties = {
 const treeScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
-  padding: 8,
-  border: "1px solid rgba(148, 163, 184, 0.18)",
-  borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.64)",
+  padding: 10,
+  border: "1px solid rgba(255,255,255,.78)",
+  borderRadius: 13,
+  background: "linear-gradient(145deg, rgba(255,255,255,.76), rgba(241,245,249,.68))",
+  boxShadow: "inset 3px 3px 9px rgba(148,163,184,.12), inset -3px -3px 9px rgba(255,255,255,.82)",
   boxSizing: "border-box",
 };
 

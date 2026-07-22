@@ -16,12 +16,12 @@ F5 - Deleting a field removes its assignments from Projects, Nodes, and Logic Ga
 F6 - An assignment identifies exactly one Project, Node, or Logic Gate and references a field from the same company.
 F7 - Updating assignments replaces the complete field set for that entity and requires edit access to the target entity.
 F8 - Project list responses include assigned field definitions in stable field position order.
-F9 - The Projects list places custom field columns immediately left of Status. The plus control first enables a generic Field column, and the new column header separately chooses which company field it displays.
-F10 - A visible custom field cell can add or remove that field for one project without changing its other fields.
-F11 - Visible custom field columns are a browser-local preference scoped by company; hiding a column does not remove assignments.
-F12 - Project grouping first adds the generic Field axis, then uses a second selector in the same grouping row to choose a current field. Assigned projects group under the field name and unassigned projects group under `No <field name>`.
-F13 - Saved dynamic grouping values use the stable field ID, not the editable display name.
-F14 - The Fields page and Project field controls use the established elevated surface, color highlight, keyboard, focus, label, and narrow-layout patterns.
+F9 - The Projects list places one optional generic `Field` column immediately left of Status. The plus control enables it without choosing a field definition in the header.
+F10 - Each visible Field cell selects the reusable field labels assigned to that project while preserving the other project metadata controls.
+F11 - Field-column visibility is a browser-local preference scoped by company; hiding the column does not remove assignments. Older per-field column preferences migrate to the single generic column.
+F12 - Project grouping offers one generic `Group by Fields` choice with no field-definition sub-selector. Projects group beneath each assigned field label, while projects without fields group beneath `Unassigned`.
+F13 - Older saved field-specific grouping values migrate to the generic Fields axis without mutating assignments.
+F14 - The Fields page, Projects list, timeline, Project Summary, Logic Gates / Nodes, and Critical Path surfaces use the established elevated surfaces, color highlights, keyboard labels, and narrow-layout patterns.
 
 ## Scenarios
 
@@ -35,7 +35,7 @@ Expected:
 - Fields appears under Entities.
 - The user creates FX with a selected color.
 - A case-only duplicate such as `fx` is rejected.
-- FX appears in the field library and in the specific-field selectors for Project columns and grouping.
+- FX appears in the field library and in each Project row's Field selector.
 
 ### Scenario F-S2: Add A Project Column And Assign A Field
 
@@ -45,10 +45,10 @@ Given:
 
 Expected:
 - The user selects the plus control immediately left of Status to enable a generic Field column.
-- The user then chooses FX from the selector in that column header.
-- The resulting FX column appears without changing Status, Health, Account, or Team.
-- Assigning FX to one project updates that project and preserves its other fields.
-- Reloading the Projects page restores the visible FX column for the same company.
+- The resulting column header reads `Field` without another configuration step.
+- The user chooses FX from a project row's Field dropdown.
+- Assigning FX updates that project without changing Status, Health, Account, or Team.
+- Reloading the Projects page restores the generic Field column for the same company.
 
 ### Scenario F-S3: Group Projects By A Field
 
@@ -56,8 +56,8 @@ Given:
 - FX is assigned to one project and not assigned to another.
 
 Expected:
-- Choosing `Field` in the Projects view menu and then `FX` from the second selector in that grouping row creates an FX group and a No FX group.
-- Changing the FX display name updates the grouping label because the grouping preference stores the field ID.
+- Choosing `Group by Fields` in the Projects view menu immediately groups projects by their assigned reusable labels.
+- The grouped view includes an FX group and an `Unassigned` group, with no specific-field selector.
 - Grouping changes presentation only and does not mutate field assignments.
 
 ### Scenario F-S4: Delete A Field
@@ -69,12 +69,12 @@ Expected:
 - The Fields page requires an explicit delete confirmation.
 - Deleting FX removes every FX assignment.
 - Projects, Nodes, and Logic Gates remain intact.
-- Project reads no longer return FX and the deleted field is no longer offered as a column or grouping choice.
+- Project reads no longer return FX, the deleted field leaves row selectors, and it no longer appears as a grouped label.
 
 ## Automated Coverage
 
 - `backend/internal/store/entity_fields_test.go` covers validation, case-insensitive uniqueness, ordering, assignment replacement, project read models, assignment counts, deletion cleanup, and schema/migration markers.
 - `backend/internal/http/entity_field_handlers_test.go` covers create, list, Project assignment, and target edit-access enforcement.
-- `tests/frontend/modules/project-management/projectListView.test.ts` covers two-stage column/grouping wiring, dynamic field values, labels, deduplication, and persistence normalization.
+- `tests/frontend/modules/project-management/projectListView.test.ts` covers the generic Field column, per-row field selection, generic Fields grouping, legacy preference normalization, and elevated responsive surface hooks.
 - `tests/frontend/app/preloadDashboardPlan.test.ts` covers isolated Fields route preloading.
 - `npm run build` type-checks the Fields surface, routing, navigation, Project column controls, assignment API, and grouping integration.

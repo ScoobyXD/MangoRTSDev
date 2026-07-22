@@ -15,6 +15,7 @@ import {
   activeProjectListGroupings,
   entityFieldIDFromGrouping,
   PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER,
+  PROJECT_LIST_FIELD_GROUPING,
   PROJECT_LIST_GROUPING_FIELDS,
   type ProjectListGroupingField,
 } from "./projectListViewModel.js";
@@ -36,11 +37,6 @@ export type ProjectListFieldUpdate = Partial<{
   teamIDs: string[];
   fieldIDs: string[];
 }>;
-type ProjectListFieldColumn = {
-  key: string;
-  sourceIndex: number;
-  field?: EntityField;
-};
 
 export function ProjectListView({
   projects,
@@ -74,27 +70,14 @@ export function ProjectListView({
   const [selectionAnchorID, setSelectionAnchorID] = useState("");
 
   const fieldByID = useMemo(() => new Map(fields.map((field) => [field.field_id, field])), [fields]);
-  const fieldColumns = useMemo<ProjectListFieldColumn[]>(() => {
-    const columns: ProjectListFieldColumn[] = [];
-    visibleFieldIDs.forEach((fieldID, sourceIndex) => {
-      if (fieldID === PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER) {
-        columns.push({ key: "pending:" + sourceIndex, sourceIndex });
-        return;
-      }
-      const field = fieldByID.get(fieldID);
-      if (field) columns.push({ key: field.field_id, sourceIndex, field });
-    });
-    return columns;
-  }, [fieldByID, visibleFieldIDs]);
-  const selectedFieldIDs = new Set(fieldColumns.flatMap((column) => column.field ? [column.field.field_id] : []));
-  const hasPendingFieldColumn = fieldColumns.some((column) => !column.field);
-  const canEnableFieldColumn = !hasPendingFieldColumn && fields.some((field) => !selectedFieldIDs.has(field.field_id));
+  const fieldColumnEnabled = visibleFieldIDs.length > 0;
+  const canEnableFieldColumn = !fieldColumnEnabled && fields.length > 0;
   const enableFieldColumnTitle = canEnableFieldColumn
     ? "Enable field column"
     : fields.length === 0
       ? "Create a field from Entities → Fields first"
-      : hasPendingFieldColumn ? "Choose a field for the enabled column first" : "Every field is already visible";
-  const columnCount = 6 + fieldColumns.length;
+      : "The Field column is already visible";
+  const columnCount = 6 + (fieldColumnEnabled ? 1 : 0);
   const activeGroupings = useMemo(() => activeProjectListGroupings(groupings), [groupings]);
 
   useEffect(() => {
@@ -181,31 +164,19 @@ export function ProjectListView({
             <span style={nameTextStyle}>{project.name || project.project_id}</span>
           </span>
         </td>
-        {fieldColumns.map((column) => {
-          const field = column.field;
-          if (!field) {
-            return <td key={column.key} style={pendingFieldCellStyle}>Choose field above</td>;
-          }
-          const currentFieldIDs = project.fields?.map((item) => item.field_id) ?? [];
-          const assigned = currentFieldIDs.includes(field.field_id);
-          return (
-            <td key={column.key} style={customFieldCellStyle(field.color)}>
-              <ProjectFieldControl
-                ariaLabel={`${field.name} for ${project.name || "project"}`}
-                values={assigned ? [field.field_id] : []}
-                choices={[{ id: field.field_id, label: field.name }]}
-                multiple
-                placeholder="Not set"
-                disabled={saving}
-                onChange={(values) => onProjectFieldChange(project, {
-                  fieldIDs: values.includes(field.field_id)
-                    ? [...currentFieldIDs.filter((fieldID) => fieldID !== field.field_id), field.field_id]
-                    : currentFieldIDs.filter((fieldID) => fieldID !== field.field_id),
-                })}
-              />
-            </td>
-          );
-        })}
+        {fieldColumnEnabled ? (
+          <td style={customFieldCellStyle}>
+            <ProjectFieldControl
+              ariaLabel={`Fields for ${project.name || "project"}`}
+              values={project.fields?.map((field) => field.field_id) ?? []}
+              choices={fields.map((field) => ({ id: field.field_id, label: field.name }))}
+              multiple
+              placeholder="Not set"
+              disabled={saving}
+              onChange={(fieldIDs) => onProjectFieldChange(project, { fieldIDs })}
+            />
+          </td>
+        ) : null}
         <td aria-hidden="true" style={addFieldCellStyle} />
         <td style={editableCellStyle}>
           <ProjectFieldControl
@@ -260,7 +231,7 @@ export function ProjectListView({
           <td colSpan={columnCount} style={groupCellStyle}>
             <span style={groupCellInnerStyle(group.depth)}>
               <span style={disclosureStyle}><ExplorerDisclosureIcon open={expanded} color="#64748b" /></span>
-              <span style={groupAxisStyle}>{groupingFieldLabel(group.field, fieldByID)}</span>
+              <span style={groupAxisStyle}>{groupingFieldLabel(group.field)}</span>
               <span style={groupLabelStyle}>{group.label}</span>
               <span style={countStyle}>{rows.length}</span>
             </span>
@@ -282,49 +253,19 @@ export function ProjectListView({
         }
       }}
     >
-      <table style={tableStyle(fieldColumns.length)}>
+      <table style={tableStyle(fieldColumnEnabled ? 1 : 0)}>
         <thead>
           <tr>
             <th style={headerCellStyle}>Project Name</th>
-            {fieldColumns.map((column) => {
-              const field = column.field;
-              const color = field?.color ?? "#6366f1";
-              const selectableFields = fields.filter((candidate) => (
-                candidate.field_id === field?.field_id || !selectedFieldIDs.has(candidate.field_id)
-              ));
-              return (
-                <th key={column.key} style={customFieldHeaderStyle(color)}>
-                  <span style={customFieldHeaderInnerStyle}>
-                    <span aria-hidden="true" style={customFieldHeaderDotStyle(color)} />
-                    <select
-                      value={field?.field_id ?? ""}
-                      aria-label={`Choose field for column ${column.sourceIndex + 1}`}
-                      title="Choose which field this column displays"
-                      style={customFieldHeaderSelectStyle}
-                      onChange={(event) => {
-                        const fieldID = event.currentTarget.value.trim();
-                        if (!fieldID) return;
-                        const nextFieldIDs = [...visibleFieldIDs];
-                        nextFieldIDs[column.sourceIndex] = fieldID;
-                        onVisibleFieldIDsChange(nextFieldIDs);
-                      }}
-                    >
-                      <option value="" disabled>Select field</option>
-                      {selectableFields.map((candidate) => (
-                        <option key={candidate.field_id} value={candidate.field_id}>{candidate.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${field?.name ?? "field"} column`}
-                      title="Remove field column"
-                      style={hideFieldColumnButtonStyle}
-                      onClick={() => onVisibleFieldIDsChange(visibleFieldIDs.filter((_, index) => index !== column.sourceIndex))}
-                    >{"\u00d7"}</button>
-                  </span>
-                </th>
-              );
-            })}
+            {fieldColumnEnabled ? (
+              <th style={customFieldHeaderStyle}>
+                <span style={customFieldHeaderInnerStyle}>
+                  <span aria-hidden="true" style={customFieldHeaderDotStyle} />
+                  <span style={customFieldHeaderLabelStyle}>Field</span>
+                  <button type="button" aria-label="Remove Field column" title="Remove field column" style={hideFieldColumnButtonStyle} onClick={() => onVisibleFieldIDsChange([])}>{"\u00d7"}</button>
+                </span>
+              </th>
+            ) : null}
             <th style={addFieldHeaderStyle}>
               <button
                 type="button"
@@ -332,7 +273,7 @@ export function ProjectListView({
                 title={enableFieldColumnTitle}
                 disabled={!canEnableFieldColumn}
                 style={addFieldColumnButtonStyle(!canEnableFieldColumn)}
-                onClick={() => onVisibleFieldIDsChange([...visibleFieldIDs, PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER])}
+                onClick={() => onVisibleFieldIDsChange([PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER])}
               >+</button>
             </th>
             <th style={headerCellStyle}>Status</th>
@@ -356,13 +297,15 @@ export function ProjectListView({
 
 function projectGroupingValues(project: ProjectRecord, field: ProjectListGroupingField, fieldByID: Map<string, EntityField>): UniversalGroupValue[] {
   const customFieldID = entityFieldIDFromGrouping(field);
-  if (customFieldID) {
-    const definition = fieldByID.get(customFieldID);
-    const label = definition?.name?.trim() || "Field";
-    const assigned = project.fields?.some((item) => item.field_id === customFieldID) === true;
-    return assigned
-      ? [{ key: customFieldID, label, sortValue: label }]
-      : [{ key: "__unassigned", label: `No ${label}`, sortValue: "", sortLast: true }];
+  if (field === PROJECT_LIST_FIELD_GROUPING || customFieldID) {
+    const values = (project.fields ?? []).map((assignment) => {
+      const definition = fieldByID.get(assignment.field_id);
+      return {
+        id: assignment.field_id,
+        label: definition?.name?.trim() || assignment.name?.trim() || assignment.field_id,
+      };
+    });
+    return entityGroupValues(values);
   }
   if (field === "account") return entityGroupValues(project.accounts?.map((account) => ({ id: account.account_id, label: account.name })) ?? []);
   if (field === "team") return entityGroupValues(project.teams?.map((team) => ({ id: team.group_id, label: team.name })) ?? []);
@@ -411,9 +354,9 @@ function toggleSet(current: Set<string>, value: string): Set<string> {
   return next;
 }
 
-function groupingFieldLabel(field: ProjectListGroupingField, fieldByID: Map<string, EntityField>): string {
+function groupingFieldLabel(field: ProjectListGroupingField): string {
   const customFieldID = entityFieldIDFromGrouping(field);
-  if (customFieldID) return fieldByID.get(customFieldID)?.name ?? "Field";
+  if (field === PROJECT_LIST_FIELD_GROUPING || customFieldID) return "Fields";
   return PROJECT_LIST_GROUPING_FIELDS.find((option) => option.value === field)?.label ?? field;
 }
 
@@ -428,35 +371,35 @@ function projectHealthTone(health: ProjectHealth): ProjectFieldTone {
 const listScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
-  border: "1px solid rgba(148, 163, 184, 0.20)",
-  borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.82)",
+  border: "1px solid rgba(255, 255, 255, 0.86)",
+  borderRadius: 16,
+  background: "linear-gradient(145deg, rgba(255,255,255,.94), rgba(240,244,249,.84))",
+  boxShadow: "inset 3px 3px 9px rgba(148,163,184,.12), inset -3px -3px 10px rgba(255,255,255,.92), 8px 8px 22px rgba(148,163,184,.16), -7px -7px 20px rgba(255,255,255,.84)",
 };
-const tableStyle = (customFieldCount: number): React.CSSProperties => ({ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 760 + customFieldCount * 150, color: "#0f172a" });
-const headerCellStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 5, height: 42, padding: "0 14px", background: "#f8fafc", borderBottom: "1px solid rgba(148, 163, 184, 0.26)", color: "#475569", fontSize: 12, fontWeight: 900, textAlign: "left" };
-const customFieldHeaderStyle = (color: string): React.CSSProperties => ({ ...headerCellStyle, minWidth: 142, padding: "0 10px", background: `linear-gradient(180deg, ${color}12, #f8fafc 78%)` });
+const tableStyle = (customFieldCount: number): React.CSSProperties => ({ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 820 + customFieldCount * 170, color: "#0f172a" });
+const headerCellStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 5, height: 46, padding: "0 15px", background: "linear-gradient(180deg, rgba(255,255,255,.97), rgba(241,245,249,.94))", borderBottom: "1px solid rgba(148, 163, 184, 0.24)", color: "#475569", fontSize: 11, fontWeight: 950, letterSpacing: ".015em", textAlign: "left", boxShadow: "inset 0 1px 0 rgba(255,255,255,.96)" };
+const customFieldHeaderStyle: React.CSSProperties = { ...headerCellStyle, minWidth: 164, padding: "0 12px", background: "linear-gradient(180deg, rgba(238,242,255,.98), rgba(248,250,252,.95))" };
 const customFieldHeaderInnerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "10px minmax(0, 1fr) 20px", alignItems: "center", gap: 6 };
-const customFieldHeaderDotStyle = (color: string): React.CSSProperties => ({ width: 9, height: 9, borderRadius: 999, background: color, boxShadow: `0 0 0 3px ${color}18`, flexShrink: 0 });
-const customFieldHeaderSelectStyle: React.CSSProperties = { width: "100%", minWidth: 0, height: 28, border: "1px solid rgba(99,102,241,.22)", borderRadius: 8, background: "rgba(255,255,255,.88)", color: "#334155", font: "inherit", fontSize: 12, fontWeight: 900, padding: "0 5px", cursor: "pointer", outline: "none" };
-const hideFieldColumnButtonStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", border: 0, borderRadius: 6, background: "transparent", color: "#94a3b8", cursor: "pointer", padding: 0, font: "inherit", fontSize: 15, lineHeight: 1 };
+const customFieldHeaderDotStyle: React.CSSProperties = { width: 9, height: 9, borderRadius: 999, background: "#6366f1", boxShadow: "0 0 0 4px rgba(99,102,241,.13), 0 3px 8px rgba(99,102,241,.25)", flexShrink: 0 };
+const customFieldHeaderLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#3730a3", fontSize: 12, fontWeight: 950 };
+const hideFieldColumnButtonStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", border: "1px solid rgba(148,163,184,.18)", borderRadius: 7, background: "rgba(255,255,255,.76)", color: "#94a3b8", cursor: "pointer", padding: 0, font: "inherit", fontSize: 15, lineHeight: 1, boxShadow: "2px 2px 5px rgba(148,163,184,.10), -2px -2px 5px rgba(255,255,255,.8)" };
 const addFieldHeaderStyle: React.CSSProperties = { ...headerCellStyle, position: "relative", width: 44, minWidth: 44, padding: 0, textAlign: "center", overflow: "visible" };
-const addFieldColumnButtonStyle = (disabled: boolean): React.CSSProperties => ({ width: 28, height: 28, display: "inline-grid", placeItems: "center", border: "1px solid rgba(99,102,241,.28)", borderRadius: 9, background: disabled ? "rgba(248,250,252,.82)" : "rgba(255,255,255,.92)", color: disabled ? "#cbd5e1" : "#6366f1", boxShadow: disabled ? "none" : "0 4px 10px rgba(15,23,42,.06)", cursor: disabled ? "default" : "pointer", padding: 0, font: "inherit", fontSize: 18, fontWeight: 800, lineHeight: 1, opacity: disabled ? 0.74 : 1 });
-const cellStyle: React.CSSProperties = { height: 44, padding: "0 14px", borderBottom: "1px solid rgba(226, 232, 240, 0.9)", fontSize: 13, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", verticalAlign: "middle" };
-const editableCellStyle: React.CSSProperties = { ...cellStyle, minWidth: 142, padding: "5px 14px" };
-const customFieldCellStyle = (color: string): React.CSSProperties => ({ ...editableCellStyle, background: `linear-gradient(90deg, ${color}06, transparent)` });
-const pendingFieldCellStyle: React.CSSProperties = { ...editableCellStyle, background: "linear-gradient(90deg, rgba(99,102,241,.035), transparent)", color: "#94a3b8", fontSize: 11, fontWeight: 800, textAlign: "center" };
+const addFieldColumnButtonStyle = (disabled: boolean): React.CSSProperties => ({ width: 30, height: 30, display: "inline-grid", placeItems: "center", border: "1px solid rgba(99,102,241,.26)", borderRadius: 10, background: disabled ? "rgba(241,245,249,.70)" : "linear-gradient(145deg, rgba(255,255,255,.98), rgba(238,242,255,.92))", color: disabled ? "#cbd5e1" : "#6366f1", boxShadow: disabled ? "inset 2px 2px 5px rgba(148,163,184,.10)" : "4px 4px 10px rgba(148,163,184,.16), -4px -4px 10px rgba(255,255,255,.90), 0 4px 12px rgba(99,102,241,.12)", cursor: disabled ? "default" : "pointer", padding: 0, font: "inherit", fontSize: 18, fontWeight: 850, lineHeight: 1, opacity: disabled ? 0.72 : 1 });
+const cellStyle: React.CSSProperties = { height: 48, padding: "0 15px", borderBottom: "1px solid rgba(226, 232, 240, 0.76)", fontSize: 13, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", verticalAlign: "middle" };
+const editableCellStyle: React.CSSProperties = { ...cellStyle, minWidth: 150, padding: "7px 14px" };
+const customFieldCellStyle: React.CSSProperties = { ...editableCellStyle, background: "linear-gradient(90deg, rgba(99,102,241,.045), rgba(196,181,253,.025), transparent)" };
 const addFieldCellStyle: React.CSSProperties = { ...cellStyle, width: 44, minWidth: 44, padding: 0 };
 const nameCellStyle: React.CSSProperties = { ...cellStyle, color: "#0f172a", fontWeight: 900 };
-const projectRowStyle = (selected: boolean): React.CSSProperties => ({ cursor: "pointer", background: selected ? "linear-gradient(90deg, rgba(219, 234, 254, 0.92), rgba(239, 246, 255, 0.72))" : "transparent", outline: selected ? "2px solid rgba(37, 99, 235, 0.30)" : "2px solid transparent", outlineOffset: -2 });
+const projectRowStyle = (selected: boolean): React.CSSProperties => ({ cursor: "pointer", background: selected ? "linear-gradient(90deg, rgba(224,231,255,.92), rgba(239,246,255,.76), rgba(250,245,255,.70))" : "rgba(255,255,255,.62)", outline: selected ? "2px solid rgba(99,102,241,.34)" : "2px solid transparent", outlineOffset: -2, boxShadow: selected ? "inset 4px 0 0 #6366f1, 0 5px 16px rgba(99,102,241,.10)" : undefined });
 const nameCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 7, maxWidth: "100%", paddingLeft: 10 + Math.max(0, depth) * 34 });
 const treeSpacerStyle: React.CSSProperties = { width: 14, flexShrink: 0 };
 const disclosureStyle: React.CSSProperties = { width: 14, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
-const iconStyle: React.CSSProperties = { width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+const iconStyle: React.CSSProperties = { width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, borderRadius: 7, background: "rgba(239,246,255,.86)", color: "#3b82f6", boxShadow: "inset 1px 1px 0 rgba(255,255,255,.9)" };
 const nameTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const groupRowStyle = (depth: number): React.CSSProperties => ({ cursor: "pointer", background: depth === 0 ? "#e2e8f0" : "#f1f5f9" });
-const groupCellStyle: React.CSSProperties = { height: 38, padding: 0, borderBottom: "1px solid rgba(148,163,184,.22)", color: "#0f172a", fontSize: 12, fontWeight: 900 };
-const groupCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 38, display: "inline-flex", alignItems: "center", paddingLeft: 12 + Math.max(0, depth) * 34 });
-const groupAxisStyle: React.CSSProperties = { display: "inline-flex", marginLeft: 7, marginRight: 7, borderRadius: 999, padding: "3px 7px", background: "rgba(255,255,255,.7)", color: "#64748b", fontSize: 10, fontWeight: 900 };
+const groupRowStyle = (depth: number): React.CSSProperties => ({ cursor: "pointer", background: depth === 0 ? "linear-gradient(90deg, rgba(226,232,240,.94), rgba(238,242,255,.88))" : "linear-gradient(90deg, rgba(241,245,249,.96), rgba(248,250,252,.90))" });
+const groupCellStyle: React.CSSProperties = { height: 42, padding: 0, borderBottom: "1px solid rgba(148,163,184,.20)", color: "#0f172a", fontSize: 12, fontWeight: 900, boxShadow: "inset 0 1px 0 rgba(255,255,255,.72)" };
+const groupCellInnerStyle = (depth: number): React.CSSProperties => ({ minHeight: 42, display: "inline-flex", alignItems: "center", paddingLeft: 14 + Math.max(0, depth) * 34 });
+const groupAxisStyle: React.CSSProperties = { display: "inline-flex", marginLeft: 7, marginRight: 8, border: "1px solid rgba(255,255,255,.78)", borderRadius: 999, padding: "4px 8px", background: "rgba(255,255,255,.78)", color: "#6366f1", fontSize: 10, fontWeight: 950, boxShadow: "3px 3px 8px rgba(148,163,184,.13), -3px -3px 8px rgba(255,255,255,.82)" };
 const groupLabelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 950 };
 const countStyle: React.CSSProperties = { marginLeft: 8, color: "#64748b", fontSize: 11, fontWeight: 800 };
 const emptyStyle: React.CSSProperties = { minHeight: 0, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 850 };

@@ -224,18 +224,18 @@ function triggerStyle(tone: ProjectFieldTone, disabled: boolean, empty: boolean)
         ? { background: "#fef2f2", color: "#b91c1c", border: "rgba(239,68,68,.28)" }
         : tone === "status"
           ? { background: "rgba(16,185,129,.11)", color: "#047857", border: "rgba(16,185,129,.24)" }
-          : { background: "#ffffff", color: empty ? "#64748b" : "#334155", border: "rgba(148,163,184,.30)" };
+          : { background: "linear-gradient(145deg, rgba(255,255,255,.96), rgba(244,247,251,.90))", color: empty ? "#64748b" : "#334155", border: "rgba(148,163,184,.24)" };
   return {
     width: "100%",
     maxWidth: 260,
     minWidth: 0,
-    minHeight: 28,
+    minHeight: 31,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 7,
     border: `1px solid ${colors.border}`,
-    borderRadius: tone === "default" ? 7 : 999,
+    borderRadius: tone === "default" ? 9 : 999,
     background: colors.background,
     color: colors.color,
     cursor: disabled ? "wait" : "pointer",
@@ -244,6 +244,8 @@ function triggerStyle(tone: ProjectFieldTone, disabled: boolean, empty: boolean)
     fontWeight: 900,
     padding: "0 8px 0 10px",
     opacity: disabled ? 0.7 : 1,
+    boxShadow: tone === "default" ? "inset 1px 1px 0 rgba(255,255,255,.92), 3px 3px 8px rgba(148,163,184,.13), -3px -3px 8px rgba(255,255,255,.82)" : "inset 1px 1px 0 rgba(255,255,255,.64), 0 4px 11px rgba(15,23,42,.055)",
+    transition: "border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease",
   };
 }
 
@@ -262,17 +264,17 @@ function popoverStyle(position: { left: number; top: number; width: number; open
     gridTemplateRows: "auto minmax(0, 1fr) auto",
     gap: 7,
     padding: 8,
-    border: "1px solid rgba(100,116,139,.28)",
-    borderRadius: 10,
-    background: "#ffffff",
-    boxShadow: "0 18px 44px rgba(15,23,42,.20)",
+    border: "1px solid rgba(255,255,255,.88)",
+    borderRadius: 14,
+    background: "linear-gradient(145deg, rgba(255,255,255,.98), rgba(241,245,249,.96))",
+    boxShadow: "14px 16px 38px rgba(71,85,105,.20), -8px -8px 24px rgba(255,255,255,.88), inset 1px 1px 0 rgba(255,255,255,.96)",
     boxSizing: "border-box",
   };
 }
 
-const searchStyle: React.CSSProperties = { width: "100%", minHeight: 32, border: "1px solid rgba(148,163,184,.32)", borderRadius: 7, padding: "0 9px", font: "inherit", fontSize: 12, boxSizing: "border-box", outline: "none" };
-const choiceListStyle: React.CSSProperties = { minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 3 };
-const choiceStyle = (selected: boolean): React.CSSProperties => ({ minHeight: 34, display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 7, border: 0, borderRadius: 7, background: selected ? "#eff6ff" : "transparent", color: "#334155", cursor: "pointer", padding: "0 8px", textAlign: "left", font: "inherit" });
+const searchStyle: React.CSSProperties = { width: "100%", minHeight: 34, border: "1px solid rgba(99,102,241,.24)", borderRadius: 9, background: "rgba(255,255,255,.88)", boxShadow: "inset 2px 2px 6px rgba(148,163,184,.13), inset -2px -2px 6px rgba(255,255,255,.86)", padding: "0 10px", font: "inherit", fontSize: 12, boxSizing: "border-box", outline: "none" };
+const choiceListStyle: React.CSSProperties = { minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 4 };
+const choiceStyle = (selected: boolean): React.CSSProperties => ({ minHeight: 36, display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 8, border: selected ? "1px solid rgba(99,102,241,.18)" : "1px solid transparent", borderRadius: 9, background: selected ? "linear-gradient(135deg, rgba(238,242,255,.98), rgba(239,246,255,.90))" : "transparent", color: selected ? "#3730a3" : "#334155", cursor: "pointer", padding: "0 9px", textAlign: "left", font: "inherit", boxShadow: selected ? "3px 3px 8px rgba(148,163,184,.10), -3px -3px 8px rgba(255,255,255,.72)" : undefined });
 const clearChoiceStyle = (selected: boolean): React.CSSProperties => ({ ...choiceStyle(selected), color: "#64748b", borderBottom: "1px solid rgba(226,232,240,.9)", borderRadius: 0, marginBottom: 3 });
 const checkboxStyle = (selected: boolean): React.CSSProperties => ({ width: 16, height: 16, display: "inline-grid", placeItems: "center", border: `1px solid ${selected ? "#2563eb" : "rgba(100,116,139,.35)"}`, borderRadius: 4, background: selected ? "#2563eb" : "#fff", color: "#fff", fontSize: 11, fontWeight: 950, boxSizing: "border-box" });
 const choiceLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 };
