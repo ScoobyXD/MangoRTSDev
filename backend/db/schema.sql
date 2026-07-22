@@ -1,5 +1,7 @@
 -- Canonical Aurora PostgreSQL schema for MVP.
 
+create extension if not exists pg_trgm;
+
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'node_relationship_position') then
@@ -774,6 +776,9 @@ create table if not exists nodes (
   primary key (company_id, node_id)
 );
 
+create index if not exists idx_nodes_name_trgm
+  on nodes using gin (lower(name) gin_trgm_ops);
+
 create table if not exists account_folders (
   company_id uuid not null,
   folder_id uuid not null,
@@ -940,6 +945,9 @@ create table if not exists logic_gates (
   primary key (company_id, logic_gate_id)
 );
 
+create index if not exists idx_logic_gates_header_trgm
+  on logic_gates using gin (lower(header) gin_trgm_ops);
+
 create table if not exists projects (
   company_id uuid not null,
   project_id uuid not null,
@@ -959,6 +967,9 @@ create table if not exists projects (
 
 create index if not exists idx_projects_company_name
   on projects(company_id, lower(name), project_id);
+
+create index if not exists idx_projects_name_trgm
+  on projects using gin (lower(name) gin_trgm_ops);
 
 create table if not exists project_critical_path_steps (
   company_id uuid not null,

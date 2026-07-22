@@ -61,6 +61,9 @@ func (r *PostgresRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (
 	if err := r.ensureCompanyExplorerDefaultState(query.CompanyID); err != nil {
 		return CompanyExplorerSearchResults{}, err
 	}
+	if query.EditorEntityRanking {
+		return r.searchCompanyExplorerEditorEntities(query)
+	}
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
 with recursive visible_folder_paths as (

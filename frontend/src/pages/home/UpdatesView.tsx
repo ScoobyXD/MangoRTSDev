@@ -38,7 +38,8 @@ import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updatesNotificationEventRequiresReload } from "./updatesSelection";
-import { createSeenUpdatesDateWindow, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDateInput, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
+import { resolveUpdateActorLabel } from "./updatesActorLabel";
+import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
 import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
@@ -906,11 +907,9 @@ export function UpdatesView({
               {viewMode === "current" ? "View seen updates" : "View current updates"}
             </button>
             {viewMode === "seen" && seenDateWindow && (
-              <SeenUpdatesDateSlider
+              <SeenUpdatesDateFields
                 window={seenDateWindow}
-                onChange={(edge, value) => {
-                  setSeenDateWindow((current) => current ? moveSeenUpdatesDateWindow(current, edge, value) : current);
-                }}
+                onChange={setSeenDateWindow}
               />
             )}
             <button
@@ -1021,39 +1020,71 @@ export function UpdatesView({
   );
 }
 
-function SeenUpdatesDateSlider({
+function SeenUpdatesDateFields({
   window,
   onChange,
 }: {
   window: SeenUpdatesDateWindow;
-  onChange: (edge: "start" | "end", value: number) => void;
+  onChange: (window: SeenUpdatesDateWindow) => void;
 }) {
+  const [startDraft, setStartDraft] = useState(() => utcDayToDisplayDate(window.startDay));
+  const [endDraft, setEndDraft] = useState(() => utcDayToDisplayDate(window.endDay));
+  const [invalidEdge, setInvalidEdge] = useState<"start" | "end" | null>(null);
+
+  useEffect(() => {
+    setStartDraft(utcDayToDisplayDate(window.startDay));
+    setEndDraft(utcDayToDisplayDate(window.endDay));
+    setInvalidEdge(null);
+  }, [window.endDay, window.startDay]);
+
+  const commit = (edge: "start" | "end") => {
+    const draft = edge === "start" ? startDraft : endDraft;
+    const day = displayDateToUTCDay(draft);
+    if (day === null || day < window.oldestDay || day > window.newestDay) {
+      setInvalidEdge(edge);
+      return;
+    }
+    const nextWindow = moveSeenUpdatesDateWindow(window, edge, day);
+    setInvalidEdge(null);
+    setStartDraft(utcDayToDisplayDate(nextWindow.startDay));
+    setEndDraft(utcDayToDisplayDate(nextWindow.endDay));
+    onChange(nextWindow);
+  };
+
+  const input = (edge: "start" | "end", value: string, setValue: (nextValue: string) => void) => (
+    <input
+      type="text"
+      value={value}
+      inputMode="numeric"
+      maxLength={10}
+      placeholder="DD/MM/YYYY"
+      aria-label={edge === "start" ? "Seen updates from date" : "Seen updates to date"}
+      aria-invalid={invalidEdge === edge}
+      title={invalidEdge === edge
+        ? `Enter a date from ${utcDayToDisplayDate(window.oldestDay)} to ${utcDayToDisplayDate(window.newestDay)} in DD/MM/YYYY format`
+        : "DD/MM/YYYY"}
+      style={seenUpdatesDateInputStyle(invalidEdge === edge)}
+      onChange={(event) => {
+        setInvalidEdge((current) => current === edge ? null : current);
+        setValue(event.currentTarget.value);
+      }}
+      onBlur={() => commit(edge)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.currentTarget.blur();
+      }}
+    />
+  );
+
   return (
-    <div role="group" aria-label="Seen updates date range" style={seenUpdatesDateSliderStyle}>
-      <span style={seenUpdatesDateValueStyle}>{utcDayToDateInput(window.startDay)}</span>
-      <div style={seenUpdatesDateTracksStyle}>
-        <input
-          type="range"
-          min={window.oldestDay}
-          max={window.newestDay}
-          value={window.startDay}
-          aria-label="Seen updates start date"
-          aria-valuetext={utcDayToDateInput(window.startDay)}
-          style={seenUpdatesDateInputStyle}
-          onChange={(event) => onChange("start", Number(event.currentTarget.value))}
-        />
-        <input
-          type="range"
-          min={window.oldestDay}
-          max={window.newestDay}
-          value={window.endDay}
-          aria-label="Seen updates end date"
-          aria-valuetext={utcDayToDateInput(window.endDay)}
-          style={seenUpdatesDateInputStyle}
-          onChange={(event) => onChange("end", Number(event.currentTarget.value))}
-        />
-      </div>
-      <span style={seenUpdatesDateValueStyle}>{utcDayToDateInput(window.endDay)}</span>
+    <div role="group" aria-label="Seen updates date range" style={seenUpdatesDateFieldsStyle}>
+      <span style={seenUpdatesDateLabelStyle}>From</span>
+      {input("start", startDraft, setStartDraft)}
+      <span aria-hidden="true" style={seenUpdatesDateSeparatorStyle}>–</span>
+      <span style={seenUpdatesDateLabelStyle}>To</span>
+      {input("end", endDraft, setEndDraft)}
+      {invalidEdge && <span role="alert" style={seenUpdatesDateErrorStyle}>Use DD/MM/YYYY within available history</span>}
     </div>
   );
 }
@@ -1668,9 +1699,7 @@ function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | nu
 }
 
 function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: string) => string): string {
-  const actorID = item.actor_user_id?.trim() ?? "";
-  const resolved = actorID ? resolveUserLabel?.(actorID)?.trim() ?? "" : "";
-  return resolved || extractActorFromNotification(item) || "Someone";
+  return resolveUpdateActorLabel(item, resolveUserLabel);
 }
 
 function updateRowStatusLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | null): string {
@@ -1682,17 +1711,6 @@ function updatePriorityValue(value: number | null | undefined): number | null {
   return Math.max(0, Math.min(5, Math.round(value)));
 }
 
-function extractActorFromNotification(item: NotificationItem): string {
-  const title = item.title.trim();
-  const body = (item.body_preview ?? "").trim();
-  const mentionMatch = title.match(/^(?:urgent\s+)?(.+?)\s+(?:urgently\s+)?mentioned you\b/i);
-  if (mentionMatch?.[1]) return mentionMatch[1].trim();
-  const bodyChangedMatch = body.match(/^(.+?)\s+(?:changed|updated|moved|added|removed)\b/i);
-  if (bodyChangedMatch?.[1]) return bodyChangedMatch[1].trim();
-  const titleActionMatch = title.match(/^(.+?)\s+(?:added|updated|removed|deleted|assigned|sent|attached|gave|requested)\b/i);
-  if (titleActionMatch?.[1]) return titleActionMatch[1].trim();
-  return "";
-}
 
 function extractMentionTargetLabel(item: NotificationItem): string {
   const title = item.title.trim();
@@ -2129,34 +2147,46 @@ const updatesHeaderActionButtonStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   boxShadow: "0 6px 14px rgba(15, 23, 42, 0.06)",
 };
-const seenUpdatesDateSliderStyle: React.CSSProperties = {
-  minWidth: 250,
-  display: "grid",
-  gridTemplateColumns: "72px minmax(110px, 1fr) 72px",
+const seenUpdatesDateFieldsStyle: React.CSSProperties = {
+  minWidth: 276,
+  display: "flex",
   alignItems: "center",
-  gap: 6,
+  flexWrap: "wrap",
+  justifyContent: "center",
+  gap: 5,
   padding: "3px 8px",
   border: "1px solid rgba(15, 23, 42, 0.14)",
   borderRadius: 6,
   background: "rgba(255, 255, 255, 0.76)",
 };
-const seenUpdatesDateTracksStyle: React.CSSProperties = {
-  minWidth: 110,
-  display: "grid",
-  gap: 1,
-};
-const seenUpdatesDateInputStyle: React.CSSProperties = {
-  width: "100%",
-  height: 12,
+const seenUpdatesDateInputStyle = (invalid: boolean): React.CSSProperties => ({
+  width: 88,
+  height: 26,
   margin: 0,
-  accentColor: "#2563eb",
-  cursor: "pointer",
-};
-const seenUpdatesDateValueStyle: React.CSSProperties = {
+  padding: "0 7px",
+  border: `1px solid ${invalid ? "#dc2626" : "rgba(15, 23, 42, 0.22)"}`,
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  fontVariantNumeric: "tabular-nums",
+  textAlign: "center",
+  boxSizing: "border-box",
+  outlineColor: invalid ? "#dc2626" : "#2563eb",
+});
+const seenUpdatesDateLabelStyle: React.CSSProperties = {
   color: "#475569",
   fontSize: 10,
   fontWeight: 800,
-  fontVariantNumeric: "tabular-nums",
+};
+const seenUpdatesDateSeparatorStyle: React.CSSProperties = { color: "#94a3b8", fontWeight: 800 };
+const seenUpdatesDateErrorStyle: React.CSSProperties = {
+  flexBasis: "100%",
+  color: "#b91c1c",
+  fontSize: 9,
+  fontWeight: 800,
   textAlign: "center",
 };
 

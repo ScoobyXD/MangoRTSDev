@@ -5904,7 +5904,12 @@ export function HomePage({
                 const logicGate = logicGateByID.get(logicGateID);
                 return logicGate ? { title: logicGateTitle(logicGate) } : null;
               }}
-              resolveUserLabel={(userID) => homeCompanyUserLabel(companyUserByID.get(userID), userID)}
+              resolveUserLabel={(userID) => {
+                const companyUser = companyUserByID.get(userID);
+                if (companyUser) return homeCompanyUserLabel(companyUser, "");
+                if (userID.trim() === currentUserID.trim()) return me?.user.display_name?.trim() || me?.user.email?.trim() || "";
+                return "";
+              }}
             />
           ) : isInboxMatrixView ? (
             <>

@@ -1002,9 +1002,10 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	if err != nil || len(recent.Results) < 3 {
 		t.Fatalf("editor recent search = %+v err=%v", recent.Results, err)
 	}
-	for index := 1; index < len(recent.Results); index++ {
-		if recent.Results[index].UpdatedTimestamp.After(recent.Results[index-1].UpdatedTimestamp) {
-			t.Fatalf("editor recent results are not newest-first: %+v", recent.Results)
+	wantRecentTypes := []string{EntityTypeNode, EntityTypeProject, EntityTypeLogicGate}
+	for index, wantType := range wantRecentTypes {
+		if recent.Results[index].ResourceType != wantType {
+			t.Fatalf("editor recent result[%d]=%q, want %q; all=%+v", index, recent.Results[index].ResourceType, wantType, recent.Results)
 		}
 	}
 	for _, result := range recent.Results {
@@ -1014,6 +1015,81 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	}
 }
 
+func TestMemoryCompanyExplorerEditorSearchPrioritizesActiveThenDoneEntities(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000105"
+	repo.EnsureCompany(companyID, "Editor Ranking Co")
+
+	user, err := repo.UpsertAuthUser("editor-ranking-user", "editor-ranking@example.com", "Editor Ranking User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("editor-ranking-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	nodes, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID: companyID, EntityKind: EntityTypeNode, MutationOrigin: MutationOriginNodeMap, CreatorUserID: user.UserID,
+		Items: []WorkspaceEntityBatchItemInput{
+			{ClientID: "active-node", Title: "Priority Needle Active Node"},
+			{ClientID: "done-node", Title: "Priority Needle Done Node"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch nodes: %v", err)
+	}
+	activeNodeID := nodes.EntityMappings[0].EntityID
+	doneNodeID := nodes.EntityMappings[1].EntityID
+	doneStatus := "Done"
+	if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: doneNodeID, Status: &doneStatus, StatusSet: true}); err != nil {
+		t.Fatalf("UpdateNode done: %v", err)
+	}
+
+	gates, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID: companyID, EntityKind: EntityTypeLogicGate, MutationOrigin: MutationOriginLogicGateMap, CreatorUserID: user.UserID,
+		Items: []WorkspaceEntityBatchItemInput{{ClientID: "gate", Title: "Priority Needle Logic Gate"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch gate: %v", err)
+	}
+	gateID := gates.EntityMappings[0].EntityID
+
+	activeProject, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID, Name: "Priority Needle Active Project", Status: "Active", ActorUserID: user.UserID, CompanyExplorerDefaultPlacement: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject active: %v", err)
+	}
+	doneProject, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID, Name: "Priority Needle Done Project", Status: "Completed", ActorUserID: user.UserID, CompanyExplorerDefaultPlacement: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject done: %v", err)
+	}
+
+	results, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID: companyID, Query: "Priority Needle", PermissionUserID: user.UserID, Limit: 10,
+		ResourceTypes: []string{EntityTypeNode, EntityTypeLogicGate, EntityTypeProject}, EditorEntityRanking: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchCompanyExplorer: %v", err)
+	}
+	want := []struct{ resourceType, resourceID string }{
+		{EntityTypeNode, activeNodeID},
+		{EntityTypeProject, activeProject.Project.ProjectID},
+		{EntityTypeLogicGate, gateID},
+		{EntityTypeNode, doneNodeID},
+		{EntityTypeProject, doneProject.Project.ProjectID},
+	}
+	if len(results.Results) != len(want) {
+		t.Fatalf("editor search results=%+v, want %d", results.Results, len(want))
+	}
+	for index, expected := range want {
+		if results.Results[index].ResourceType != expected.resourceType || results.Results[index].ResourceID != expected.resourceID {
+			t.Fatalf("result[%d]=%s/%s, want %s/%s; all=%+v", index, results.Results[index].ResourceType, results.Results[index].ResourceID, expected.resourceType, expected.resourceID, results.Results)
+		}
+	}
+}
 func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000104"

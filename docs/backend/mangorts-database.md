@@ -46,7 +46,7 @@ These tables are intentionally empty for existing HTML data. The application doe
 
 Schema version 1 includes the additive inline atom `mangoEntityLink` with required `entityType`, `entityId`, and `label` attributes. The strict API validator permits only `node`, `logic_gate`, or `project`, requires bounded nonblank identity/display values, and permits the atom only where inline content is valid. Existing legacy editor documents persist the equivalent canonical `data-mango-entity-*` attributes inside their already-owned rich-HTML columns.
 
-Inline entity links add no database tables, columns, seed data, or migration. Their durable identity is stored inside the existing editor document payload. The editor's recent/relevant combined search is a read-only Company Explorer query mode over existing resource timestamps and authorization predicates; it does not create placement rows or denormalized entity-link records.
+Inline entity links add no database tables, columns, seed data, placement rows, or denormalized entity-link records. Their durable identity is stored inside the existing editor document payload. The editor's combined search is a read-only Company Explorer query mode over existing resource status/timestamps and authorization predicates. Migration `20260722_editor_entity_search_indexes.sql` enables PostgreSQL's trusted `pg_trgm` extension and adds GIN indexes for `lower(nodes.name)`, `lower(projects.name)`, and `lower(logic_gates.header)` so contains search does not depend on full sequential name scans. The canonical schema carries the same extension and indexes; deployment must apply this additive migration before relying on the optimized production query plan.
 
 Auth and membership tables were added in:
 

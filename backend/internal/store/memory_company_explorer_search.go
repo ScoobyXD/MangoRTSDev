@@ -238,14 +238,16 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		leftMatch, _, _ := companyExplorerSearchMatch(matches[i].DisplayName, matches[i].EntityID, query.Query)
 		rightMatch, _, _ := companyExplorerSearchMatch(matches[j].DisplayName, matches[j].EntityID, query.Query)
 		if query.EditorEntityRanking {
+			leftEditorPriority := r.companyExplorerEditorEntityPriorityLocked(matches[i])
+			rightEditorPriority := r.companyExplorerEditorEntityPriorityLocked(matches[j])
+			if leftEditorPriority != rightEditorPriority {
+				return leftEditorPriority < rightEditorPriority
+			}
 			if leftMatch != rightMatch {
 				return leftMatch < rightMatch
 			}
 			if !matches[i].UpdatedTimestamp.Equal(matches[j].UpdatedTimestamp) {
 				return matches[i].UpdatedTimestamp.After(matches[j].UpdatedTimestamp)
-			}
-			if leftType != rightType {
-				return leftType < rightType
 			}
 		} else {
 			if leftType != rightType {
@@ -316,6 +318,41 @@ func (r *MemoryRepo) companyExplorerNodeSearchLocationPathLocked(companyID, node
 		return []CompanyExplorerLocationSegment{}, false
 	}
 	return []CompanyExplorerLocationSegment{}, true
+}
+
+func (r *MemoryRepo) companyExplorerEditorEntityPriorityLocked(item CompanyExplorerSearchResult) int {
+	status := ""
+	switch item.ResourceType {
+	case EntityTypeNode:
+		if node, ok := r.nodes[key(item.CompanyID, item.ResourceID)]; ok && node.Status != nil {
+			status = *node.Status
+		}
+	case EntityTypeProject:
+		if project, ok := r.projects[key(item.CompanyID, item.ResourceID)]; ok {
+			status = project.Status
+		}
+	}
+	return companyExplorerEditorEntityPriority(item.ResourceType, status)
+}
+
+func companyExplorerEditorEntityPriority(entityType, status string) int {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch entityType {
+	case EntityTypeNode:
+		if status == "done" {
+			return 3
+		}
+		return 0
+	case EntityTypeProject:
+		if status == "done" || status == "completed" || status == "archived" {
+			return 4
+		}
+		return 1
+	case EntityTypeLogicGate:
+		return 2
+	default:
+		return 5
+	}
 }
 
 func companyExplorerSearchTypePriority(entityType string) (int, bool) {
