@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderAccountManagerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderFieldsIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
@@ -12,7 +12,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { shouldDeferToNativeTextEditing, shouldNavigateBrowserHistoryBack } from "../hooks/keyboardShortcutRouting";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
-import { createAccountManagerFrames, createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
+import { createAccountManagerFrames, createDefaultNodeViewFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
 import {
   CELL_SIZE,
@@ -34,8 +34,8 @@ import {
   type ViewTab,
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
-import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
-import { LazyAccountManagerPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
+import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadFieldsSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
+import { LazyAccountManagerPage, LazyFieldsPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
@@ -85,7 +85,7 @@ const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
 
-type PrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
+type PrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
 type NavigateOptions = { replace?: boolean };
 type ExplorerEntityActivatedDetail = {
   companyID?: string;
@@ -150,6 +150,7 @@ function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "project-management") return { id, name: "Projects", page: "project-management", frames: createProjectManagementFrames() };
   if (page === "account-manager") return { id, name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() };
   if (page === "teams") return { id, name: "Teams", page: "teams", frames: createTeamsFrames() };
+  if (page === "fields") return { id, name: "Fields", page: "fields", frames: createFieldsFrames() };
   return { id, name: "Map", frames: createDefaultNodeViewFrames() };
 }
 
@@ -251,9 +252,11 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
   if (tab.page === "project-management") return "project-management";
   if (tab.page === "account-manager") return "account-manager";
   if (tab.page === "teams") return "teams";
+  if (tab.page === "fields") return "fields";
   if (/^(project management|projects)$/i.test(tab.name.trim())) return "project-management";
   if (/^(account manager|accounts)$/i.test(tab.name.trim())) return "account-manager";
   if (/^teams$/i.test(tab.name.trim())) return "teams";
+  if (/^fields$/i.test(tab.name.trim())) return "fields";
   if (!tab.page && /^(map|default node view|default map view)$/i.test(tab.name.trim())) return "map";
   return null;
 }
@@ -265,6 +268,7 @@ function labelForTab(tab: ViewTab): string {
   if (page === "project-management") return "Projects";
   if (page === "account-manager") return "Accounts";
   if (page === "teams") return "Teams";
+  if (page === "fields") return "Fields";
   if (page === "map") return "Map";
   return tab.name;
 }
@@ -276,6 +280,7 @@ function iconForTab(tab: ViewTab): React.ReactNode {
   if (page === "project-management") return <HeaderProjectManagementIcon />;
   if (page === "account-manager") return <HeaderAccountManagerIcon />;
   if (page === "teams") return <HeaderTeamsIcon />;
+  if (page === "fields") return <HeaderFieldsIcon />;
   if (page === "map") return <HeaderMapIcon />;
   return null;
 }
@@ -286,6 +291,7 @@ function routeForPage(page: PrimaryPage): string {
   if (page === "project-management") return "/project-management";
   if (page === "account-manager") return "/account-manager";
   if (page === "teams") return "/teams";
+  if (page === "fields") return "/fields";
   return "/";
 }
 
@@ -479,7 +485,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isProjectManagementView = activePrimaryPage === "project-management";
   const isAccountManagerView = activePrimaryPage === "account-manager";
   const isTeamsView = activePrimaryPage === "teams";
-  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isTeamsView;
+  const isFieldsView = activePrimaryPage === "fields";
+  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isTeamsView || isFieldsView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -507,7 +514,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             ? { id, name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() }
             : initialPage === "teams"
               ? { id, name: "Teams", page: "teams", frames: createTeamsFrames() }
-              : { id, name: "Map", frames: createDefaultNodeViewFrames() };
+              : initialPage === "fields"
+                ? { id, name: "Fields", page: "fields", frames: createFieldsFrames() }
+                : { id, name: "Map", frames: createDefaultNodeViewFrames() };
     setTabs((previous) => [...previous, nextTab]);
     setActiveTabId(id);
   }, [activeTabId, initialPage, overrideContent, tabs]);
@@ -532,8 +541,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       preloadTeamsSurface();
       return;
     }
+    if (isFieldsView) {
+      preloadFieldsSurface();
+      return;
+    }
     preloadVisibleFrameModules(frames);
-  }, [frames, isAccountManagerView, isHomeView, isLogicGateArenaView, isProjectManagementView, isTeamsView]);
+  }, [frames, isAccountManagerView, isFieldsView, isHomeView, isLogicGateArenaView, isProjectManagementView, isTeamsView]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -1068,6 +1081,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (page === "project-management") preloadProjectManagementSurface();
     if (page === "account-manager") preloadAccountManagerSurface();
     if (page === "teams") preloadTeamsSurface();
+    if (page === "fields") preloadFieldsSurface();
     if (page === "map") preloadDefaultDashboardModules();
 
     const ensured = ensurePrimaryPageTab(tabs, page);
@@ -1941,6 +1955,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         ) : isTeamsView ? (
           <React.Suspense fallback={fullPageFallback}>
             <LazyTeamsPage me={me} />
+          </React.Suspense>
+        ) : isFieldsView ? (
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyFieldsPage />
           </React.Suspense>
         ) : (
           <>

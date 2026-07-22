@@ -1,10 +1,11 @@
 import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
-import { preloadAccountManagerPage, preloadHomePage, preloadLogicGateArenaPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
+import { preloadAccountManagerPage, preloadFieldsPage, preloadHomePage, preloadLogicGateArenaPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
 import {
   ACCOUNT_MANAGER_MODULE_KINDS,
   DEFAULT_DASHBOARD_MODULE_KINDS,
+  FIELDS_MODULE_KINDS,
   HOME_MODULE_KINDS,
   LOGIC_GATE_ARENA_MODULE_KINDS,
   PROJECT_MANAGEMENT_MODULE_KINDS,
@@ -42,6 +43,11 @@ export function preloadTeamsSurface(): void {
   preloadModuleKinds(TEAMS_MODULE_KINDS);
 }
 
+export function preloadFieldsSurface(): void {
+  preloadFieldsPage();
+  preloadModuleKinds(FIELDS_MODULE_KINDS);
+}
+
 export function preloadVisibleFrameModules(frames: Iterable<Pick<FrameDataModel, "kind">>): void {
   preloadModulesForFrames(frames);
 }
@@ -53,6 +59,7 @@ function preloadDashboardPlan(plan: DashboardPreloadPlan): void {
     if (surface === "project-management") preloadProjectManagementPage();
     if (surface === "account-manager") preloadAccountManagerPage();
     if (surface === "teams") preloadTeamsPage();
+    if (surface === "fields") preloadFieldsPage();
   }
   preloadModuleKinds(plan.moduleKinds);
 }

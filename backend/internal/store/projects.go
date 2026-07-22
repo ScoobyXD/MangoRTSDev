@@ -284,6 +284,7 @@ func cloneBoolPointer(value *bool) *bool {
 func cloneProject(item domain.Project) domain.Project {
 	item.Accounts = append([]domain.Account{}, item.Accounts...)
 	item.Teams = append([]domain.CompanyUserGroup{}, item.Teams...)
+	item.Fields = append([]domain.EntityField{}, item.Fields...)
 	return item
 }
 

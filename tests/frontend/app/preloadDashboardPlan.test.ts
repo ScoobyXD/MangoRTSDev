@@ -44,3 +44,16 @@ test("planLikelyDashboardPreload falls back to default dashboard modules without
     routeSurfaces: [],
   });
 });
+
+test("planLikelyDashboardPreload isolates the Fields entity surface", () => {
+  assert.deepEqual(planLikelyDashboardPreload({
+    page: "fields",
+    frames: [
+      { kind: "map" },
+      { kind: "fields" },
+    ],
+  }), {
+    moduleKinds: ["fields"],
+    routeSurfaces: ["fields"],
+  });
+});

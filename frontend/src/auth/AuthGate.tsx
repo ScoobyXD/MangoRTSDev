@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
-import { preloadAccountManagerSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -70,6 +70,14 @@ function preloadRouteSurface(path: string): void {
     preloadAccountManagerSurface();
     return;
   }
+  if (path === "/teams") {
+    preloadTeamsSurface();
+    return;
+  }
+  if (path === "/fields") {
+    preloadFieldsSurface();
+    return;
+  }
   if (route?.kind === "node") preloadAppLayout();
 }
 function prefetchHandlers(preload: () => void) {
@@ -85,6 +93,7 @@ const homePrefetch = prefetchHandlers(preloadHomeSurface);
 const projectManagementPrefetch = prefetchHandlers(preloadProjectManagementSurface);
 const accountManagerPrefetch = prefetchHandlers(preloadAccountManagerSurface);
 const teamsPrefetch = prefetchHandlers(preloadTeamsSurface);
+const fieldsPrefetch = prefetchHandlers(preloadFieldsSurface);
 const AUTH_RETURN_PATH_KEY = "mangorts:auth-return-path-v1";
 const AUTH_RETURN_STATIC_PATHS = new Set([
   "/",
@@ -95,6 +104,7 @@ const AUTH_RETURN_STATIC_PATHS = new Set([
   "/project-management",
   "/account-manager",
   "/teams",
+  "/fields",
   "/settings",
   "/admin/users",
   "/recycle-bin",
@@ -422,7 +432,9 @@ export default function AuthGate() {
           ? "account-manager"
           : normalizedPath === "/teams"
             ? "teams"
-            : undefined;
+            : normalizedPath === "/fields"
+              ? "fields"
+              : undefined;
 
   if (!authEnabled) {
     return (
@@ -476,6 +488,10 @@ export default function AuthGate() {
   if (normalizedPath === "/teams") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="teams" /></React.Suspense>;
   }
+  if (normalizedPath === "/fields") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="fields" /></React.Suspense>;
+  }
+
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="home" /></React.Suspense>;
@@ -1230,6 +1246,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/account-manager")} {...accountManagerPrefetch}>Accounts</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/teams")} {...teamsPrefetch}>Teams</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/fields")} {...fieldsPrefetch}>Fields</button>
         </div>}
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}

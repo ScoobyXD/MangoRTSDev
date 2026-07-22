@@ -25,6 +25,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/grouping/universalStatusGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectRelationshipGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectManagementApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectListView.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/emailReadReceipts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/emailForwarding.test.js"),

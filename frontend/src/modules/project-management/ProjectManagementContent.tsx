@@ -18,6 +18,7 @@ import {
   subscribeCommittedEntityTitleUpdates,
 } from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
+import { listEntityFields, setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
@@ -60,13 +61,13 @@ import {
 } from "./projectManagementCommittedTitles.js";
 import {
   normalizeProjectListGroupings,
-  PROJECT_LIST_GROUPING_FIELDS,
   ProjectListView,
   type ProjectListContextMenuRequest,
   type ProjectListFieldUpdate,
   type ProjectListGroupingField,
 } from "./ProjectListView.js";
 import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
+import { projectListGroupingFields } from "./projectListViewModel.js";
 import { EVENT_PROJECT_VIEW_SETTINGS_REQUESTED } from "./projectViewEvents.js";
 
 type ProjectManagementContentProps = {
@@ -169,6 +170,7 @@ type TimelineDisplayRow = TimelineWorkDisplayRow | TimelineGroupDisplayRow;
 
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
 const PROJECT_LIST_GROUPING_STORAGE_PREFIX = "mangorts-project-list-groupings-v1";
+const PROJECT_LIST_FIELD_COLUMNS_STORAGE_PREFIX = "mangorts-project-list-field-columns-v1";
 const PROJECT_GROUP_FIELDS: Array<{ field: ProjectGroupField; label: string }> = [
   { field: "account", label: "Account" },
   { field: "team", label: "Team" },
@@ -178,6 +180,17 @@ function readProjectListGroupings(companyID: string) {
   if (typeof window === "undefined") return [];
   try {
     return normalizeProjectListGroupings(JSON.parse(window.localStorage.getItem(`${PROJECT_LIST_GROUPING_STORAGE_PREFIX}:${companyID}`) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function readProjectListFieldColumns(companyID: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`${PROJECT_LIST_FIELD_COLUMNS_STORAGE_PREFIX}:${companyID}`) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(value.map(String).map((fieldID) => fieldID.trim()).filter(Boolean)));
   } catch {
     return [];
   }
@@ -659,6 +672,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
   const [projectListGroupings, setProjectListGroupings] = useState(() => readProjectListGroupings(companyID));
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [entityFields, setEntityFields] = useState<EntityField[]>([]);
+  const [visibleProjectFieldIDs, setVisibleProjectFieldIDs] = useState(() => readProjectListFieldColumns(companyID));
+  const projectListGroupingOptions = useMemo(() => projectListGroupingFields(entityFields), [entityFields]);
   const [projectFieldSavingIDs, setProjectFieldSavingIDs] = useState<Set<string>>(() => new Set());
   const [activeProjectID, setActiveProjectID] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
@@ -716,6 +732,19 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setError(loadError instanceof Error ? loadError.message : "Failed to load projects");
     } finally {
       setProjectsLoading(false);
+    }
+  }, [companyID]);
+
+  const loadEntityFields = useCallback(async () => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) {
+      setEntityFields([]);
+      return;
+    }
+    try {
+      setEntityFields(await listEntityFields(cleanCompanyID));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load fields");
     }
   }, [companyID]);
 
@@ -858,16 +887,23 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => {
     void loadProjectList(true);
-  }, [loadProjectList]);
+    void loadEntityFields();
+  }, [loadEntityFields, loadProjectList]);
 
   useEffect(() => {
     setProjectListGroupings(readProjectListGroupings(companyID));
+    setVisibleProjectFieldIDs(readProjectListFieldColumns(companyID));
   }, [companyID]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(`${PROJECT_LIST_GROUPING_STORAGE_PREFIX}:${companyID}`, JSON.stringify(projectListGroupings));
   }, [companyID, projectListGroupings]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(`${PROJECT_LIST_FIELD_COLUMNS_STORAGE_PREFIX}:${companyID}`, JSON.stringify(visibleProjectFieldIDs));
+  }, [companyID, visibleProjectFieldIDs]);
 
   useEffect(() => {
     const cleanProjectID = targetProjectID?.trim() ?? "";
@@ -1258,6 +1294,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     if (!projectID) return;
     const accountIDs = update.accountIDs ?? project.accounts?.map((account) => account.account_id) ?? [];
     const teamIDs = update.teamIDs ?? project.teams?.map((team) => team.group_id) ?? [];
+    const fieldIDs = update.fieldIDs ?? project.fields?.map((field) => field.field_id) ?? [];
     const optimistic: ProjectRecord = {
       ...project,
       status: update.status ?? project.status ?? "Active",
@@ -1280,11 +1317,26 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           updated_timestamp: project.updated_timestamp,
         };
       }),
+      fields: fieldIDs.map((fieldID) => (
+        entityFields.find((field) => field.field_id === fieldID)
+        ?? project.fields?.find((field) => field.field_id === fieldID)
+      )).filter((field): field is EntityField => Boolean(field)),
     };
     setProjectFieldSavingIDs((current) => new Set(current).add(projectID));
     setProjects((current) => current.map((item) => item.project_id === projectID ? optimistic : item));
     setError("");
     try {
+      if (update.fieldIDs !== undefined) {
+        const savedFields = await setEntityFieldAssignments({
+          companyID,
+          resourceType: "project",
+          resourceID: projectID,
+          fieldIDs,
+        });
+        setProjects((current) => current.map((item) => item.project_id === projectID ? { ...item, fields: savedFields } : item));
+        scheduleProjectListReload();
+        return;
+      }
       const result = await updateProject({
         companyID,
         projectID,
@@ -1310,7 +1362,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         return next;
       });
     }
-  }, [companyID, groups, loadProjectList, scheduleProjectListReload, timelineAccounts]);
+  }, [companyID, entityFields, groups, loadProjectList, scheduleProjectListReload, timelineAccounts]);
 
   const showLocalProjectExplorer = false;
 
@@ -1360,7 +1412,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           {viewMode === "list" ? (
             <UniversalGroupingControls<ProjectListGroupingField>
               groupings={projectListGroupings}
-              fieldOptions={PROJECT_LIST_GROUPING_FIELDS}
+              fieldOptions={projectListGroupingOptions}
               onChange={setProjectListGroupings}
               buttonLabel="•••"
               popoverLabel="Edit Projects view"
@@ -1435,6 +1487,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             groupings={projectListGroupings}
             accounts={timelineAccounts}
             teams={groups}
+            fields={entityFields}
+            visibleFieldIDs={visibleProjectFieldIDs}
+            onVisibleFieldIDsChange={setVisibleProjectFieldIDs}
             savingProjectIDs={projectFieldSavingIDs}
             onProjectOpen={openProject}
             onProjectFieldChange={saveProjectListField}

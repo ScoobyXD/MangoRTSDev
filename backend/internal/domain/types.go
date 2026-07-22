@@ -92,6 +92,20 @@ type Account struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+// EntityField is a company-scoped label that can be attached to Projects,
+// Nodes, and Logic Gates. AssignmentCount is populated by list reads so the
+// management surface can explain whether a field is in use before deletion.
+type EntityField struct {
+	CompanyID        string    `json:"company_id"`
+	FieldID          string    `json:"field_id"`
+	Name             string    `json:"name"`
+	Color            string    `json:"color"`
+	Position         int       `json:"position"`
+	AssignmentCount  int       `json:"assignment_count,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type CompanyMembership struct {
 	CompanyID        string    `json:"company_id"`
 	CompanyName      string    `json:"company_name,omitempty"`
@@ -875,6 +889,7 @@ type Project struct {
 	DefaultAccess    string             `json:"default_access"`
 	Accounts         []Account          `json:"accounts,omitempty"`
 	Teams            []CompanyUserGroup `json:"teams,omitempty"`
+	Fields           []EntityField      `json:"fields,omitempty"`
 	EffectiveAccess  string             `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time          `json:"created_timestamp"`
 	UpdatedTimestamp time.Time          `json:"updated_timestamp"`
