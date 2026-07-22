@@ -59,6 +59,7 @@ P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explo
 
 P49 - Project Field, Status, Health, Account, and Team dropdowns commit and close on the selected option. They do not display Apply or Cancel actions; multi-value controls toggle the clicked assignment without discarding other selected IDs, and Not set clears the control.
 P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
+P51 - Every Project chat comment authored by the current user exposes the shared inline Edit action after send. Saving uses the stable Project projection ID, replaces only trimmed text and resolved mention IDs, records an edit timestamp, and preserves author, original creation time, attachments, reply/source-selection context, text-box ownership, and thread order. Project Edit access never permits editing or deleting another author's comment, and legacy information POST requests cannot overwrite a chat projection even when they disguise the replacement as another information type.
 
 ## Scenarios
 
@@ -348,3 +349,22 @@ Expected:
 - Multi-value controls preserve existing choices except for the one assignment being toggled.
 - Choosing Not set clears that control, with no Apply or Cancel footer.
 - Project Summary shows **Fields** immediately left of Status and reflects the same assignments shown in the list row.
+
+### Scenario P-S15: Author-Only Project Comment Editing
+
+Business logic covered:
+- P51
+
+Given:
+- Project chat contains comments sent by the current user and another user who also has Project Edit access.
+
+When:
+- The current user edits their own comment and attempts to edit, delete, or POST-overwrite the other comment.
+
+Expected:
+- Edit appears only on comments authored by the current user.
+- A successful PATCH keeps the stable comment envelope and thread position, updates text/mentions, and shows Edited.
+- Cross-author edit/delete attempts are forbidden, and a disguised legacy POST overwrite returns conflict.
+- A failed save restores the canonical row while retaining the inline draft for retry.
+
+Focused coverage lives in `backend/internal/http/chat_comment_edit_test.go` and `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`.

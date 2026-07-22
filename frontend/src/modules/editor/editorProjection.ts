@@ -73,6 +73,7 @@ export type EditorTextBlockChatMessage = {
   authorName: string;
   message: string;
   createdTimestamp: string;
+  editedTimestamp?: string;
   attachments: EditorChatAttachment[];
   mentionedUserIDs?: string[];
   mentionedGroupIDs?: string[];
@@ -82,6 +83,10 @@ export function canDeleteEditorTextBlockChatMessage(message: Pick<EditorTextBloc
   const authorID = message.authorID.trim();
   const userID = currentUserID.trim();
   return Boolean(authorID && userID && authorID === userID);
+}
+
+export function canEditEditorTextBlockChatMessage(message: Pick<EditorTextBlockChatMessage, "authorID">, currentUserID: string): boolean {
+  return canDeleteEditorTextBlockChatMessage(message, currentUserID);
 }
 
 export type EditorAttachedEmail = {
@@ -172,6 +177,7 @@ export function buildEditorTextBlockChatPayload(input: {
   authorName: string;
   message: string;
   createdTimestamp: string;
+  editedTimestamp?: string;
   attachments?: EditorChatAttachment[];
   mentionedUserIDs?: string[];
   mentionedGroupIDs?: string[];
@@ -189,6 +195,7 @@ export function buildEditorTextBlockChatPayload(input: {
     author_name: input.authorName,
     message: input.message,
     created_timestamp: input.createdTimestamp,
+    edited_timestamp: input.editedTimestamp?.trim() ?? "",
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
     mentioned_user_ids: uniqueStringList(input.mentionedUserIDs ?? []),
     mentioned_group_ids: uniqueStringList(input.mentionedGroupIDs ?? []),
@@ -383,6 +390,7 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     authorName: stringValue(record, "author_name") || "Unknown user",
     message,
     createdTimestamp: stringValue(record, "created_timestamp") || item.created_timestamp || "",
+    editedTimestamp: stringValue(record, "edited_timestamp") || undefined,
     attachments,
     mentionedUserIDs: stringListValue(record, "mentioned_user_ids"),
     mentionedGroupIDs: stringListValue(record, "mentioned_group_ids"),

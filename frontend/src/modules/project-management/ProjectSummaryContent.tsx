@@ -36,6 +36,7 @@ import {
   buildEditorTextBlockMetadataPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
+  canEditEditorTextBlockChatMessage,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
   parseEditorTextBlockChats,
@@ -45,6 +46,7 @@ import {
   type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
+import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "../editor/editorMentions.js";
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
@@ -116,6 +118,7 @@ import {
   createProjectLogicGate,
   createProjectNode,
   deleteProjectProjection,
+  editProjectChatComment,
   deleteProjectRelationship,
   fetchProjectView,
   updateProject,
@@ -149,6 +152,19 @@ import {
   type ProjectRelationshipGroupingSetting,
   type ProjectRelationshipNestedGroup,
 } from "./projectRelationshipGrouping.js";
+
+function projectChatMentionedUserIDs(draft: string, users: MentionableCompanyUser[]): string[] {
+  const aliasCounts = new Map<string, number>();
+  for (const user of users) {
+    const alias = mentionUserDisplayName(user).trim().toLowerCase();
+    if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
+  }
+  const unambiguousUsers = users.filter((user) => aliasCounts.get(mentionUserDisplayName(user).trim().toLowerCase()) === 1);
+  return Array.from(new Set(splitTextByMentions(draft, unambiguousUsers)
+    .filter((segment) => segment.mention)
+    .map((segment) => segment.user?.user_id.trim() ?? "")
+    .filter(Boolean)));
+}
 
 type ProjectSummaryContentProps = {
   projectID: string;
@@ -1134,6 +1150,45 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       await loadProject({ showLoading: false });
     }
   }, [companyID, loadProject, projectID]);
+
+  const editChatMessage = useCallback(async (messageID: string, nextText: string) => {
+    const existing = chatMessages.find((item) => item.id === messageID);
+    if (!existing || !canEditEditorTextBlockChatMessage(existing, currentUserID)) {
+      const cause = new Error("cannot_edit_other_users_chat_message");
+      setError(cause.message);
+      throw cause;
+    }
+    const message = nextText.trim();
+    if (!message && existing.attachments.length === 0) {
+      const cause = new Error("chat_message_required");
+      setError(cause.message);
+      throw cause;
+    }
+    if (message === existing.message) return;
+    const mentionedUserIDs = projectChatMentionedUserIDs(message, companyUsers);
+    const editedTimestamp = new Date().toISOString();
+    setChatMessages((current) => current.map((item) => item.id === messageID ? {
+      ...item,
+      message,
+      editedTimestamp,
+      mentionedUserIDs,
+    } : item));
+    setError("");
+    try {
+      await editProjectChatComment({
+        companyID,
+        projectID,
+        informationID: messageID,
+        message,
+        mentionedUserIDs,
+        mentionedGroupIDs: existing.mentionedGroupIDs,
+      });
+    } catch (chatError) {
+      setChatMessages((current) => current.map((item) => item.id === messageID ? existing : item));
+      setError(chatError instanceof Error ? chatError.message : "Failed to edit chat message");
+      throw chatError;
+    }
+  }, [chatMessages, companyID, companyUsers, currentUserID, projectID]);
 
   const attachChatDraftFiles = useCallback(async (blockID: string, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
@@ -2443,6 +2498,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => ({ ...current, [block.id]: current[block.id] === messageID ? "" : messageID }))}
                                 onNavigateToMessage={(messageID) => setChatNavigationRequests((current) => ({ ...current, [block.id]: { anchorMessageID: messageID, requestID: Date.now() } }))}
                                 onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}
+                                onEditMessage={editChatMessage}
                                 onDeleteMessage={(messageID) => void deleteChatMessage(messageID)}
                                 onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
                                 onClearSelectionAnchor={() => setChatSelectionAnchors((current) => omitRecordKey(current, block.id))}

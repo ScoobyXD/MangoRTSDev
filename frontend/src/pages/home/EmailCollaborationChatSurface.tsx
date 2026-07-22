@@ -17,6 +17,7 @@ import {
   buildEditorTextBlockChatPayload,
   buildEditorTextBlockProjectionPayload,
   canDeleteEditorTextBlockChatMessage,
+  canEditEditorTextBlockChatMessage,
   editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
@@ -468,6 +469,9 @@ export function EmailCollaborationChatSurface({
       onChatMessageCreated(event) {
         if (event.company_id === companyID && event.node_id === nodeID) refresh();
       },
+      onChatMessageUpdated(event) {
+        if (event.company_id === companyID && event.node_id === nodeID) refresh();
+      },
       onChatMessageDeleted(event) {
         if (event.company_id === companyID && event.node_id === nodeID) refresh();
       },
@@ -853,6 +857,47 @@ export function EmailCollaborationChatSurface({
     }
   }, [collaboration, companyID, currentUserID, loadProjection, messages, nodeID, onError, onSuccess, requestJSON]);
 
+  const editMessage = React.useCallback(async (messageID: string, nextText: string) => {
+    const existing = messages.find((item) => item.id === messageID);
+    if (!existing || !nodeID || !canEditEditorTextBlockChatMessage(existing, currentUserID)) {
+      const cause = new Error("cannot_edit_other_users_chat_message");
+      onError(cause.message);
+      throw cause;
+    }
+    const messageText = nextText.trim();
+    if (!messageText && existing.attachments.length === 0) {
+      const cause = new Error("chat_message_required");
+      onError(cause.message);
+      throw cause;
+    }
+    if (messageText === existing.message) return;
+    const mentions = mentionedPrincipalIDs(messageText, principals);
+    const editedTimestamp = new Date().toISOString();
+    setMessages((current) => current.map((item) => item.id === messageID ? {
+      ...item,
+      message: messageText,
+      editedTimestamp,
+      mentionedUserIDs: mentions.mentionedUserIDs,
+      mentionedGroupIDs: mentions.mentionedGroupIDs,
+    } : item));
+    try {
+      await requestJSON("/v1/nodes/" + encodeURIComponent(nodeID) + "/projection/" + encodeURIComponent(messageID), {
+        method: "PATCH",
+        json: {
+          company_id: companyID,
+          message: messageText,
+          mentioned_user_ids: mentions.mentionedUserIDs,
+          mentioned_group_ids: mentions.mentionedGroupIDs,
+        },
+      });
+      onSuccess();
+    } catch (cause) {
+      setMessages((current) => current.map((item) => item.id === messageID ? existing : item));
+      onError(cause instanceof Error ? cause.message : "failed_to_edit_email_chat");
+      throw cause;
+    }
+  }, [companyID, currentUserID, messages, nodeID, onError, onSuccess, principals, requestJSON]);
+
   const navigateToChatMessage = React.useCallback((chatMessageID: string) => {
     setActiveMessageID(chatMessageID);
     const target = messages.find((item) => item.id === chatMessageID);
@@ -975,6 +1020,7 @@ export function EmailCollaborationChatSurface({
         onActivateMessage={setActiveMessageID}
         onNavigateToMessage={navigateToChatMessage}
         onReply={setReplyTargetID}
+        onEditMessage={editMessage}
         onDeleteMessage={(messageID) => { void deleteMessage(messageID); }}
         onClearReply={() => setReplyTargetID("")}
         onClearSelectionAnchor={onClearSelection}

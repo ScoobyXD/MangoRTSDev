@@ -55,6 +55,7 @@ const (
 	realtimeMessageNotificationDeleted   = "notification.deleted"
 	realtimeMessageNotificationsCleared  = "notifications.cleared"
 	realtimeMessageChatCreated           = "chat.message.created"
+	realtimeMessageChatUpdated           = "chat.message.updated"
 	realtimeMessageChatDeleted           = "chat.message.deleted"
 	realtimeMessageKanbanChanged         = "kanban.changed"
 	realtimeMessageMailboxMessageChanged = "mailbox.message.changed"

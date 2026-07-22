@@ -17,6 +17,7 @@ import {
   realtimeSharedMailboxScope,
   realtimeWebSocketURL,
   type RealtimeChatMessageCreatedMessage,
+  type RealtimeChatMessageUpdatedMessage,
   type RealtimeChatMessageDeletedMessage,
   type RealtimeKanbanChangedMessage,
   type RealtimeMailboxFolderChangedMessage,
@@ -52,6 +53,17 @@ test("parses retained product and scoped mailbox message families", () => {
   })) as RealtimeChatMessageCreatedMessage;
   assert.equal(created.block_id, "block-1");
   assert.equal(created.message_id, "message-1");
+
+  const updated = parseRealtimeMessage(JSON.stringify({
+    type: "chat.message.updated",
+    company_id: "company-1",
+    scope: "chat:node:node-1",
+    node_id: "node-1",
+    block_id: "block-1",
+    message_id: "message-1",
+  })) as RealtimeChatMessageUpdatedMessage;
+  assert.equal(updated.block_id, "block-1");
+  assert.equal(updated.message_id, "message-1");
 
   const deleted = parseRealtimeMessage(JSON.stringify({
     type: "chat.message.deleted",
@@ -225,7 +237,11 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     let boardAcceptances = 0;
     let mailbox = 0;
     const unsubNotifications = client.subscribe("notifications:user:user-1", { onAccepted: () => { notificationAcceptances += 1; }, onNotificationCreated: () => { notifications += 1; } });
-    const unsubChat = client.subscribe("chat:node:node-1", { onAccepted: () => { chatAcceptances += 1; }, onChatMessageCreated: () => { chat += 1; } });
+    const unsubChat = client.subscribe("chat:node:node-1", {
+      onAccepted: () => { chatAcceptances += 1; },
+      onChatMessageCreated: () => { chat += 1; },
+      onChatMessageUpdated: () => { chat += 1; },
+    });
     const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onKanbanChanged: () => { board += 1; } });
     const unsubMailbox = client.subscribe("mailbox:personal:account:user-1:owner@example.com", { onMailboxMessageChanged: () => { mailbox += 1; } });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
@@ -294,12 +310,13 @@ test("one client shares a socket and dispatches compact messages to exact scopes
       notification: { notification_id: "n-1", recipient_user_id: "user-1", type: "update", source_event_id: "e-1", entity_type: "node", entity_id: "node-1", title: "Update", created_timestamp: "2026-07-12T12:00:00Z" },
     }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.updated", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "kanban.changed", company_id: "company-1", scope: "board:logic-gate:gate-1", board_id: "logic-gate:gate-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:account:user-1:owner@example.com", trigger: "message.created", message_id: "mail-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:other", node_id: "other", block_id: "block-1", message_id: "m-2" }) });
 
     assert.equal(notifications, 1);
-    assert.equal(chat, 1);
+    assert.equal(chat, 2);
     assert.equal(board, 1);
     assert.equal(mailbox, 1);
 

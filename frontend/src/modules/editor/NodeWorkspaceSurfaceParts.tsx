@@ -12,7 +12,7 @@ import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEm
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
-import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
+import { canDeleteEditorTextBlockChatMessage, canEditEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -1956,6 +1956,7 @@ type ChatPaneProps = {
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
   onReply: (messageID: string) => void;
+  onEditMessage: (messageID: string, message: string) => Promise<void>;
   onDeleteMessage: (messageID: string) => void;
   onClearReply: () => void;
   onClearSelectionAnchor: () => void;
@@ -2009,6 +2010,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onActivateMessage,
   onNavigateToMessage,
   onReply,
+  onEditMessage,
   onDeleteMessage,
   onClearReply,
   onClearSelectionAnchor,
@@ -2389,6 +2391,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onActivate={onActivateMessage}
                   onNavigate={onNavigateToMessage}
                   onReply={handleReply}
+                  onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
                   onPreviewImage={setPreviewAttachment}
                 />
@@ -2712,6 +2715,7 @@ type ChatThreadItemProps = {
   onActivate: (messageID: string) => void;
   onNavigate: (messageID: string) => void;
   onReply: (messageID: string) => void;
+  onEdit: (messageID: string, message: string) => Promise<void>;
   onDelete: (messageID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
@@ -2747,15 +2751,35 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
   const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
   const isActive = activeMessageID === message.id;
+  const canEdit = editable && canEditEditorTextBlockChatMessage(message, currentUserID);
   const canDelete = editable && canDeleteEditorTextBlockChatMessage(message, currentUserID);
   const authorAccent = userAccentForName(message.authorName || message.authorID);
   const [focused, setFocused] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(message.message);
+  const [savingEdit, setSavingEdit] = useState(false);
+  useEffect(() => {
+    if (!editing) setEditDraft(message.message);
+  }, [editing, message.message]);
+  const saveEdit = async () => {
+    const cleanMessage = editDraft.trim();
+    if (savingEdit || cleanMessage === message.message || (!cleanMessage && message.attachments.length === 0)) return;
+    setSavingEdit(true);
+    try {
+      await onEdit(message.id, cleanMessage);
+      setEditing(false);
+    } catch {
+      // The parent surface owns the visible error; keep the editor open for retry.
+    } finally {
+      setSavingEdit(false);
+    }
+  };
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
@@ -2836,15 +2860,76 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
       <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: authorAccent, fontWeight: 900 }}>{message.authorName}</span>
-          <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
+          <span title={message.editedTimestamp ? `Edited ${formatTimestamp(message.editedTimestamp)}` : undefined} style={{ opacity: 0.58, flex: "0 0 auto" }}>
+            {formatTimestamp(message.createdTimestamp)}{message.editedTimestamp ? " · Edited" : ""}
+          </span>
         </div>
-        {message.message && <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} />}
+        {editing ? (
+          <div onClick={(event) => event.stopPropagation()} style={{ display: "grid", gap: 5 }}>
+            <textarea
+              aria-label="Edit comment text"
+              autoFocus
+              value={editDraft}
+              disabled={savingEdit}
+              onChange={(event) => setEditDraft(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setEditDraft(message.message);
+                  setEditing(false);
+                } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  void saveEdit();
+                }
+              }}
+              style={{ width: "100%", minHeight: 58, resize: "vertical", boxSizing: "border-box", border: `1px solid ${ruleColor}`, borderRadius: 7, background: "#ffffff", color: surfaceText, padding: "7px 8px", font: "inherit", fontSize: 12, lineHeight: 1.35 }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                aria-label="Save edited comment"
+                disabled={savingEdit || (!editDraft.trim() && message.attachments.length === 0)}
+                onClick={() => { void saveEdit(); }}
+                style={{ border: "none", borderRadius: 6, background: accent, color: "#ffffff", cursor: savingEdit ? "wait" : "pointer", fontSize: 10, fontWeight: 850, padding: "4px 9px" }}
+              >
+                {savingEdit ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={savingEdit}
+                onClick={() => {
+                  setEditDraft(message.message);
+                  setEditing(false);
+                }}
+                style={{ border: "none", background: "transparent", color: "rgba(51,65,85,0.82)", cursor: "pointer", fontSize: 10, fontWeight: 800, padding: "2px 0" }}
+              >
+                Cancel
+              </button>
+              <span style={{ color: "rgba(51,65,85,0.56)", fontSize: 9, fontWeight: 700 }}>Ctrl+Enter to save</span>
+            </div>
+          </div>
+        ) : message.message ? <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} /> : null}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} apiBase={apiBase} companyID={companyID} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {editable && (
             <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
               <ChatIcon color={accent} />
               Reply
+            </button>
+          )}
+          {canEdit && !editing && (
+            <button
+              type="button"
+              aria-label="Edit comment"
+              title="Edit comment"
+              onClick={(event) => {
+                event.stopPropagation();
+                setEditDraft(message.message);
+                setEditing(true);
+              }}
+              style={{ border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+            >
+              Edit
             </button>
           )}
           {canDelete && (
@@ -2897,6 +2982,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               onActivate={onActivate}
               onNavigate={onNavigate}
               onReply={onReply}
+              onEdit={onEdit}
               onDelete={onDelete}
               onPreviewImage={onPreviewImage}
             />

@@ -352,6 +352,25 @@ export async function deleteProjectProjection(input: {
   });
 }
 
+export async function editProjectChatComment(input: {
+  companyID: string;
+  projectID: string;
+  informationID: string;
+  message: string;
+  mentionedUserIDs?: string[];
+  mentionedGroupIDs?: string[];
+}): Promise<unknown> {
+  return apiFetchJSON(`/v1/projects/${encodeURIComponent(input.projectID)}/projection/${encodeURIComponent(input.informationID)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      message: input.message,
+      mentioned_user_ids: input.mentionedUserIDs ?? [],
+      mentioned_group_ids: input.mentionedGroupIDs ?? [],
+    }),
+  });
+}
+
 export async function upsertProjectCriticalPathStep(input: {
   companyID: string;
   projectID: string;

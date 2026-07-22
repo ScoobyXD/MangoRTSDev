@@ -339,6 +339,15 @@ func (s *Server) handleProjectInformation(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "editor_collaboration_required")
 		return
 	}
+	if strings.TrimSpace(req.InformationID) != "" {
+		if projections, listErr := s.repo.ListProjectProjections(companyID, projectID); listErr != nil {
+			s.writeProjectMutationError(w, listErr, "failed_to_load_chat_comment")
+			return
+		} else if _, exists := findProjectChatComment(projections, req.InformationID); exists {
+			writeError(w, http.StatusConflict, "chat_comment_patch_required")
+			return
+		}
+	}
 	if rejectDurableInlineFileBytes(w, "project_information", req.Information) {
 		return
 	}
@@ -377,6 +386,10 @@ func (s *Server) handleProjectProjectionList(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Request, projectID, informationID string) {
+	if r.Method == http.MethodPatch {
+		s.handleProjectChatCommentEdit(w, r, projectID, informationID)
+		return
+	}
 	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -389,12 +402,22 @@ func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Requ
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
-	if projections, listErr := s.repo.ListProjectProjections(companyID, projectID); listErr == nil {
-		for _, projection := range projections {
-			if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
-				writeError(w, http.StatusConflict, "editor_collaboration_required")
-				return
-			}
+	projections, listErr := s.repo.ListProjectProjections(companyID, projectID)
+	if listErr != nil {
+		s.writeProjectMutationError(w, listErr, "failed_to_load_chat_comment")
+		return
+	}
+	for _, projection := range projections {
+		if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
+			writeError(w, http.StatusConflict, "editor_collaboration_required")
+			return
+		}
+	}
+	if chatComment, found := findProjectChatComment(projections, informationID); found {
+		actor, ok := authenticatedActor(r)
+		if !ok || !chatCommentOwnedBy(chatComment.Information, actor.User.UserID) {
+			writeError(w, http.StatusForbidden, "chat_comment_author_required")
+			return
 		}
 	}
 	actor, _ := authenticatedActor(r)

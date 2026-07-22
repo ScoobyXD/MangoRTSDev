@@ -1,4 +1,4 @@
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 # Nodes Tests
 
@@ -679,6 +679,7 @@ N112 - Every Node has one optional, independently resizable, full-height email c
 
 N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; their opened panes and linked-email expansion use the shared short, reduced-motion-aware entrance transition without changing persisted open/closed state. A linked exact-message email preview always belongs to the left content column, sharing that column vertically with Editor when both are open. Chat always owns a separate right column at full row-body height and is never shortened by the email preview. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
 N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients from that Node's current effective GVIC assignments. A parent Logic Gate's GVIC never substitutes for Node GVIC. A Node GVIC assignment update is sent only to a newly assigned or effective-role-changed user, not unchanged, removed, unrelated, or actor users.
+N115 - An authenticated user with Node Edit access may edit or delete only a Node chat comment whose stored `author_id` is that user. Comment edits use the exact projection ID through PATCH, preserve the original comment envelope and attachment/source relationships, refresh direct mention notifications and collaboration participants, and publish one compact `chat.message.updated` hint on the existing exact Node chat scope. Generic information/projection POST routes must reject attempts to overwrite an existing chat comment so the author check cannot be bypassed.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
@@ -707,3 +708,26 @@ Automated coverage:
 - `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts` covers actionable attachment-list network error formatting.
 - `tests/frontend/modules/editor/editorRowVirtualizationReact.test.tsx` covers the actual Node host: full-height email column, single headers, inline linked-email expansion, chat-header removal, and visible Delete menu.
 - `tests/frontend/modules/editor/emailViewerContract.test.ts` locks the Node/email composition contract and no-folder direct thread list.
+
+### Scenario N-S24: Author-Only Node Comment Editing
+
+Business logic covered:
+- N115
+
+Given:
+- Two users with Node Edit access have sent comments on the same Node.
+
+When:
+- Each user views the chat and one user edits their own comment.
+- That user attempts to PATCH or delete the other user's projection or overwrite it through the legacy POST path.
+
+Expected:
+- Each user sees Edit only for comments they authored.
+- The authorized PATCH preserves the stable projection envelope, records the edit time, and wakes mounted exact-Node chat viewers for canonical refresh.
+- Editing or deleting the other author's comment returns forbidden.
+- POST overwrite returns conflict and cannot bypass exact authorship.
+
+Automated coverage:
+- `backend/internal/http/chat_comment_edit_test.go`
+- `backend/internal/http/realtime_websocket_test.go`
+- `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`

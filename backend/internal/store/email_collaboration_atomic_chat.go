@@ -150,6 +150,32 @@ func (r *MemoryRepo) UpsertEmailCollaborationNodeProjectionWithActor(input NodeI
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	participantsBefore := cloneMemoryMap(r.emailCollaborationParticipants)
+	permissionsBefore := cloneMemoryMap(r.entityPermissions)
+	effectiveAccessBefore := cloneMemoryMap(r.effectiveAccess)
+	nodesBefore := cloneMemoryMap(r.nodes)
+	nodeTextBefore := cloneMemoryNodeText(r.nodeText)
+	contentChangesBefore := cloneMemoryMap(r.nodeContentChanges)
+	contentSeenBefore := cloneMemoryMap(r.nodeContentChangeSeen)
+	readVersionsBefore := cloneMemoryMap(r.workspaceReadVersions)
+	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
+	outboxSequenceBefore := r.realtimeOutboxSequence
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		r.emailCollaborationParticipants = participantsBefore
+		r.entityPermissions = permissionsBefore
+		r.effectiveAccess = effectiveAccessBefore
+		r.nodes = nodesBefore
+		r.nodeText = nodeTextBefore
+		r.nodeContentChanges = contentChangesBefore
+		r.nodeContentChangeSeen = contentSeenBefore
+		r.workspaceReadVersions = readVersionsBefore
+		r.realtimeOutbox = outboxBefore
+		r.realtimeOutboxSequence = outboxSequenceBefore
+	}()
 	collaboration, ok := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID)
 	if !ok {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, ErrNotEmailCollaboration
@@ -165,7 +191,19 @@ func (r *MemoryRepo) UpsertEmailCollaborationNodeProjectionWithActor(input NodeI
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
 	}
+	_, projectionExisted := r.nodeText[key(input.CompanyID, input.NodeID)][input.InformationID]
 	projection := r.upsertEmailCollaborationNodeProjectionLocked(input)
+	if projectionExisted {
+		outboxInput, err := nodeChatUpdatedOutboxInput(projection)
+		if err != nil {
+			return CommunicationsEmailCollaborationProjectionWriteResult{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return CommunicationsEmailCollaborationProjectionWriteResult{}, err
+		}
+		r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
+	}
+	committed = true
 	return CommunicationsEmailCollaborationProjectionWriteResult{
 		Projection: projection, CollaborationID: collaboration.CollaborationID, MentionedUserIDs: participants.MentionedUserIDs,
 	}, nil
@@ -269,9 +307,18 @@ func (r *PostgresRepo) UpsertEmailCollaborationNodeProjectionWithActor(input Nod
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
 	}
-	projection, err := upsertEmailCollaborationNodeProjectionTx(ctx, tx, input)
+	projection, projectionExisted, err := upsertEmailCollaborationNodeProjectionTx(ctx, tx, input)
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
+	}
+	if projectionExisted {
+		outboxInput, err := nodeChatUpdatedOutboxInput(projection)
+		if err != nil {
+			return CommunicationsEmailCollaborationProjectionWriteResult{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return CommunicationsEmailCollaborationProjectionWriteResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
@@ -324,19 +371,19 @@ returning company_id::text, information_id::text, node_id::text, type::text, inf
 	return item, nil
 }
 
-func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, error) {
+func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, bool, error) {
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
 	if err != nil {
-		return domain.NodeProjection{}, err
+		return domain.NodeProjection{}, false, err
 	}
 	projection, err := upsertEmailCollaborationNodeProjectionRowTx(ctx, tx, input, input.InformationID)
 	if err != nil {
-		return domain.NodeProjection{}, err
+		return domain.NodeProjection{}, false, err
 	}
 	if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, input.InformationID, previous, previousFound); err != nil {
-		return domain.NodeProjection{}, err
+		return domain.NodeProjection{}, false, err
 	}
-	return projection, nil
+	return projection, previousFound, nil
 }
 
 func upsertEmailCollaborationNodeProjectionRowTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, informationID string) (domain.NodeProjection, error) {

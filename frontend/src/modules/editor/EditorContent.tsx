@@ -2014,6 +2014,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         if (nodeWorkspaceProjectionsRef.current.some((item) => item.information_id === message.message_id)) return;
         scheduleCanonicalRefresh();
       },
+      onChatMessageUpdated(message) {
+        if (message.company_id !== companyID || message.node_id !== nodeID) return;
+        if (!nodeWorkspaceProjectionsRef.current.some((item) => item.information_id === message.message_id)) return;
+        scheduleCanonicalRefresh();
+      },
       onChatMessageDeleted(message) {
         if (message.company_id !== companyID || message.node_id !== nodeID) return;
         if (!nodeWorkspaceProjectionsRef.current.some((item) => item.information_id === message.message_id)) return;

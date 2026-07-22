@@ -204,6 +204,13 @@ Search and creation retain the current company/workspace scope and existing effe
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.
 
+## Sent comment editing (2026-07-22)
+
+- The shared `ChatPane` renders Edit on every comment authored by the current user across Node, Project, My Triage, and Shared Triage chat surfaces. Other users' comments remain read-only.
+- Inline Save/Cancel edits replace only trimmed text and resolved mention IDs. The server preserves stable identity, original author/creation time, reply/source-selection context, attachments, ownership, and unrelated payload fields, then records `edited_timestamp`.
+- Node and email-collaboration edits use the existing exact Node chat scope and a compact `chat.message.updated` wake-up followed by canonical projection refresh. Project chat retains HTTP-only reconciliation.
+- Optimistic rows roll back after failure while the inline editor keeps its draft open for retry. Server-side author checks also protect delete and reject legacy POST overwrite attempts.
+
 ## One-shot chat/source navigation (2026-07-21)
 
 - Clicking a chat comment creates one monotonic navigation request for its linked editor annotation. The request may wait while the target row or annotation loads, but one successful range focus/scroll consumes it.

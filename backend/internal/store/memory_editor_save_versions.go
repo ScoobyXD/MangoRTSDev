@@ -67,6 +67,16 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 		CreatedTimestamp: created,
 		UpdatedTimestamp: now,
 	}
+	if previous != nil && strings.EqualFold(strings.TrimSpace(previous.Type), "Text block chat") && strings.EqualFold(infoType, "Text block chat") {
+		outboxInput, err := nodeChatUpdatedOutboxInput(projection)
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(outboxInput); err != nil {
+			return domain.NodeProjection{}, err
+		}
+		r.bumpNodeViewVersionLocked(companyID, nodeID)
+	}
 	r.nodeText[k][informationID] = projection
 	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
 		r.recordNodeContentChangesLocked(buildNodeContentChanges(

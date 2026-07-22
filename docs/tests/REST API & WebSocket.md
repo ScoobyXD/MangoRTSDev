@@ -1,4 +1,4 @@
-Last updated: 2026-07-15
+Last updated: 2026-07-22
 
 # REST API & WebSocket Tests
 
@@ -66,6 +66,7 @@ RW54 - Mailbox work uses separate ownership domains. Message-list/detail work ma
 RW55 - Canonical HTTP reconciliation owns durable server data, not transient local presentation state. Notification summary acceptance does not revalidate the Updates feed; real feed hints atomically replace canonical rows without clearing selection/group expansion first. Mounted-board work/view reconciliation may update cards and titles but a controlled same-Node reopen must not reset that popup's fullscreen mode.
 RW56 - The unified collaboration rollout is coordinated: apply `20260715_unified_realtime_collaboration.sql` before the matching backend/frontend release, then require pre-cutover tabs to reload. Migrated `Text box` projection POST/DELETE compatibility writes remain rejected; no revisionless or whole-document fallback is restored.
 RW57 - An otherwise healthy realtime WebSocket remains connected while idle. The backend sends an empty protocol-level ping every 25 seconds, below the deployed load balancer's 60-second idle timeout; the browser networking stack answers without JavaScript timers, API fetches, auth refreshes, or new realtime tickets. Only a genuine transport failure invokes bounded reconnect and scoped canonical recovery.
+RW58 - Node and Project chat edits use author-checked `PATCH .../projection/{projection_id}` commands. The request may replace trimmed message text and resolved mention IDs but cannot replace the stored author, created timestamp, source selection, reply context, attachments, text-box ownership, or arbitrary payload fields. Node edits enqueue a durable compact `chat.message.updated` event on `chat:node:{node_id}`; mounted clients respond with one canonical projection refresh. The existing exact-scope authorization, current-audience resolution, retry/outbox behavior, and no-project-chat-subscription boundary remain unchanged.
 
 ## Scenarios
 
@@ -539,3 +540,26 @@ Reference defaults:
 - [Cloudflare Agents keepalive interval](https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/)
 - [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
 - [RFC 6455 Ping and Pong](https://www.rfc-editor.org/rfc/rfc6455#section-5.5.2)
+
+### Scenario RW-S22: Chat Edit Command And Exact Reconciliation
+
+Business logic covered:
+- RW58
+
+Given:
+- A comment author and another entity editor can both read the same mounted Node chat.
+
+When:
+- The author PATCHes the exact comment projection and the other editor attempts the same command.
+
+Expected:
+- The author's command changes only trimmed message text, mention IDs, and edit timestamp.
+- The nonauthor request is forbidden even though that user otherwise has entity Edit access.
+- The committed Node edit produces one durable `chat.message.updated` event on the exact Node chat scope.
+- The frontend maps that hint to one canonical projection refresh; it never treats the WebSocket body as chat persistence truth.
+- Project edits remain HTTP-only and do not create a new Project chat subscription.
+
+Automated coverage:
+- `backend/internal/http/realtime_websocket_test.go`
+- `backend/internal/http/chat_comment_edit_test.go`
+- `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`

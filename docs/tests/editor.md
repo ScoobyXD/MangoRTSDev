@@ -1,4 +1,4 @@
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 # Unified Editor Tests
 
@@ -113,6 +113,7 @@ ED87 - Backspace on a selected/focused inline entity, or at a collapsed caret im
 ED88 - Turning selected Node text into a pending chat quote preserves only the temporary source annotation needed while composing. Clicking the quote X or closing that pending chat removes the quote/annotation and collapses the native/ProseMirror selection, so no selected-text highlight survives cancellation. Sending successfully may replace the temporary annotation with the durable chat annotation.
 ED89 - For editor entity ranking, a Node is done only when its status is `Done`; a Project is done when its status is `Done`, `Completed`, or `Archived`. Every other nonblank or missing Node/Project status stays in its active bucket, so Planning, On Hold, Pending, Review, and similar work remain discoverable before Logic Gates.
 ED90 - The PostgreSQL editor-only search applies text filtering and effective-access/visible-location checks before its bounded sort and does not construct unused Explorer location-path JSON. Case-insensitive contains search uses canonical `pg_trgm` GIN indexes on Node names, Project names, and Logic Gate headers. Ordinary Company Explorer search retains its separate tree/path response and ordering.
+ED91 - Every sent comment rendered by the shared `ChatPane` exposes Edit only to its original author. Edit opens an inline text area with Save/Cancel and Ctrl+Enter submission, keeps the editor open when persistence fails, and shows an Edited marker after success. The edit changes only message text and current mention IDs; it preserves the stable comment ID, author, created timestamp, reply/source-selection context, attachments, thread position, and all unrelated payload fields. Blank text remains valid only when the comment still has an attachment.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1450,3 +1451,25 @@ Expected:
 - A successful send may replace the temporary annotation with the normal durable chat annotation.
 
 Focused automated coverage lives in tests/frontend/modules/editor/unifiedRichEditorContract.test.ts; the mounted editor suites continue to cover selection-to-chat creation and durable annotation behavior.
+
+### Scenario ED-S21: Edit A Sent Comment
+
+Business logic covered:
+- ED91
+
+Given:
+- The shared ChatPane contains one comment authored by the current user and one authored by another user.
+
+When:
+- The current user opens Edit, changes the text and mentions, and saves.
+- A later save fails and the user retries.
+
+Expected:
+- Edit appears only on the current user's comment and opens an inline Save/Cancel editor.
+- Success retains the comment ID, author, creation time, attachments, reply/source link, and thread position while showing the new text and Edited marker.
+- Failure leaves the draft open for retry and the persisted row is not replaced by an unsaved value.
+- Blank text is rejected unless the comment retains an attachment.
+
+Automated coverage:
+- `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`
+- `tests/frontend/modules/editor/editorProjection.test.ts`

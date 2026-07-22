@@ -5,6 +5,7 @@ import {
   buildEditorTextBlockMetadataPayload,
   buildEditorTextBlockChatPayload,
   canDeleteEditorTextBlockChatMessage,
+  canEditEditorTextBlockChatMessage,
   editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CONTENT_PREFIX,
   listEditorTextBlockProjections,
@@ -75,6 +76,7 @@ test("parses node text block chat projection payloads", () => {
     authorName: "Ada",
     message: "Check this section",
     createdTimestamp: "2026-05-04T01:00:00.000Z",
+    editedTimestamp: "2026-05-04T02:00:00.000Z",
     selectionBlockID: "text-block-2",
     selectionQuote: "selected text",
     selectionStart: 12,
@@ -100,6 +102,7 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages[0].selectionEnd, 25);
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
+  assert.equal(messages[0].editedTimestamp, "2026-05-04T02:00:00.000Z");
   assert.deepEqual(messages[0].mentionedUserIDs, ["user-2"]);
   assert.deepEqual(messages[0].mentionedGroupIDs, ["group-1"]);
   assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: undefined }]);
@@ -168,6 +171,12 @@ test("chat message deletion is limited to the author", () => {
   assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "user-a" }, "user-a"), true);
   assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "user-a" }, "user-b"), false);
   assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "" }, "user-a"), false);
+});
+
+test("chat message editing is limited to the author", () => {
+  assert.equal(canEditEditorTextBlockChatMessage({ authorID: "user-a" }, "user-a"), true);
+  assert.equal(canEditEditorTextBlockChatMessage({ authorID: "user-a" }, "user-b"), false);
+  assert.equal(canEditEditorTextBlockChatMessage({ authorID: "" }, "user-a"), false);
 });
 
 test("parses titled node text block content payloads with legacy fallback", () => {

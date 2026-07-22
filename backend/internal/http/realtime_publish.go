@@ -204,6 +204,13 @@ func (s *Server) publishNodeChatDeleted(companyID, nodeID, blockID, messageID st
 	s.wakeRealtimeSpine()
 }
 
+func (s *Server) publishNodeChatUpdated(companyID, nodeID, messageID string) {
+	if s == nil || strings.TrimSpace(companyID) == "" || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	s.wakeRealtimeSpine()
+}
+
 type capturedKanbanDelete struct {
 	boardID        string
 	allowedUserIDs map[string]struct{} // nil when the surviving board must reauthorize at publication time

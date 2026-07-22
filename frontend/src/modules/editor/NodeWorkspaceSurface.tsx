@@ -39,6 +39,7 @@ import {
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   canDeleteEditorTextBlockChatMessage,
+  canEditEditorTextBlockChatMessage,
   editorEmailMessageAccent,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
@@ -1866,6 +1867,48 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [author.userID, canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
+  const editChatMessage = useCallback(async (messageID: string, nextText: string) => {
+    if (!canEdit) return;
+    const existing = chatMessages.find((item) => item.id === messageID);
+    if (!existing || !nodeID || !companyID) return;
+    if (!canEditEditorTextBlockChatMessage(existing, author.userID)) {
+      const cause = new Error("cannot_edit_other_users_chat_message");
+      onError(cause.message);
+      throw cause;
+    }
+    const message = nextText.trim();
+    if (!message && existing.attachments.length === 0) {
+      const cause = new Error("chat_message_required");
+      onError(cause.message);
+      throw cause;
+    }
+    if (message === existing.message) return;
+    const editedTimestamp = new Date().toISOString();
+    const mentionedUserIDs = mentionedUserIDsFromChatDraft(message, companyUsers);
+    setChatMessages((current) => current.map((item) => item.id === messageID ? {
+      ...item,
+      message,
+      editedTimestamp,
+      mentionedUserIDs,
+    } : item));
+    try {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${messageID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          company_id: companyID,
+          message,
+          mentioned_user_ids: mentionedUserIDs,
+          mentioned_group_ids: existing.mentionedGroupIDs ?? [],
+        }),
+      });
+      onProjectionMutation();
+    } catch (cause) {
+      setChatMessages((current) => current.map((item) => item.id === messageID ? existing : item));
+      onError(cause instanceof Error ? cause.message : "failed_to_edit_chat_message");
+      throw cause;
+    }
+  }, [author.userID, canEdit, chatMessages, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON]);
+
   const addChatDraftAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     if (!canEdit) return;
     const candidates = Array.from(files);
@@ -3610,6 +3653,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onActivateMessage={activateChatMessage}
                     onNavigateToMessage={(messageID) => navigateToChatMessage(chatBlockID, messages, messageID)}
                     onReply={replyToMessage}
+                    onEditMessage={editChatMessage}
                     onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
                     onClearSelectionAnchor={clearSelectionAnchor}

@@ -390,6 +390,15 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, "editor_collaboration_required")
 				return
 			}
+			if strings.TrimSpace(req.InformationID) != "" {
+				if projections, listErr := s.repo.ListNodeProjections(req.CompanyID, nodeID); listErr != nil {
+					writeChatCommentEditError(w, listErr, "failed_to_load_chat_comment")
+					return
+				} else if _, exists := findNodeChatComment(projections, req.InformationID); exists {
+					writeError(w, http.StatusConflict, "chat_comment_patch_required")
+					return
+				}
+			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
 			writeInput := store.NodeInformationInput{
 				CompanyID:        req.CompanyID,
@@ -655,6 +664,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 3 && parts[1] == "projection" {
+		if r.Method == http.MethodPatch {
+			s.handleNodeChatCommentEdit(w, r, nodeID, strings.TrimSpace(parts[2]))
+			return
+		}
 		if r.Method != http.MethodDelete {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
@@ -681,14 +694,24 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		// The append-only information history stays intact for audit/debug paths.
 		chatBlockID := ""
 		deletingChat := false
-		if projections, listErr := s.repo.ListNodeProjections(companyID, nodeID); listErr == nil {
-			for _, projection := range projections {
-				if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
-					writeError(w, http.StatusConflict, "editor_collaboration_required")
-					return
-				}
+		projections, listErr := s.repo.ListNodeProjections(companyID, nodeID)
+		if listErr != nil {
+			writeChatCommentEditError(w, listErr, "failed_to_load_chat_comment")
+			return
+		}
+		for _, projection := range projections {
+			if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
+				writeError(w, http.StatusConflict, "editor_collaboration_required")
+				return
 			}
-			chatBlockID, deletingChat = nodeChatProjectionDetails(projections, informationID)
+		}
+		chatBlockID, deletingChat = nodeChatProjectionDetails(projections, informationID)
+		if chatComment, found := findNodeChatComment(projections, informationID); found {
+			actorUserID, _ := nodeChangeActorPayload(r)
+			if !chatCommentOwnedBy(chatComment.Information, actorUserID) {
+				writeError(w, http.StatusForbidden, "chat_comment_author_required")
+				return
+			}
 		}
 		actorUserID, actorLabel := nodeChangeActorPayload(r)
 		if err := s.repo.DeleteNodeProjectionWithActor(store.NodeProjectionDeleteInput{
@@ -752,6 +775,15 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
+		}
+		if strings.TrimSpace(req.InformationID) != "" {
+			if projections, listErr := s.repo.ListNodeProjections(req.CompanyID, nodeID); listErr != nil {
+				writeChatCommentEditError(w, listErr, "failed_to_load_chat_comment")
+				return
+			} else if _, exists := findNodeChatComment(projections, req.InformationID); exists {
+				writeError(w, http.StatusConflict, "chat_comment_patch_required")
+				return
+			}
 		}
 
 		actorUserID, actorLabel := nodeChangeActorPayload(r)

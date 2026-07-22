@@ -146,8 +146,9 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { ChatPane, NodeTextBlockEditor }, { AppModalPortal }] = await Promise.all([
+    const [{ createRoot }, { Simulate }, { ChatPane, NodeTextBlockEditor }, { AppModalPortal }] = await Promise.all([
       import("react-dom/client"),
+      import("react-dom/test-utils"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
       import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
@@ -462,6 +463,7 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       message({ id: "parent", message: "Parent comment" }),
       message({ id: "exact-child", parentID: "parent", authorName: "Grace", message: "Exact child comment" }),
     ];
+    const editedComments: Array<{ messageID: string; message: string }> = [];
     const chatProps = {
       blockID: "block-1",
       editable: true,
@@ -487,6 +489,9 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
       onActivateMessage: noop,
       onNavigateToMessage: noop,
       onReply: noop,
+      onEditMessage: async (messageID: string, nextMessage: string) => {
+        editedComments.push({ messageID, message: nextMessage });
+      },
       onDeleteMessage: noop,
       onClearReply: noop,
       onClearSelectionAnchor: noop,
@@ -529,6 +534,32 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     ));
     await flushFrames();
     assert.equal(dom.window.document.activeElement, focusedComment, "an ordinary rerender must not hand focus back to the composer");
+
+    const editButton = focusedComment.querySelector<HTMLButtonElement>('button[aria-label="Edit comment"]');
+    assert.ok(editButton, "the author sees Edit on a sent chat comment");
+    await act(async () => editButton.click());
+    const editTextarea = focusedComment.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit comment text"]');
+    assert.ok(editTextarea);
+    await act(async () => {
+      const setTextareaValue = Object.getOwnPropertyDescriptor(
+        dom.window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      assert.ok(setTextareaValue);
+      setTextareaValue.call(editTextarea, "Updated exact child comment");
+      Simulate.change(editTextarea);
+      await Promise.resolve();
+    });
+    assert.equal(editTextarea.value, "Updated exact child comment");
+    const saveEditButton = focusedComment.querySelector<HTMLButtonElement>('button[aria-label="Save edited comment"]');
+    assert.ok(saveEditButton);
+    await act(async () => saveEditButton.click());
+    assert.deepEqual(editedComments, [{ messageID: "exact-child", message: "Updated exact child comment" }]);
+
+    await act(async () => root.render(
+      <ChatPane {...chatProps} currentUserID="other-user" messageFocusRequest={null} />,
+    ));
+    assert.equal(container.querySelector('button[aria-label="Edit comment"]'), null, "other users cannot edit the author's comment");
 
     const imageMessage = message({
       id: "image-comment",

@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-22
 
 # My Triage Tests
 
@@ -186,6 +186,7 @@ MT154 - Automated realtime regression tests must assert request budgets, not mer
 MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next always occupying three equal lower positions. Inactive lower controls use shared light gradient tints; only the selected Compose or My Drafts destination becomes fully saturated. Archive page/next remains in the third slot and is disabled instead of removed outside Inbox, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
 MT158 - Once a My Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens the existing Node rather than creating another one and carries the clicked provider message ID so the left email pane expands and scrolls to that exact reply. Before creation, Create Node From Email shows only priority then an adjacent Logic Gate search, Add Email to Node shows only Node search, and neither opens chat or duplicate create/import buttons. Priority, Logic Gate, and Node-search menus all use the standard neutral elevated neomorphic surface with the shared cyan-to-violet highlight; priority/gate semantics never introduce orange or green panel themes. Successful create/add stays on the email under a temporary green banner. The created Node has its durable thread route, exact message-linked text box, shared accent, and no transient `not_found` card.
+MT159 - In a personal email collaboration, every chat comment authored by the current user has an inline Edit action after it is sent. Other participants' comments have no Edit action. Saving preserves the comment's email/message linkage, reply/source context, attachments, original author/creation time, and thread position; it updates mention participation through the established atomic collaboration path and displays Edited after canonical reconciliation.
 
 ## Scenarios
 
@@ -847,3 +848,21 @@ Given:
 Expected:
 - Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row in every mailbox tab.
 - The lower actions use light shared gradients until selected, only one destination is fully saturated, and Archive/next remains visible but disabled outside Inbox. Both dropdown rows visibly highlight on pointer hover and keyboard focus.
+
+### Scenario MT-S23: Edit A Personal Collaboration Comment
+
+Business logic covered:
+- MT159
+
+Given:
+- My Triage Chat is open for a personal email collaboration with comments from multiple participants.
+
+When:
+- The current user edits a comment they sent.
+
+Expected:
+- Edit is available on every current-user comment and absent from other participants' comments.
+- Saving updates text and mentions while preserving email/message linkage, attachment and reply/source context, author, creation time, and thread position.
+- The row shows Edited after success, and a failed save keeps the draft available for retry.
+
+Shared UI coverage lives in `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`; collaboration persistence is covered by `backend/internal/http/chat_comment_edit_test.go`.

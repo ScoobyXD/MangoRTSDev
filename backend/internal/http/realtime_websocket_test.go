@@ -751,7 +751,8 @@ func TestRealtimeNodeChatCreateDeletePublishesOnlyNodeScope(t *testing.T) {
 	client.readJSON(t)
 	messageID := "44444444-4444-4444-8444-444444444444"
 	blockID := "55555555-5555-4555-8555-555555555555"
-	body, _ := json.Marshal(map[string]any{"company_id": companyID, "type": "Text block chat", "information_id": messageID, "information": `{"block_id":"` + blockID + `","author_name":"User","message":"Hello"}`})
+	information, _ := json.Marshal(map[string]any{"block_id": blockID, "author_id": user.UserID, "author_name": "User", "message": "Hello"})
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "type": "Text block chat", "information_id": messageID, "information": string(information)})
 	req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -763,6 +764,31 @@ func TestRealtimeNodeChatCreateDeletePublishesOnlyNodeScope(t *testing.T) {
 	created := client.readJSON(t)
 	if created["type"] != realtimeMessageChatCreated || created["scope"] != scope || created["node_id"] != node.NodeID || created["block_id"] != blockID || created["message_id"] != messageID {
 		t.Fatalf("created chat message = %+v", created)
+	}
+	overwriteBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID, "type": "Note", "information_id": messageID, "information": "disguised overwrite",
+	})
+	overwriteReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(overwriteBody))
+	overwriteReq.Header.Set("Authorization", "Bearer "+token)
+	overwriteReq.Header.Set("Content-Type", "application/json")
+	overwriteRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(overwriteRec, overwriteReq)
+	if overwriteRec.Code != http.StatusConflict {
+		t.Fatalf("disguised chat overwrite status=%d body=%s, want 409", overwriteRec.Code, overwriteRec.Body.String())
+	}
+	updatedMessage := "Hello, edited"
+	editBody, _ := json.Marshal(map[string]any{"company_id": companyID, "message": updatedMessage})
+	editReq := httptest.NewRequest(http.MethodPatch, "/v1/nodes/"+node.NodeID+"/projection/"+messageID, bytes.NewReader(editBody))
+	editReq.Header.Set("Authorization", "Bearer "+token)
+	editReq.Header.Set("Content-Type", "application/json")
+	editRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(editRec, editReq)
+	if editRec.Code != http.StatusOK {
+		t.Fatalf("chat edit status=%d body=%s", editRec.Code, editRec.Body.String())
+	}
+	updated := client.readJSON(t)
+	if updated["type"] != realtimeMessageChatUpdated || updated["scope"] != scope || updated["node_id"] != node.NodeID || updated["block_id"] != blockID || updated["message_id"] != messageID {
+		t.Fatalf("updated chat message = %+v", updated)
 	}
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+messageID+"?company_id="+companyID, nil)
 	deleteReq.Header.Set("Authorization", "Bearer "+token)

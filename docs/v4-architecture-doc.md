@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-22
 
 # MangoRTS Current Data And Realtime Architecture
 
@@ -32,7 +32,7 @@ The frontend reuses one physical WebSocket per API/company boundary and refcount
 | Scope | Mounted consumer | Live payload | Canonical recovery |
 | --- | --- | --- | --- |
 | `notifications:user:{user_id}` | App-lifetime notification bridge | Created/deleted/cleared notification hints | Coalesced notification summary; Updates feed only for real mounted feed changes |
-| `chat:node:{node_id}` | Mounted Node chat | Committed chat create/delete identifiers | Coalesced exact Node projection/chat read |
+| `chat:node:{node_id}` | Mounted Node chat | Committed chat create/update/delete identifiers | Coalesced exact Node projection/chat read |
 | `board:{board_id}` | Mounted Logic Gate Kanban | Compact `kanban.changed` hint | Coalesced exact board/work read |
 | `mailbox:personal:account:{user_id}:{account}` | Exact selected personal mailbox | Compact provider message/folder hint | Exact mailbox folder/list/detail reads |
 | `mailbox:shared:{shared_inbox_id}` | Exact selected mail-bearing shared inbox | Compact provider message/folder hint | Exact shared-mailbox reads |

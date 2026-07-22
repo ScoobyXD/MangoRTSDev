@@ -71,6 +71,7 @@ PM60 - Project Logic Gates / Nodes exposes an Add control that opens an elevated
 
 PM61 - Project Field, Status, Health, Account, and Team dropdowns are one-click commit controls. Selecting an option immediately persists that selected or toggled value and closes the menu, with no staged Apply or Cancel footer. Multi-value controls preserve every other selected ID, while Not set clears the complete assignment.
 PM62 - Project Summary conditionally mirrors the company-local generic Field column as a **Fields** metadata control immediately left of Status. It shows and edits the same project field assignments through the canonical entity-field assignment endpoint.
+PM63 - Project Summary chat gives every current user's sent comment an author-only Edit action. A successful edit PATCHes the stable Project chat projection, preserves reply/source/attachment/creation metadata and ordering, updates the displayed text and mention IDs, and marks the comment Edited. Project Edit permission alone never permits editing or deleting another author's comment, and the generic Project information POST cannot overwrite an existing chat projection.
 
 ## Scenarios
 
@@ -311,3 +312,22 @@ Expected:
 - No Project metadata dropdown displays Apply or Cancel buttons.
 - Opening the project shows **Fields** immediately left of Status in Project Summary.
 - The summary value matches the list-row assignment, and changing it updates the same canonical project field assignments.
+
+### Scenario PM-S10: Edit A Project Comment
+
+Business logic covered:
+- PM63
+
+Given:
+- Project Summary chat contains comments from the current user and another Project editor.
+
+When:
+- The current user edits their own comment and attempts to edit or delete the other comment.
+
+Expected:
+- The inline edit saves the current user's changed text and mentions on the stable Project projection and shows Edited.
+- Reply/source context, attachments, author, creation time, and ordering remain unchanged.
+- The other comment has no Edit action, and direct edit/delete requests for it are forbidden.
+- A failed save restores the canonical row and keeps the edit draft available.
+
+Focused backend coverage lives in `backend/internal/http/chat_comment_edit_test.go`; the shared mounted UI behavior is covered by `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`.

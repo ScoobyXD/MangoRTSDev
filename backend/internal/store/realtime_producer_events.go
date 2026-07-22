@@ -176,6 +176,23 @@ func nodeChatDeletedOutboxInput(item domain.NodeProjection) (RealtimeOutboxInput
 	_ = json.Unmarshal([]byte(item.Information), &body)
 	return nodeChatOutboxInput(item.CompanyID, item.NodeID, body.BlockID, item.InformationID, "chat.message.deleted")
 }
+
+func nodeChatUpdatedOutboxInput(item domain.NodeProjection) (RealtimeOutboxInput, error) {
+	if !strings.EqualFold(strings.TrimSpace(item.Type), "Text block chat") {
+		return RealtimeOutboxInput{}, ErrInvalid
+	}
+	var body struct {
+		BlockID string `json:"block_id"`
+	}
+	_ = json.Unmarshal([]byte(item.Information), &body)
+	input, err := nodeChatOutboxInput(item.CompanyID, item.NodeID, body.BlockID, item.InformationID, "chat.message.updated")
+	if err != nil {
+		return RealtimeOutboxInput{}, err
+	}
+	// Each saved edit needs its own durable event even though the comment ID is stable.
+	input.EventID = stableRealtimeEventID("chat.message.updated", item.CompanyID, item.NodeID, item.InformationID, item.Information)
+	return input, nil
+}
 func isKanbanRealtimeDomainEvent(eventType string) bool {
 	switch strings.TrimSpace(eventType) {
 	case "kanban_board_saved", "kanban_board_updated", "kanban_board_deleted",

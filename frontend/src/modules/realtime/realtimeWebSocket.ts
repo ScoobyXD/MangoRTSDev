@@ -21,6 +21,7 @@ type RealtimeMessageType =
   | "notification.deleted"
   | "notifications.cleared"
   | "chat.message.created"
+  | "chat.message.updated"
   | "chat.message.deleted"
   | "kanban.changed"
   | "mailbox.message.changed"
@@ -84,6 +85,16 @@ export type RealtimeNotificationsClearedMessage = RealtimeBaseMessage & {
 
 export type RealtimeChatMessageCreatedMessage = RealtimeBaseMessage & {
   type: "chat.message.created";
+  company_id: string;
+  scope: string;
+  node_id: string;
+  block_id: string;
+  message_id: string;
+  ts?: string;
+};
+
+export type RealtimeChatMessageUpdatedMessage = RealtimeBaseMessage & {
+  type: "chat.message.updated";
   company_id: string;
   scope: string;
   node_id: string;
@@ -204,6 +215,7 @@ type RealtimeInboundMessage =
   | RealtimeNotificationDeletedMessage
   | RealtimeNotificationsClearedMessage
   | RealtimeChatMessageCreatedMessage
+  | RealtimeChatMessageUpdatedMessage
   | RealtimeChatMessageDeletedMessage
   | RealtimeKanbanChangedMessage
   | RealtimeMailboxMessageChangedMessage
@@ -222,6 +234,7 @@ export type RealtimeSubscriptionHandlers = {
   onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
   onNotificationsCleared?: (message: RealtimeNotificationsClearedMessage) => void;
   onChatMessageCreated?: (message: RealtimeChatMessageCreatedMessage) => void;
+  onChatMessageUpdated?: (message: RealtimeChatMessageUpdatedMessage) => void;
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
@@ -330,6 +343,14 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       return { ...scoped, type, deleted_count: optionalNumber(payload.deleted_count) ?? 0, ts: stringValue(payload.ts) || undefined };
     }
     case "chat.message.created": {
+      const scoped = scopedMessageBase(payload, type);
+      const nodeID = stringValue(payload.node_id);
+      const blockID = stringValue(payload.block_id);
+      const messageID = stringValue(payload.message_id);
+      if (!nodeID || !blockID || !messageID) throw new Error("realtime_chat_message_required");
+      return { ...scoped, type, node_id: nodeID, block_id: blockID, message_id: messageID, ts: stringValue(payload.ts) || undefined };
+    }
+    case "chat.message.updated": {
       const scoped = scopedMessageBase(payload, type);
       const nodeID = stringValue(payload.node_id);
       const blockID = stringValue(payload.block_id);
@@ -738,6 +759,9 @@ export class MangoRealtimeClient {
           break;
         case "chat.message.created":
           sub.onChatMessageCreated?.(message);
+          break;
+        case "chat.message.updated":
+          sub.onChatMessageUpdated?.(message);
           break;
         case "chat.message.deleted":
           sub.onChatMessageDeleted?.(message);

@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-22
 
 # Permissions Tests
 
@@ -75,6 +75,7 @@ P63 - A newly created email Node has default access `no_access`, one system-mana
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
+P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
 
 ## Scenarios
 
@@ -305,3 +306,22 @@ Expected:
 - Group changes and mention deletion do not change existing participants.
 - Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to email/thread/draft visibility.
 - Existing company-admin/dev-admin bypass remains intact but does not itself create a participant, triage card, notification, or shared draft listing.
+
+### Scenario P-S9: Comment Authorship Is A Mutation Boundary
+
+Business logic covered:
+- P67
+
+Given:
+- An author, a different entity editor, and an administrator can read the same chat comment.
+
+When:
+- Each actor attempts to edit or delete that exact comment.
+
+Expected:
+- Only the stored author may mutate it, and the author must still have normal entity Edit access.
+- A missing or mismatched `author_id` fails closed.
+- Legacy create/upsert routes cannot replace an existing chat projection.
+- These checks do not alter read, reply, mention-participant, or administrator visibility rules.
+
+Focused backend coverage lives in `backend/internal/http/chat_comment_edit_test.go`.

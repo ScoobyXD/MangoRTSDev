@@ -118,6 +118,15 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 			return domain.NodeProjection{}, err
 		}
 	}
+	if previousFound && strings.EqualFold(strings.TrimSpace(previous.Type), "Text block chat") && strings.EqualFold(infoType, "Text block chat") {
+		outboxInput, err := nodeChatUpdatedOutboxInput(projection)
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return domain.NodeProjection{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.NodeProjection{}, err
 	}

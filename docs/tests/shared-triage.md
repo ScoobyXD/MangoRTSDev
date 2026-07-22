@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-22
 
 # Shared Triage Tests
 
@@ -213,6 +213,7 @@ ST180 - Automated realtime regression tests must assert request budgets for Shar
 ST184 - Shared Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next always occupying three equal lower positions. Inactive lower controls use shared light gradient tints; only the selected Compose or My Drafts destination becomes fully saturated. Archive page/next remains in the third slot and is disabled instead of removed outside Inbox, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
 ST185 - Once a Shared Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens that existing Node and carries the clicked provider message ID without leaking outside established shared-inbox/participant authorization. Before creation, Create Node From Email shows only priority then adjacent Logic Gate search, Add Email to Node shows only Node search, and neither opens chat or duplicate create/import buttons. Priority, Logic Gate, and Node-search menus all use the standard neutral elevated neomorphic surface with the shared cyan-to-violet highlight; priority/gate semantics never introduce orange or green panel themes. Successful create/add stays on the email under a temporary green banner. The created Node has its authorized durable thread route, exact message-linked text box, shared accent, and no transient `not_found` card.
+ST186 - In a shared-inbox email collaboration, every chat comment authored by the current user has an inline Edit action after it is sent. Other participants' comments have no Edit action even when they share Node Edit access. Saving stays inside the exact shared-inbox/collaboration authorization boundary, preserves the source email/message linkage and attachment/reply metadata, applies newly resolved mentions atomically, and displays Edited after canonical reconciliation.
 
 ## Scenarios
 
@@ -1005,3 +1006,22 @@ Given:
 Expected:
 - Sent occupies the third equal top slot and My Drafts the second equal lower slot; Compose and Archive/next complete the symmetric lower row in every mailbox tab.
 - The lower actions use light shared gradients until selected, only one destination is fully saturated, and Archive/next remains visible but disabled outside Inbox. Both dropdown rows visibly highlight on pointer hover and keyboard focus.
+
+### Scenario ST-S28: Edit A Shared Collaboration Comment
+
+Business logic covered:
+- ST186
+
+Given:
+- Shared Triage Chat is open for an authorized shared-inbox collaboration with comments from multiple participants.
+
+When:
+- The current user edits a comment they sent and another participant observes the mounted chat.
+
+Expected:
+- Edit is available only to the exact stored author, regardless of the other participant's Node Edit access.
+- Saving preserves shared-inbox/email/message linkage and all attachment/reply/source metadata while updating text and resolved mentions.
+- The edit remains inside existing shared-inbox and collaboration authorization, and the observing participant converges through the exact Node chat refresh.
+- Failure retains the author's draft without displaying an uncommitted value as canonical.
+
+Shared UI/realtime coverage lives in `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx` and `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`; backend authorization is covered by `backend/internal/http/chat_comment_edit_test.go`.

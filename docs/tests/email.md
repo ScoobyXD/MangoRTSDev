@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-22
 
 # Email Tests
 
@@ -137,6 +137,7 @@ EMAIL108 - Personal Email, My Triage, and Shared Triage use the same ordered mai
 EMAIL109 - My Triage and Shared Triage use one email-to-node model. A collaboration Node owns one separate Node-wide email column containing the imported standalone email or complete chronological provider thread; attached sources are never copied into editable text. Explicit creation first requires a priority, then shows an adjacent elevated Logic Gate search. Selecting a Logic Gate assigns the new Node to that gate's `requested` status with the same priority; choosing **Create without a Logic Gate** leaves it unassigned. Creation persists the canonical Attached email and creates or reuses the exact-message text box with durable `email_message_id` and collision-free `email_accent`, even with no chat draft. The message card and text-box header share that accent and retain two-way navigation. Add Email to Node uses the same thread attachment and linked-text-box contract for the selected existing Node. A message/selection chat creates or reuses that exact message-linked text box and writes the same chat projection shown beside it. Each chat is attached through that text-box ID. The email column, text editor, and chat are independently toggleable, extend through available height, and enter with a short reduced-motion-aware transition. The authenticated Node email-thread route returns Mango-stored selected-message or chronological-thread history for that exact Node/thread link without a provider read or generic `not_found` fallthrough. Legacy Attached-email-keyed chats remain read-only fallbacks; every new chat and attachment uses a real text-box ID. Reload restores message links/colors, and downstream Logic Gate, Kanban, or Project views preserve `created_from_email=true`.
 EMAIL110 - The Node email header does not contain a collapse/hide-column arrow; the existing Node-level Email toggle is the sole hide/show control. The header instead offers an accessible Expand email column control. Its 180-millisecond transition gives email all workspace width except a 38-pixel right rail that preserves the text-box circle-and-line timeline, marks the clipped editor/chat region inert, and restores the user's prior normal layout on the second press. Node chat opens beside an editor at a compact 340-pixel default rather than half the available width, while deliberate separator resizing remains persisted.
 EMAIL111 - The selected My Triage or Shared Triage message toolbar keeps ordinary mail controls in a horizontally scrollable left group and a non-wrapping, right-aligned group containing Create Node From Email (or Open Email Node once linked), Add Email to Node, and Chat. Create displays only its compact priority menu and then the adjacent Logic Gate picker; Add displays only a compact searchable Node menu. All three action menus use the standard neutral neomorphic surface, raised shadow, inset search field, and cyan-to-violet edge highlight. Urgency and Logic Gate selection may strengthen that shared highlight but must not introduce orange priority panels, green/teal Logic Gate panels, or other workflow-specific color themes. Neither action opens chat or shows duplicate create/import choices. Chat opens only the full-height ChatPane. A successful explicit creation leaves the email visible and temporarily shows **Node was created.** in a green banner directly above its title; successful Add similarly shows **Email was added to node.** Associated reply cards place a per-message Chat icon immediately left of their three-dot menu. Email-list rows/reply cards use the shared cyan-to-blue Node icon, and an established Node indicator opens the existing Node at the exact provider message.
+EMAIL112 - My Triage and Shared Triage email-collaboration chats use the same author-only inline comment editor as Node and Project chat. Editing recomputes direct-user and user-group mention IDs from the saved text, atomically preserves the source email/text-box relationship and existing collaboration payload, adds any newly resolved participants through the normal append-only participant path, and reconciles other mounted viewers through the exact Node `chat.message.updated` hint. Failed saves roll back the optimistic row while retaining the draft for retry.
 
 ## Scenarios
 
@@ -734,3 +735,26 @@ Expected:
 - Legacy Attached-email-keyed chats may still render beside a linked text box, but no new chat or attachment is written to the Attached-email ID.
 - My Triage and Shared Triage use the same controls and persistence path. Their top toolbar keeps mail actions on the left and the Create Node From Email, Add Email to Node, and Chat controls together on the right.
 - Every linked row and reply card uses the canonical cyan-to-blue Explorer Node icon; no purple email-shaped or locally drawn Node indicator remains.
+
+### Scenario EMAIL-S28: Edit An Email-Collaboration Comment
+
+Business logic covered:
+- EMAIL112
+
+Given:
+- A personal or shared email conversation has a collaboration chat with comments, mentions, attachments, and a message-linked text box.
+
+When:
+- The author edits one sent comment, changes its mention text, and saves while another participant has the chat mounted.
+
+Expected:
+- Only the author can edit or delete the comment.
+- The atomic save preserves email/thread/text-box linkage, attachments, reply/source metadata, author, and original creation time.
+- Newly resolved mention participants are appended through the existing collaboration transaction.
+- The other mounted participant receives a compact exact-Node update hint and canonically refreshes the chat.
+- Failed persistence restores the prior row and retains the draft for retry.
+
+Automated coverage:
+- `backend/internal/http/chat_comment_edit_test.go`
+- `backend/internal/http/realtime_websocket_test.go`
+- `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`
