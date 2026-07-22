@@ -197,11 +197,15 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(workspace, /gridTemplateColumns: showDetailResizeHandle && emailChatVisible/);
   assert.match(workspace, /gridTemplateRows: !showDetailResizeHandle && emailChatVisible/);
   assert.match(workspace, /chatAvailable=\{emailChatAvailable\}[\s\S]*chatOpen=\{emailChatVisible\}[\s\S]*onToggleChat=\{toggleEmailChat\}/);
-  assert.match(workspace, /\{emailChatMounted && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
+  assert.match(workspace, /\{\(emailChatMounted \|\| emailActionRequest\) && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
   assert.match(detail, /data-email-node-actions="true"[\s\S]*Create Node From Email[\s\S]*Add Email to Node[\s\S]*aria-controls="email-collaboration-chat"/);
   assert.match(detail, /aria-controls="email-collaboration-chat"[\s\S]*aria-expanded=\{chatOpen\}[\s\S]*aria-pressed=\{chatOpen\}/);
   assert.match(workspace, /requestEmailPanelAction\("create"\)/);
   assert.match(workspace, /requestEmailPanelAction\("import"\)/);
+  const requestActionStart = workspace.indexOf("const requestEmailPanelAction");
+  const toggleChatStart = workspace.indexOf("const toggleEmailChat", requestActionStart);
+  assert.ok(requestActionStart >= 0 && toggleChatStart > requestActionStart);
+  assert.doesNotMatch(workspace.slice(requestActionStart, toggleChatStart), /setEmailChatSession/);
   assert.match(surface, /actionRequest[\s\S]*setPendingAction\(actionRequest\.action\)[\s\S]*setPriorityMenuOpen\(actionRequest\.action !== "chat"\)/);
   assert.match(sharedChat, /headerTrailing\?: React\.ReactNode/);
   assert.match(sharedChat, /\{headerTrailing && \(/);
@@ -219,9 +223,24 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /if \(!collaboration && \(!priority \|\| priority < 1 \|\| priority > 5\)\) \{[\s\S]*setPriorityMenuOpen\(true\)/);
   assert.match(surface, /priority,[\s\S]*await requestJSON\([\s\S]*setMessages\([\s\S]*setDraft\(""\)/);
   assert.doesNotMatch(surface, /optimisticInformationID/);
-  assert.match(surface, /Create node for this email/);
-  assert.match(surface, /Import into existing node/);
+  assert.doesNotMatch(surface, /Create node for this email/);
+  assert.doesNotMatch(surface, /Import into existing node/);
+  assert.match(surface, /data-email-action-popover="true"/);
+  assert.match(surface, /aria-label="Choose email node priority"/);
+  assert.match(surface, /data-email-logic-gate-picker="true"[\s\S]*Search Logic Gates/);
+  assert.match(surface, /assignNodeToLogicGateStatus\(\{[\s\S]{0,360}status: "requested"/);
+  assert.match(surface, /aria-label="Add email to node"[\s\S]*placeholder="Search nodes"/);
+  assert.match(surface, /onActionSuccess\("Node was created\."\)/);
+  assert.match(surface, /onActionSuccess\("Email was added to node\."\)/);
+  assert.match(workspace, /actionNotice=\{emailActionNotice\?\.message \?\? ""\}/);
+  assert.match(detail, /data-email-action-success="true"/);
+  assert.match(detail, /title="Chat about this email message"[\s\S]*onCommentOnMessage\(message\)/);
+  assert.match(detail, /data-email-node-actions="true"[\s\S]{0,220}flexWrap: "nowrap"/);
+  assert.match(surface, /targetEmailMessageID = selection\?\.messageID\?\.trim\(\) \|\| message\.id\.trim\(\)/);
+  assert.match(surface, /message: collaborationTargetMessage,[\s\S]{0,100}messageID: targetEmailMessageID/);
   assert.match(surface, /convertTriageMessagesToExplorerTarget/);
+  assert.match(surface, /existingLinkedProjection[\s\S]{0,420}textBlockID = existingLinkedProjection\?\.information_id \?\? generateStableInformationID\(\)/);
+  assert.match(surface, /const textBlockWrite = existingLinkedProjection \? undefined/);
   assert.match(surface, /parseEditorAttachedEmails/);
   assert.match(surface, /const ensureLinkedEmailTextBlock = React\.useCallback/);
   assert.match(surface, /emailMessageID,[\s\S]{0,160}emailAccent: editorEmailMessageAccent/);
@@ -229,6 +248,8 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /blockID: activeBlockID,[\s\S]{0,500}selectionMessageID: !replyTargetID \? \(selection\?\.messageID \?\? message\.id\)/);
   assert.match(surface, /const linkedTextBlockID = await ensureLinkedEmailTextBlock\(created\);[\s\S]*saveCurrentDraftToCollaboration\(created, linkedTextBlockID\)/);
   assert.match(surface, /informationID: activeBlockID,[\s\S]{0,120}editorSurface: "email_collaboration_chat"/);
+  assert.match(surface, /<ChatPane[\s\S]{0,800}fillHeight/);
+  assert.match(sharedChat, /fillHeight\?: boolean/);
 });
 
 test("email-created nodes reuse canonical chat data with one node email column", () => {
@@ -255,6 +276,10 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
   assert.match(nodeSurface, /tabbed=\{false\}/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
+  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "min\(820px, calc\(100vh - 250px\)\)"/);
+  assert.match(nodeParts, /className="editor-document-scroll mango-pane-enter"/);
+  assert.match(nodeSurface, /className="mango-pane-enter"[\s\S]{0,120}data-node-email-column|data-node-email-column="true"[\s\S]{0,120}className="mango-pane-enter"/);
+  assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);
   assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
   assert.match(projection, /selection_block_id: input\.selectionBlockID/);
   assert.match(projection, /created_from_email: input\.createdFromEmail === true/);
