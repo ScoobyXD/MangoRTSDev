@@ -226,6 +226,12 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.doesNotMatch(surface, /Create node for this email/);
   assert.doesNotMatch(surface, /Import into existing node/);
   assert.match(surface, /data-email-action-popover="true"/);
+  assert.match(surface, /const emailActionSurfaceStyle: React\.CSSProperties = \{[\s\S]*EDITOR_NEU_SURFACE[\s\S]*EDITOR_NEU_EDGE_FRAME[\s\S]*EDITOR_NEU_PANEL_SHADOW/);
+  assert.match(surface, /const emailActionOptionStyle: React\.CSSProperties = \{[\s\S]*EDITOR_NEU_SHADOW/);
+  assert.equal((surface.match(/data-email-action-surface="neomorphic"/g) ?? []).length, 3, "priority, Logic Gate, and Node search should share the standard elevated surface");
+  const actionPopoverSource = surface.slice(surface.indexOf('data-email-action-popover="true"'), surface.indexOf("<aside", surface.indexOf('data-email-action-popover="true"')));
+  assert.match(actionPopoverSource, /data-email-action-option="true"/);
+  assert.doesNotMatch(actionPopoverSource, /rgba\(249,115,22|rgba\(20,184,166|#9a3412|#7c2d12|#0f766e/);
   assert.match(surface, /aria-label="Choose email node priority"/);
   assert.match(surface, /data-email-logic-gate-picker="true"[\s\S]*Search Logic Gates/);
   assert.match(surface, /assignNodeToLogicGateStatus\(\{[\s\S]{0,360}status: "requested"/);
@@ -278,7 +284,7 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "min\(820px, calc\(100vh - 250px\)\)"/);
   assert.match(nodeParts, /className="editor-document-scroll mango-pane-enter"/);
-  assert.match(nodeSurface, /className="mango-pane-enter"[\s\S]{0,120}data-node-email-column|data-node-email-column="true"[\s\S]{0,120}className="mango-pane-enter"/);
+  assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,180}className="mango-pane-layout-transition"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);
   assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
   assert.match(projection, /selection_block_id: input\.selectionBlockID/);
