@@ -185,7 +185,7 @@ MT153 - Mailbox subscription acceptance/reconnect and global notification-summar
 MT154 - Automated realtime regression tests must assert request budgets, not merely final rows: 12 archive echoes plus local send/star/read/delete echoes produce zero invalidations, zero timers, and zero provider reads; acceptance/reconnect produces zero reads; external bursts cannot request a message-list replacement.
 MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top positions, with Compose, My Drafts, and Archive page/next always occupying three equal lower positions. Inactive lower controls use shared light gradient tints; only the selected Compose or My Drafts destination becomes fully saturated. Archive page/next remains in the third slot and is disabled instead of removed outside Inbox, while All and Spam expose a full-row hover/focus highlight with no dead option gap.
 
-MT158 - Once a My Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens the existing Node rather than creating another one and carries the clicked provider message ID so the left email pane expands and scrolls to that exact reply.
+MT158 - Once a My Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens the existing Node rather than creating another one and carries the clicked provider message ID so the left email pane expands and scrolls to that exact reply. Create Node From Email opens with its durable email/thread already readable through the Node email-thread route, its message-linked text box and shared accent present, and no transient `not_found` card.
 
 ## Scenarios
 
