@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-21
 
 # GVIC Tests
 
@@ -64,6 +64,8 @@ GVIC53 - The committed GVIC response patches or revalidates the initiating brows
 GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_edit`.
 GVIC55 - Email-derived Nodes use normal editable Node GVIC semantics. First-comment creation atomically assigns the creator as direct Generated GVIC; accepted mention participation remains a separate collaboration access grant and does not itself add a GVIC role. Later authorized GVIC add/set/remove follows the ordinary Node contract.
 GVIC56 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
+GVIC57 - Notification routing follows the editor/resource where the action occurs: Node editor mentions, urgent mentions, chat, and work-field updates use current effective Node GVIC; Logic Gate editor mentions and urgent mentions use current effective Logic Gate GVIC. Parent or neighboring resource GVIC never substitutes.
+GVIC58 - A Node or Logic Gate GVIC mutation creates an assignment notification only for a user whose effective assignment was newly added or whose effective role changed. Unchanged existing users, removed users, unrelated users, and the actor receive no assignment notification.
 
 ## Scenarios
 
@@ -311,3 +313,20 @@ Expected:
 - Selecting that action opens an explicit Yes/No confirmation.
 - Choosing No, canceling, or dismissing performs no write.
 - Only choosing Yes applies the current Logic Gate GVIC assignment snapshot to all currently assigned nodes.
+
+### Scenario GVIC-S11: Editor-Owned Routing And Target-Only Assignment Updates
+
+Business logic covered:
+- GVIC36
+- GVIC57
+- GVIC58
+
+Given:
+- A Node is inside a Logic Gate and their current GVIC assignments differ.
+- Node and Logic Gate editor actions are committed.
+- Bob is newly assigned, Alice is unchanged, and Charlie is removed by a GVIC mutation.
+
+Expected:
+- Node actions use the Node's current effective roles and Logic Gate actions use the Logic Gate's current effective roles.
+- Only Bob receives the assignment update; Alice, Charlie, unrelated users, and the actor do not.
+- Group-backed assignments use the same effective-user delta rule without duplicating recipients.

@@ -1235,6 +1235,7 @@ type Notification struct {
 	LogicGateID      string     `json:"logic_gate_id,omitempty"`
 	NodeID           string     `json:"node_id,omitempty"`
 	InformationID    string     `json:"information_id,omitempty"`
+	Priority         *int       `json:"priority,omitempty"`
 	ReadTimestamp    *time.Time `json:"read_timestamp,omitempty"`
 	CreatedTimestamp time.Time  `json:"created_timestamp"`
 }

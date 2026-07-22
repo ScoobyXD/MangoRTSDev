@@ -99,8 +99,20 @@ with visible as (
     and (
       case
         when notifications.entity_type='project' then mangorts_user_can_access_resource(notifications.company_id, 'project', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
-        when btrim(notifications.logic_gate_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.logic_gate_id::uuid, notifications.recipient_user_id, 'edit')
+        when btrim(notifications.node_id) <> '' and notifications.role in ('generated', 'verified', 'consulted', 'informed') then exists (
+          select 1
+          from nodes
+          where nodes.company_id=notifications.company_id
+            and nodes.node_id=notifications.node_id::uuid
+        )
+        when btrim(notifications.logic_gate_id) <> '' and notifications.role in ('generated', 'verified', 'consulted', 'informed') then exists (
+          select 1
+          from logic_gates
+          where logic_gates.company_id=notifications.company_id
+            and logic_gates.logic_gate_id=notifications.logic_gate_id::uuid
+        )
         when btrim(notifications.node_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.node_id::uuid, notifications.recipient_user_id, 'edit')
+        when btrim(notifications.logic_gate_id) <> '' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.logic_gate_id::uuid, notifications.recipient_user_id, 'edit')
         when notifications.entity_type='logic_gate' then mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
         when notifications.entity_type='node' then mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.entity_id::uuid, notifications.recipient_user_id, 'edit')
         else true

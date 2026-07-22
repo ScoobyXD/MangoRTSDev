@@ -96,3 +96,36 @@ func TestSchemaDropsDerivedResourceGrantCompatibilityTriggers(t *testing.T) {
 		}
 	}
 }
+
+func TestNotificationsSchemaStoresPriorityContext(t *testing.T) {
+	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
+	schemaRaw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	for _, required := range []string{
+		"priority smallint",
+		"constraint notifications_priority_chk check (priority is null or priority between 1 and 5)",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Fatalf("canonical notifications schema missing %q", required)
+		}
+	}
+
+	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260721_notification_priority_context.sql")
+	migrationRaw, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("ReadFile priority migration: %v", err)
+	}
+	migration := strings.ToLower(strings.Join(strings.Fields(string(migrationRaw)), " "))
+	for _, required := range []string{
+		"add column if not exists priority smallint",
+		"add constraint notifications_priority_chk",
+		"check (priority is null or priority between 1 and 5)",
+	} {
+		if !strings.Contains(migration, required) {
+			t.Fatalf("priority migration missing %q", required)
+		}
+	}
+}

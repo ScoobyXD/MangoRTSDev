@@ -1423,7 +1423,7 @@ function UpdateCanonicalRowCopy({
   const nodeLabel = updateRowNodeLabel(row, nodeDetails);
   const statusLabel = updateRowStatusLabel(row, nodeDetails);
   const chatMention = updateRowIsChatMention(row);
-  const priorityValue = nodeDetails ? updatePriorityValue(nodeDetails.priority) : null;
+  const priorityValue = updatePriorityValue(item.priority ?? nodeDetails?.priority);
   const statusToken = statusLabel ? <UpdateStatusToken status={statusLabel} /> : null;
   const priorityToken = priorityValue !== null ? <UpdatePriorityToken priority={priorityValue} /> : null;
   const nodeEntity = <UpdateInlineEntity kind="node" label={nodeLabel} />;
@@ -1678,7 +1678,7 @@ function updateRowStatusLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | 
 }
 
 function updatePriorityValue(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(0, Math.min(5, Math.round(value)));
 }
 
@@ -1852,7 +1852,7 @@ function getUpdateGroupValues(
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
   if (field === "priority") {
     const nodeID = row.node?.id.trim() ?? "";
-    const priority = updatePriorityValue(nodeID ? resolveNodeDetails?.(nodeID)?.priority : null);
+    const priority = updatePriorityValue(row.item.priority ?? (nodeID ? resolveNodeDetails?.(nodeID)?.priority : null));
     const option = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((item) => item.value === String(priority));
     const priorityOrder = resolveUpdatePriorityGroupOrder(priority);
     return option

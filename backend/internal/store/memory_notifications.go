@@ -36,8 +36,8 @@ func NotificationAccessTargets(entityType, entityID, logicGateID, nodeID string)
 		seen[key] = true
 		targets = append(targets, NotificationAccessTarget{EntityType: targetType, EntityID: targetID})
 	}
-	add(EntityTypeLogicGate, logicGateID)
 	add(EntityTypeNode, nodeID)
+	add(EntityTypeLogicGate, logicGateID)
 	add(entityType, entityID)
 	return targets
 }
@@ -54,6 +54,10 @@ func cloneNotification(item domain.Notification) domain.Notification {
 		actor := *item.ActorUserID
 		item.ActorUserID = &actor
 	}
+	if item.Priority != nil {
+		priority := *item.Priority
+		item.Priority = &priority
+	}
 	if item.ReadTimestamp != nil {
 		read := *item.ReadTimestamp
 		item.ReadTimestamp = &read
@@ -67,8 +71,13 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if companyID == "" || userID == "" {
 		return true
 	}
-	if logicGateID := strings.TrimSpace(item.LogicGateID); logicGateID != "" && notificationLogicGateGVICRole(item.Role) {
-		return r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID)
+	if notificationLogicGateGVICRole(item.Role) {
+		if nodeID := strings.TrimSpace(item.NodeID); nodeID != "" {
+			return r.entityExistsLocked(companyID, EntityTypeNode, nodeID)
+		}
+		if logicGateID := strings.TrimSpace(item.LogicGateID); logicGateID != "" {
+			return r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID)
+		}
 	}
 	target, ok := NotificationPrimaryAccessTarget(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID)
 	if !ok {
@@ -137,6 +146,9 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
 		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
 		candidate.InformationID = strings.TrimSpace(candidate.InformationID)
+		if candidate.Priority != nil && (*candidate.Priority < 1 || *candidate.Priority > 5) {
+			return nil, ErrInvalid
+		}
 		if candidate.CompanyID == "" || candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
@@ -167,6 +179,7 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 			LogicGateID:      candidate.LogicGateID,
 			NodeID:           candidate.NodeID,
 			InformationID:    candidate.InformationID,
+			Priority:         candidate.Priority,
 			CreatedTimestamp: now,
 		}
 		r.notifications[item.NotificationID] = item

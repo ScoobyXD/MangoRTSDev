@@ -311,11 +311,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	beforeEffective, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID})
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(beforeEffective, domain.GVICRoleGenerated)
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -327,12 +322,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	afterEffective, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID})
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(afterEffective, domain.GVICRoleGenerated)
-	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item, beforeGeneratedUserIDs, afterGeneratedUserIDs))
+	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}

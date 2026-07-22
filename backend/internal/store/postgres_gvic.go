@@ -74,6 +74,10 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 		}
 	}
 
+	beforeEffective, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, keyValue)
+	if err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
 	var beforeAssignments []domain.ResourceGVICAssignment
 	if input.ApplyToDescendants {
 		beforeAssignments, err = postgresResourceGVICAssignmentsForResource(ctx, tx, keyValue)
@@ -260,10 +264,7 @@ where company_id=$1::uuid
 	if err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
-	}
-	return ResourceGVICAssignmentMutationResult{
+	result := ResourceGVICAssignmentMutationResult{
 		CompanyID:            keyValue.companyID,
 		ResourceType:         keyValue.resourceType,
 		ResourceID:           keyValue.resourceID,
@@ -272,7 +273,18 @@ where company_id=$1::uuid
 		GVICAssignments:      sourceRows,
 		EffectiveAssignments: effectiveRows,
 		Events:               []domain.DomainEvent{},
-	}, nil
+	}
+	if eventInput, ok := resourceGVICUpdatedWorkspaceEventInput(result, beforeEffective, input.ActorUserID, input.IdempotencyKey); ok {
+		event, err := r.appendDomainEventTx(ctx, tx, eventInput)
+		if err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
+		result.Events = []domain.DomainEvent{event}
+	}
+	if err := tx.Commit(); err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
+	return result, nil
 }
 
 func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, policySequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {

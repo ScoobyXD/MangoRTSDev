@@ -3287,9 +3287,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const blockAttachmentDropdownItems = (nodeTextBlockAttachmentsByInformationID.get(block.id) ?? []).map((resourceAttachment) => ({
             resourceAttachment,
           }));
+          const clearSelectionAnchor = () => {
+            setChatSelectionAnchors((current) => {
+              if (!(chatBlockID in current)) return current;
+              const next = { ...current };
+              delete next[chatBlockID];
+              return next;
+            });
+          };
           const toggleChat = () => {
             setFocusedTextBlockID("");
             if (chatPaneIsVisible) {
+              clearSelectionAnchor();
               setActiveChatBlockID("");
               setOpenChatBlockIDs((current) => {
                 if (!current.has(chatBlockID)) return current;
@@ -3387,14 +3396,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const clearReplyTarget = () => {
             setChatReplyTargets((current) => {
               if (!current[chatBlockID]) return current;
-              const next = { ...current };
-              delete next[chatBlockID];
-              return next;
-            });
-          };
-          const clearSelectionAnchor = () => {
-            setChatSelectionAnchors((current) => {
-              if (!(chatBlockID in current)) return current;
               const next = { ...current };
               delete next[chatBlockID];
               return next;

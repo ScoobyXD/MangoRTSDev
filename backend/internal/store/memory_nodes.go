@@ -127,18 +127,14 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
-	gvicEffectiveBefore := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
-	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveBefore, domain.GVICRoleGenerated)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	gvicEffectiveAfter := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
-	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveAfter, domain.GVICRoleGenerated)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
-		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item, beforeGeneratedUserIDs, afterGeneratedUserIDs)
+		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
 	}
 	event, err := r.appendDomainEventLocked(eventInput)
 	if err != nil {

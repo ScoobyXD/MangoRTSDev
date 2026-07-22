@@ -1,4 +1,4 @@
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 # Nodes Tests
 
@@ -47,7 +47,7 @@ N18 - Inserting a table from the shared node editor toolbar must insert it at th
 N19 - A node header can show and edit the node's project placement: the project button displays the current project when one is known and otherwise offers project assignment.
 N20 - Assigning a node to a project from the node header supports project-only assignment; selecting a Logic Gate within that project is optional and moves or assigns the node to that Logic Gate only when chosen.
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
-N22 - When selected node text is sent to chat as a quote/prefill, the quote preview must expose a cancel action that clears the selected-text prefill without sending a message.
+N22 - When selected Node text is sent to chat as a quote/prefill, canceling with the quote X or closing that pending chat completely cancels the action: it clears the quote/prefill, removes the temporary source annotation, and collapses the editor/browser selection without sending a message. An unrelated chat draft remains intact.
 N23 - Live node editor typing writes the current text-block state to the node editor projection table and must not append a full rich-text document row to `node_information` on every keystroke autosave.
 N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
 N25 - Clicking Save flushes and acknowledges every pending structured collaboration operation, materializes the canonical collaboration head, then creates one manual saved editor version in `node_information`.
@@ -287,7 +287,8 @@ Expected:
 - Choosing an optional Logic Gate inside that project creates or updates the node/project relationship and assigns the node to the selected Logic Gate.
 - Go to Project opens the related project directly.
 - The selected-text chat quote includes a cancel action next to the quoted text.
-- Canceling the quote clears the prefill and leaves the chat draft otherwise intact.
+- Clicking the quote X clears the prefill, removes the temporary source highlight, and leaves the chat draft otherwise intact.
+- Closing the chat pane while that selected-text action is still pending performs the same complete cancellation.
 
 ### Scenario N-S8: Node Editor Projection Saves And Saved Versions
 
@@ -677,6 +678,7 @@ Expected:
 N112 - Every Node has one optional, independently resizable email column to the left of its full multi-text-box list. Importing one message stores one node-level attached-email source and displays the full thread as collapsed message cards on the mail viewer's compact vertical line-and-dot timeline; importing another reply from that same mailbox/thread does not create a duplicate source. The exact `/v1/nodes/{node_id}/email-threads/{email_thread_id}` read must route to the authorized durable Node/thread link and return Mango-stored history instead of falling through to `not_found`; ordinary reads do not require the source mailbox provider. Thread headers and the column header collapse or expand complete threads. Each text box independently owns its editor and optional chat. Email-linked text boxes persist a message ID and a matching accent shared with that exact email card; distinct linked messages within one node use distinct accents, including repaired legacy duplicates, while ordinary text boxes have no email accent. Clicking either side smoothly scrolls and pulses its exact linked partner. Email-created nodes bind their initial editor to the source message, and later normal or email-linked text boxes can coexist in any order.
 
 N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; linked text boxes can expand their exact full email card inline. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
+N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients from that Node's current effective GVIC assignments. A parent Logic Gate's GVIC never substitutes for Node GVIC. A Node GVIC assignment update is sent only to a newly assigned or effective-role-changed user, not unchanged, removed, unrelated, or actor users.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 

@@ -24,6 +24,7 @@ export type NotificationItem = {
   logic_gate_id?: string;
   node_id?: string;
   information_id?: string;
+  priority?: number | null;
   read_timestamp?: string;
   created_timestamp: string;
 };

@@ -1,4 +1,4 @@
-Last updated: 2026-07-16
+Last updated: 2026-07-21
 
 # Logic Gates Tests
 
@@ -313,3 +313,5 @@ Expected:
 - Closing or opening a different Node restores the normal saved half-view behavior.
 
 LG51 - Email-derived Nodes are not attached to a Logic Gate at chat creation. A later ordinary assignment is allowed, preserves selected Node priority/status behavior, and returns `created_from_email=true` immediately so the established email icon appears on the Logic Gate row/card without waiting for a refresh.
+LG52 - Normal and urgent mentions committed from a Logic Gate editor use that Logic Gate's current effective GVIC assignments and roles. Node GVIC is not consulted for a Logic Gate-owned action.
+LG53 - A Logic Gate GVIC mutation sends an assignment update only to a newly assigned or effective-role-changed user. Existing unchanged users, removed users, unrelated users, and the actor receive none.

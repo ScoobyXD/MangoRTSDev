@@ -2056,6 +2056,7 @@ type NotificationCreateInput struct {
 	LogicGateID     string
 	NodeID          string
 	InformationID   string
+	Priority        *int
 }
 
 type CreateNotificationsInput struct {
