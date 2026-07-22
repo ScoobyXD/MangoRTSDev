@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -126,15 +127,6 @@ func TestEmailNodeHTTPWorkSemanticsMentionParticipationAndCanonicalSafety(t *tes
 		t.Fatalf("email node update status = %d body=%s", updateRec.Code, updateRec.Body.String())
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+collaboration.NodeID+"?company_id="+companyID, nil)
-	deleteReq.Header.Set(confirmationDisplayNameHeader, creator.DisplayName)
-	deleteReq = attachmentRequestWithActor(deleteReq, creator, companyID, domain.RoleCompanyUser)
-	deleteRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusConflict {
-		t.Fatalf("canonical email node delete status = %d body=%s, want 409", deleteRec.Code, deleteRec.Body.String())
-	}
-
 	projectionDeleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+collaboration.NodeID+"/projection/"+collaboration.AttachedEmailInformationID+"?company_id="+companyID, nil)
 	projectionDeleteReq = attachmentRequestWithActor(projectionDeleteReq, creator, companyID, domain.RoleCompanyUser)
 	projectionDeleteRec := httptest.NewRecorder()
@@ -153,6 +145,28 @@ func TestEmailNodeHTTPWorkSemanticsMentionParticipationAndCanonicalSafety(t *tes
 	}
 
 	assertEmailCollaborationAttachmentAdminPrivacy(t, repo, companyID, collaboration, creator, target, admin)
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+collaboration.NodeID+"?company_id="+companyID, nil)
+	deleteReq.Header.Set(confirmationDisplayNameHeader, creator.DisplayName)
+	deleteReq = attachmentRequestWithActor(deleteReq, creator, companyID, domain.RoleCompanyUser)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("canonical email node delete status = %d body=%s, want 200", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, err := repo.GetNode(companyID, collaboration.NodeID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetNode after HTTP delete error = %v, want not found", err)
+	}
+	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, creator.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetCommunicationsEmailCollaboration after HTTP delete error = %v, want not found", err)
+	}
+	thread, err := repo.GetCommunicationsEmailThread(companyID, collaboration.EmailThreadID)
+	if err != nil {
+		t.Fatalf("GetCommunicationsEmailThread after HTTP delete: %v", err)
+	}
+	if thread.RootProviderMessageID != collaboration.RootMessageID || len(thread.Messages) == 0 {
+		t.Fatalf("stored email thread after HTTP node delete = %+v, want original email intact", thread)
+	}
 }
 
 type emailCollaborationDefaultFoldersHTTPTest struct{ nodesID string }

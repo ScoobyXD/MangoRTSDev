@@ -312,9 +312,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
-	if _, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected {
-		return ErrProtectedEmailCollaborationResource
-	}
 	r.deleteGVICMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
 		if item.CompanyID == companyID && item.EntityType == EntityTypeNode && item.EntityID == nodeID {
@@ -362,6 +359,28 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.NodeID == nodeID {
 			delete(r.emailNodeLinks, linkKey)
+		}
+	}
+	for linkKey, link := range r.nodeEmailThreads {
+		if link.CompanyID == companyID && link.NodeID == nodeID {
+			delete(r.nodeEmailThreads, linkKey)
+		}
+	}
+	collaborationIDs := map[string]bool{}
+	for collaborationKey, collaboration := range r.emailCollaborations {
+		if collaboration.CompanyID == companyID && collaboration.NodeID == nodeID {
+			collaborationIDs[collaboration.CollaborationID] = true
+			delete(r.emailCollaborations, collaborationKey)
+		}
+	}
+	for participantKey, participant := range r.emailCollaborationParticipants {
+		if participant.CompanyID == companyID && collaborationIDs[participant.CollaborationID] {
+			delete(r.emailCollaborationParticipants, participantKey)
+		}
+	}
+	for draftKey, draft := range r.emailDrafts {
+		if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
+			delete(r.emailDrafts, draftKey)
 		}
 	}
 	for board, cards := range r.kanbanCards {
