@@ -1,4 +1,4 @@
-Last updated: 2026-07-20
+Last updated: 2026-07-22
 
 # Project Management Tests
 
@@ -68,6 +68,9 @@ PM57 - A Node backed by an email collaboration uses normal project-relationship 
 PM58 - A successful inline Project rename updates the parent Project Management list immediately. Browser Back from `/projects/{project_id}` to `/project-management` clears the detail target and shows the Project list with the committed name.
 PM59 - Expanding a node in Project Logic Gates / Nodes renders the inline node editor at the full relationship-panel width. Group and row depth still indent the collapsed row labels, but must not add a left offset or reduce the width of the expanded editor.
 PM60 - Project Logic Gates / Nodes exposes an Add control that opens an elevated Company Explorer search surface restricted to Nodes and Logic Gates. Choosing a result creates or reuses its project relationship; a selected Logic Gate follows the existing Logic Gate-add contract and includes its known child nodes. Existing relationships are visibly marked and cannot be added again.
+
+PM61 - Project Field, Status, Health, Account, and Team dropdowns are one-click commit controls. Selecting an option immediately persists that selected or toggled value and closes the menu, with no staged Apply or Cancel footer. Multi-value controls preserve every other selected ID, while Not set clears the complete assignment.
+PM62 - Project Summary conditionally mirrors the company-local generic Field column as a **Fields** metadata control immediately left of Status. It shows and edits the same project field assignments through the canonical entity-field assignment endpoint.
 
 ## Scenarios
 
@@ -290,3 +293,21 @@ Expected:
 - Reopening the message uses the stored mailbox scope for thread hydration, recipients, attachments, Reply/Reply All, draft resume, and calendar invitation response.
 - A shared message never silently falls back to a personal grant.
 - Reply files and inline images remain linked to the project and originating project information ID, while the stored personal/shared mailbox scope continues to authorize provider reads, drafts, replies, and sends.
+
+### Scenario PM-S9: Immediate Project Metadata Selection And Detail Parity
+
+Business logic covered:
+- PM61
+- PM62
+
+Given:
+- The generic Field column is enabled for the active company.
+- A project has editable Field, Status, Health, Account, and Team metadata.
+
+Expected:
+- Selecting any option immediately saves that option and closes its dropdown.
+- Field, Account, and Team clicks toggle only the clicked assignment while preserving the other selected assignments.
+- Choosing Not set clears the complete value for that multi-value control.
+- No Project metadata dropdown displays Apply or Cancel buttons.
+- Opening the project shows **Fields** immediately left of Status in Project Summary.
+- The summary value matches the list-row assignment, and changing it updates the same canonical project field assignments.

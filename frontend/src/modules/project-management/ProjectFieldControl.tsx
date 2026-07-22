@@ -50,7 +50,6 @@ export function ProjectFieldControl({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [draftValues, setDraftValues] = useState<string[]>(values);
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState({ left: 0, top: 0, width: 240, openUp: false });
   const cleanValues = uniqueIDs(values);
@@ -80,7 +79,6 @@ export function ProjectFieldControl({
 
   useEffect(() => {
     if (!open) return undefined;
-    setDraftValues(cleanValues);
     setQuery("");
     updatePosition();
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -112,8 +110,14 @@ export function ProjectFieldControl({
     void onChange([id]);
   };
 
-  const toggleDraft = (id: string) => {
-    setDraftValues((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const commitMultiple = (id: string) => {
+    setOpen(false);
+    void onChange(toggleProjectFieldValue(cleanValues, id));
+  };
+
+  const clearMultiple = () => {
+    setOpen(false);
+    void onChange([]);
   };
 
   const popover = open && typeof document !== "undefined" ? createPortal(
@@ -136,24 +140,29 @@ export function ProjectFieldControl({
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
       ) : null}
-      <div style={choiceListStyle}>
+      <div role="listbox" aria-label={ariaLabel} aria-multiselectable={multiple || undefined} style={choiceListStyle}>
         {multiple ? (
-          <button type="button" style={clearChoiceStyle(draftValues.length === 0)} onClick={() => setDraftValues([])}>
-            <span style={checkboxStyle(draftValues.length === 0)}>{draftValues.length === 0 ? "✓" : ""}</span>
+          <button
+            type="button"
+            role="option"
+            aria-selected={cleanValues.length === 0}
+            style={clearChoiceStyle(cleanValues.length === 0)}
+            onClick={clearMultiple}
+          >
+            <span style={checkboxStyle(cleanValues.length === 0)}>{cleanValues.length === 0 ? "✓" : ""}</span>
             {placeholder}
           </button>
         ) : null}
         {filteredChoices.map((choice) => {
-          const selected = (multiple ? draftValues : cleanValues).includes(choice.id);
+          const selected = cleanValues.includes(choice.id);
           return (
             <button
               key={choice.id}
               type="button"
-              role={multiple ? "checkbox" : "option"}
-              aria-checked={multiple ? selected : undefined}
-              aria-selected={multiple ? undefined : selected}
+              role="option"
+              aria-selected={selected}
               style={choiceStyle(selected)}
-              onClick={() => multiple ? toggleDraft(choice.id) : commitSingle(choice.id)}
+              onClick={() => multiple ? commitMultiple(choice.id) : commitSingle(choice.id)}
             >
               <span style={checkboxStyle(selected)}>{selected ? "✓" : ""}</span>
               <span style={choiceLabelStyle}>{choice.label}</span>
@@ -162,12 +171,6 @@ export function ProjectFieldControl({
         })}
         {filteredChoices.length === 0 ? <div style={emptyStyle}>No matches</div> : null}
       </div>
-      {multiple ? (
-        <div style={footerStyle}>
-          <button type="button" style={cancelButtonStyle} onClick={() => setOpen(false)}>Cancel</button>
-          <button type="button" style={applyButtonStyle} onClick={() => { setOpen(false); void onChange(uniqueIDs(draftValues)); }}>Apply</button>
-        </div>
-      ) : null}
     </div>,
     document.body,
   ) : null;
@@ -178,7 +181,7 @@ export function ProjectFieldControl({
         ref={triggerRef}
         type="button"
         aria-label={ariaLabel}
-        aria-haspopup={multiple ? "dialog" : "listbox"}
+        aria-haspopup="dialog"
         aria-expanded={open}
         disabled={disabled}
         title={displayLabel}
@@ -203,6 +206,15 @@ export function ProjectFieldControl({
 
 function uniqueIDs(values: ReadonlyArray<string>): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+export function toggleProjectFieldValue(values: ReadonlyArray<string>, id: string): string[] {
+  const cleanValues = uniqueIDs(values);
+  const cleanID = id.trim();
+  if (!cleanID) return cleanValues;
+  return cleanValues.includes(cleanID)
+    ? cleanValues.filter((value) => value !== cleanID)
+    : [...cleanValues, cleanID];
 }
 
 function uniqueChoices(choices: ReadonlyArray<ProjectFieldChoice>): ProjectFieldChoice[] {
@@ -260,8 +272,8 @@ function popoverStyle(position: { left: number; top: number; width: number; open
     zIndex: 10050,
     width: position.width,
     maxHeight: "min(360px, calc(100vh - 16px))",
-    display: "grid",
-    gridTemplateRows: "auto minmax(0, 1fr) auto",
+    display: "flex",
+    flexDirection: "column",
     gap: 7,
     padding: 8,
     border: "1px solid rgba(255,255,255,.88)",
@@ -273,12 +285,9 @@ function popoverStyle(position: { left: number; top: number; width: number; open
 }
 
 const searchStyle: React.CSSProperties = { width: "100%", minHeight: 34, border: "1px solid rgba(99,102,241,.24)", borderRadius: 9, background: "rgba(255,255,255,.88)", boxShadow: "inset 2px 2px 6px rgba(148,163,184,.13), inset -2px -2px 6px rgba(255,255,255,.86)", padding: "0 10px", font: "inherit", fontSize: 12, boxSizing: "border-box", outline: "none" };
-const choiceListStyle: React.CSSProperties = { minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 4 };
+const choiceListStyle: React.CSSProperties = { flex: 1, minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 4 };
 const choiceStyle = (selected: boolean): React.CSSProperties => ({ minHeight: 36, display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 8, border: selected ? "1px solid rgba(99,102,241,.18)" : "1px solid transparent", borderRadius: 9, background: selected ? "linear-gradient(135deg, rgba(238,242,255,.98), rgba(239,246,255,.90))" : "transparent", color: selected ? "#3730a3" : "#334155", cursor: "pointer", padding: "0 9px", textAlign: "left", font: "inherit", boxShadow: selected ? "3px 3px 8px rgba(148,163,184,.10), -3px -3px 8px rgba(255,255,255,.72)" : undefined });
 const clearChoiceStyle = (selected: boolean): React.CSSProperties => ({ ...choiceStyle(selected), color: "#64748b", borderBottom: "1px solid rgba(226,232,240,.9)", borderRadius: 0, marginBottom: 3 });
 const checkboxStyle = (selected: boolean): React.CSSProperties => ({ width: 16, height: 16, display: "inline-grid", placeItems: "center", border: `1px solid ${selected ? "#2563eb" : "rgba(100,116,139,.35)"}`, borderRadius: 4, background: selected ? "#2563eb" : "#fff", color: "#fff", fontSize: 11, fontWeight: 950, boxSizing: "border-box" });
 const choiceLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 };
 const emptyStyle: React.CSSProperties = { minHeight: 54, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 800 };
-const footerStyle: React.CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 7, paddingTop: 1 };
-const cancelButtonStyle: React.CSSProperties = { minHeight: 30, border: "1px solid rgba(148,163,184,.3)", borderRadius: 7, background: "#fff", color: "#475569", padding: "0 10px", font: "inherit", fontSize: 12, fontWeight: 850, cursor: "pointer" };
-const applyButtonStyle: React.CSSProperties = { ...cancelButtonStyle, borderColor: "#2563eb", background: "#2563eb", color: "#fff" };
