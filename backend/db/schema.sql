@@ -1171,8 +1171,9 @@ create index if not exists idx_project_relationships_project_position
 
 create index if not exists idx_project_relationships_resource
   on project_relationships(company_id, resource_type, resource_id, project_id);
-create unique index if not exists idx_project_relationships_one_project_per_resource
-  on project_relationships(company_id, resource_type, resource_id);
+create unique index if not exists idx_project_relationships_one_project_per_node
+  on project_relationships(company_id, resource_id)
+  where resource_type='node';
 
 create table if not exists project_relationship_projection (
   company_id uuid not null,

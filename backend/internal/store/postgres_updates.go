@@ -142,7 +142,12 @@ with visible as (
     on relationship.company_id=node_context.company_id
    and (
      (node_context.target_node_id <> '' and relationship.node_id=node_context.target_node_id::uuid)
-     or (node_context.path_logic_gate_id <> '' and relationship.logic_gate_id=node_context.path_logic_gate_id::uuid)
+     or (
+       node_context.target_node_id = ''
+       and node_context.path_logic_gate_id <> ''
+       and relationship.resource_type='logic_gate'
+       and relationship.logic_gate_id=node_context.path_logic_gate_id::uuid
+     )
    )
   join projects project
     on project.company_id=relationship.company_id
@@ -275,7 +280,12 @@ with filtered as (
             and relationship.project_id=$11::uuid
             and (
               (with_gate.target_node_id <> '' and relationship.node_id=with_gate.target_node_id::uuid)
-              or (with_gate.path_logic_gate_id <> '' and relationship.logic_gate_id=with_gate.path_logic_gate_id::uuid)
+              or (
+                with_gate.target_node_id = ''
+                and with_gate.path_logic_gate_id <> ''
+                and relationship.resource_type='logic_gate'
+                and relationship.logic_gate_id=with_gate.path_logic_gate_id::uuid
+              )
             )
         )
       )
@@ -575,6 +585,7 @@ select
   relationship.project_id::text,
   coalesce(nullif(project.name, ''), relationship.project_id::text),
   relationship.relationship_id::text,
+  relationship.resource_type,
   relationship.node_id::text,
   relationship.logic_gate_id::text,
   relationship.position,
@@ -585,8 +596,8 @@ join projects project
  and project.project_id=relationship.project_id
 where relationship.company_id=$1::uuid
   and (
-    ($2 <> '' and relationship.node_id = any(string_to_array($2, ',')::uuid[]))
-    or ($3 <> '' and relationship.logic_gate_id = any(string_to_array($3, ',')::uuid[]))
+    ($2 <> '' and relationship.resource_type='node' and relationship.node_id = any(string_to_array($2, ',')::uuid[]))
+    or ($3 <> '' and relationship.resource_type='logic_gate' and relationship.logic_gate_id = any(string_to_array($3, ',')::uuid[]))
   )
   and mangorts_user_can_access_resource(relationship.company_id, 'project', relationship.project_id, $4::uuid, 'edit')
 order by relationship.position asc, lower(coalesce(nullif(project.name, ''), relationship.project_id::text)) asc, relationship.relationship_created_timestamp asc, relationship.relationship_id asc`,
@@ -596,11 +607,11 @@ order by relationship.position asc, lower(coalesce(nullif(project.name, ''), rel
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var projectID, projectName, relationshipID string
+		var projectID, projectName, relationshipID, resourceType string
 		var nodeID, logicGateID sql.NullString
 		var position int
 		var created time.Time
-		if err := rows.Scan(&projectID, &projectName, &relationshipID, &nodeID, &logicGateID, &position, &created); err != nil {
+		if err := rows.Scan(&projectID, &projectName, &relationshipID, &resourceType, &nodeID, &logicGateID, &position, &created); err != nil {
 			return err
 		}
 		project := updatesProjectContext{
@@ -615,7 +626,7 @@ order by relationship.position asc, lower(coalesce(nullif(project.name, ''), rel
 			keyValue := strings.TrimSpace(nodeID.String)
 			build.NodeProjectContexts[keyValue] = append(build.NodeProjectContexts[keyValue], project)
 		}
-		if logicGateID.Valid && strings.TrimSpace(logicGateID.String) != "" {
+		if resourceType == EntityTypeLogicGate && logicGateID.Valid && strings.TrimSpace(logicGateID.String) != "" {
 			keyValue := strings.TrimSpace(logicGateID.String)
 			build.LogicGateProjectContexts[keyValue] = append(build.LogicGateProjectContexts[keyValue], project)
 		}

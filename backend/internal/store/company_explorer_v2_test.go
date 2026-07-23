@@ -333,12 +333,15 @@ func TestMemoryProjectRelationshipMovesEligibleNodeAndImplicitGateBetweenProject
 	if second.Relationship.ProjectID != bravo.Project.ProjectID || second.ImplicitRelationships[0].ResourceID != logicGate.LogicGateID {
 		t.Fatalf("moved relationships = %+v, want node and implicit gate in Bravo", second)
 	}
+	if len(first.ImplicitRelationships) != 1 || first.ImplicitRelationships[0].RelationshipID == second.ImplicitRelationships[0].RelationshipID {
+		t.Fatalf("Logic Gate relationship must be distinct per Project: first=%+v second=%+v", first, second)
+	}
 	alphaRows, err := repo.ListProjectRelationshipProjections(companyID, alpha.Project.ProjectID)
 	if err != nil {
 		t.Fatalf("ListProjectRelationshipProjections alpha: %v", err)
 	}
-	if len(alphaRows) != 0 {
-		t.Fatalf("alpha relationships after move = %+v, want empty", alphaRows)
+	if len(alphaRows) != 1 || alphaRows[0].ResourceType != EntityTypeLogicGate || alphaRows[0].ResourceID != logicGate.LogicGateID {
+		t.Fatalf("alpha relationships after move = %+v, want retained Logic Gate", alphaRows)
 	}
 	bravoRows, err := repo.ListProjectRelationshipProjections(companyID, bravo.Project.ProjectID)
 	if err != nil {

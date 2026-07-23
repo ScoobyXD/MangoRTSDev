@@ -200,11 +200,14 @@ func updateProjectContextsForNotification(nodeID, logicGateID string, ctx update
 		seen[keyValue] = true
 		out = append(out, project)
 	}
-	for _, project := range ctx.NodeProjectContexts[nodeID] {
-		add(project)
-	}
-	for _, project := range ctx.LogicGateProjectContexts[logicGateID] {
-		add(project)
+	if strings.TrimSpace(nodeID) != "" {
+		for _, project := range ctx.NodeProjectContexts[nodeID] {
+			add(project)
+		}
+	} else {
+		for _, project := range ctx.LogicGateProjectContexts[logicGateID] {
+			add(project)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Position != out[j].Position {

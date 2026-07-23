@@ -1,10 +1,10 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 # Projects Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. `scripts/run_realtime_production_path_tests.mjs` proves real-browser Project-document isolation through the production HTTP/WebSocket/outbox path; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
+- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. Project relationship rule tests cover one Logic Gate per node, one Project per node, implicit per-Project Logic Gate relationships, and the same Logic Gate remaining related to multiple Projects. `scripts/run_realtime_production_path_tests.mjs` proves real-browser Project-document isolation through the production HTTP/WebSocket/outbox path; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
 
 ## Business Logic
 
@@ -31,7 +31,7 @@ P20 - Project text-box inline images and project text-block attachment arrays mu
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
 P22 - In the Project Logic Gates / Nodes tab, clicking a node row expands that node's Project-owned unified node editor directly below the row. Clicking the same row again collapses it; the row does not open the app/sidebar popup or replace the Project page.
 P23 - Nodes opened in the Project Logic Gates / Nodes panel use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor. Project state owns only which node panel is open; it does not own node content persistence.
-P24 - Dropping a My Triage or mailbox-capable Shared Triage email onto a project relationship panel creates an email-derived standalone node relationship for that project.
+P24 - Every Node related to a Project must belong to a Logic Gate. A My Triage or mailbox-capable Shared Triage email cannot create a standalone Project Node; the Project conversion must resolve the destination Logic Gate first.
 P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic Gate group inside a project creates an email-derived node/card in that Logic Gate and a node relationship in the project.
 P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
 P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
@@ -55,11 +55,19 @@ P44 - Replies to email attached to a project text block use the project as attac
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
 P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes editor remains in normal document flow beneath its selected row except while its explicit fullscreen action temporarily mounts it in that shared modal layer.
 P47 - Expanding a node in Logic Gates / Nodes removes the row-depth indentation from the editor surface so the editor spans the full relationship-panel width while the collapsed relationship row keeps its normal grouping indentation.
-P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes and Logic Gates. Choosing a result creates or reuses the project relationship, selecting a Logic Gate includes its known child nodes just like an Explorer drop, and resources already related to the Project are marked as added and disabled.
+P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes that already belong to a Logic Gate. Choosing a Node creates or reuses its Project relationship and implicitly creates or reuses that Logic Gate's relationship for the same Project. Direct Logic Gate addition is not offered, and Nodes already related to the Project are marked as added and disabled.
 
 P49 - Project Field, Status, Health, Account, and Team dropdowns commit and close on the selected option. They do not display Apply or Cancel actions; multi-value controls toggle the clicked assignment without discarding other selected IDs, and Not set clears the control.
 P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
 P51 - Every Project chat comment authored by the current user exposes the shared inline Edit action after send. Saving uses the stable Project projection ID, replaces only trimmed text and resolved mention IDs, records an edit timestamp, and preserves author, original creation time, attachments, reply/source-selection context, text-box ownership, and thread order. Project Edit access never permits editing or deleting another author's comment, and legacy information POST requests cannot overwrite a chat projection even when they disguise the replacement as another information type.
+P52 - A Node may have at most one active Logic Gate assignment. A Node must have that assignment before it can be related to a Project.
+P53 - A Node may be related to at most one Project. Adding the same Node to another Project moves its existing Node relationship to the destination Project and preserves the Node and relationship identities.
+P54 - Adding a Node to a Project implicitly creates or reuses a separate Logic Gate relationship for that exact Project and the Node's current Logic Gate.
+P55 - A Logic Gate may be related to any number of Projects. Relating it to a new Project must never move, overwrite, or delete its relationships with other Projects.
+P56 - Each Project/Logic Gate pair has its own stable relationship row and relationship ID. Re-adding another Node from that Logic Gate to the same Project reuses the existing Project/Logic Gate row instead of creating a duplicate.
+P57 - Moving or removing a Node relationship does not silently remove the Logic Gate's relationship from the former Project. Logic Gate relationships are persistent Project associations, including when no related Node is currently visible in that Project.
+P58 - Users do not add a Logic Gate directly to a Project. The supported command adds a Node, verifies that Node's single Logic Gate assignment, and brings that Logic Gate into the Project implicitly.
+P59 - Node-based Project context in My Work, Updates, and other derived views comes only from that Node's direct Project relationship. A Logic Gate's membership in multiple Projects must never make all Nodes in that Logic Gate appear in every one of those Projects.
 
 ## Scenarios
 
@@ -230,8 +238,8 @@ Given:
 - The project may have zero or more related Logic Gates.
 
 Expected:
-- Dropping the email on the project relationship panel creates a node relationship in the project without requiring a Logic Gate.
-- Dropping the email on a Logic Gate group inside the project creates the node/card in that Logic Gate and relates the created node to the project.
+- Dropping the email on the project relationship panel requires the user to resolve a destination Logic Gate; it never creates a standalone Project Node.
+- Dropping the email on a Logic Gate group inside the project creates the node/card in that Logic Gate, relates the created Node to the Project, and creates or reuses that Project's relationship with the Logic Gate.
 - Created project relationship rows for email-derived nodes expose `created_from_email = true` and show the email-origin icon.
 - A personal email drop stores `account_email` in the created attached-email projection; a Shared Triage drop stores both `shared_inbox_id` and `account_email`.
 - The source Home mail row is reconciled through the local conversion event, including shared inbox scope and unstarred IDs when present.
@@ -368,3 +376,35 @@ Expected:
 - A failed save restores the canonical row while retaining the inline draft for retry.
 
 Focused coverage lives in `backend/internal/http/chat_comment_edit_test.go` and `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`.
+
+### Scenario P-S16: Node And Logic Gate Project Cardinality
+
+Business logic covered:
+- P52
+- P53
+- P54
+- P55
+- P56
+- P57
+- P58
+- P59
+
+Given:
+- One Logic Gate contains Node A and Node B.
+- Project Alpha receives Node A and Project Bravo receives Node B.
+
+When:
+- Node A is later added to Project Bravo.
+- Either Node is re-added to Project Bravo.
+
+Expected:
+- Node A and Node B each retain exactly one active Logic Gate assignment.
+- Project Alpha and Project Bravo have distinct persistent relationship rows for the same Logic Gate.
+- Adding the Logic Gate to Project Bravo never moves or deletes its Project Alpha relationship.
+- Node A has one Project relationship, and moving it to Project Bravo preserves that relationship ID instead of duplicating it.
+- Project Alpha retains its Logic Gate relationship after Node A moves.
+- Project Bravo contains one relationship for the Logic Gate and one relationship for each Node; re-adding a Node creates no duplicates.
+- My Work and Updates place Node A only under Project Bravo after the move; they do not infer an Alpha Node relationship merely because the shared Logic Gate remains in Project Alpha.
+- A direct Logic Gate addition and a Project Node without a Logic Gate assignment are rejected.
+
+Focused coverage lives in `backend/internal/store/project_relationship_rules_test.go`, `backend/internal/store/project_relationship_schema_test.go`, `backend/internal/store/project_relationship_postgres_integration_test.go`, `backend/internal/store/work_item_reads_test.go`, and `backend/internal/http/notification_handlers_test.go`.

@@ -726,9 +726,6 @@ func (r *MemoryRepo) myWorkProjectContextsLocked(row memoryGVICMatrixProjectionR
 			related = projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) == row.ResourceID
 		} else if row.ResourceType == GVICMatrixProjectionResourceNode {
 			related = projection.NodeID != nil && strings.TrimSpace(*projection.NodeID) == row.ResourceID
-			if !related && strings.TrimSpace(row.LogicGateID) != "" {
-				related = projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) == row.LogicGateID
-			}
 		}
 		if !related {
 			continue

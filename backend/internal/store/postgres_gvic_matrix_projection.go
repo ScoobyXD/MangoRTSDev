@@ -109,10 +109,7 @@ with latest_assignment as (
   from assignment_rows
   join project_relationship_projection relationship
     on relationship.company_id=assignment_rows.company_id
-   and (
-     relationship.node_id=assignment_rows.node_id
-     or (assignment_rows.logic_gate_id is not null and relationship.logic_gate_id=assignment_rows.logic_gate_id)
-   )
+   and relationship.node_id=assignment_rows.node_id
   join projects project
     on project.company_id=relationship.company_id
    and project.project_id=relationship.project_id
@@ -314,10 +311,7 @@ with input_users as (
   from assignment_rows
   join project_relationship_projection relationship
     on relationship.company_id=assignment_rows.company_id
-   and (
-     relationship.node_id=assignment_rows.node_id
-     or (assignment_rows.logic_gate_id is not null and relationship.logic_gate_id=assignment_rows.logic_gate_id)
-   )
+   and relationship.node_id=assignment_rows.node_id
   join projects project
     on project.company_id=relationship.company_id
    and project.project_id=relationship.project_id

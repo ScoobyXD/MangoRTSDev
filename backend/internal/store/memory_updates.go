@@ -133,7 +133,7 @@ func (r *MemoryRepo) updatesBuildContextLocked(input UpdatesQuery, items []domai
 			nodeID := strings.TrimSpace(*projection.NodeID)
 			ctx.NodeProjectContexts[nodeID] = append(ctx.NodeProjectContexts[nodeID], project)
 		}
-		if projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) != "" {
+		if projection.ResourceType == EntityTypeLogicGate && projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) != "" {
 			logicGateID := strings.TrimSpace(*projection.LogicGateID)
 			ctx.LogicGateProjectContexts[logicGateID] = append(ctx.LogicGateProjectContexts[logicGateID], project)
 		}

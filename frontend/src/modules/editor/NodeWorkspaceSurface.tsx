@@ -540,6 +540,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
   const [logicGateAssignFlash, setLogicGateAssignFlash] = useState<"" | "success" | "error">("");
   const [projectAssignerOpen, setProjectAssignerOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
   const [projectOptions, setProjectOptions] = useState<ProjectRecord[]>([]);
   const [projectOptionsLoading, setProjectOptionsLoading] = useState(false);
   const [projectRelationshipRefreshKey, setProjectRelationshipRefreshKey] = useState(0);
@@ -700,6 +701,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignProjectButtonLabel = primaryAssignedProject
     ? `Project: ${primaryAssignedProjectLabel}`
     : "Assign to Project";
+  const projectSearchQuery = projectSearch.trim().toLocaleLowerCase();
+  const filteredProjectOptions = useMemo(() => {
+    if (!projectSearchQuery) return projectOptions;
+    return projectOptions.filter((project) => (
+      projectOptionLabel(project).toLocaleLowerCase().includes(projectSearchQuery)
+      || project.project_id.toLocaleLowerCase().includes(projectSearchQuery)
+    ));
+  }, [projectOptions, projectSearchQuery]);
   const projectAssignerMenuWidth = Math.max(
     280,
     Math.min(compact ? 320 : 390, width > 0 ? width - 28 : compact ? 320 : 390),
@@ -972,6 +981,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [projectAssignerMenuWidth, projectAssignerOpen, width]);
 
   useAppFloatingMenuDismissal(projectAssignerOpen, projectAssignerRef, () => setProjectAssignerOpen(false));
+
+  useEffect(() => {
+    if (projectAssignerOpen) return;
+    setProjectSearch("");
+  }, [projectAssignerOpen]);
 
   useEffect(() => {
     if (!companyID || !nodeID) {
@@ -2856,10 +2870,26 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     >
       <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
         <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Project</div>
+        <CompanyExplorerSearchBox
+          value={projectSearch}
+          onChange={setProjectSearch}
+          onEscape={() => setProjectSearch("")}
+          placeholder="Search projects"
+          ariaLabel="Search projects"
+          autoFocus
+          style={{
+            height: 34,
+            borderRadius: 10,
+            border: projectSearchQuery ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            background: projectSearchQuery ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE,
+            boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)",
+          }}
+        />
         <div className="editor-document-scroll" style={{ maxHeight: 168, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
           {projectOptionsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading projects</div>}
           {!projectOptionsLoading && projectOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No projects</div>}
-          {!projectOptionsLoading && projectOptions.map((project) => {
+          {!projectOptionsLoading && projectOptions.length > 0 && filteredProjectOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No matching projects</div>}
+          {!projectOptionsLoading && filteredProjectOptions.map((project) => {
             const projectID = project.project_id.trim();
             const selected = selectedProjectForAssignment?.project_id === projectID;
             return (
@@ -2884,19 +2914,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       </div>
       {selectedProjectForAssignment && (
         <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
-            onClick={() => { void assignToProject(); }}
-            title={`Assign node to ${projectOptionLabel(selectedProjectForAssignment)}`}
-            style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
-          >
-            <ExplorerRowIcon kind="project" />
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>Assign node to project</span>
-            <span>{assigningProjectID ? "..." : null}</span>
-          </button>
-          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Optional Logic Gate</div>
+          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Optional: Add to a logic gate in this project</div>
           {nodePriorityUnassignedForLogicGate && (
             <div style={{ border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 9, background: "rgba(255,251,235,0.9)", color: "#92400e", padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>Give this node a priority before assigning it to a project logic gate.</div>
           )}
@@ -2926,6 +2944,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         </div>
       )}
       {projectAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${projectAssignStatus.startsWith("Project:") ? "rgba(100,116,139,0.22)" : "rgba(59,130,246,0.24)"}`, borderRadius: 9, background: projectAssignStatus.startsWith("Project:") ? "rgba(248,250,252,0.9)" : "rgba(239,246,255,0.82)", color: projectAssignStatus.startsWith("Project:") ? surfaceText : accent, padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projectAssignStatus}</div>}
+      {selectedProjectForAssignment && (
+        <button
+          type="button"
+          role="menuitem"
+          disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
+          onClick={() => { void assignToProject(); }}
+          title={`Apply project ${projectOptionLabel(selectedProjectForAssignment)}`}
+          style={{ minHeight: 34, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid transparent", borderRadius: 9, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, color: accent, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 12px", font: "inherit", fontSize: 11, fontWeight: 900, textAlign: "center", boxShadow: EDITOR_NEU_SHADOW }}
+        >
+          {assigningProjectID ? "Applying..." : "Apply"}
+        </button>
+      )}
     </div>
   ) : null;
 

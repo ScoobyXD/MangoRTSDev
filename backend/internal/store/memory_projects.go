@@ -497,7 +497,12 @@ func (r *MemoryRepo) upsertProjectRelationshipSourceLocked(input ProjectRelation
 	}
 	relationshipID := cleanUUIDText(input.RelationshipID)
 	for _, relationship := range r.projectRelationships {
-		if relationship.CompanyID == input.CompanyID && relationship.ResourceType == resourceType && relationship.ResourceID == input.ResourceID {
+		if relationship.CompanyID != input.CompanyID ||
+			relationship.ResourceType != resourceType ||
+			relationship.ResourceID != input.ResourceID {
+			continue
+		}
+		if resourceType == EntityTypeNode || relationship.ProjectID == input.ProjectID {
 			relationshipID = relationship.RelationshipID
 			break
 		}
