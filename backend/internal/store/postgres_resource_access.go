@@ -780,7 +780,7 @@ where access.company_id=$1::uuid
 	})
 }
 
-func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, policySequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
+func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, policySequence int64, currentDefault string, currentAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
 	if !input.ApplyToDescendants {
 		return []resourcePermissionTarget{}, nil
 	}
@@ -797,7 +797,7 @@ func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, t
 	if len(targets) == 0 {
 		return targets, nil
 	}
-	if _, err := postgresRecordPermissionSubtreeApplicationsTx(ctx, tx, companyID, resourceType, resourceID, policySequence, beforeDefault, beforeAssignments, afterDefault, afterAssignments); err != nil {
+	if _, err := postgresRecordPermissionSubtreeApplicationsTx(ctx, tx, companyID, resourceType, resourceID, policySequence, currentDefault, currentAssignments); err != nil {
 		return nil, err
 	}
 	return targets, nil

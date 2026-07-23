@@ -74,6 +74,42 @@ func TestPostgresResourcePermissionGroupRowsAndDescendantApplyStaySourceShaped(t
 			t.Fatalf("descendant permission apply missing %q", required)
 		}
 	}
+	recordRaw, err := os.ReadFile("postgres_resource_policy_pointers.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_resource_policy_pointers.go: %v", err)
+	}
+	recordBody := postgresResourceAccessFunctionBodyForTest(t, strings.ReplaceAll(string(recordRaw), "\r\n", "\n"), "func postgresRecordPermissionSubtreeApplicationsTx")
+	for _, required := range []string{
+		"resourcePermissionSnapshotRuleKey",
+		"resourcePermissionDefaultRuleKey",
+		"for _, current := range currentAssignments",
+	} {
+		if !strings.Contains(recordBody, required) {
+			t.Fatalf("descendant permission snapshot recording missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"beforeDefault != afterDefault", "before == after"} {
+		if strings.Contains(recordBody, forbidden) {
+			t.Fatalf("descendant Apply must not depend on request-local changes, found %q", forbidden)
+		}
+	}
+	for _, path := range []string{"../../db/schema.sql", "../../db/migrations/20260722_zz_full_descendant_policy_snapshots.sql"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		schemaContract := string(raw)
+		for _, required := range []string{
+			"rule_key = '__snapshot__'",
+			"snapshot boolean not null default false",
+			"latest_snapshot_application(policy_sequence)",
+			"app.rule_key not in ('__default__', '__snapshot__')",
+		} {
+			if !strings.Contains(schemaContract, required) {
+				t.Fatalf("%s missing full-snapshot contract %q", path, required)
+			}
+		}
+	}
 	for _, forbidden := range []string{
 		"setPostgresResourceDefaultAccessForTargetsTx(ctx, tx",
 		"deletePostgresResourcePermissionForTargetsTx(ctx, tx",

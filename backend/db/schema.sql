@@ -2793,6 +2793,13 @@ create table if not exists resource_permission_subtree_applications (
     check (access_level is null or access_level in ('no_access', 'edit')),
   constraint resource_permission_subtree_applications_rule_shape_chk check (
     (
+      rule_key = '__snapshot__'
+      and subject_type is null
+      and subject_id is null
+      and access_level is null
+      and not deleted
+    )
+    or (
       rule_key = '__default__'
       and subject_type is null
       and subject_id is null
@@ -2800,7 +2807,7 @@ create table if not exists resource_permission_subtree_applications (
       and not deleted
     )
     or (
-      rule_key <> '__default__'
+      rule_key not in ('__default__', '__snapshot__')
       and subject_type in ('user', 'group')
       and subject_id is not null
       and (deleted or access_level in ('no_access', 'edit'))
@@ -2839,10 +2846,11 @@ create table if not exists resource_gvic_subtree_applications (
   company_id uuid not null,
   ancestor_resource_type text not null,
   ancestor_resource_id uuid not null,
-  role text not null,
-  principal_type text not null,
-  principal_id uuid not null,
+  role text,
+  principal_type text,
+  principal_id uuid,
   deleted boolean not null default false,
+  snapshot boolean not null default false,
   created_timestamp timestamptz not null default now(),
   constraint resource_gvic_subtree_applications_ancestor_type_chk
     check (ancestor_resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder', 'shared_inbox')),
@@ -2850,11 +2858,30 @@ create table if not exists resource_gvic_subtree_applications (
     check (role in ('generated', 'verified', 'consulted', 'informed')),
   constraint resource_gvic_subtree_applications_principal_type_chk
     check (principal_type in ('user', 'group')),
+  constraint resource_gvic_subtree_applications_rule_shape_chk check (
+    (
+      snapshot
+      and role is null
+      and principal_type is null
+      and principal_id is null
+      and not deleted
+    )
+    or (
+      not snapshot
+      and role in ('generated', 'verified', 'consulted', 'informed')
+      and principal_type in ('user', 'group')
+      and principal_id is not null
+    )
+  ),
   foreign key (company_id) references companies (company_id) on delete cascade
 );
 
 create index if not exists idx_resource_gvic_subtree_applications_ancestor
   on resource_gvic_subtree_applications(company_id, ancestor_resource_type, ancestor_resource_id, policy_sequence desc, application_id desc);
+
+create index if not exists idx_resource_gvic_subtree_applications_snapshot
+  on resource_gvic_subtree_applications(company_id, ancestor_resource_type, ancestor_resource_id, policy_sequence desc)
+  where snapshot;
 
 create index if not exists idx_resource_gvic_subtree_applications_principal
   on resource_gvic_subtree_applications(company_id, principal_type, principal_id, policy_sequence desc);
@@ -3000,6 +3027,16 @@ returns boolean as $$
     select 'company_explorer_folder'::text, folder_id
     from folder_ancestors
   ),
+  latest_snapshot_application(policy_sequence) as (
+    select max(app.policy_sequence)
+    from resource_permission_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type
+     and ancestor.resource_id=app.ancestor_resource_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.company_id=p_company_id
+      and app.rule_key='__snapshot__'
+  ),
   latest_default_application(access_level) as (
     select app.access_level
     from resource_permission_subtree_applications app
@@ -3009,6 +3046,7 @@ returns boolean as $$
     join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
     where app.company_id=p_company_id
       and app.rule_key='__default__'
+      and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application), 0)
     order by app.policy_sequence desc, app.application_id desc
     limit 1
   ),
@@ -3042,17 +3080,19 @@ returns boolean as $$
      and ancestor.resource_id=app.ancestor_resource_id
     join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
     where app.company_id=p_company_id
-      and app.rule_key<>'__default__'
+      and app.rule_key not in ('__default__', '__snapshot__')
+      and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application), 0)
     order by app.rule_key, app.policy_sequence desc, app.application_id desc
   ),
   resolved_permission_rows as (
     select direct.subject_type, direct.subject_id, direct.access_level
     from direct_permission_rows direct
-    where not exists (
-      select 1
-      from application_permission_rows app
-      where app.rule_key=direct.rule_key
-    )
+    where not exists (select 1 from latest_snapshot_application where policy_sequence is not null)
+      and not exists (
+        select 1
+        from application_permission_rows app
+        where app.rule_key=direct.rule_key
+      )
     union all
     select app.subject_type, app.subject_id, app.access_level
     from application_permission_rows app

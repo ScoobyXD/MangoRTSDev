@@ -271,6 +271,94 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsRefreshesNodeSnapshots(t *
 	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, nextUser.UserID)
 }
 
+func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapshot(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-GVIC-current-snapshot"
+	repo.EnsureCompany(companyID, "GVIC Current Snapshot Company")
+	gateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-gate", companyID)
+	descendantUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-descendant", companyID)
+	node := mustCreateGVICMembershipNode(t, repo, companyID, "current snapshot node")
+	logicGate, err := repo.CreateLogicGate(companyID, "Current Snapshot Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	gateAssignments := []ResourceGVICAssignmentInput{{
+		Role:          domain.GVICRoleGenerated,
+		PrincipalType: EntityPermissionSubjectUser,
+		PrincipalID:   gateUser.UserID,
+	}}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments:  gateAssignments,
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments gate template: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
+		Status: "pending", Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
+		},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments descendant custom snapshot: %v", err)
+	}
+
+	// Business rule: clicking Apply replaces the descendant snapshot with the
+	// gate's current assignments even though the gate assignments did not change.
+	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:          companyID,
+		ResourceType:       EntityTypeLogicGate,
+		ResourceID:         logicGate.LogicGateID,
+		ApplyToDescendants: true,
+		Assignments:        gateAssignments,
+	})
+	if err != nil {
+		t.Fatalf("SetResourceGVICAssignments reapply current gate snapshot: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("reapplying the current gate snapshot should report a descendant change")
+	}
+	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, gateUser.UserID)
+
+	// An empty current gate policy is still a complete snapshot and therefore
+	// clears assignments on current descendants.
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments clear gate: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments restore descendant custom snapshot: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID, ApplyToDescendants: true,
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments apply empty current snapshot: %v", err)
+	}
+	if source, err := repo.ListResourceGVICAssignments(companyID, EntityTypeNode, node.NodeID); err != nil || len(source) != 0 {
+		t.Fatalf("node source after empty snapshot = %+v err = %v, want empty", source, err)
+	}
+	if effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, node.NodeID); err != nil || len(effective) != 0 {
+		t.Fatalf("node effective after empty snapshot = %+v err = %v, want empty", effective, err)
+	}
+}
+
 func assertMemoryNodeGVICSnapshot(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
 	t.Helper()
 	source, err := repo.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)
