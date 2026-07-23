@@ -112,6 +112,7 @@ export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch:
   const cleanCompanyID = patch.companyID.trim();
   const targetUsers = new Set(uniqueNonEmptyStrings(patch.targetUserIDs ?? []));
   const removedIDs = new Set(uniqueNonEmptyStrings(patch.removedProjectionRowIDs));
+  const generatedUserIDsByContext = generatedUserIDsByMyWorkContext(patch.rows);
   const byProjectionID = new Map<string, MyWorkMatrixCellWithUser>();
   const passthrough: MyWorkMatrixCellWithUser[] = [];
   for (const cell of cells) {
@@ -125,8 +126,14 @@ export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch:
     if (!userID || (targetUsers.size > 0 && !targetUsers.has(userID))) continue;
     const projectionRowID = row.projection_row_id?.trim() ?? "";
     if (!projectionRowID) continue;
+    const previous = byProjectionID.get(projectionRowID);
+    const generatedUserIDs = uniqueNonEmptyStrings([
+      ...(row.generated_user_ids ?? []),
+      ...(generatedUserIDsByContext.get(myWorkMatrixRowContextKey(row)) ?? []),
+    ]);
     byProjectionID.set(projectionRowID, {
       ...row,
+      generated_user_ids: generatedUserIDs.length > 0 ? generatedUserIDs : previous?.generated_user_ids,
       companyID: row.company_id?.trim() || cleanCompanyID,
       userID,
     });
@@ -388,6 +395,31 @@ export function myWorkMatrixCacheKey({
   const subjectID = selectedScope.subject_id.trim() || "subject";
   const targets = uniqueNonEmptyStrings(targetUserIDs).join(",");
   return "my_work:" + cleanCompanyID + ":" + level + ":" + subjectType + ":" + subjectID + ":targets:" + targets;
+}
+
+function myWorkMatrixRowContextKey(row: MyWorkMatrixRow): string {
+  return [
+    row.company_id?.trim() ?? "",
+    row.project_id?.trim() ?? "",
+    row.logic_gate_id?.trim() ?? "",
+    row.node_id?.trim() ?? "",
+  ].join("\u0000");
+}
+
+function generatedUserIDsByMyWorkContext(rows: MyWorkMatrixRow[]): Map<string, string[]> {
+  const byContext = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const userIDs = uniqueNonEmptyStrings([
+      ...(row.generated_user_ids ?? []),
+      ...(row.gvic_assignment === "generated" ? [row.user_id ?? ""] : []),
+    ]);
+    if (userIDs.length === 0) continue;
+    const key = myWorkMatrixRowContextKey(row);
+    const users = byContext.get(key) ?? new Set<string>();
+    for (const userID of userIDs) users.add(userID);
+    byContext.set(key, users);
+  }
+  return new Map(Array.from(byContext, ([key, users]) => [key, Array.from(users)]));
 }
 
 function uniqueNonEmptyStrings(values: string[]): string[] {

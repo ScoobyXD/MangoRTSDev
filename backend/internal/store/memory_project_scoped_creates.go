@@ -139,6 +139,14 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
+	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
+	})
+	if err != nil {
+		rollback()
+		return ProjectScopedNodeCreateResult{}, err
+	}
 	relationshipID := newUUIDv7String()
 	relationship := domain.ProjectRelationship{
 		CompanyID:        input.CompanyID,
@@ -155,12 +163,13 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		rollback()
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	if input.InitialAssignment == nil {
-	}
 	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{node.NodeID}, []string{input.InitialAssignment.LogicGateID})
+	r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, input.InitialAssignment.LogicGateID)
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{
 		nodeCreatedWorkspaceEventInputWithMetadata(node, meta),
+		projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID),
 		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
 	})
 	if err != nil {
@@ -169,86 +178,19 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 	}
 	events = append(assignmentEvents, events...)
 	return ProjectScopedNodeCreateResult{
-		Node:         r.withNodeReadModelLocked(node),
-		Relationship: &projection,
-		Information:  information,
-		Assignment:   assignment,
-		Card:         card,
-		Events:       events,
+		Node:                  r.withNodeReadModelLocked(node),
+		Relationship:          &projection,
+		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		Information:           information,
+		Assignment:            assignment,
+		Card:                  card,
+		Events:                events,
 	}, nil
 }
 
 func (r *MemoryRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateResult, error) {
-	input, err := NormalizeProjectScopedLogicGateCreateInput(input)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	snapshot := r.snapshotProjectScopedCreateLocked()
-	rollback := func() { r.restoreProjectScopedCreateLocked(snapshot) }
-	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
-		return ProjectScopedLogicGateCreateResult{}, ErrNotFound
-	}
-	logicGateID := input.LogicGateID
-	if logicGateID == "" {
-		logicGateID = newUUIDv7String()
-	}
-	logicGate := domain.LogicGate{
-		CompanyID:        input.CompanyID,
-		LogicGateID:      logicGateID,
-		Header:           input.Header,
-		DefaultAccess:    ResourceDefaultAccessEdit,
-		GVICAssignments:  []domain.LogicGateGVICAssignment{},
-		CreatedTimestamp: time.Now().UTC(),
-	}
-	r.logicGates[key(input.CompanyID, logicGate.LogicGateID)] = logicGate
-	r.ensureLogicGateKanbanBoardLocked(input.CompanyID, logicGate.LogicGateID, logicGate.Header)
-	var information *domain.LogicGateInformation
-	if input.InitialInformation != nil {
-		item, err := r.addInitialLogicGateInformationLocked(input.CompanyID, logicGate.LogicGateID, *input.InitialInformation, input.ActorUserID)
-		if err != nil {
-			rollback()
-			return ProjectScopedLogicGateCreateResult{}, err
-		}
-		information = &item
-	}
-	relationshipID := newUUIDv7String()
-	relationship := domain.ProjectRelationship{
-		CompanyID:        input.CompanyID,
-		RelationshipID:   relationshipID,
-		ProjectID:        input.ProjectID,
-		ResourceType:     EntityTypeLogicGate,
-		ResourceID:       logicGate.LogicGateID,
-		Position:         input.Position,
-		CreatedTimestamp: time.Now().UTC(),
-		UpdatedTimestamp: time.Now().UTC(),
-	}
-	r.projectRelationships[projectRelationshipKey(input.CompanyID, relationshipID)] = relationship
-	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
-		rollback()
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	r.syncGVICMatrixProjectionForLogicGateLocked(input.CompanyID, logicGate.LogicGateID)
-	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
-	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
-	events, err := r.appendDomainEventsLocked([]DomainEventInput{
-		logicGateCreatedWorkspaceEventInput(logicGate, meta),
-		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
-	})
-	if err != nil {
-		rollback()
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	return ProjectScopedLogicGateCreateResult{
-		LogicGate:    r.withLogicGateGVICLocked(logicGate),
-		Relationship: &projection,
-		Information:  information,
-		Events:       events,
-	}, nil
+	return ProjectScopedLogicGateCreateResult{}, ErrDirectProjectLogicGate
 }
-
 func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input ProjectScopedNodeCreateInput, node domain.Node) (LogicGateNodeAssignmentResult, error) {
 	assignmentInput := LogicGateNodeAssignmentInput{
 		CompanyID:      input.CompanyID,

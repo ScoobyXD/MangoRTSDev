@@ -1008,6 +1008,7 @@ type LogicGateWorkCard struct {
 	DueDate                    *string   `json:"due_date,omitempty"`
 	Priority                   *int      `json:"priority,omitempty"`
 	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
+	HasProject                 bool      `json:"has_project,omitempty"`
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 	CreatedTimestamp           time.Time `json:"created_timestamp"`
 	Accounts                   []Account `json:"accounts,omitempty"`
@@ -1152,6 +1153,7 @@ type KanbanCard struct {
 	DueDate                    *string   `json:"due_date,omitempty"`
 	Priority                   *int      `json:"priority,omitempty"`
 	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
+	HasProject                 bool      `json:"has_project,omitempty"`
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 	CreatedTimestamp           time.Time `json:"created_timestamp"`
 	UpdatedTimestamp           time.Time `json:"updated_timestamp"`

@@ -115,7 +115,6 @@ import {
   deleteProjectManagementLogicGate,
   deleteProjectManagementNode,
   deleteProjectCriticalPathStep,
-  createProjectLogicGate,
   createProjectNode,
   deleteProjectProjection,
   editProjectChatComment,
@@ -201,7 +200,7 @@ type ProjectSummaryWorkspaceSnapshot = {
 };
 
 type ProjectRelationshipDropTarget = {
-  resourceType: "logic_gate" | "node";
+  resourceType: "node";
   resourceID: string;
 };
 
@@ -383,14 +382,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
   const relationshipPickerSearchText = relationshipPickerQuery.trim();
+  const eligibleProjectNodeIDs = useMemo(() => new Set(
+    (workspace?.nodes ?? [])
+      .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim()))
+      .map((node) => node.node_id.trim())
+      .filter(Boolean),
+  ), [workspace?.nodes]);
   const relationshipPickerRows = useMemo(() => (
     buildCompanyExplorerSearchTreeRows(relationshipPickerResults)
-      .filter((row) => (
-        row.syntheticKind === "search_result"
-        && (row.kind === "node" || row.kind === "logic_gate")
-        && (row.nodeID || row.logicGateID || row.resourceID)
-      ))
-  ), [relationshipPickerResults]);
+      .filter((row) => {
+        const nodeID = row.nodeID?.trim() || row.resourceID?.trim() || "";
+        return row.syntheticKind === "search_result" && row.kind === "node" && eligibleProjectNodeIDs.has(nodeID);
+      })
+  ), [eligibleProjectNodeIDs, relationshipPickerResults]);
   const existingRelationshipKeys = useMemo(() => new Set(
     relationships.map((relationship) => `${relationship.resource_type}:${relationship.resource_id}`),
   ), [relationships]);
@@ -445,7 +449,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       companyID,
       relationshipPickerSearchText,
       30,
-      ["node", "logic_gate"],
+      ["node"],
     )
       .then((payload) => {
         if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
@@ -457,7 +461,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       .catch((searchError) => {
         if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
         setRelationshipPickerResults([]);
-        setRelationshipPickerError(searchError instanceof Error ? searchError.message : "Failed to search Nodes and Logic Gates");
+        setRelationshipPickerError(searchError instanceof Error ? searchError.message : "Failed to search eligible Nodes");
       })
       .finally(() => {
         if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
@@ -1314,8 +1318,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const uniqueTargets: ProjectRelationshipDropTarget[] = [];
     const incoming = new Set<string>();
     for (const target of targets) {
-      const key = `${target.resourceType}:${target.resourceID}`;
-      if (!target.resourceID || incoming.has(key)) continue;
+      const resourceID = target.resourceID.trim();
+      if (!resourceID || !eligibleProjectNodeIDs.has(resourceID)) continue;
+      const key = `node:${resourceID}`;
+      if (incoming.has(key)) continue;
       const existing = existingByKey.get(key);
       if (existing) {
         ensuredRelationships.push(existing);
@@ -1323,7 +1329,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         continue;
       }
       incoming.add(key);
-      uniqueTargets.push(target);
+      uniqueTargets.push({ resourceType: "node", resourceID });
     }
     if (uniqueTargets.length === 0) return ensuredRelationships;
     setError("");
@@ -1331,11 +1337,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const results = await Promise.all(uniqueTargets.map((target, index) => upsertProjectRelationship({
         companyID,
         projectID,
-        resourceType: target.resourceType,
+        resourceType: "node",
         resourceID: target.resourceID,
         position: relationships.length + index + 1,
       })));
-      const nextRelationships = results.map((result) => result.relationship).filter((item): item is ProjectRelationshipProjection => Boolean(item));
+      const nextRelationships = results.flatMap((result) => [
+        ...(result.implicit_relationships ?? []),
+        ...(result.relationship ? [result.relationship] : []),
+      ]);
       if (nextRelationships.length > 0) {
         setRelationships((current) => mergeProjectRelationships(current, nextRelationships));
       } else {
@@ -1346,29 +1355,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setError(relationshipError instanceof Error ? relationshipError.message : "Failed to add relationships");
       return ensuredRelationships;
     }
-  }, [companyID, loadProject, projectID, relationships]);
-
+  }, [companyID, eligibleProjectNodeIDs, loadProject, projectID, relationships]);
   const addRelationshipFromPicker = useCallback(async (target: ProjectRelationshipDropTarget) => {
     const resourceID = target.resourceID.trim();
     if (!resourceID) return;
-    const key = `${target.resourceType}:${resourceID}`;
+    const key = `node:${resourceID}`;
     setRelationshipPickerAddingKey(key);
     setRelationshipPickerError("");
     try {
-      const targets = expandLogicGateRelationshipTargets([{ ...target, resourceID }], workspace);
-      const ensured = await addRelationshipTargets(targets);
-      if (ensured.some((relationship) => (
-        relationship.resource_type === target.resourceType && relationship.resource_id === resourceID
-      ))) {
+      const ensured = await addRelationshipTargets([{ resourceType: "node", resourceID }]);
+      if (ensured.some((relationship) => relationship.resource_type === "node" && relationship.resource_id === resourceID)) {
         closeRelationshipPicker();
       } else {
-        setRelationshipPickerError(`Failed to add ${target.resourceType === "logic_gate" ? "Logic Gate" : "Node"} to this Project`);
+        setRelationshipPickerError("Only Nodes that belong to a Logic Gate can be added to this Project.");
       }
     } finally {
       setRelationshipPickerAddingKey("");
     }
-  }, [addRelationshipTargets, closeRelationshipPicker, workspace]);
-
+  }, [addRelationshipTargets, closeRelationshipPicker]);
   const convertTriageMessagesToProject = useCallback(async (
     drag: ReturnType<typeof readTriageMessageDrag>,
     logicGateID = "",
@@ -1383,6 +1387,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const cleanProjectID = projectID.trim();
     const cleanLogicGateID = logicGateID.trim();
     if (!companyID || !cleanProjectID) return;
+    if (!cleanLogicGateID) {
+      setError("Add email work through a Logic Gate in this Project.");
+      return;
+    }
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
     const accountEmail = sharedInboxID ? undefined : drag.accountEmail?.trim().toLowerCase() || undefined;
     setError("");
@@ -1391,9 +1399,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
     try {
       const position = relationships.length + 1;
-      const target: CommunicationsTriageConversionTarget = cleanLogicGateID
-        ? { mode: "existing_logic_gate", logicGateID: cleanLogicGateID, projectID: cleanProjectID, position }
-        : { mode: "project", projectID: cleanProjectID, position };
+      const target: CommunicationsTriageConversionTarget = {
+        mode: "existing_logic_gate", logicGateID: cleanLogicGateID, projectID: cleanProjectID, position,
+      };
       const result = await convertTriageMessagesToExplorerTarget({
         companyID,
         sharedInboxID,
@@ -1595,35 +1603,35 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
   }, [selectedRelationshipNodeIDs]);
 
-  const createRelationshipResource = useCallback(async (resourceType: "logic_gate" | "node") => {
+  const createRelationshipNode = useCallback(async () => {
     setRelationshipContextMenu(null);
     setError("");
     const targetLogicGateID = relationshipContextMenu?.logicGateID?.trim() ?? "";
+    if (!targetLogicGateID) {
+      setError("Create the Node from a Logic Gate in this Project.");
+      return;
+    }
     try {
-      const result = resourceType === "logic_gate"
-        ? await createProjectLogicGate({
-          companyID,
-          projectID,
-          header: "New Logic Gate",
-          position: relationships.length + 1,
-        })
-        : await createProjectNode({
-          companyID,
-          projectID,
-          title: "New Node",
-          position: relationships.length + 1,
-          logicGateID: targetLogicGateID,
-        });
-      if (result.relationship) {
-        setRelationships((current) => mergeProjectRelationships(current, [result.relationship!]));
+      const result = await createProjectNode({
+        companyID,
+        projectID,
+        title: "New Node",
+        position: relationships.length + 1,
+        logicGateID: targetLogicGateID,
+      });
+      const createdRelationships = [
+        ...(result.implicit_relationships ?? []),
+        ...(result.relationship ? [result.relationship] : []),
+      ];
+      if (createdRelationships.length > 0) {
+        setRelationships((current) => mergeProjectRelationships(current, createdRelationships));
       } else {
         await loadProject({ showLoading: false });
       }
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : `Failed to create ${resourceType === "logic_gate" ? "logic gate" : "node"}`);
+      setError(createError instanceof Error ? createError.message : "Failed to create node");
     }
   }, [companyID, loadProject, projectID, relationshipContextMenu?.logicGateID, relationships.length]);
-
   const removeRelationshipFromProject = useCallback(async () => {
     const target = relationshipContextMenu?.relationship;
     if (!target) return;
@@ -2544,7 +2552,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div style={projectWorkPanelActionsStyle}>
                 <button
                   type="button"
-                  aria-label="Add Node or Logic Gate"
+                  aria-label="Add Node"
                   aria-expanded={relationshipPickerOpen}
                   aria-controls="project-relationship-picker"
                   style={projectRelationshipAddButtonStyle(accent, relationshipPickerOpen)}
@@ -2588,8 +2596,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             onContextMenu={(event) => {
               if (projectRelationshipEventTargetsRow(event.target)) return;
               event.preventDefault();
-              event.stopPropagation();
-              setRelationshipContextMenu({ x: event.clientX, y: event.clientY });
             }}
             onMouseDown={(event) => {
               if (event.button !== 0 || projectRelationshipEventTargetsRow(event.target)) return;
@@ -2597,7 +2603,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               setSelectionAnchorRelationshipNodeID("");
             }}
             onDragOver={(event) => {
-              if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME) && !hasTriageMessageDrag(event.dataTransfer)) return;
+              if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "copy";
               setRelationshipDropActive(true);
@@ -2607,13 +2613,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               setRelationshipDropActive(false);
             }}
             onDrop={(event) => {
-              const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
-              if (triageMessageDrag.messageIDs.length > 0) {
-                event.preventDefault();
-                event.stopPropagation();
-                void convertTriageMessagesToProject(triageMessageDrag);
-                return;
-              }
               const targets = relationshipTargetsFromTransfer(event.dataTransfer);
               if (targets.length === 0) return;
               event.preventDefault();
@@ -2658,14 +2657,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onPointerDown={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
             >
-              {!relationshipContextMenu.relationship ? (
-                <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("logic_gate")}>
-                  Create new logic gate
-                </button>
-              ) : null}
-              {!relationshipContextMenu.relationship || relationshipContextMenu.relationship.resourceType === "logic_gate" ? (
-                <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("node")}>
-                  {relationshipContextMenu.logicGateID ? "Create new node in logic gate" : "Create new node"}
+              {relationshipContextMenu.relationship?.resourceType === "logic_gate" ? (
+                <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipNode()}>
+                  Create new node in logic gate
                 </button>
               ) : null}
               {relationshipContextMenu.relationship ? (
@@ -3072,8 +3066,8 @@ function ProjectRelationshipSearchPicker({
           value={query}
           onChange={onQueryChange}
           onEscape={onCancel}
-          placeholder="Search Explorer Nodes and Logic Gates"
-          ariaLabel="Search Explorer Nodes and Logic Gates"
+          placeholder="Search Explorer Nodes in Logic Gates"
+          ariaLabel="Search Explorer Nodes in Logic Gates"
           autoFocus
           style={criticalPathNodePickerSearchBoxStyle}
         />
@@ -3081,26 +3075,23 @@ function ProjectRelationshipSearchPicker({
           Cancel
         </button>
       </div>
-      <div role="listbox" aria-label="Node and Logic Gate search results" style={criticalPathNodePickerResultsStyle}>
+      <div role="listbox" aria-label="Eligible Node search results" style={criticalPathNodePickerResultsStyle}>
         {!hasQuery ? (
-          <div style={criticalPathNodePickerEmptyStyle}>Search for a Node or Logic Gate in Company Explorer</div>
+          <div style={criticalPathNodePickerEmptyStyle}>Search for a Node that belongs to a Logic Gate</div>
         ) : loading ? (
           <div style={criticalPathNodePickerEmptyStyle}>Searching...</div>
         ) : error ? (
           <div style={criticalPathNodePickerErrorStyle}>{error}</div>
         ) : rows.length === 0 ? (
-          <div style={criticalPathNodePickerEmptyStyle}>No Node or Logic Gate matches</div>
+          <div style={criticalPathNodePickerEmptyStyle}>No eligible Node matches</div>
         ) : (
           rows.map((row) => {
-            const resourceType = row.kind === "logic_gate" ? "logic_gate" : row.kind === "node" ? "node" : null;
-            const resourceID = resourceType === "logic_gate"
-              ? row.logicGateID?.trim() || row.resourceID?.trim() || ""
-              : row.nodeID?.trim() || row.resourceID?.trim() || "";
-            if (!resourceType || !resourceID) return null;
-            const key = `${resourceType}:${resourceID}`;
+            if (row.kind !== "node") return null;
+            const resourceID = row.nodeID?.trim() || row.resourceID?.trim() || "";
+            if (!resourceID) return null;
+            const key = `node:${resourceID}`;
             const alreadyAdded = existingRelationshipKeys.has(key);
             const adding = addingKey === key;
-            const resourceLabel = resourceType === "logic_gate" ? "Logic Gate" : "Node";
             return (
               <button
                 key={row.id}
@@ -3109,15 +3100,15 @@ function ProjectRelationshipSearchPicker({
                 aria-selected="false"
                 disabled={alreadyAdded || Boolean(addingKey)}
                 style={projectRelationshipPickerResultButtonStyle(alreadyAdded || Boolean(addingKey))}
-                onClick={() => onSelectTarget({ resourceType, resourceID })}
+                onClick={() => onSelectTarget({ resourceType: "node", resourceID })}
               >
                 <span style={criticalPathNodePickerResultIconStyle(accent)}>
-                  <ExplorerRowIcon kind={resourceType} />
+                  <ExplorerRowIcon kind="node" />
                 </span>
                 <span style={criticalPathNodePickerResultTextStyle}>
                   <span style={criticalPathNodePickerResultTitleStyle}>{row.label}</span>
                   <span style={criticalPathNodePickerResultPathStyle}>
-                    {resourceLabel}{row.folderLabel ? ` · ${row.folderLabel}` : ""}
+                    Node{row.folderLabel ? ` · ${row.folderLabel}` : ""}
                   </span>
                 </span>
                 {alreadyAdded || adding ? (
@@ -3725,73 +3716,39 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
 }
 
 function resolveProjectRelationshipDropTargets(payload: ExplorerDropPayload | null, workspace?: ProjectSummaryWorkspaceSnapshot): ProjectRelationshipDropTarget[] {
-  if (!payload) return [];
+  if (!payload || !workspace) return [];
   const itemType = getExplorerDropPayloadItemType(payload);
-  let targets: ProjectRelationshipDropTarget[] = [];
   if (payload.kind === "batch") {
-    if (itemType !== "logic_gate" && itemType !== "node") return [];
-    targets = getExplorerDropPayloadItems(payload).map((item) => ({
-      resourceType: itemType,
-      resourceID: item.itemID,
-    }));
-    return expandLogicGateRelationshipTargets(targets, workspace);
+    if (itemType !== "node") return [];
+    return eligibleProjectNodeRelationshipTargets(
+      getExplorerDropPayloadItems(payload).map((item) => item.itemID),
+      workspace,
+    );
   }
-  if ((payload.itemType === "logic_gate" || payload.itemType === "node") && payload.itemID) {
-    return expandLogicGateRelationshipTargets([{ resourceType: payload.itemType, resourceID: payload.itemID }], workspace);
+  if (payload.itemType === "node" && payload.itemID) {
+    return eligibleProjectNodeRelationshipTargets([payload.itemID], workspace);
   }
-  if (payload.kind !== "folder" || !workspace) return [];
-  if (payload.folderKind === "logic_gate") {
-    targets = Array.from(getScopedItemIDs({
-      folders: workspace.logicGateFolders,
-      folderItems: workspace.logicGateFolderItems,
-      folderID: payload.folderID ?? "",
-      itemType: "logic_gate",
-    })).map((resourceID) => ({ resourceType: "logic_gate", resourceID }));
-    return expandLogicGateRelationshipTargets(targets, workspace);
-  }
-  if (payload.folderKind === "node") {
-    return Array.from(getScopedItemIDs({
-      folders: workspace.nodeFolders,
-      folderItems: workspace.nodeFolderItems,
-      folderID: payload.folderID ?? "",
-      itemType: "node",
-    })).map((resourceID) => ({ resourceType: "node", resourceID }));
-  }
-  return [];
+  if (payload.kind !== "folder" || payload.folderKind !== "node") return [];
+  return eligibleProjectNodeRelationshipTargets(Array.from(getScopedItemIDs({
+    folders: workspace.nodeFolders,
+    folderItems: workspace.nodeFolderItems,
+    folderID: payload.folderID ?? "",
+    itemType: "node",
+  })), workspace);
 }
 
-function expandLogicGateRelationshipTargets(
-  targets: ProjectRelationshipDropTarget[],
-  workspace?: ProjectSummaryWorkspaceSnapshot,
+function eligibleProjectNodeRelationshipTargets(
+  nodeIDs: string[],
+  workspace: ProjectSummaryWorkspaceSnapshot,
 ): ProjectRelationshipDropTarget[] {
-  if (!workspace) return targets;
-  const expanded: ProjectRelationshipDropTarget[] = [];
-  const seen = new Set<string>();
-  const addTarget = (target: ProjectRelationshipDropTarget) => {
-    const cleanResourceID = target.resourceID.trim();
-    if (!cleanResourceID) return;
-    const key = `${target.resourceType}:${cleanResourceID}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    expanded.push({ resourceType: target.resourceType, resourceID: cleanResourceID });
-  };
-  for (const target of targets) {
-    addTarget(target);
-    if (target.resourceType !== "logic_gate") continue;
-    const gateID = target.resourceID.trim();
-    const childNodes = workspace.nodes
-      .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim() === gateID))
-      .sort((left, right) => (
-        (left.name || left.node_id).localeCompare(right.name || right.node_id, undefined, { numeric: true, sensitivity: "base" })
-        || left.node_id.localeCompare(right.node_id)
-      ));
-    for (const node of childNodes) {
-      addTarget({ resourceType: "node", resourceID: node.node_id });
-    }
-  }
-  return expanded;
+  const eligibleNodeIDs = new Set(workspace.nodes
+    .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim()))
+    .map((node) => node.node_id.trim())
+    .filter(Boolean));
+  return cleanIDList(nodeIDs)
+    .filter((nodeID) => eligibleNodeIDs.has(nodeID))
+    .map((resourceID) => ({ resourceType: "node", resourceID }));
 }
-
 const summaryShellStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",

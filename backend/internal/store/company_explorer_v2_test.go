@@ -215,14 +215,22 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		ActorUserID:  user.UserID,
+	projectNode, err := repo.CreateNode(companyID, "Project anchor node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	projectPriority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: projectNode.NodeID,
+		Priority: &projectPriority, PrioritySet: true,
 	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship: %v", err)
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: projectNode.NodeID, ActorUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship node: %v", err)
 	}
 	manualGate, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
 		CompanyID:        companyID,
@@ -264,7 +272,7 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 		t.Fatalf("project children = %+v, want project relationship outside Explorer tree", projectChildren.Rows)
 	}
 }
-func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
+func TestMemoryProjectRelationshipMovesEligibleNodeAndImplicitGateBetweenProjects(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000003"
 	repo.EnsureCompany(companyID, "Project Relationship Move Co")
@@ -291,34 +299,39 @@ func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	node, err := repo.CreateNode(companyID, "Movable project node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
+		Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 	first, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    alpha.Project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		ActorUserID:  user.UserID,
+		CompanyID: companyID, ProjectID: alpha.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID, ActorUserID: user.UserID,
 	})
 	if err != nil {
 		t.Fatalf("UpsertProjectRelationship first: %v", err)
 	}
 	second, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    bravo.Project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		ActorUserID:  user.UserID,
+		CompanyID: companyID, ProjectID: bravo.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID, ActorUserID: user.UserID,
 	})
 	if err != nil {
 		t.Fatalf("UpsertProjectRelationship move: %v", err)
 	}
-	if first.Relationship == nil || second.Relationship == nil {
-		t.Fatalf("relationship mutation missing projection")
+	if first.Relationship == nil || second.Relationship == nil || len(second.ImplicitRelationships) != 1 {
+		t.Fatalf("relationship mutation missing node or implicit gate projection: first=%+v second=%+v", first, second)
 	}
 	if second.Relationship.RelationshipID != first.Relationship.RelationshipID {
-		t.Fatalf("move created a new relationship id %s, want existing %s", second.Relationship.RelationshipID, first.Relationship.RelationshipID)
+		t.Fatalf("move created a new node relationship id %s, want existing %s", second.Relationship.RelationshipID, first.Relationship.RelationshipID)
 	}
-	if second.Relationship.ProjectID != bravo.Project.ProjectID {
-		t.Fatalf("moved relationship ProjectID = %s, want %s", second.Relationship.ProjectID, bravo.Project.ProjectID)
+	if second.Relationship.ProjectID != bravo.Project.ProjectID || second.ImplicitRelationships[0].ResourceID != logicGate.LogicGateID {
+		t.Fatalf("moved relationships = %+v, want node and implicit gate in Bravo", second)
 	}
 	alphaRows, err := repo.ListProjectRelationshipProjections(companyID, alpha.Project.ProjectID)
 	if err != nil {
@@ -331,11 +344,10 @@ func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListProjectRelationshipProjections bravo: %v", err)
 	}
-	if len(bravoRows) != 1 || bravoRows[0].RelationshipID != first.Relationship.RelationshipID {
-		t.Fatalf("bravo relationships after move = %+v, want moved relationship", bravoRows)
+	if len(bravoRows) != 2 {
+		t.Fatalf("bravo relationships after move = %+v, want node and implicit gate", bravoRows)
 	}
 }
-
 func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000004"
@@ -378,14 +390,6 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship: %v", err)
-	}
 	node, err := repo.CreateNode(companyID, "Contained Node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
@@ -401,6 +405,12 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship node: %v", err)
+	}
 	result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folder.EntityID}}, deleterUserID)
 	if err != nil {
 		t.Fatalf("DeleteCompanyExplorerTargets folder: %v", err)
@@ -489,8 +499,8 @@ func TestMemoryCompanyExplorerDeletePreservesProjectAssociationsAndSummarizesLog
 		if err != nil {
 			t.Fatalf("ListProjectRelationshipProjections after restore: %v", err)
 		}
-		if len(relationships) != 1 || relationships[0].ResourceID != logicGate.LogicGateID {
-			t.Fatalf("relationships after project restore = %+v, want restored association", relationships)
+		if len(relationships) != 2 {
+			t.Fatalf("relationships after project restore = %+v, want restored node and implicit gate associations", relationships)
 		}
 	})
 
@@ -1213,14 +1223,6 @@ func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string)
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    projectResult.Project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship: %v", err)
-	}
 	node, err := repo.CreateNode(companyID, "Project Node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
@@ -1234,6 +1236,12 @@ func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string)
 		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship node: %v", err)
 	}
 	return *projectResult.Project, logicGate, node
 }

@@ -210,6 +210,7 @@ export type GVICMatrixProjectionRow = {
   user_id: string;
   node_name: string;
   gvic_assignment?: string;
+  generated_user_ids?: string[];
   priority?: number;
   project_id?: string;
   project_name?: string;

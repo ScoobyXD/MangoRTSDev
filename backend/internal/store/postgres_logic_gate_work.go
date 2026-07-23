@@ -103,6 +103,12 @@ select
         and collaboration.node_id=projection.node_id
     )
   ) as created_from_email,
+  exists (
+    select 1 from project_relationships relationship
+    where relationship.company_id=projection.company_id
+      and relationship.resource_type='node'
+      and relationship.resource_id=projection.node_id
+  ) as has_project,
   projection.projection_updated_timestamp,
   projection.assignment_created_timestamp,
   projection.accounts::text
@@ -145,6 +151,7 @@ order by
 			dueDate           sql.NullString
 			priority          sql.NullInt64
 			createdFromEmail  bool
+			hasProject        bool
 			projectionUpdated sql.NullTime
 			cardCreated       sql.NullTime
 			accountsJSON      sql.NullString
@@ -167,6 +174,7 @@ order by
 			&dueDate,
 			&priority,
 			&createdFromEmail,
+			&hasProject,
 			&projectionUpdated,
 			&cardCreated,
 			&accountsJSON,
@@ -208,6 +216,7 @@ order by
 			IsIssue:                    isIssue.Bool,
 			Position:                   int(position.Int64),
 			CreatedFromEmail:           createdFromEmail,
+			HasProject:                 hasProject,
 			ProjectionUpdatedTimestamp: projectionUpdated.Time,
 			CreatedTimestamp:           cardCreated.Time,
 			Accounts:                   scanAccountSnapshotsJSON(accountsJSON),

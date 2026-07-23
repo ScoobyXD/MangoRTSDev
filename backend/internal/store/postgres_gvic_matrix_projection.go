@@ -803,7 +803,13 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachPostgresMyWorkGeneratedUserIDs(context.Background(), r.db, companyID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
@@ -856,7 +862,13 @@ limit nullif($4, 0)`, companyID, userID, viewerUserID, limit)
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachPostgresMyWorkGeneratedUserIDs(context.Background(), r.db, companyID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {

@@ -27,6 +27,16 @@ func TestMemoryProjectRelationshipAllowsEmailNodeAndPreservesEmailOrigin(t *test
 	if err != nil {
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Email project gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID,
+		NodeID: collaborationResult.Collaboration.NodeID, Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 	relationshipID := NewUUIDv7String()
 	result, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
 		CompanyID: companyID, RelationshipID: relationshipID, ProjectID: projectResult.Project.ProjectID,
@@ -39,8 +49,17 @@ func TestMemoryProjectRelationshipAllowsEmailNodeAndPreservesEmailOrigin(t *test
 		t.Fatalf("email node relationship = %+v", result.Relationship)
 	}
 	projections, err := repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
-	if err != nil || len(projections) != 1 || !projections[0].CreatedFromEmail {
-		t.Fatalf("email node project projection = %+v err=%v, want created_from_email", projections, err)
+	if err != nil || len(projections) != 2 {
+		t.Fatalf("email node project projections = %+v err=%v, want node and implicit gate", projections, err)
+	}
+	var foundEmailNode bool
+	for _, projection := range projections {
+		if projection.ResourceType == EntityTypeNode && projection.ResourceID == collaborationResult.Collaboration.NodeID && projection.CreatedFromEmail {
+			foundEmailNode = true
+		}
+	}
+	if !foundEmailNode {
+		t.Fatalf("email node project projections = %+v, want created_from_email node", projections)
 	}
 	deleted, err := repo.DeleteProjectRelationship(ProjectRelationshipDeleteInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID, RelationshipID: relationshipID,

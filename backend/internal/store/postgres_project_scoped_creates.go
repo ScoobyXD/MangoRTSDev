@@ -31,32 +31,8 @@ func (r *PostgresRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCr
 }
 
 func (r *PostgresRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateResult, error) {
-	input, err := NormalizeProjectScopedLogicGateCreateInput(input)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	defer tx.Rollback()
-
-	result, err := r.createLogicGateAssociatedWithProjectTx(ctx, tx, input)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	items, err := r.attachLogicGateGVICAssignments(ctx, input.CompanyID, []domain.LogicGate{result.LogicGate})
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	result.LogicGate = items[0]
-	return result, nil
+	return ProjectScopedLogicGateCreateResult{}, ErrDirectProjectLogicGate
 }
-
 func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx *sql.Tx, input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateResult, error) {
 	if err := ensureProjectExistsForScopedCreateTx(ctx, tx, input.CompanyID, input.ProjectID); err != nil {
 		return ProjectScopedNodeCreateResult{}, err
@@ -115,6 +91,20 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
+	gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
+	})
+	if err != nil {
+		return ProjectScopedNodeCreateResult{}, err
+	}
+	if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{CompanyID: input.CompanyID, RelationshipID: gateRelationshipID}); err != nil {
+		return ProjectScopedNodeCreateResult{}, err
+	}
+	gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
+	if err != nil {
+		return ProjectScopedNodeCreateResult{}, err
+	}
 	relationshipID, err := insertProjectRelationshipForScopedCreateTx(ctx, tx, ProjectRelationshipInput{
 		CompanyID:    input.CompanyID,
 		ProjectID:    input.ProjectID,
@@ -146,6 +136,7 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
 		nodeCreatedWorkspaceEventInputWithMetadata(node, meta),
+		projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID),
 		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
 	})
 	if err != nil {
@@ -153,72 +144,13 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	}
 	events = append(assignmentEvents, events...)
 	return ProjectScopedNodeCreateResult{
-		Node:         node,
-		Relationship: &projection,
-		Information:  information,
-		Assignment:   assignment,
-		Card:         card,
-		Events:       events,
-	}, nil
-}
-
-func (r *PostgresRepo) createLogicGateAssociatedWithProjectTx(ctx context.Context, tx *sql.Tx, input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateResult, error) {
-	if err := ensureProjectExistsForScopedCreateTx(ctx, tx, input.CompanyID, input.ProjectID); err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	logicGate, err := createLogicGateAssociatedWithProjectSourceTx(ctx, tx, input)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	var information *domain.LogicGateInformation
-	if input.InitialInformation != nil {
-		item, err := r.addInitialLogicGateInformationTx(ctx, tx, input.CompanyID, logicGate.LogicGateID, *input.InitialInformation, input.ActorUserID)
-		if err != nil {
-			return ProjectScopedLogicGateCreateResult{}, err
-		}
-		information = &item
-	}
-	relationshipID, err := insertProjectRelationshipForScopedCreateTx(ctx, tx, ProjectRelationshipInput{
-		CompanyID:    input.CompanyID,
-		ProjectID:    input.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		Position:     input.Position,
-	})
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	err = syncLogicGateProjectionDependenciesTx(ctx, tx, LogicGateProjectionDependencyInput{
-		CompanyID:   input.CompanyID,
-		LogicGateID: logicGate.LogicGateID,
-	})
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
-		CompanyID:      input.CompanyID,
-		RelationshipID: relationshipID,
-	})
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, relationshipID)
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
-		logicGateCreatedWorkspaceEventInput(logicGate, meta),
-		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
-	})
-	if err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
-	return ProjectScopedLogicGateCreateResult{
-		LogicGate:    logicGate,
-		Relationship: &projection,
-		Information:  information,
-		Events:       events,
+		Node:                  node,
+		Relationship:          &projection,
+		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		Information:           information,
+		Assignment:            assignment,
+		Card:                  card,
+		Events:                events,
 	}, nil
 }
 
@@ -248,33 +180,13 @@ insert into project_relationships (
 returning relationship_id::text`, input.CompanyID, relationshipID, input.ProjectID, input.ResourceType, input.ResourceID, input.Position).Scan(&relationshipID); err != nil {
 		return "", err
 	}
+	if input.ResourceType == EntityTypeNode {
+		if _, err := tx.ExecContext(ctx, `select mangorts_bump_logic_gate_work_versions_for_node($1::uuid, $2::uuid)`, input.CompanyID, input.ResourceID); err != nil {
+			return "", err
+		}
+	}
 	return relationshipID, nil
 }
-
-func createLogicGateAssociatedWithProjectSourceTx(ctx context.Context, tx *sql.Tx, input ProjectScopedLogicGateCreateInput) (domain.LogicGate, error) {
-	logicGateID := input.LogicGateID
-	if logicGateID == "" {
-		logicGateID = newUUIDv7String()
-	}
-	item := domain.LogicGate{
-		CompanyID:       input.CompanyID,
-		LogicGateID:     logicGateID,
-		Header:          input.Header,
-		DefaultAccess:   ResourceDefaultAccessEdit,
-		GVICAssignments: []domain.LogicGateGVICAssignment{},
-	}
-	err := tx.QueryRowContext(ctx,
-		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
-		 values ($1::uuid, $2::uuid, $3, now())
-		 returning company_id::text, logic_gate_id::text, header, created_timestamp`,
-		item.CompanyID, item.LogicGateID, item.Header,
-	).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp)
-	if err != nil {
-		return domain.LogicGate{}, err
-	}
-	return item, nil
-}
-
 func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
 	companyID := cleanUUIDText(input.CompanyID)
 	nodeID := cleanUUIDText(input.NodeID)
@@ -358,81 +270,22 @@ func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.
 	return item, nil
 }
 
-func (r *PostgresRepo) addInitialLogicGateInformationTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, initial ProjectScopedInitialInformationInput, actorUserID string) (domain.LogicGateInformation, error) {
-	companyID = cleanUUIDText(companyID)
-	logicGateID = cleanUUIDText(logicGateID)
-	infoType := strings.TrimSpace(initial.Type)
-	if companyID == "" || logicGateID == "" || infoType == "" || strings.TrimSpace(initial.Information) == "" {
-		return domain.LogicGateInformation{}, ErrInvalid
-	}
-	item := domain.LogicGateInformation{
-		CompanyID:     companyID,
-		InformationID: newUUIDv7String(),
-		LogicGateID:   logicGateID,
-		Type:          infoType,
-		Information:   initial.Information,
-	}
-	if err := tx.QueryRowContext(ctx,
-		`insert into logic_gate_information
-		 (company_id, information_id, logic_gate_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 returning company_id::text, information_id::text, logic_gate_id::text, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.InformationID, item.LogicGateID, item.Type, item.Information,
-	).Scan(
-		&item.CompanyID,
-		&item.InformationID,
-		&item.LogicGateID,
-		&item.Type,
-		&item.Information,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-	projectionID := cleanUUIDText(initial.InformationID)
-	if projectionID == "" {
-		projectionID = item.InformationID
-	}
-	var projection domain.LogicGateProjection
-	query := `insert into logic_gate_projection_table
-		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, logic_gate_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now()
-		 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`
-	if isEditorTextBoxType(item.Type) {
-		query = `insert into logic_gate_projection_table
-		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, logic_gate_id, information_id)
-		 do update set
-		   information=excluded.information,
-		   updated_timestamp=now()
-		 returning company_id::text, logic_gate_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`
-	}
-	if err := tx.QueryRowContext(ctx, query, item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information).Scan(
-		&projection.CompanyID,
-		&projection.LogicGateID,
-		&projection.InformationID,
-		&projection.Type,
-		&projection.Information,
-		&projection.CreatedTimestamp,
-		&projection.UpdatedTimestamp,
-	); err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-	return item, nil
-}
-
 func projectRelationshipUpsertedWorkspaceEventInput(item domain.ProjectRelationshipProjection, actorUserID string) DomainEventInput {
+	nodeID := ""
+	if item.NodeID != nil {
+		nodeID = strings.TrimSpace(*item.NodeID)
+	}
+	logicGateID := ""
+	if item.LogicGateID != nil {
+		logicGateID = strings.TrimSpace(*item.LogicGateID)
+	}
 	input := workspaceDomainEventInput(item.CompanyID, "project_relationship_upserted", map[string]any{
 		"project_id":    item.ProjectID,
 		"relationship":  item,
 		"resource_type": item.ResourceType,
 		"resource_id":   item.ResourceID,
+		"node_id":       nodeID,
+		"logic_gate_id": logicGateID,
 	})
 	input.ActorUserID = strings.TrimSpace(actorUserID)
 	return input

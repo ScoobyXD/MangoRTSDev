@@ -341,11 +341,11 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
-			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			relationships, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
-			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectRelationships = append(result.ProjectRelationships, relationships...)
 		}
 
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
@@ -467,11 +467,11 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
-			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			relationships, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
-			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectRelationships = append(result.ProjectRelationships, relationships...)
 		}
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
 		result.Nodes = append(result.Nodes, node)
@@ -497,31 +497,30 @@ func (r *MemoryRepo) nextProjectRelationshipPositionLocked(companyID, projectID 
 	return position
 }
 
-func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input CommunicationsTriageConversionInput, nodeID string, now time.Time) (domain.ProjectRelationshipProjection, error) {
+func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input CommunicationsTriageConversionInput, nodeID string, now time.Time) ([]domain.ProjectRelationshipProjection, error) {
 	position := input.Target.Position
 	if position <= 0 {
 		position = r.nextProjectRelationshipPositionLocked(input.CompanyID, input.Target.ProjectID)
 	}
-	relationshipID := newUUIDv7String()
-	relationshipKey := projectRelationshipKey(input.CompanyID, relationshipID)
-	r.projectRelationships[relationshipKey] = domain.ProjectRelationship{
-		CompanyID:        input.CompanyID,
-		RelationshipID:   relationshipID,
-		ProjectID:        input.Target.ProjectID,
-		ResourceType:     EntityTypeNode,
-		ResourceID:       nodeID,
-		Position:         position,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+	if strings.TrimSpace(input.LogicGateID) == "" {
+		return nil, ErrProjectNodeLogicGateRequired
 	}
-	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
-		return domain.ProjectRelationshipProjection{}, err
+	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.Target.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: input.LogicGateID, Position: position,
+	})
+	if err != nil {
+		return nil, err
 	}
-	projection, ok := r.projectRelationshipProjection[relationshipKey]
-	if !ok {
-		return domain.ProjectRelationshipProjection{}, ErrNotFound
+	nodeProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.Target.ProjectID, ResourceType: EntityTypeNode,
+		ResourceID: nodeID, Position: position,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return projection, nil
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{nodeID}, []string{input.LogicGateID})
+	return []domain.ProjectRelationshipProjection{gateProjection, nodeProjection}, nil
 }
 func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
 	if input.LogicGateID == "" {

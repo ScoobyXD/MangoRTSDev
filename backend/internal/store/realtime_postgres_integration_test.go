@@ -402,16 +402,16 @@ func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndGeneratedP
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID: company.CompanyID, ProjectID: project.ProjectID,
-		ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	priority := 1
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID: company.CompanyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
 		Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: company.CompanyID, ProjectID: project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 	}); err != nil {
 		t.Fatal(err)
 	}
