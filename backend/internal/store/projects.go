@@ -161,7 +161,13 @@ func NormalizeProjectRelationshipInput(input ProjectRelationshipInput) (ProjectR
 	input.ResourceID = cleanUUIDText(input.ResourceID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	resourceType, ok := NormalizeEntityType(input.ResourceType)
-	if !ok || (resourceType != EntityTypeLogicGate && resourceType != EntityTypeNode) {
+	if !ok {
+		return ProjectRelationshipInput{}, ErrInvalid
+	}
+	if resourceType == EntityTypeLogicGate {
+		return ProjectRelationshipInput{}, ErrDirectProjectLogicGate
+	}
+	if resourceType != EntityTypeNode {
 		return ProjectRelationshipInput{}, ErrInvalid
 	}
 	input.ResourceType = resourceType
@@ -204,6 +210,9 @@ func NormalizeProjectScopedNodeCreateInput(input ProjectScopedNodeCreateInput) (
 	assignment, err := normalizeProjectScopedNodeLogicGateAssignment(input.InitialAssignment)
 	if err != nil {
 		return ProjectScopedNodeCreateInput{}, err
+	}
+	if assignment == nil {
+		return ProjectScopedNodeCreateInput{}, ErrProjectNodeLogicGateRequired
 	}
 	input.InitialAssignment = assignment
 	return input, nil

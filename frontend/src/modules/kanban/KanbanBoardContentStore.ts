@@ -276,6 +276,7 @@ function normalizeLogicGateWorkView(
       due_date: card.due_date,
       priority: card.priority,
       created_from_email: card.created_from_email === true,
+      has_project: card.has_project === true,
       accounts: card.accounts?.map((account) => ({ ...account })) ?? [],
       projection_updated_timestamp: projectionUpdated || undefined,
       created_timestamp: created,

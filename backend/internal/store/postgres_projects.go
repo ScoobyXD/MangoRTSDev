@@ -985,8 +985,62 @@ func (r *PostgresRepo) UpsertProjectRelationship(input ProjectRelationshipInput)
 	}
 	defer tx.Rollback()
 
-	var returnedID string
+	var logicGateID string
 	err = tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from node_logic_gate_assignments
+where company_id=$1::uuid and node_id=$2::uuid
+order by updated_timestamp desc, created_timestamp desc, assignment_id desc
+limit 1`, input.CompanyID, input.ResourceID).Scan(&logicGateID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
+	}
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+
+	gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: logicGateID, Position: input.Position,
+	})
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	nodeRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, input)
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	for _, relationshipID := range []string{gateRelationshipID, nodeRelationshipID} {
+		if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
+			CompanyID: input.CompanyID, RelationshipID: relationshipID,
+		}); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+	}
+	gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	nodeProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, nodeRelationshipID)
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	return ProjectRelationshipMutationResult{
+		Relationship:          &nodeProjection,
+		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+	}, nil
+}
+
+func upsertProjectRelationshipSourceTx(ctx context.Context, tx *sql.Tx, input ProjectRelationshipInput) (string, error) {
+	relationshipID := cleanUUIDText(input.RelationshipID)
+	if relationshipID == "" {
+		relationshipID = newUUIDv7String()
+	}
+	var returnedID string
+	err := tx.QueryRowContext(ctx, `
 insert into project_relationships (
   company_id, relationship_id, project_id, resource_type, resource_id, position, created_timestamp, updated_timestamp
 ) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
@@ -995,27 +1049,12 @@ do update set
   project_id=excluded.project_id,
   position=excluded.position,
   updated_timestamp=now()
-returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.ProjectID, input.ResourceType, input.ResourceID, input.Position).Scan(&returnedID)
-	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
+returning relationship_id::text`, input.CompanyID, relationshipID, input.ProjectID, input.ResourceType, input.ResourceID, input.Position).Scan(&returnedID)
+	if err == nil && input.ResourceType == EntityTypeNode {
+		_, err = tx.ExecContext(ctx, `select mangorts_bump_logic_gate_work_versions_for_node($1::uuid, $2::uuid)`, input.CompanyID, input.ResourceID)
 	}
-	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
-		CompanyID:      input.CompanyID,
-		RelationshipID: returnedID,
-	})
-	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
-	}
-	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
-	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProjectRelationshipMutationResult{}, err
-	}
-	return ProjectRelationshipMutationResult{Relationship: &projection}, nil
+	return returnedID, err
 }
-
 func (r *PostgresRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteInput) (ProjectRelationshipMutationResult, error) {
 	input, err := NormalizeProjectRelationshipDeleteInput(input)
 	if err != nil {
@@ -1045,6 +1084,14 @@ where company_id=$1::uuid
 	}
 	if affected == 0 {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
+	}
+	for _, row := range projectionBefore {
+		if strings.TrimSpace(row.NodeID) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "select mangorts_bump_logic_gate_work_versions_for_node($1::uuid, $2::uuid)", input.CompanyID, row.NodeID); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
 	}
 	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,

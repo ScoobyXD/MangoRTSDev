@@ -551,7 +551,11 @@ func (s *Server) handleProjectRelationships(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		resourceType, ok := store.NormalizeEntityType(req.ResourceType)
-		if !ok || (resourceType != store.EntityTypeLogicGate && resourceType != store.EntityTypeNode) || strings.TrimSpace(req.ResourceID) == "" {
+		if ok && resourceType == store.EntityTypeLogicGate {
+			writeError(w, http.StatusBadRequest, "direct_project_logic_gate_addition_not_allowed")
+			return
+		}
+		if !ok || resourceType != store.EntityTypeNode || strings.TrimSpace(req.ResourceID) == "" {
 			writeError(w, http.StatusBadRequest, "invalid_project_relationship")
 			return
 		}
@@ -571,6 +575,12 @@ func (s *Server) handleProjectRelationships(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_save_project_relationship")
 			return
+		}
+		for _, relationship := range result.ImplicitRelationships {
+			s.publishWorkspaceEvent(companyID, "project_relationship_upserted", map[string]any{
+				"project_id": projectID, "relationship": relationship,
+				"resource_type": relationship.ResourceType, "resource_id": relationship.ResourceID,
+			})
 		}
 		s.publishWorkspaceEvent(companyID, "project_relationship_upserted", map[string]any{
 			"project_id":    projectID,
@@ -644,11 +654,13 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
-	if req.InitialAssignment != nil {
-		logicGateID := strings.TrimSpace(req.InitialAssignment.LogicGateID)
-		if logicGateID != "" && !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, store.EntityPermissionEdit) {
-			return
-		}
+	if req.InitialAssignment == nil || strings.TrimSpace(req.InitialAssignment.LogicGateID) == "" {
+		writeError(w, http.StatusBadRequest, "project_node_logic_gate_required")
+		return
+	}
+	logicGateID := strings.TrimSpace(req.InitialAssignment.LogicGateID)
+	if !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, store.EntityPermissionEdit) {
+		return
 	}
 	actor, _ := authenticatedActor(r)
 	input := store.ProjectScopedNodeCreateInput{
@@ -693,47 +705,8 @@ func (s *Server) handleProjectScopedLogicGateCreate(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	var req projectScopedLogicGateCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	companyID := strings.TrimSpace(req.CompanyID)
-	if companyID == "" || strings.TrimSpace(req.Header) == "" {
-		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
-		return
-	}
-	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
-		return
-	}
-	actor, _ := authenticatedActor(r)
-	input := store.ProjectScopedLogicGateCreateInput{
-		CompanyID:   companyID,
-		ProjectID:   projectID,
-		LogicGateID: req.LogicGateID,
-		Header:      req.Header,
-		Position:    req.Position,
-		ActorUserID: actor.User.UserID,
-	}
-	if req.InitialInformation != nil {
-		if rejectDurableInlineFileBytes(w, "project_scoped_logic_gate_initial_information", req.InitialInformation.Information) {
-			return
-		}
-		input.InitialInformation = &store.ProjectScopedInitialInformationInput{
-			Type:          req.InitialInformation.Type,
-			Information:   req.InitialInformation.Information,
-			InformationID: req.InitialInformation.InformationID,
-		}
-	}
-	result, err := s.repo.CreateLogicGateAssociatedWithProject(input)
-	if err != nil {
-		s.writeProjectMutationError(w, err, "failed_to_create_project_logic_gate")
-		return
-	}
-	s.publishCommittedWorkspaceEvents(result.Events)
-	writeJSON(w, http.StatusCreated, result)
+	writeError(w, http.StatusBadRequest, "direct_project_logic_gate_addition_not_allowed")
 }
-
 func (s *Server) handleProjectRelationshipsForResource(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -760,6 +733,10 @@ func (s *Server) handleProjectRelationshipsForResource(w http.ResponseWriter, r 
 
 func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, store.ErrDirectProjectLogicGate):
+		writeError(w, http.StatusBadRequest, "direct_project_logic_gate_addition_not_allowed")
+	case errors.Is(err, store.ErrProjectNodeLogicGateRequired):
+		writeError(w, http.StatusBadRequest, "project_node_logic_gate_required")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_project")
 	case errors.Is(err, store.ErrAlreadyExists):

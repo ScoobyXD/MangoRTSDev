@@ -411,7 +411,7 @@ func TestMemoryEmailConversionCommandRejectsExplorerFolderTarget(t *testing.T) {
 	}
 }
 
-func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
+func TestMemoryEmailConversionCommandRejectsProjectWithoutLogicGateTarget(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111108"
 	repo.EnsureCompany(companyID, "Email Conversion Company")
@@ -423,15 +423,6 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
 	if projectResult.Project == nil {
 		t.Fatalf("CreateProject returned nil project")
 	}
-	project := projectResult.Project
-	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
-	if err != nil {
-		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
-	}
-	afterSequence := int64(0)
-	if len(baselineEvents) > 0 {
-		afterSequence = baselineEvents[len(baselineEvents)-1].Sequence
-	}
 	message := domain.EmailMessageSnapshot{ID: "message-project-target", ThreadID: "thread-project-target", Subject: "Create this in project"}
 	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
@@ -442,43 +433,17 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
 		CompanyID: companyID,
 		Target: CommunicationsTriageConversionTarget{
 			Mode:      CommunicationsEmailConversionTargetProject,
-			ProjectID: project.ProjectID,
+			ProjectID: projectResult.Project.ProjectID,
 		},
 		MessageIDs: []string{message.ID},
 	})
-	if err != nil {
-		t.Fatalf("ConvertCommunicationsTriageItems project target: %v", err)
+	if !errors.Is(err, ErrProjectNodeLogicGateRequired) {
+		t.Fatalf("ConvertCommunicationsTriageItems project target err = %v, want ErrProjectNodeLogicGateRequired", err)
 	}
-	if len(result.Nodes) != 1 || result.Nodes[0].Title != message.Subject {
-		t.Fatalf("nodes = %+v, want one created email node", result.Nodes)
-	}
-	if len(result.ProjectRelationships) != 1 {
-		t.Fatalf("project relationships = %+v, want one relationship", result.ProjectRelationships)
-	}
-	relationship := result.ProjectRelationships[0]
-	if relationship.ProjectID != project.ProjectID || relationship.ResourceType != EntityTypeNode || relationship.ResourceID != result.Nodes[0].NodeID || relationship.NodeID == nil || *relationship.NodeID != result.Nodes[0].NodeID {
-		t.Fatalf("project relationship = %+v, want node relationship for %s", relationship, result.Nodes[0].NodeID)
-	}
-	if !relationship.CreatedFromEmail {
-		t.Fatalf("project relationship created_from_email = false, want true")
-	}
-	relationships, err := repo.ListProjectRelationshipProjections(companyID, project.ProjectID)
-	if err != nil {
-		t.Fatalf("ListProjectRelationshipProjections: %v", err)
-	}
-	if len(relationships) != 1 || relationships[0].RelationshipID != relationship.RelationshipID {
-		t.Fatalf("relationships = %+v, want created relationship %s", relationships, relationship.RelationshipID)
-	}
-	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
-	if err != nil {
-		t.Fatalf("ListDomainEventsAfter: %v", err)
-	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", "node_updated", "project_relationship_upserted"}
-	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
-		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	if len(result.Nodes) != 0 || len(result.ProjectRelationships) != 0 {
+		t.Fatalf("rejected conversion mutated result: %+v", result)
 	}
 }
-
 func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111118"
@@ -492,16 +457,6 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 		t.Fatalf("CreateProject returned nil project")
 	}
 	project := projectResult.Project
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		Position:     1,
-		ActorUserID:  user.UserID,
-	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship logic gate: %v", err)
-	}
 	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
@@ -528,11 +483,17 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems project logic gate target: %v", err)
 	}
-	if len(result.Nodes) != 1 || len(result.Cards) != 1 || len(result.Assignments) != 1 || len(result.ProjectRelationships) != 1 {
-		t.Fatalf("result nodes/cards/assignments/project relationships = %d/%d/%d/%d, want one each", len(result.Nodes), len(result.Cards), len(result.Assignments), len(result.ProjectRelationships))
+	if len(result.Nodes) != 1 || len(result.Cards) != 1 || len(result.Assignments) != 1 || len(result.ProjectRelationships) != 2 {
+		t.Fatalf("result nodes/cards/assignments/project relationships = %d/%d/%d/%d, want one node/card/assignment and two project relationships", len(result.Nodes), len(result.Cards), len(result.Assignments), len(result.ProjectRelationships))
 	}
 	node := result.Nodes[0]
-	relationship := result.ProjectRelationships[0]
+	var relationship domain.ProjectRelationshipProjection
+	for _, item := range result.ProjectRelationships {
+		if item.ResourceType == EntityTypeNode {
+			relationship = item
+			break
+		}
+	}
 	if relationship.ProjectID != project.ProjectID || relationship.ResourceType != EntityTypeNode || relationship.ResourceID != node.NodeID {
 		t.Fatalf("project relationship = %+v, want node relationship for %s", relationship, node.NodeID)
 	}
@@ -566,7 +527,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated", "project_relationship_upserted"}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated", "project_relationship_upserted", "project_relationship_upserted"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}

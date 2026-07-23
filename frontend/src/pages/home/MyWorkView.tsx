@@ -1545,6 +1545,18 @@ function buildMyWorkRowsFromMatrix({
   groupIDsByUserID: Map<string, string[]>;
 }): MyWorkResourceRow[] {
   const rows: MyWorkResourceRow[] = [];
+  const generatedUserIDsByContext = new Map<string, Set<string>>();
+  for (const item of matrixCells) {
+    const contextKey = myWorkMatrixAssignmentContextKey(item);
+    const generatedUserIDs = cleanIDList(item.generated_user_ids ?? []);
+    if (normalizeGVICRole(item.gvic_assignment) === "generated") {
+      generatedUserIDs.push(item.userID.trim() || item.user_id?.trim() || "");
+    }
+    if (generatedUserIDs.length === 0) continue;
+    const users = generatedUserIDsByContext.get(contextKey) ?? new Set<string>();
+    for (const userID of generatedUserIDs) if (userID) users.add(userID);
+    generatedUserIDsByContext.set(contextKey, users);
+  }
   for (const item of matrixCells) {
     const role = normalizeGVICRole(item.gvic_assignment);
     if (!role) continue;
@@ -1556,7 +1568,8 @@ function buildMyWorkRowsFromMatrix({
     const title = item.node_name?.trim() || nodeID;
     const projectName = item.project_name?.trim() || projectID;
     const logicGateName = item.logic_gate_name?.trim() || logicGateID;
-    const people = userID ? [personForUserID(userID, userByID)] : [];
+    const generatedUserIDs = Array.from(generatedUserIDsByContext.get(myWorkMatrixAssignmentContextKey(item)) ?? []);
+    const people = generatedUserIDs.map((generatedUserID) => personForUserID(generatedUserID, userByID));
     rows.push({
       rowKey: item.projection_row_id?.trim() || `${userID}:${role}:node:${nodeID}:project:${projectID || "none"}:logic_gate:${logicGateID || "none"}`,
       companyID: item.companyID || item.company_id,
@@ -1584,6 +1597,15 @@ function buildMyWorkRowsFromMatrix({
   }
 
   return sortMyWorkRows(rows);
+}
+
+function myWorkMatrixAssignmentContextKey(item: MyWorkMatrixRow): string {
+  return [
+    item.company_id?.trim() ?? "",
+    item.project_id?.trim() ?? "",
+    item.logic_gate_id?.trim() ?? "",
+    item.node_id?.trim() ?? "",
+  ].join("\u0000");
 }
 
 function nodeRecordFromMyWorkRow(row: MyWorkResourceRow): NodeRecord | null {

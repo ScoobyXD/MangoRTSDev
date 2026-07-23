@@ -13,6 +13,13 @@ const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
+const ProjectFolderIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+    <path d="M1.75 4.25h4.1l1.25 1.5h7.15v7.1H1.75z" fill="rgba(255,255,255,0.72)" stroke={color} strokeWidth="1.35" strokeLinejoin="round" />
+    <path d="M1.75 5.75h12.5" fill="none" stroke={color} strokeWidth="1.15" />
+  </svg>
+);
+
 const EmailSourceIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 14 }) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
     <path d="M2.25 4.25h11.5v7.5H2.25z" fill="rgba(255,255,255,0.76)" stroke={color} strokeWidth="1.35" strokeLinejoin="round" />
@@ -100,6 +107,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
   const showRequestedActions = Boolean(requestedActions);
   const createdFromEmail = card.created_from_email === true;
+  const hasProject = card.has_project === true;
   const trailingGridColumns = [createdFromEmail ? "22px" : "", showRequestedActions ? "24px 24px" : ""].filter(Boolean).join(" ");
   const hasFooter = Boolean(requestedStatusText || requestedStatusAction || bylineText);
   const requestedActionButtonBase: React.CSSProperties = {
@@ -164,8 +172,15 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}
       <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
       <div style={{ display: "grid", gridTemplateColumns: `20px minmax(0, 1fr)${trailingGridColumns ? ` ${trailingGridColumns}` : ""}`, gap: 7, alignItems: "start" }}>
-        <span title="Node" style={{ width: 20, height: 20, marginTop: 0, display: "grid", placeItems: "center" }}>
-          <NodeDocumentIcon color={color} />
+        <span style={{ width: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+          <span title="Node" style={{ width: 20, height: 20, display: "grid", placeItems: "center" }}>
+            <NodeDocumentIcon color={color} />
+          </span>
+          {hasProject && (
+            <span title="Part of a Project" aria-label="Part of a Project" style={{ width: 18, height: 17, display: "grid", placeItems: "center" }}>
+              <ProjectFolderIcon color={color} />
+            </span>
+          )}
         </span>
         {editingTitle ? (
           <input

@@ -152,6 +152,7 @@ export type ProjectMutationResponse = {
 
 export type ProjectRelationshipMutationResponse = {
   relationship?: ProjectRelationshipProjection;
+  implicit_relationships?: ProjectRelationshipProjection[];
   deleted_id?: string;
 };
 
@@ -414,7 +415,7 @@ export async function deleteProjectCriticalPathStep(input: {
 export async function upsertProjectRelationship(input: {
   companyID: string;
   projectID: string;
-  resourceType: "logic_gate" | "node";
+  resourceType: "node";
   resourceID: string;
   relationshipID?: string;
   position?: number;
@@ -438,32 +439,17 @@ export async function createProjectNode(input: {
   projectID: string;
   title: string;
   position?: number;
-  logicGateID?: string;
-}): Promise<{ node?: unknown; relationship?: ProjectRelationshipProjection }> {
-  const logicGateID = input.logicGateID?.trim() ?? "";
-  return apiFetchJSON<{ node?: unknown; relationship?: ProjectRelationshipProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/nodes`, {
+  logicGateID: string;
+}): Promise<{ node?: unknown; relationship?: ProjectRelationshipProjection; implicit_relationships?: ProjectRelationshipProjection[] }> {
+  const logicGateID = input.logicGateID.trim();
+  if (!logicGateID) throw new Error("A Project node must belong to a Logic Gate.");
+  return apiFetchJSON<{ node?: unknown; relationship?: ProjectRelationshipProjection; implicit_relationships?: ProjectRelationshipProjection[] }>(`/v1/projects/${encodeURIComponent(input.projectID)}/nodes`, {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
       title: input.title,
       position: input.position ?? 0,
-      initial_assignment: logicGateID ? { logic_gate_id: logicGateID, position: input.position ?? 0, priority: 3 } : undefined,
-    }),
-  });
-}
-
-export async function createProjectLogicGate(input: {
-  companyID: string;
-  projectID: string;
-  header: string;
-  position?: number;
-}): Promise<{ logic_gate?: unknown; relationship?: ProjectRelationshipProjection }> {
-  return apiFetchJSON<{ logic_gate?: unknown; relationship?: ProjectRelationshipProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/logic-gates`, {
-    method: "POST",
-    body: JSON.stringify({
-      company_id: input.companyID,
-      header: input.header,
-      position: input.position ?? 0,
+      initial_assignment: { logic_gate_id: logicGateID, position: input.position ?? 0, priority: 3 },
     }),
   });
 }

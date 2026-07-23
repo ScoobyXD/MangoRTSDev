@@ -86,8 +86,8 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 	if err != nil {
 		t.Fatalf("ListProjectRelationshipProjections after allowed create: %v", err)
 	}
-	if len(relationships) != 1 || relationships[0].LogicGateID == nil || *relationships[0].LogicGateID != logicGate.LogicGateID {
-		t.Fatalf("relationships after allowed create = %+v, want one row assigned to guarded gate", relationships)
+	if len(relationships) != 2 {
+		t.Fatalf("relationships after allowed create = %+v, want node and implicit guarded gate rows", relationships)
 	}
 
 	payloadWithoutPriority := map[string]any{
@@ -144,11 +144,24 @@ func TestProjectRelationshipsGETFiltersTargetsForViewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate hidden: %v", err)
 	}
+	priority := 1
+	for _, assignment := range []struct {
+		nodeID string
+		gateID string
+	}{
+		{nodeID: visibleNode.NodeID, gateID: visibleGate.LogicGateID},
+		{nodeID: hiddenNode.NodeID, gateID: hiddenGate.LogicGateID},
+	} {
+		if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+			CompanyID: companyID, LogicGateID: assignment.gateID, NodeID: assignment.nodeID,
+			Priority: &priority, PrioritySet: true,
+		}); err != nil {
+			t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+		}
+	}
 	projectID := projectResult.Project.ProjectID
 	upsertProjectRelationshipForHTTPTest(t, repo, companyID, projectID, store.EntityTypeNode, visibleNode.NodeID)
 	upsertProjectRelationshipForHTTPTest(t, repo, companyID, projectID, store.EntityTypeNode, hiddenNode.NodeID)
-	upsertProjectRelationshipForHTTPTest(t, repo, companyID, projectID, store.EntityTypeLogicGate, visibleGate.LogicGateID)
-	upsertProjectRelationshipForHTTPTest(t, repo, companyID, projectID, store.EntityTypeLogicGate, hiddenGate.LogicGateID)
 	hideProjectRelationshipTargetForHTTPTest(t, repo, companyID, store.EntityTypeNode, hiddenNode.NodeID)
 	hideProjectRelationshipTargetForHTTPTest(t, repo, companyID, store.EntityTypeLogicGate, hiddenGate.LogicGateID)
 

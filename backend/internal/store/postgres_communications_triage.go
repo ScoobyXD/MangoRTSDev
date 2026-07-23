@@ -421,11 +421,11 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		}
 		card.CreatedFromEmail = true
 		if input.Target.ProjectID != "" {
-			relationship, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			relationships, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
-			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectRelationships = append(result.ProjectRelationships, relationships...)
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -598,11 +598,11 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if input.Target.ProjectID != "" {
-			relationship, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			relationships, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
-			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectRelationships = append(result.ProjectRelationships, relationships...)
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -625,40 +625,42 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 	return result, nil
 }
 
-func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, error) {
+func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) ([]domain.ProjectRelationshipProjection, error) {
 	position := input.Target.Position
 	if position <= 0 {
 		if err := tx.QueryRowContext(ctx, `select coalesce(max(position), 0) + 1000 from project_relationships where company_id=$1::uuid and project_id=$2::uuid`, input.CompanyID, input.Target.ProjectID).Scan(&position); err != nil {
-			return domain.ProjectRelationshipProjection{}, err
+			return nil, err
 		}
 	}
-	relationshipID := newUUIDv7String()
-	var returnedID string
-	err := tx.QueryRowContext(ctx, `
-insert into project_relationships (
-  company_id, relationship_id, project_id, resource_type, resource_id, position, created_timestamp, updated_timestamp
-) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
-on conflict (company_id, resource_type, resource_id)
-do update set
-  project_id=excluded.project_id,
-  position=excluded.position,
-  updated_timestamp=now()
-returning relationship_id::text`, input.CompanyID, relationshipID, input.Target.ProjectID, EntityTypeNode, nodeID, position).Scan(&returnedID)
-	if err != nil {
-		return domain.ProjectRelationshipProjection{}, err
+	if strings.TrimSpace(input.LogicGateID) == "" {
+		return nil, ErrProjectNodeLogicGateRequired
 	}
-	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
-		CompanyID:      input.CompanyID,
-		RelationshipID: returnedID,
+	gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.Target.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: input.LogicGateID, Position: position,
 	})
 	if err != nil {
-		return domain.ProjectRelationshipProjection{}, err
+		return nil, err
 	}
-	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
+	nodeRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.Target.ProjectID, ResourceType: EntityTypeNode,
+		ResourceID: nodeID, Position: position,
+	})
 	if err != nil {
-		return domain.ProjectRelationshipProjection{}, err
+		return nil, err
 	}
-	return projection, nil
+	projections := make([]domain.ProjectRelationshipProjection, 0, 2)
+	for _, relationshipID := range []string{gateRelationshipID, nodeRelationshipID} {
+		if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{CompanyID: input.CompanyID, RelationshipID: relationshipID}); err != nil {
+			return nil, err
+		}
+		projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, relationshipID)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, projection)
+	}
+	return projections, nil
 }
 func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, logicGate domain.LogicGate) (CommunicationsTriageConversionResult, error) {
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)

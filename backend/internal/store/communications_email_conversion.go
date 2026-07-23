@@ -105,17 +105,7 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	case CommunicationsEmailConversionTargetFolder:
 		return CommunicationsTriageConversionInput{}, ErrInvalid
 	case CommunicationsEmailConversionTargetProject:
-		if input.Target.ProjectID == "" {
-			return CommunicationsTriageConversionInput{}, ErrInvalid
-		}
-		input.LogicGateID = ""
-		input.NodeID = ""
-		input.NewLogicGateHeader = ""
-		input.Target.LogicGateID = ""
-		input.Target.NodeID = ""
-		input.Target.Header = ""
-		input.Target.FolderID = ""
-		input.Target.ParentEntityID = ""
+		return CommunicationsTriageConversionInput{}, ErrProjectNodeLogicGateRequired
 	default:
 		return CommunicationsTriageConversionInput{}, ErrInvalid
 	}

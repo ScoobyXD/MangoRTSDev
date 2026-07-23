@@ -104,8 +104,8 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 		if _, err := repo.UpsertProjectRelationship(store.ProjectRelationshipInput{
 			CompanyID:    companyID,
 			ProjectID:    projectID,
-			ResourceType: store.EntityTypeLogicGate,
-			ResourceID:   logicGate.LogicGateID,
+			ResourceType: store.EntityTypeNode,
+			ResourceID:   node.NodeID,
 			Position:     index + 1,
 			ActorUserID:  user.UserID,
 		}); err != nil {

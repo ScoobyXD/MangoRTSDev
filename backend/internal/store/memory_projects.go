@@ -448,72 +448,90 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
-	if !r.entityExistsLocked(input.CompanyID, input.ResourceType, input.ResourceID) {
+	if _, ok := r.nodes[key(input.CompanyID, input.ResourceID)]; !ok {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.ResourceID, "")
+	if !ok || strings.TrimSpace(assignment.LogicGateID) == "" {
+		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
+	}
 
-	relationshipKey := projectRelationshipKey(input.CompanyID, input.RelationshipID)
-	for keyValue, relationship := range r.projectRelationships {
-		if relationship.CompanyID == input.CompanyID &&
-			relationship.ResourceType == input.ResourceType &&
-			relationship.ResourceID == input.ResourceID {
-			relationshipKey = keyValue
-			input.RelationshipID = relationship.RelationshipID
+	previousRelationships := cloneMemoryMap(r.projectRelationships)
+	previousProjections := cloneMemoryMap(r.projectRelationshipProjection)
+	previousGVICRows := cloneMemoryMap(r.GVICMatrixProjectionRows)
+	previousReadVersions := cloneMemoryMap(r.workspaceReadVersions)
+	rollback := func() {
+		r.projectRelationships = previousRelationships
+		r.projectRelationshipProjection = previousProjections
+		r.GVICMatrixProjectionRows = previousGVICRows
+		r.workspaceReadVersions = previousReadVersions
+	}
+
+	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+		ResourceID: assignment.LogicGateID, Position: input.Position,
+	})
+	if err != nil {
+		rollback()
+		return ProjectRelationshipMutationResult{}, err
+	}
+	nodeProjection, err := r.upsertProjectRelationshipSourceLocked(input)
+	if err != nil {
+		rollback()
+		return ProjectRelationshipMutationResult{}, err
+	}
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, []string{assignment.LogicGateID})
+	return ProjectRelationshipMutationResult{
+		Relationship:          &nodeProjection,
+		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+	}, nil
+}
+
+func (r *MemoryRepo) upsertProjectRelationshipSourceLocked(input ProjectRelationshipInput) (domain.ProjectRelationshipProjection, error) {
+	resourceType, ok := NormalizeEntityType(input.ResourceType)
+	if !ok || (resourceType != EntityTypeNode && resourceType != EntityTypeLogicGate) {
+		return domain.ProjectRelationshipProjection{}, ErrInvalid
+	}
+	if !r.entityExistsLocked(input.CompanyID, resourceType, input.ResourceID) {
+		return domain.ProjectRelationshipProjection{}, ErrNotFound
+	}
+	relationshipID := cleanUUIDText(input.RelationshipID)
+	for _, relationship := range r.projectRelationships {
+		if relationship.CompanyID == input.CompanyID && relationship.ResourceType == resourceType && relationship.ResourceID == input.ResourceID {
+			relationshipID = relationship.RelationshipID
 			break
 		}
 	}
-	previousRelationship, hadPreviousRelationship := r.projectRelationships[relationshipKey]
-	previousProjection, hadPreviousProjection := r.projectRelationshipProjection[relationshipKey]
-	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
-	gvicNodeSet := map[string]bool{}
-	gvicLogicGateSet := map[string]bool{}
-	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
-	switch input.ResourceType {
-	case EntityTypeNode:
-		gvicNodeSet[input.ResourceID] = true
-	case EntityTypeLogicGate:
-		gvicLogicGateSet[input.ResourceID] = true
+	if relationshipID == "" {
+		relationshipID = newUUIDv7String()
 	}
+	relationshipKey := projectRelationshipKey(input.CompanyID, relationshipID)
 	now := time.Now().UTC()
-	existing := r.projectRelationships[relationshipKey]
 	created := now
-	if !existing.CreatedTimestamp.IsZero() {
+	if existing, ok := r.projectRelationships[relationshipKey]; ok && !existing.CreatedTimestamp.IsZero() {
 		created = existing.CreatedTimestamp
 	}
-	relationship := domain.ProjectRelationship{
-		CompanyID:        input.CompanyID,
-		RelationshipID:   input.RelationshipID,
-		ProjectID:        input.ProjectID,
-		ResourceType:     input.ResourceType,
-		ResourceID:       input.ResourceID,
-		Position:         input.Position,
-		CreatedTimestamp: created,
-		UpdatedTimestamp: now,
+	r.projectRelationships[relationshipKey] = domain.ProjectRelationship{
+		CompanyID: input.CompanyID, RelationshipID: relationshipID, ProjectID: input.ProjectID,
+		ResourceType: resourceType, ResourceID: input.ResourceID, Position: input.Position,
+		CreatedTimestamp: created, UpdatedTimestamp: now,
 	}
-	r.projectRelationships[relationshipKey] = relationship
-	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, input.RelationshipID); err != nil {
-		if hadPreviousRelationship {
-			r.projectRelationships[relationshipKey] = previousRelationship
-		} else {
-			delete(r.projectRelationships, relationshipKey)
-		}
-		if hadPreviousProjection {
-			r.projectRelationshipProjection[relationshipKey] = previousProjection
-		} else {
-			delete(r.projectRelationshipProjection, relationshipKey)
-		}
-		return ProjectRelationshipMutationResult{}, err
+	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
+		return domain.ProjectRelationshipProjection{}, err
 	}
-	after := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
-	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, after)
-	gvicNodeIDs := mapKeys(gvicNodeSet)
-	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
-
-	projection := r.projectRelationshipProjection[relationshipKey]
-	return ProjectRelationshipMutationResult{Relationship: &projection}, nil
+	if resourceType == EntityTypeNode {
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == input.CompanyID && assignment.NodeID == input.ResourceID {
+				r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, assignment.LogicGateID)
+			}
+		}
+	}
+	projection, ok := r.projectRelationshipProjection[relationshipKey]
+	if !ok {
+		return domain.ProjectRelationshipProjection{}, ErrNotFound
+	}
+	return projection, nil
 }
-
 func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteInput) (ProjectRelationshipMutationResult, error) {
 	input, err := NormalizeProjectRelationshipDeleteInput(input)
 	if err != nil {
@@ -535,6 +553,13 @@ func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteIn
 	delete(r.projectRelationships, relationshipKey)
 	delete(r.projectRelationshipProjection, relationshipKey)
 	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	if relationship.ResourceType == EntityTypeNode {
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == input.CompanyID && assignment.NodeID == relationship.ResourceID {
+				r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, assignment.LogicGateID)
+			}
+		}
+	}
 
 	return ProjectRelationshipMutationResult{DeletedRelationshipID: input.RelationshipID}, nil
 }

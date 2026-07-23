@@ -266,6 +266,7 @@ func LogicGateWorkCardToKanbanCard(companyID, boardID, logicGateID string, card 
 		DueDate:                    cloneStringPointer(card.DueDate),
 		Priority:                   cloneIntPointer(card.Priority),
 		CreatedFromEmail:           card.CreatedFromEmail,
+		HasProject:                 card.HasProject,
 		ProjectionUpdatedTimestamp: card.ProjectionUpdatedTimestamp,
 		CreatedTimestamp:           card.CreatedTimestamp,
 		UpdatedTimestamp:           card.ProjectionUpdatedTimestamp,

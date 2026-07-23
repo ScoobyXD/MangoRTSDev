@@ -19,6 +19,8 @@ var (
 	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
 	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
 	ErrPriorityRequired              = errors.New("priority required")
+	ErrDirectProjectLogicGate        = errors.New("logic gates cannot be added directly to projects")
+	ErrProjectNodeLogicGateRequired  = errors.New("project nodes must belong to a logic gate")
 	ErrInvitationBadToken            = errors.New("invitation bad token")
 	ErrInvitationExpired             = errors.New("invitation expired")
 	ErrInvitationAlreadyAccepted     = errors.New("invitation already accepted")
@@ -1077,6 +1079,7 @@ type ProjectionRow struct {
 	ResourceType                 string           `json:"resource_type,omitempty"`
 	ResourceID                   string           `json:"resource_id,omitempty"`
 	GVICAssignment               string           `json:"gvic_assignment,omitempty"`
+	GeneratedUserIDs             []string         `json:"generated_user_ids,omitempty"`
 	ParentResourceType           string           `json:"parent_resource_type,omitempty"`
 	ParentResourceID             string           `json:"parent_resource_id,omitempty"`
 	NodeLeafID                   string           `json:"node_leaf_id,omitempty"`
@@ -1312,8 +1315,9 @@ type ProjectRelationshipDeleteInput struct {
 }
 
 type ProjectRelationshipMutationResult struct {
-	Relationship          *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
-	DeletedRelationshipID string                                `json:"deleted_relationship_id,omitempty"`
+	Relationship          *domain.ProjectRelationshipProjection  `json:"relationship,omitempty"`
+	ImplicitRelationships []domain.ProjectRelationshipProjection `json:"implicit_relationships,omitempty"`
+	DeletedRelationshipID string                                 `json:"deleted_relationship_id,omitempty"`
 }
 
 type ProjectScopedInitialInformationInput struct {
@@ -1345,14 +1349,14 @@ type ProjectScopedNodeLogicGateAssignmentInput struct {
 }
 
 type ProjectScopedNodeCreateResult struct {
-	Node         domain.Node                           `json:"node"`
-	Relationship *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
-	Information  *domain.NodeInformation               `json:"information,omitempty"`
-	Assignment   *domain.NodeLogicGateAssignment       `json:"assignment,omitempty"`
-	Card         *domain.KanbanCard                    `json:"card,omitempty"`
-	Events       []domain.DomainEvent                  `json:"-"`
+	Node                  domain.Node                            `json:"node"`
+	Relationship          *domain.ProjectRelationshipProjection  `json:"relationship,omitempty"`
+	ImplicitRelationships []domain.ProjectRelationshipProjection `json:"implicit_relationships,omitempty"`
+	Information           *domain.NodeInformation                `json:"information,omitempty"`
+	Assignment            *domain.NodeLogicGateAssignment        `json:"assignment,omitempty"`
+	Card                  *domain.KanbanCard                     `json:"card,omitempty"`
+	Events                []domain.DomainEvent                   `json:"-"`
 }
-
 type ProjectScopedLogicGateCreateInput struct {
 	CompanyID          string
 	ProjectID          string

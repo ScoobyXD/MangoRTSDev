@@ -459,6 +459,7 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
+	r.attachMyWorkGeneratedUserIDsLocked(items)
 	return items, nil
 }
 
@@ -526,6 +527,7 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
+	r.attachMyWorkGeneratedUserIDsLocked(items)
 	return items, nil
 }
 
@@ -745,7 +747,7 @@ func (r *MemoryRepo) myWorkProjectContextsLocked(row memoryGVICMatrixProjectionR
 		if done {
 			continue
 		}
-		keyValue := projection.ProjectID + "\x00" + projection.RelationshipID
+		keyValue := projection.ProjectID
 		if seen[keyValue] {
 			continue
 		}

@@ -165,6 +165,7 @@ export type KanbanCard = {
   due_date?: string | null;
   priority?: number | null;
   created_from_email?: boolean;
+  has_project?: boolean;
   accounts?: Account[];
   projection_updated_timestamp?: string;
   created_timestamp: string;
@@ -201,6 +202,7 @@ export type LogicGateArenaCard = {
   due_date?: string | null;
   priority?: number | null;
   created_from_email?: boolean;
+  has_project?: boolean;
   accounts?: Account[];
   projection_updated_timestamp?: string;
   created_timestamp: string;

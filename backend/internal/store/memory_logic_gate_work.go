@@ -39,6 +39,14 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 		})
 	}
 	work := buildLogicGateWorkView(logicGate, assignments)
+	for index := range work.Cards {
+		for _, relationship := range r.projectRelationships {
+			if relationship.CompanyID == companyID && relationship.ResourceType == EntityTypeNode && relationship.ResourceID == work.Cards[index].NodeID {
+				work.Cards[index].HasProject = true
+				break
+			}
+		}
+	}
 	emailOriginKeys := make(map[string]bool)
 	for linkKey, link := range r.emailNodeLinks {
 		if linkKey != emailNodeLinkKey(link.CompanyID, link.BoardID, link.CardID) {
