@@ -176,7 +176,7 @@ type ProjectSummaryContentProps = {
   refreshToken?: number;
   onNodeOpen?: (nodeID: string) => void;
   onProjectUpdated?: (project: ProjectRecord) => void;
-  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
+  onLogicGateOpen?: (logicGateID: string, label?: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onOpenInNewTab?: () => void;
   onCollapseToTab?: (target: { projectID: string; label: string }) => void;
   workspace?: ProjectSummaryWorkspaceSnapshot;
@@ -1921,7 +1921,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <span
                 title={logicGateID ? "Double-click to open logic gate" : undefined}
                 style={relationshipResourceTitleStyle}
-                onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, {
+                onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, relationship.display_title, {
                   projectID,
                   workPanelTab: "relationships",
                 })}
@@ -2048,13 +2048,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   type="button"
                   style={relationshipGroupResourceButtonStyle}
                   title="Double-click to open logic gate"
-                  onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, {
+                  onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, group.label, {
                     projectID,
                     workPanelTab: "relationships",
                   })}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && logicGateID) {
-                      onLogicGateOpen?.(logicGateID, {
+                      onLogicGateOpen?.(logicGateID, group.label, {
                         projectID,
                         workPanelTab: "relationships",
                       });
@@ -2645,7 +2645,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onSelectNodePreview={setSelectedCriticalPathNode}
               onClearNodePreview={() => setSelectedCriticalPathNode(null)}
               onNodeOpen={onNodeOpen}
-              onLogicGateOpen={onLogicGateOpen ? (logicGateID) => onLogicGateOpen(logicGateID, {
+              onLogicGateOpen={onLogicGateOpen ? (logicGateID, label) => onLogicGateOpen(logicGateID, label, {
                 projectID,
                 workPanelTab: "critical-path",
               }) : undefined}
@@ -2767,7 +2767,7 @@ function CriticalPathTable({
   onSelectNodePreview: (selection: CriticalPathNodePreviewSelection) => void;
   onClearNodePreview: () => void;
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string) => void;
+  onLogicGateOpen?: (logicGateID: string, label?: string) => void;
 }) {
   const apiBase = readAuthConfig().apiBase;
   const nodePickerRequestRef = useRef(0);
@@ -2917,7 +2917,7 @@ function CriticalPathTable({
                       title={resourceType === "node" ? "Click to preview node. Click again to collapse. Double-click to open node." : "Open logic gate"}
                       style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
                       onClick={() => {
-                        if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
+                        if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID, title);
                         if (resourceType === "node" && nodePreview) {
                           if (nodePreviewSelected) onClearNodePreview();
                           else onSelectNodePreview(nodePreview);

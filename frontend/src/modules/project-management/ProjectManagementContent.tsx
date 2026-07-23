@@ -76,7 +76,7 @@ type ProjectManagementContentProps = {
   hideTopControls?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
+  onLogicGateOpen?: (logicGateID: string, label?: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
@@ -1734,7 +1734,7 @@ function TimelineChart({
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
+  onLogicGateOpen?: (logicGateID: string, label?: string, returnContext?: ProjectLogicGateReturnContext) => void;
   contextMenu: TimelineContextMenuState | null;
   onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
   onDeleteNode: (item: ProjectManagementTimelineRow, position?: ConfirmActionMenuPosition) => void;
@@ -1810,7 +1810,7 @@ function TimelineChart({
               <div
                 style={timelineRowLabelStyle(rowIndex, displayRow.depth, displayRow.kind)}
                 onDoubleClick={() => {
-                  if (displayRow.kind === "logic_gate" && displayRow.gateID) onLogicGateOpen?.(displayRow.gateID);
+                  if (displayRow.kind === "logic_gate" && displayRow.gateID) onLogicGateOpen?.(displayRow.gateID, item.display_title);
                   if (displayRow.kind === "node") {
                     const nodeID = nodeIDForTimelineRow(item);
                     if (nodeID) onNodeOpen?.(nodeID);

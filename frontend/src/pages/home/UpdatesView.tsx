@@ -26,7 +26,6 @@ import {
   markNotificationRead,
   markNotificationsRead,
   EVENT_NOTIFICATIONS_UPDATED,
-  NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
   NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
   NOTIFICATION_TYPE_MENTION,
   NOTIFICATION_TYPE_URGENT_MENTION,
@@ -36,6 +35,7 @@ import {
   type UpdateFeedView,
 } from "../../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
+import { consumeRequestedUpdatesFilter, EVENT_UPDATES_FILTER_REQUESTED, updatesFilterFromRequestEvent } from "../../modules/notifications/updatesFilterRequests";
 import { createSavedViewID, fetchSavedViews, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping";
@@ -192,7 +192,7 @@ export function UpdatesView({
   const [loadingRoots, setLoadingRoots] = useState(false);
   const [branchLoadingIDs, setBranchLoadingIDs] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<UpdateFeedFilter>("all");
+  const [filter, setFilter] = useState<UpdateFeedFilter>(() => consumeRequestedUpdatesFilter(companyID) ?? "all");
   const [viewMode, setViewMode] = useState<UpdateFeedView>("current");
   const [seenDateWindow, setSeenDateWindow] = useState<SeenUpdatesDateWindow | null>(null);
   const [seenQueryWindow, setSeenQueryWindow] = useState<SeenUpdatesDateWindow | null>(null);
@@ -223,6 +223,24 @@ export function UpdatesView({
   const canonicalLoadScopeRef = useRef("");
   const displayGroupingSignatureRef = useRef("");
   const manuallyCollapsedGroupIDsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const applyRequestedFilter = (requestedFilter: UpdateFeedFilter) => {
+      setViewMode("current");
+      setFilter(requestedFilter);
+    };
+    const pendingFilter = consumeRequestedUpdatesFilter(companyID);
+    if (pendingFilter) applyRequestedFilter(pendingFilter);
+    if (typeof window === "undefined") return undefined;
+    const handleFilterRequested = (event: Event) => {
+      const requestedFilter = updatesFilterFromRequestEvent(event, companyID);
+      if (!requestedFilter) return;
+      consumeRequestedUpdatesFilter(companyID);
+      applyRequestedFilter(requestedFilter);
+    };
+    window.addEventListener(EVENT_UPDATES_FILTER_REQUESTED, handleFilterRequested);
+    return () => window.removeEventListener(EVENT_UPDATES_FILTER_REQUESTED, handleFilterRequested);
+  }, [companyID]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -495,7 +513,6 @@ export function UpdatesView({
         eventCompanyID: detail?.companyID,
         source: detail?.source,
         localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
-        summaryOnlySource: NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
       })) return;
       if (notificationRefreshTimerRef.current !== null) window.clearTimeout(notificationRefreshTimerRef.current);
       notificationRefreshTimerRef.current = window.setTimeout(() => {

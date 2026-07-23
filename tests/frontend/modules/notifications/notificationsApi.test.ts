@@ -257,7 +257,7 @@ test("a failed clear releases its marker so a later socket event reconciles", as
   }
 });
 
-test("an accepted notification subscription reconciles summary without reloading the mounted Updates feed", () => {
+test("an accepted notification subscription reconciles summary and the mounted Updates feed", () => {
   const { events, restore } = installTestWindow();
   try {
     const handlers = createNotificationRealtimeHandlers("company-1");
@@ -270,8 +270,7 @@ test("an accepted notification subscription reconciles summary without reloading
       eventCompanyID: events[0].detail.companyID,
       source: events[0].detail.source,
       localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
-      summaryOnlySource: NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED,
-    }), false);
+    }), true);
   } finally {
     restore();
   }

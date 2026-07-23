@@ -52,6 +52,7 @@ import {
   setNodeDragData,
   sharedInboxCanLoadMail,
   sortEmailConversationMessagesNewestFirst,
+  shouldAutoMarkEmailSelectionRead,
   unreadEmailThreadMessagesForSelection,
   visibleEmailAttachmentsForBody,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
@@ -460,6 +461,13 @@ test("triage row and thread identity isolate identical provider ids across mailb
     unreadEmailThreadMessagesForSelection([personal, shared, olderPersonal], personal).map((message) => message.id),
     ["same-message", "older-personal"],
   );
+});
+
+test("unread-only email cards stay visible when selected", () => {
+  assert.equal(shouldAutoMarkEmailSelectionRead(true), false);
+  assert.equal(shouldAutoMarkEmailSelectionRead(false), true);
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  assert.match(source, /!shouldAutoMarkEmailSelectionRead\(unreadOnlyRef\.current\)/);
 });
 
 test("selecting an aggregated unread thread targets every loaded unread member and leaves unrelated threads alone", () => {

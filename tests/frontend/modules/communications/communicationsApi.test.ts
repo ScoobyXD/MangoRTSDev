@@ -1031,7 +1031,7 @@ test("archive updates add messages to archive and all overlays even before those
   }
 });
 
-test("background archive acceptance does not remove messages from cached primary pages", async () => {
+test("background archive acceptance keeps cached starred messages out of Inbox", async () => {
   invalidateCommunicationsCache();
   const calls: string[] = [];
   const originalFetch = globalThis.fetch;
@@ -1042,7 +1042,7 @@ test("background archive acceptance does not remove messages from cached primary
       assert.equal(init?.method, "POST");
       return jsonResponse({ job_id: "job-1", accepted_ids: ["msg-1"], archived_ids: [], failed: [] });
     }
-    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] }), message("msg-2", { date: 200, folders: ["INBOX"] })] });
+    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true }), message("msg-2", { date: 200, folders: ["INBOX"] })] });
     return jsonResponse({ messages: [] });
   };
   try {
@@ -1051,7 +1051,9 @@ test("background archive acceptance does not remove messages from cached primary
 
     assert.equal(accepted.job_id, "job-1");
     assert.deepEqual(accepted.accepted_ids, ["msg-1"]);
-    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1", "msg-2"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-2"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-2"]);
     assert.equal(calls.filter((path) => path.includes("mailbox=primary")).length, 1);
   } finally {
     globalThis.fetch = originalFetch;

@@ -4,7 +4,7 @@ import { ProjectManagementContent } from "../../modules/project-management/Proje
 
 export type ProjectManagementPageProps = {
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
+  onLogicGateOpen?: (logicGateID: string, label?: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
