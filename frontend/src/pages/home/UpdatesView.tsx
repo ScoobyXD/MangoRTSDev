@@ -1465,8 +1465,8 @@ function updateRowTone(item: NotificationItem): "urgent" | "mention" | "verifica
   const text = `${item.type} ${title} ${body}`;
   if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) return "urgent";
   if (item.type === NOTIFICATION_TYPE_MENTION) return "mention";
-  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED || item.type === NOTIFICATION_TYPE_NODE_ASSIGNED || /node added|new node|brand new node/.test(text)) return "new";
   if (item.type === NOTIFICATION_TYPE_NODE_VERIFICATION_REQUESTED) return "verification";
+  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED || item.type === NOTIFICATION_TYPE_NODE_ASSIGNED || /node added|new node|brand new node/.test(text)) return "new";
   if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED || /\b(deleted|removed)\b/.test(text)) return "deleted";
   if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED || item.type === NOTIFICATION_TYPE_NODE_FIELDS_CHANGED || /status changed|moved to/.test(text)) return "status";
   if (item.type === NOTIFICATION_TYPE_NODE_COMMENT_CREATED || /comment/.test(text)) return "comment";

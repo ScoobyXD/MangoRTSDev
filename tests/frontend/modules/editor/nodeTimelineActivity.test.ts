@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { resolve } from "node:path";
+import { groupNodeTimelineEventsByTextBlock } from "../../../../frontend/src/modules/editor/nodeTimelineOrdering.js";
 
 function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), "utf8");
@@ -53,4 +54,31 @@ test("verified supports multiple explicit people and Updates gets verification c
   assert.match(updates, /node\.verification_requested/);
   assert.match(updates, /requested verification from you on/);
   assert.match(updates, /verification: \{ color: "#4338ca"/);
+  assert.ok(
+    updates.indexOf('if (item.type === NOTIFICATION_TYPE_NODE_VERIFICATION_REQUESTED) return "verification"')
+      < updates.indexOf('/node added|new node|brand new node/.test(text)'),
+    "an explicit verification notification must win over a node title such as 'new node'",
+  );
+});
+
+test("node timeline interleaves text boxes, transfers, and verify stamps newest first", () => {
+  const blocks = [
+    { id: "new-text-box", createdTimestamp: "2026-07-23T20:03:00.000Z" },
+    { id: "old-text-box", createdTimestamp: "2026-07-23T20:01:00.000Z" },
+  ];
+  const events = [
+    { event_id: "transfer", created_timestamp: "2026-07-23T20:02:00.000Z" },
+    { event_id: "verify-stamp", created_timestamp: "2026-07-23T20:04:00.000Z" },
+  ];
+
+  const slots = groupNodeTimelineEventsByTextBlock(blocks, events);
+  const orderedIDs = [
+    ...slots[0].map((event) => event.event_id),
+    blocks[0].id,
+    ...slots[1].map((event) => event.event_id),
+    blocks[1].id,
+    ...slots[2].map((event) => event.event_id),
+  ];
+
+  assert.deepEqual(orderedIDs, ["verify-stamp", "new-text-box", "transfer", "old-text-box"]);
 });

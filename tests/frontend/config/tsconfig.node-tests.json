@@ -203,6 +203,7 @@
     "../../../frontend/src/modules/editor/editorRichClipboard.ts",
     "../modules/editor/editorRichClipboard.test.ts",
     "../../../frontend/src/modules/editor/editorScroll.ts",
+    "../../../frontend/src/modules/editor/nodeTimelineOrdering.ts",
     "../modules/editor/editorScroll.test.ts",
     "../../../frontend/src/modules/editor/editorIndentGuides.ts",
     "../modules/editor/editorIndentGuides.test.ts",
