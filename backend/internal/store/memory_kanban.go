@@ -1045,6 +1045,9 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if crossLogicGateMove {
+		r.appendLogicGateTransferTimelineEventLocked(input.CompanyID, input.NodeID, input.ActorUserID, sourceAssignment.LogicGateID, input.LogicGateID, resultCard.UpdatedTimestamp)
+	}
 	return result, nil
 }
 

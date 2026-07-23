@@ -12,6 +12,8 @@ type MemoryRepo struct {
 	nodeInfo                       map[string][]domain.NodeInformation
 	nodeText                       map[string]map[string]domain.NodeProjection
 	nodeContentChanges             map[string]domain.NodeContentChange
+	nodeTimelineEvents             map[string]domain.NodeTimelineEvent
+	nodeTimelineVerificationSeen   map[string]string
 	nodeContentChangeSeen          map[string]time.Time
 	nodeProjectionSeen             map[string]memoryNodeProjectionSeen
 	nodeRels                       map[string][]domain.NodeRelationship
@@ -111,6 +113,8 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeInfo:                       map[string][]domain.NodeInformation{},
 		nodeText:                       map[string]map[string]domain.NodeProjection{},
 		nodeContentChanges:             map[string]domain.NodeContentChange{},
+		nodeTimelineEvents:             map[string]domain.NodeTimelineEvent{},
+		nodeTimelineVerificationSeen:   map[string]string{},
 		nodeContentChangeSeen:          map[string]time.Time{},
 		nodeProjectionSeen:             map[string]memoryNodeProjectionSeen{},
 		nodeRels:                       map[string][]domain.NodeRelationship{},

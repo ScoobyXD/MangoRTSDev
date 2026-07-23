@@ -33,6 +33,7 @@ var (
 	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
 	ErrUploadPayloadConflict         = errors.New("attachment upload idempotency payload conflict")
 	ErrProjectionRevisionRequired    = errors.New("projection revision required")
+	ErrNoVerificationRecipients      = errors.New("no verification recipients")
 )
 
 type ProjectionRevisionConflictError struct {
@@ -67,6 +68,7 @@ type Repository interface {
 	KanbanRepository
 	ProjectManagementRepository
 	NotificationRepository
+	NodeTimelineRepository
 	RealtimeOutboxRepository
 	EditorCollaborationRepository
 	EditorJSONRepository
@@ -965,6 +967,12 @@ type NotificationRepository interface {
 	MarkAllNotificationsRead(userID, companyID string) (int, error)
 	DeleteNotifications(input NotificationDeleteInput) ([]domain.Notification, error)
 	DeleteExpiredNotifications(olderThan time.Time, limit int) ([]domain.Notification, error)
+}
+
+type NodeTimelineRepository interface {
+	ListNodeTimelineEvents(companyID, nodeID string) ([]domain.NodeTimelineEvent, error)
+	CreateNodeVerificationRequest(input NodeVerificationRequestInput) (NodeTimelineMutationResult, error)
+	CompleteNodeVerificationRequest(input NodeVerificationCompletionInput) (domain.NodeTimelineEvent, error)
 }
 
 type DomainEventRepository interface {
@@ -2015,6 +2023,27 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
+
+type NodeVerificationRequestInput struct {
+	CompanyID      string
+	NodeID         string
+	ActorUserID    string
+	IdempotencyKey string
+}
+
+type NodeVerificationCompletionInput struct {
+	CompanyID string
+	NodeID    string
+	EventID   string
+	UserID    string
+}
+
+type NodeTimelineMutationResult struct {
+	TimelineEvent domain.NodeTimelineEvent `json:"timeline_event"`
+	Events        []domain.DomainEvent     `json:"-"`
+}
+
+const NodeVerificationRequestedWorkspaceEventType = "node.verification_requested"
 
 type KanbanWorkspaceEventResult struct {
 	Events []domain.DomainEvent `json:"-"`

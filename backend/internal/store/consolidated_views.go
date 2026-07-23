@@ -12,6 +12,7 @@ type nodeViewLoader interface {
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
+	ListNodeTimelineEvents(companyID, nodeID string) ([]domain.NodeTimelineEvent, error)
 }
 
 type logicGateViewLoader interface {
@@ -41,15 +42,17 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		assignments     []domain.NodeLogicGateAssignment
 		gvicAssignments []domain.ResourceGVICAssignment
 		contentChanges  = []domain.NodeContentChange{}
+		timelineEvents  = []domain.NodeTimelineEvent{}
 		detailsErr      error
 		projectionsErr  error
 		assignmentsErr  error
 		gvicErr         error
 		changesErr      error
+		timelineErr     error
 		waitGroup       sync.WaitGroup
 	)
 	userID := strings.TrimSpace(input.UserID)
-	callCount := 4
+	callCount := 5
 	if userID != "" {
 		callCount++
 	}
@@ -70,6 +73,10 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		defer waitGroup.Done()
 		gvicAssignments, gvicErr = loader.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)
 	}()
+	go func() {
+		defer waitGroup.Done()
+		timelineEvents, timelineErr = loader.ListNodeTimelineEvents(companyID, nodeID)
+	}()
 	if userID != "" {
 		go func() {
 			defer waitGroup.Done()
@@ -81,7 +88,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		}()
 	}
 	waitGroup.Wait()
-	for _, err := range []error{detailsErr, projectionsErr, assignmentsErr, gvicErr, changesErr} {
+	for _, err := range []error{detailsErr, projectionsErr, assignmentsErr, gvicErr, timelineErr, changesErr} {
 		if err != nil {
 			return domain.NodeView{}, err
 		}
@@ -113,6 +120,8 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		GVICAssignments:      gvicAssignments,
 		ContentChanges:       contentChanges,
 		InformationCount:     details.InformationCount,
+		TimelineEvents:       timelineEvents,
+		TimelineEventCount:   len(timelineEvents),
 		ProjectionCount:      len(projections),
 		RelationshipsCount:   details.RelationshipsCount,
 		AssignmentCount:      len(assignments),

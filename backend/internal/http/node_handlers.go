@@ -163,6 +163,21 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "timeline-events" {
+		s.handleNodeTimelineEvents(w, r, nodeID)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "verification-requests" {
+		s.handleNodeVerificationRequests(w, r, nodeID)
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "verification-requests" && parts[3] == "complete" {
+		s.handleNodeVerificationCompletion(w, r, nodeID, parts[2])
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "accounts" {
 		s.handleNodeAccounts(w, r, nodeID)
 		return

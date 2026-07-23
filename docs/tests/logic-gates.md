@@ -12,9 +12,9 @@ Coverage Status:
 ## Business Logic
 
 LG1 - Logic gates support generated, verified, consulted, and informed GVIC assignments.
-LG2 - Logic gate generated and verified GVIC assignments are single-user slots.
-LG3 - Logic gate generated and verified GVIC assignments must use a user principal, not a group principal.
-LG4 - Replacing the generated or verified user on a logic gate removes the previous user for that role.
+LG2 - Logic Gate Generated is a single-user slot; Verified accepts multiple explicit users.
+LG3 - Logic Gate Generated and Verified assignments must use user principals, not group principals.
+LG4 - Replacing Generated removes its previous user; adding Verified keeps the existing Verified users.
 LG5 - Logic gate consulted and informed GVIC assignments may include users and user groups.
 LG6 - Nodes dropped or created into a logic gate requested column store the requesting user.
 LG7 - The generated user for the logic gate sees accept and deny actions for requested nodes sent by another user.
@@ -60,11 +60,13 @@ LG46 - Each Logic Gate independently editable body is an exact collaboration doc
 LG47 - Concurrent valid Logic Gate operations integrate automatically and converge in deterministic order; an older valid base is not rejected merely because another collaborator committed first. Stable operation IDs deduplicate retries, and no end-user whole-document conflict workflow exists.
 LG48 - Unacknowledged Logic Gate operations are durable under user/company/document/client/operation identity and survive unmount, refresh, disconnect, and reconnect. Saved state advances only after backend commit acknowledgement/deduplication.
 LG49 - Exact committed Logic Gate deltas reach every healthy exact subscriber through the shared outbox/backplane/spine and apply once without echo-saving. Gaps, reconnect, or saved-version replacement trigger a canonical full snapshot plus automatic pending-operation reapplication.
+LG51 - A successful cross-Logic-Gate Node reassignment creates exactly one immutable Node timeline transfer stamp in the same transaction, using historical actor/source/destination name snapshots.
+LG52 - Same-Logic-Gate status movement, initial assignment, and removal do not create cross-Logic-Gate transfer stamps.
 LG50 - A Logic Gate document is fully healthy only after identity/Edit authorization, exact subscription acceptance, confirmed heartbeat, canonical snapshot recovery, buffered-event ordering, and pending acknowledgements complete. Orange permits durable queued typing; global red states gate interactions.
 
 ## Scenarios
 
-### Scenario LG-S1: Generated And Verified Single User Slots
+### Scenario LG-S1: Generated Single User And Verified Multiple Users
 
 Business logic covered:
 - LG1
@@ -78,9 +80,9 @@ Given:
 - A second user is later selected for the same generated or verified field.
 
 Expected:
-- The generated or verified field accepts exactly one user.
-- Group principals are not selectable or accepted for generated or verified.
-- Selecting the second user replaces the first user for that role.
+- Generated accepts exactly one user and selecting a second Generated user replaces the first.
+- Verified accepts multiple users.
+- Group principals are not selectable or accepted for Generated or Verified.
 
 ### Scenario LG-S2: Consulted And Informed Users And Teams
 
