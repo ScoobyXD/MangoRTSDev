@@ -171,6 +171,7 @@ const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const UPDATES_NODE_PANEL_SPLIT_STORAGE_KEY = "mangorts.updates.nodePanelSplit.v1";
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
+const NOTIFICATION_TYPE_NODE_VERIFICATION_REQUESTED = "node.verification_requested";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assignment_saved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
@@ -1437,16 +1438,18 @@ function updateRowIcon(item: NotificationItem): React.ReactNode {
   if (tone === "deleted") return "x";
   if (tone === "status") return "S";
   if (tone === "comment") return "C";
+  if (tone === "verification") return "✓";
   return "U";
 }
 
-function updateRowTone(item: NotificationItem): "urgent" | "mention" | "new" | "deleted" | "status" | "comment" | "update" {
+function updateRowTone(item: NotificationItem): "urgent" | "mention" | "verification" | "new" | "deleted" | "status" | "comment" | "update" {
   const title = item.title.trim().toLowerCase();
   const body = (item.body_preview ?? "").trim().toLowerCase();
   const text = `${item.type} ${title} ${body}`;
   if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) return "urgent";
   if (item.type === NOTIFICATION_TYPE_MENTION) return "mention";
   if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED || item.type === NOTIFICATION_TYPE_NODE_ASSIGNED || /node added|new node|brand new node/.test(text)) return "new";
+  if (item.type === NOTIFICATION_TYPE_NODE_VERIFICATION_REQUESTED) return "verification";
   if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED || /\b(deleted|removed)\b/.test(text)) return "deleted";
   if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED || item.type === NOTIFICATION_TYPE_NODE_FIELDS_CHANGED || /status changed|moved to/.test(text)) return "status";
   if (item.type === NOTIFICATION_TYPE_NODE_COMMENT_CREATED || /comment/.test(text)) return "comment";
@@ -1514,6 +1517,17 @@ function UpdateCanonicalRowCopy({
       </span>
     );
   }
+  if (tone === "verification") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>requested verification from you on</span>
+        {nodeEntity}
+        {priorityToken}
+      </span>
+    );
+  }
+
 
   if (tone === "deleted") {
     return (
@@ -2408,6 +2422,7 @@ function updateRowIconStyle(tone: ReturnType<typeof updateRowTone>): React.CSSPr
     status: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
     comment: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
     update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
+    verification: { color: "#4338ca", background: "rgba(99, 102, 241, 0.16)" },
   };
   return {
     width: 18,

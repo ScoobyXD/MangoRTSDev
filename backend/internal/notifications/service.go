@@ -282,6 +282,29 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		title = "Node assigned to you"
 		body = "You were assigned to " + nodeTitle + "."
+	case domain.NotificationEventNodeVerificationRequested:
+		nodeID := strings.TrimSpace(event.EntityID)
+		timelineEventID := payloadString(payload, "timeline_event_id")
+		logicGateID := ""
+		if node, err := s.Repo.GetNode(event.CompanyID, nodeID); err == nil {
+			logicGateID = firstCleanString(node.LogicGateIDs)
+		}
+		for _, userID := range payloadStringSlice(payload, "recipient_user_ids") {
+			addRecipient(userID, notificationRecipientMeta{
+				Surface: domain.NotificationSurfaceACIInbox, Role: domain.GVICRoleVerified,
+				LogicGateID: logicGateID, NodeID: nodeID, InformationID: timelineEventID,
+			})
+		}
+		actorLabel := payloadString(payload, "actor_display_name")
+		if actorLabel == "" {
+			actorLabel = "Someone"
+		}
+		nodeTitle := payloadString(payload, "node_title")
+		if nodeTitle == "" {
+			nodeTitle = "this node"
+		}
+		title = actorLabel + " requested verification from you"
+		body = actorLabel + " requested your verification on " + nodeTitle + "."
 	case domain.NotificationEventNodeFieldsChanged:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
@@ -537,6 +560,10 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		if entityID == "" {
 			entityID = payloadString(payload, "entity_id")
 		}
+	case store.NodeVerificationRequestedWorkspaceEventType:
+		notificationType = domain.NotificationEventNodeVerificationRequested
+		entityType = store.EntityTypeNode
+		entityID = payloadString(payload, "node_id")
 	case store.NodeGVICUpdatedEventType:
 		notificationType = domain.NotificationEventNodeAssigned
 		entityType = store.EntityTypeNode

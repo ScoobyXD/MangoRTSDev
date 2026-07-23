@@ -700,6 +700,37 @@ type NodeContentChange struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
+const (
+	NodeTimelineEventLogicGateTransfer   = "logic_gate_transfer"
+	NodeTimelineEventVerificationRequest = "verification_request"
+)
+
+type NodeTimelineVerificationRecipient struct {
+	CompanyID          string     `json:"company_id"`
+	NodeID             string     `json:"node_id"`
+	EventID            string     `json:"event_id"`
+	UserID             string     `json:"user_id"`
+	UserDisplayName    string     `json:"user_display_name"`
+	CompletedTimestamp *time.Time `json:"completed_timestamp,omitempty"`
+	CreatedTimestamp   time.Time  `json:"created_timestamp"`
+}
+
+type NodeTimelineEvent struct {
+	EventID                string                              `json:"event_id"`
+	CompanyID              string                              `json:"company_id"`
+	NodeID                 string                              `json:"node_id"`
+	Type                   string                              `json:"type"`
+	ActorUserID            string                              `json:"actor_user_id,omitempty"`
+	ActorDisplayName       string                              `json:"actor_display_name"`
+	FromLogicGateID        string                              `json:"from_logic_gate_id,omitempty"`
+	FromLogicGateName      string                              `json:"from_logic_gate_name,omitempty"`
+	ToLogicGateID          string                              `json:"to_logic_gate_id,omitempty"`
+	ToLogicGateName        string                              `json:"to_logic_gate_name,omitempty"`
+	IdempotencyKey         string                              `json:"-"`
+	VerificationRecipients []NodeTimelineVerificationRecipient `json:"verification_recipients"`
+	CreatedTimestamp       time.Time                           `json:"created_timestamp"`
+}
+
 type NodeDetails struct {
 	Node               Node               `json:"node"`
 	Information        []NodeInformation  `json:"information"`
@@ -722,6 +753,8 @@ type NodeView struct {
 	LogicGateAssignments []NodeLogicGateAssignment `json:"logic_gate_assignments"`
 	GVICAssignments      []ResourceGVICAssignment  `json:"gvic_assignments"`
 	ContentChanges       []NodeContentChange       `json:"content_changes"`
+	TimelineEvents       []NodeTimelineEvent       `json:"timeline_events"`
+	TimelineEventCount   int                       `json:"timeline_event_count"`
 	InformationCount     int                       `json:"information_count"`
 	ProjectionCount      int                       `json:"projection_count"`
 	RelationshipsCount   int                       `json:"relationships_count"`
@@ -1185,14 +1218,15 @@ type NodeAccountAssignment struct {
 }
 
 const (
-	NotificationEventLogicGateGVICUpdated = "logic_gate.gvic_updated"
-	NotificationEventNodeAssigned         = "node.assigned"
-	NotificationEventNodeFieldsChanged    = "node.fields_changed"
-	NotificationEventNodeCommentCreated   = "node.comment_created"
-	NotificationEventMentionCreated       = "mention.created"
-	NotificationEventUrgentMentionCreated = "mention.urgent_created"
-	NotificationEventACIInboxChanged      = "aci_inbox.changed"
-	NotificationEventACIInboxGVICUpdated  = "aci_inbox.GVIC_updated"
+	NotificationEventLogicGateGVICUpdated      = "logic_gate.gvic_updated"
+	NotificationEventNodeAssigned              = "node.assigned"
+	NotificationEventNodeVerificationRequested = "node.verification_requested"
+	NotificationEventNodeFieldsChanged         = "node.fields_changed"
+	NotificationEventNodeCommentCreated        = "node.comment_created"
+	NotificationEventMentionCreated            = "mention.created"
+	NotificationEventUrgentMentionCreated      = "mention.urgent_created"
+	NotificationEventACIInboxChanged           = "aci_inbox.changed"
+	NotificationEventACIInboxGVICUpdated       = "aci_inbox.GVIC_updated"
 )
 
 const (

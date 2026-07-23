@@ -945,10 +945,11 @@ function GVICRoleEditor({
     return out;
   }, [allAssignments]);
   const roleAccent = logicGateGVICRolePresentation(role).accent;
-  const singleUserOnly = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
+  const primaryUserRole = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
+  const singleUserOnly = primaryUserRole && role === "generated";
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
-  const inputPlaceholder = disabledReason ? "Inherited" : singleUserOnly ? "Add user" : "Add user or team";
-  const pickerAriaLabel = singleUserOnly ? `${label} users` : `${label} users and teams`;
+  const inputPlaceholder = disabledReason ? "Inherited" : primaryUserRole ? "Add user" : "Add user or team";
+  const pickerAriaLabel = primaryUserRole ? `${label} users` : `${label} users and teams`;
   const assignedSummary = singleUserOnly
     ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
     : `People (${assignments.length})`;
@@ -1065,10 +1066,10 @@ function GVICRoleEditor({
         principalType: "group",
         principalID: groupID,
         label: companyGroupLabel(group, groupID),
-        meta: singleUserOnly && state.selectable ? "Group" : state.meta,
+        meta: primaryUserRole && state.selectable ? "Groups are not allowed for this role" : state.meta,
         depth,
         rowType: "group",
-        selectable: !singleUserOnly && state.selectable,
+        selectable: !primaryUserRole && state.selectable,
         expandable: hasChildren,
         expanded,
       }];
@@ -1108,7 +1109,7 @@ function GVICRoleEditor({
       pickerRows: rows,
       selectableOptions: rows.filter((row) => row.selectable),
     };
-  }, [companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, occupiedRoleByPrincipalKey, role, singleUserOnly]);
+  }, [companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, occupiedRoleByPrincipalKey, primaryUserRole, role]);
 
   useEffect(() => {
     if (!singleUserOnly) return;
@@ -1153,7 +1154,7 @@ function GVICRoleEditor({
 
   const addPrincipalOption = (option: LogicGateGVICPrincipalPickerOption) => {
     if (!canEdit || !option.selectable || occupiedRoleByPrincipalKey.has(`${option.principalType}:${option.principalID}`)) return;
-    if (singleUserOnly && option.principalType !== "user") return;
+    if (primaryUserRole && option.principalType !== "user") return;
     onAddPrincipal(role, option.principalType, option.principalID);
     setDraft("");
     setOpen(false);
@@ -1227,7 +1228,7 @@ function GVICRoleEditor({
             ref={assignedListRef}
             id={`${inputID}-assigned-users`}
             role="listbox"
-            aria-label={singleUserOnly ? `${label} user` : `${label} people and groups`}
+            aria-label={primaryUserRole ? `${label} people` : `${label} people and groups`}
             style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 1, top: assignedListPosition.top, left: assignedListPosition.left, width: assignedListPosition.width, maxHeight: assignedListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {assignments.length === 0 ? (
@@ -1286,7 +1287,7 @@ function GVICRoleEditor({
           type="button"
           id={inputID}
           disabled={!canEdit}
-          aria-label={`Add ${label} ${singleUserOnly ? "user" : "user or team"}`}
+          aria-label={`Add ${label} ${primaryUserRole ? "user" : "user or team"}`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
@@ -1354,7 +1355,7 @@ function GVICRoleEditor({
             <div role="listbox" aria-label={pickerAriaLabel} style={{ minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 3, paddingTop: 6 }}>
               {pickerRows.length === 0 ? (
                 <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
-                  {draft.trim() ? "No matches" : singleUserOnly ? "No users available" : "No users or teams available"}
+                  {draft.trim() ? "No matches" : primaryUserRole ? "No users available" : "No users or teams available"}
                 </div>
               ) : pickerRows.map((option) => {
               const optionAccent = option.principalType === "group" ? roleAccent : userAccentForName(option.label || option.principalID);

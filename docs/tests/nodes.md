@@ -27,7 +27,7 @@ Required regression scenario:
 - Confirm an edit-authorized user can list, preview, download, and upload retained files and open retained attached emails, while a no-access user receives neither list.
 
 N1 - Nodes support generated, verified, consulted, and informed GVIC assignments.
-N2 - Node generated and verified GVIC assignments are single-user slots.
+N2 - Node Generated is a single-user slot; Node Verified accepts multiple explicit users and rejects group principals.
 N3 - Node generated and verified GVIC assignments must use a user principal, not a group principal.
 N4 - Replacing the generated or verified user on a node removes the previous user for that role.
 N5 - Node consulted and informed GVIC assignments may include users and user groups.
@@ -142,7 +142,7 @@ N108 - Every attached-email Reply and Reply All submission enters EMAIL90's cent
 
 ## Scenarios
 
-### Scenario N-S1: Generated And Verified Single User Slots
+### Scenario N-S1: Generated Single User And Verified Multiple Users
 
 Business logic covered:
 - N1
@@ -157,10 +157,10 @@ Given:
 - A second user is later selected for the same generated or verified field.
 
 Expected:
-- The generated or verified field accepts exactly one user.
-- Group principals are not selectable or accepted for generated or verified.
-- Selecting the second user replaces the first user for that role.
-- The assigned chip displays the user's name.
+- Generated accepts exactly one user and selecting a second Generated user replaces the first.
+- Verified accepts multiple users and displays them in its assignment list.
+- Group principals are not selectable or accepted for Generated or Verified.
+- Assigned chips display each user's name.
 - The assigned chip exposes a direct remove action instead of an assignment-list dropdown.
 
 ### Scenario N-S2: Consulted And Informed Users And Teams
@@ -683,6 +683,13 @@ N113 - A new Node text box starts with Editor open and Chat closed unless that e
 N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients from that Node's current effective GVIC assignments. A parent Logic Gate's GVIC never substitutes for Node GVIC. A Node GVIC assignment update is sent only to a newly assigned or effective-role-changed user, not unchanged, removed, unrelated, or actor users.
 N115 - An authenticated user with Node Edit access may edit or delete only a Node chat comment whose stored `author_id` is that user. Comment edits use the exact projection ID through PATCH, preserve the original comment envelope and attachment/source relationships, refresh direct mention notifications and collaboration participants, and publish one compact `chat.message.updated` hint on the existing exact Node chat scope. Generic information/projection POST routes must reject attempts to overwrite an existing chat comment so the author check cannot be bypassed.
 N116 - The Updates row-detail Node panel exposes the shared fullscreen/restore shell action. Fullscreen uses the body-level blocking overlay, shared viewport insets, focus/Escape handling, and app-chrome suppression; restore returns to the existing Updates split ratio without changing the selected update or Node context.
+N117 - Moving an assigned Node from one Logic Gate ID to another commits a durable compact timeline event with timestamp, actor-name snapshot, source Logic Gate ID/name snapshot, and destination Logic Gate ID/name snapshot. Initial assignment, removal, and same-Logic-Gate status movement do not create that event.
+N118 - A Node timeline transfer event is immutable and read-only. Later actor or Logic Gate rename/removal does not rewrite historical display copy, and the assignment move and timeline insert succeed or roll back together.
+N119 - The Node timeline plus button opens a keyboard-labelled menu with New text box and Verification stamp choices. New text box preserves existing behavior; the plus itself no longer creates a text box immediately.
+N120 - A verification stamp snapshots every current effective Node Verified user once, requires at least one recipient, preserves that snapshot across later GVIC changes, and renders one individually actionable check beside each name.
+N121 - Only a snapshotted recipient can complete their own verification. Completion is one-way, stores the first server timestamp, is idempotent under retry/concurrency, and cannot complete another recipient.
+N122 - Transfer and verification stamps stack as short cards on the existing line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing.
+N123 - Updates deep links use the verification stamp event ID, and the Node editor scrolls that exact `data-node-timeline-event-id` row into view without opening or editing an unrelated text box.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 

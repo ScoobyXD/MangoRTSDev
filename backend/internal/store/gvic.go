@@ -74,6 +74,9 @@ func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, 
 	}
 	roleCounts := map[string]int{}
 	for _, assignment := range assignments {
+		if assignment.role == domain.GVICRoleVerified && assignment.principalType != EntityPermissionSubjectUser {
+			return ErrInvalid
+		}
 		if !isSingleUserPrimaryGVICRole(assignment.role) {
 			continue
 		}
@@ -93,7 +96,7 @@ func isSingleUserPrimaryGVICResourceType(resourceType string) bool {
 }
 
 func isSingleUserPrimaryGVICRole(role string) bool {
-	return role == domain.GVICRoleGenerated || role == domain.GVICRoleVerified
+	return role == domain.GVICRoleGenerated
 }
 
 func gvicAssignmentInputKey(input normalizedGVICAssignmentInput) string {

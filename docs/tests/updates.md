@@ -100,6 +100,10 @@ U88 - Update actor identity remains keyed by `actor_user_id`, but user-facing Up
 U89 - Seen Updates exposes separate From and To editable text fields in exact `DD/MM/YYYY` format. A date commits on blur or Enter only after strict calendar validation; impossible dates, other formats, and dates outside the available Seen-history bounds are marked invalid and do not issue a new feed query.
 U90 - Seen-history date queries use inclusive UTC calendar days. The initial window ends on the newest available Seen update and includes at most the latest 30 days. Any edited range remains within available history and at most 90 inclusive days; moving one edge beyond that maximum moves the opposite edge rather than sending an invalid backend request.
 U91 - Every row in Seen Updates replaces the normal **Seen** action with **Unsee**. Unsee clears only that notification's read timestamp through the existing current-user notification mutation, removes the row optimistically from Seen Updates without a full-feed reload or blink, and makes it eligible for the normal Updates inbox and unread badge counts. Failure restores the Seen Updates row and reports the error; unrelated notifications and the selected date window are unchanged.
+U93 - Creating a Node verification stamp sends one `node.verification_requested` update to each snapshotted Verified recipient except the actor. Later GVIC changes do not add, retract, or reroute that historical request.
+U94 - Verification request updates use a dedicated indigo check marker, canonical copy `{User} requested verification from you on <node icon> {Node}`, the Node's normal priority token, ACI/Verified routing, and no duplicate Logic Gate label in row copy.
+U95 - A verification update stores the stamp ID as its information target. Activating the row opens the authorized Node preview and scrolls that exact compact timeline stamp into view.
+U96 - Retrying the same verification-request idempotency key sends no duplicate update, and the requesting actor receives no self-notification even when included in the stamp's recipient snapshot.
 U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscreen action in its top-right controls. Activating it moves the complete selected Node panel into the shared body-level blocking overlay with the standard 8px vertical and 12px horizontal viewport insets, hides conflicting app chrome, traps focus, and preserves the selected update, Node editor, and chat context. The same control, Escape, or backdrop restores the existing Updates split-panel layout and its saved ratio; closing still closes the Node panel.
 
 ## Update Row Copy And Visual Language
@@ -112,6 +116,7 @@ U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscree
 | Normal mention | @ marker is reserved for normal mentions only | Orange |
 | New, added, appended, attached, converted, assigned, or granted | Use the relevant shared entity/action icon | Blue |
 | Changed, updated, moved, or edited | Use the relevant shared entity/action icon | Purple |
+| Verification requested | ✓ check marker | Indigo |
 | Removed, deleted, revoked, or detached | Use the relevant shared entity/action icon | Dark mellow red |
 
 ### Shared Inline Tokens
@@ -144,6 +149,7 @@ Entity icons in Updates must also be shared tokens. Individual row copy may use 
 | --- | --- | --- |
 | Node added to Logic Gate | Blue | `{User} added <node icon> {Node} {Priority} {Status}` |
 | Node requested to Logic Gate | Blue | `{User} requested <node icon> {Node} {Priority}` |
+| Node verification requested | Indigo ✓ | `{User} requested verification from you on <node icon> {Node} {Priority}` |
 | Email converted into node | Blue | `{User} turned <email icon> email into <node icon> {Node}` |
 | Node moved status | Purple | `{User} updated <node icon> {Node} to {Status}` |
 | Normal mention in node text box | Orange @ | `{User} mentioned you in <node icon> {Node}` |

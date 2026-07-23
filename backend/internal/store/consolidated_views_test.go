@@ -225,6 +225,11 @@ func (loader *blockingNodeViewLoader) ListResourceGVICAssignments(_, _, _ string
 	return []domain.ResourceGVICAssignment{}, nil
 }
 
+func (loader *blockingNodeViewLoader) ListNodeTimelineEvents(_, _ string) ([]domain.NodeTimelineEvent, error) {
+	loader.enter("timeline")
+	return []domain.NodeTimelineEvent{}, nil
+}
+
 func (loader *blockingNodeViewLoader) ListUnseenNodeContentChanges(NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
 	loader.enter("changes")
 	return []domain.NodeContentChange{}, nil
@@ -232,7 +237,7 @@ func (loader *blockingNodeViewLoader) ListUnseenNodeContentChanges(NodeContentCh
 
 func TestLoadNodeViewRunsIndependentReadsConcurrently(t *testing.T) {
 	loader := &blockingNodeViewLoader{
-		entered: make(chan string, 5),
+		entered: make(chan string, 6),
 		release: make(chan struct{}),
 	}
 	done := make(chan error, 1)
@@ -246,7 +251,7 @@ func TestLoadNodeViewRunsIndependentReadsConcurrently(t *testing.T) {
 	}()
 
 	entered := map[string]bool{}
-	for len(entered) < 5 {
+	for len(entered) < 6 {
 		select {
 		case name := <-loader.entered:
 			entered[name] = true

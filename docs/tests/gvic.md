@@ -29,7 +29,7 @@ GVIC18 - Removing a GVIC assignment removes the effective access/projection rows
 GVIC19 - A resource can have multiple GVIC roles across different principals without collapsing the role meaning.
 GVIC20 - Shared inbox GVIC assignments must remain GVIC assignments and must not be converted into ordinary resource permission grants.
 GVIC21 - A person or group can only have one GVIC assignment per each node or for each logic gate. So the same person/group can not be in, for example, Generated and Informed for the same node (same rule applies for logic gates). A node assigned to a logic gate owns its node-level GVIC snapshot after entry.
-GVIC22 - Node and logic gate generated and verified assignments are single-user slots; they must use user principals, while consulted and informed can still use users or groups.
+GVIC22 - Node and Logic Gate Generated is a single-user slot. Verified accepts multiple user principals but no group principal, while Consulted and Informed can still use users or groups.
 GVIC23 - GVIC write commands update source assignments and projection/effective read models in the same transaction using precise row changes, not broad table or subsection rebuilds.
 GVIC24 - GVIC editor caches are patched from the canonical source-shaped write response for the edited resource; broad cached payloads must not overwrite newer GVIC assignments.
 GVIC25 - Source-shaped assignment responses patch editable GVIC chips for the initiating browser. My Work and other non-live projection-backed views read canonical state when opened or refreshed.
@@ -93,7 +93,7 @@ Expected:
 - Consulted and informed do not produce edit permission access.
 - Resource authorization remains controlled by permission policy: default access, direct user rows, and group rows.
 - Different principals can hold different GVIC roles on the same resource without losing the role meaning.
-- Node and logic gate generated and verified fields reject group principals and keep only one user for each role.
+- Node and Logic Gate Generated rejects groups and keeps one user; Verified rejects groups but accepts multiple explicit users.
 
 ### Scenario GVIC-S2: Group Expansion And Removal
 

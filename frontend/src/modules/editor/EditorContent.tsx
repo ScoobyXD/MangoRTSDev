@@ -1711,7 +1711,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (nodeGVICIsInherited) return;
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const singleUserRole = role === "generated" || role === "verified";
+    const singleUserRole = role === "generated";
+    if (role === "verified" && principalType !== "user") return;
     if (singleUserRole) {
       if (principalType !== "user") return;
       const existing = nodeGVICAssignments.filter((assignment) => assignment.role === role);
@@ -1791,7 +1792,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
     const currentAssignments = logicGateGVICAssignmentsRef.current;
-    const singleUserRole = role === "generated" || role === "verified";
+    const singleUserRole = role === "generated";
+    if (role === "verified" && principalType !== "user") return;
     if (singleUserRole) {
       if (principalType !== "user") return;
       const existing = currentAssignments.filter((assignment) => assignment.role === role);

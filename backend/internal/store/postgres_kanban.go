@@ -686,6 +686,11 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if crossLogicGateMove {
+		if _, err := insertLogicGateTransferTimelineEventTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, sourceAssignment.LogicGateID, input.LogicGateID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

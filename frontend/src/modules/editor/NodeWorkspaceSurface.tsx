@@ -138,6 +138,31 @@ const TEXT_CHAT_PANE_DEFAULT_WIDTH_PX = 340;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const NODE_EMAIL_COLUMN_LAYOUT_ID = "__node_email_column__";
+
+type NodeTimelineVerificationRecipient = {
+  company_id: string;
+  node_id: string;
+  event_id: string;
+  user_id: string;
+  user_display_name: string;
+  completed_timestamp?: string;
+  created_timestamp: string;
+};
+
+type NodeTimelineEvent = {
+  event_id: string;
+  company_id: string;
+  node_id: string;
+  type: "logic_gate_transfer" | "verification_request";
+  actor_user_id?: string;
+  actor_display_name: string;
+  from_logic_gate_id?: string;
+  from_logic_gate_name?: string;
+  to_logic_gate_id?: string;
+  to_logic_gate_name?: string;
+  verification_recipients: NodeTimelineVerificationRecipient[];
+  created_timestamp: string;
+};
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v2";
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
@@ -383,7 +408,7 @@ function focusContentEditableAtEnd(element: HTMLElement | null) {
 function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, informationID: string) {
   const cleanInformationID = informationID.trim();
   if (!root || !cleanInformationID) return;
-  const target = root.querySelector<HTMLElement>(`[data-node-text-block-id="${cleanInformationID}"], [data-node-chat-block-id="${cleanInformationID}"], [data-node-chat-message-id="${cleanInformationID}"]`);
+  const target = root.querySelector<HTMLElement>(`[data-node-timeline-event-id="${cleanInformationID}"], [data-node-text-block-id="${cleanInformationID}"], [data-node-chat-block-id="${cleanInformationID}"], [data-node-chat-message-id="${cleanInformationID}"]`);
   target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
 }
 
@@ -432,6 +457,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
+  const timelineCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
   const projectAssignerRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
@@ -520,6 +546,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
+  const [timelineEvents, setTimelineEvents] = useState<NodeTimelineEvent[]>([]);
+  const [timelineEventsLoading, setTimelineEventsLoading] = useState(false);
+  const [timelineEventsError, setTimelineEventsError] = useState("");
+  const [timelineCreateMenuOpen, setTimelineCreateMenuOpen] = useState(false);
+  const [verificationRequestPending, setVerificationRequestPending] = useState(false);
+  const [verificationCompletionPendingID, setVerificationCompletionPendingID] = useState("");
   const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID);
   const formattingControllerAvailable = editorTextCanEdit && blocks.some((block) => block.id === focusedTextBlockID);
   useEffect(() => {
@@ -879,13 +911,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (canEdit) return;
     setLogicGateAssignerOpen(false);
+    setTimelineCreateMenuOpen(false);
     setProjectAssignerOpen(false);
     setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
 
-
+  useAppFloatingMenuDismissal(timelineCreateMenuOpen, timelineCreateMenuRef, () => setTimelineCreateMenuOpen(false));
   useAppFloatingMenuDismissal(logicGateAssignerOpen, logicGateAssignerRef, () => setLogicGateAssignerOpen(false));
 
   useEffect(() => {
@@ -2158,6 +2191,74 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }, 700);
   }, []);
 
+  const loadNodeTimelineEvents = useCallback(async () => {
+    if (!companyID || !nodeID) {
+      setTimelineEvents([]);
+      return;
+    }
+    setTimelineEventsLoading(true);
+    setTimelineEventsError("");
+    try {
+      const payload = await requestJSON<{ timeline_events?: NodeTimelineEvent[] }>(
+        `/v1/nodes/${encodeURIComponent(nodeID)}/timeline-events?company_id=${encodeURIComponent(companyID)}`,
+      );
+      setTimelineEvents(payload.timeline_events ?? []);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_list_node_timeline_events";
+      setTimelineEventsError(message);
+    } finally {
+      setTimelineEventsLoading(false);
+    }
+  }, [companyID, nodeID, requestJSON]);
+
+  useEffect(() => {
+    void loadNodeTimelineEvents();
+  }, [loadNodeTimelineEvents]);
+
+  const createVerificationRequest = useCallback(async () => {
+    if (!canEdit || !companyID || !nodeID || verificationRequestPending) return;
+    setVerificationRequestPending(true);
+    setTimelineCreateMenuOpen(false);
+    setTimelineEventsError("");
+    try {
+      const payload = await requestJSON<{ timeline_event: NodeTimelineEvent }>(
+        `/v1/nodes/${encodeURIComponent(nodeID)}/verification-requests`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": generateStableInformationID() },
+          body: JSON.stringify({ company_id: companyID }),
+        },
+      );
+      setTimelineEvents((current) => [payload.timeline_event, ...current.filter((item) => item.event_id !== payload.timeline_event.event_id)]);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_create_verification_request";
+      setTimelineEventsError(message === "verification_recipients_required" ? "Add at least one person to Verified before requesting verification." : message);
+      onError(message);
+    } finally {
+      setVerificationRequestPending(false);
+    }
+  }, [canEdit, companyID, nodeID, onError, requestJSON, verificationRequestPending]);
+
+  const completeVerificationRequest = useCallback(async (eventID: string) => {
+    const cleanEventID = eventID.trim();
+    if (!companyID || !nodeID || !author.userID || !cleanEventID || verificationCompletionPendingID) return;
+    setVerificationCompletionPendingID(cleanEventID);
+    setTimelineEventsError("");
+    try {
+      const payload = await requestJSON<{ timeline_event: NodeTimelineEvent }>(
+        `/v1/nodes/${encodeURIComponent(nodeID)}/verification-requests/${encodeURIComponent(cleanEventID)}/complete`,
+        { method: "POST", body: JSON.stringify({ company_id: companyID }) },
+      );
+      setTimelineEvents((current) => current.map((item) => item.event_id === cleanEventID ? payload.timeline_event : item));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_complete_verification_request";
+      setTimelineEventsError(message);
+      onError(message);
+    } finally {
+      setVerificationCompletionPendingID("");
+    }
+  }, [author.userID, companyID, nodeID, onError, requestJSON, verificationCompletionPendingID]);
+
   const assignToLogicGate = useCallback(async (logicGateID: string, rawLabel: string) => {
     if (!canEdit) return;
     const cleanLogicGateID = logicGateID.trim();
@@ -2190,6 +2291,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLogicGateAssignStatus(`Assigning to Logic Gate: ${label}`);
     try {
       await onAssignToLogicGate(cleanLogicGateID);
+      await loadNodeTimelineEvents();
       const message = `Assigned to Logic Gate: ${label}`;
       setLogicGateAssignStatus(message);
       flashLogicGateAssignButton("success");
@@ -2211,7 +2313,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningLogicGateID("");
     }
-  }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
+  }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, loadNodeTimelineEvents, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
   const assignToProject = useCallback(async () => {
     if (!canEdit) return;
@@ -2264,6 +2366,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         resourceID: nodeID,
       });
       await onAssignToLogicGate(logicGateID);
+      await loadNodeTimelineEvents();
       setLastAssignedLogicGateID(logicGateID);
       setLastAssignedLogicGateLabel(logicGateLabel);
       setProjectAssignerOpen(false);
@@ -2277,7 +2380,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningProjectLogicGateID("");
     }
-  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
+  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
@@ -2424,6 +2527,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if ((!cleanInformationID && !cleanEmailMessageID) || !projectionsLoaded) return;
     const requestKey = `${nodeID}:${cleanInformationID}:${cleanEmailMessageID}:${focusRequestID ?? 0}`;
     if (handledFocusRequestRef.current === requestKey) return;
+    const timelineTarget = cleanInformationID
+      ? timelineEvents.find((item) => item.event_id === cleanInformationID)
+      : undefined;
+    if (timelineTarget) {
+      handledFocusRequestRef.current = requestKey;
+      window.requestAnimationFrame(() => scrollNodeWorkspaceInformationIntoView(rootRef.current, timelineTarget.event_id));
+      return;
+    }
+
     if (focusTargetIndex < 0) return;
 
     if (cleanEmailMessageID && emailOriginChatBlockID) {
@@ -2491,7 +2603,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       });
       return;
     }
-  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded]);
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded, timelineEvents]);
 
   const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, edge: "before" | "after", fallbackWidth: number, maxWidth: number) => {
     return (
@@ -2934,26 +3046,57 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         <div style={{ position: "sticky", top: 0, zIndex: 43, display: "flex", alignItems: "center", gap: 7, flexWrap: "nowrap", overflow: "visible", padding: "0 0 7px", background: panelBackground }}>
           {canEdit && (
-            <button
-              type="button"
-              title="Add text box"
-              onClick={createTextBlock}
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 9,
-                border: "1px solid transparent",
-                background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                color: accent,
-                display: "grid",
-                placeItems: "center",
-                cursor: "pointer",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              <PlusIcon color={accent} />
-            </button>
+            <div ref={timelineCreateMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
+              <button
+                type="button"
+                title="Add timeline entry"
+                aria-label="Add timeline entry"
+                aria-haspopup="menu"
+                aria-expanded={timelineCreateMenuOpen}
+                onClick={() => setTimelineCreateMenuOpen((current) => !current)}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 9,
+                  border: "1px solid transparent",
+                  background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+                  color: accent,
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                  boxShadow: EDITOR_NEU_SHADOW,
+                }}
+              >
+                <PlusIcon color={accent} />
+              </button>
+              {timelineCreateMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Choose timeline entry type"
+                  style={{ position: "absolute", top: 36, left: 0, zIndex: 80, width: 230, padding: 7, borderRadius: 12, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: panelBackground, boxShadow: EDITOR_NEU_PANEL_SHADOW }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setTimelineCreateMenuOpen(false); createTextBlock(); }}
+                    style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: "pointer" }}
+                  >
+                    <TextEditorIcon color={accent} />
+                    <span><strong style={{ display: "block", fontSize: 12 }}>New text box</strong><small style={{ opacity: 0.7 }}>Add editable timeline content</small></span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={verificationRequestPending}
+                    onClick={() => { void createVerificationRequest(); }}
+                    style={{ width: "100%", border: 0, borderRadius: 8, background: "rgba(99,102,241,0.08)", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
+                  >
+                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", background: "rgba(99,102,241,0.14)", color: accent, fontWeight: 950 }}>✓</span>
+                    <span><strong style={{ display: "block", fontSize: 12 }}>Verification stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verified</small></span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {nodeAttachedEmails.length > 0 && (
             <button
@@ -3250,6 +3393,74 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {nodeEmailColumnVisible && !nodeEmailOnly && (nodeEmailFocusActive
           ? <div aria-hidden="true" data-node-email-focus-gap="true" />
           : renderTextSidePaneResizeHandle(NODE_EMAIL_COLUMN_LAYOUT_ID, "email", "after", nodeEmailPaneWidth, nodeEmailPaneMaxWidth))}
+        {!nodeEmailOnly && (timelineEvents.length > 0 || timelineEventsLoading || timelineEventsError) && (
+          <section
+            aria-label="Node activity timeline"
+            data-node-timeline-activity="true"
+            style={{ gridColumn: "1 / -1", display: "grid", gap: 9, minWidth: 0, margin: "2px 0 4px" }}
+          >
+            {timelineEventsLoading && timelineEvents.length === 0 && (
+              <div role="status" style={{ marginLeft: 42, fontSize: 12, color: surfaceText, opacity: 0.66 }}>Loading timeline activity…</div>
+            )}
+            {timelineEventsError && (
+              <div role="alert" style={{ marginLeft: 42, maxWidth: 680, borderRadius: 9, padding: "8px 10px", background: "rgba(254,226,226,0.72)", color: "#b91c1c", fontSize: 12 }}>
+                {timelineEventsError}
+              </div>
+            )}
+            {timelineEvents.map((item) => {
+              const createdLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_timestamp));
+              const isVerification = item.type === "verification_request";
+              return (
+                <div key={item.event_id} style={{ display: "grid", gridTemplateColumns: `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`, columnGap: 4, alignItems: "stretch", minWidth: 0 }}>
+                  <div aria-hidden="true" style={{ position: "relative", display: "flex", justifyContent: "center" }}>
+                    <span style={{ position: "absolute", top: -9, bottom: -9, width: 2, borderRadius: 2, background: `linear-gradient(${ruleColor}, ${accent}55, ${ruleColor})` }} />
+                    <span style={{ position: "relative", zIndex: 1, marginTop: 18, width: 13, height: 13, borderRadius: "50%", border: `3px solid ${panelBackground}`, background: isVerification ? "#6366f1" : "#0ea5e9", boxShadow: `0 0 0 1px ${isVerification ? "rgba(99,102,241,0.42)" : "rgba(14,165,233,0.42)"}` }} />
+                  </div>
+                  <article
+                    data-node-timeline-event-id={item.event_id}
+                    tabIndex={-1}
+                    style={{ width: "min(680px, calc(100% - 16px))", borderRadius: 13, border: `1px solid ${isVerification ? "rgba(99,102,241,0.27)" : "rgba(14,165,233,0.27)"}`, background: isVerification ? "linear-gradient(135deg, rgba(238,242,255,0.95), rgba(255,255,255,0.82))" : "linear-gradient(135deg, rgba(240,249,255,0.96), rgba(255,255,255,0.82))", color: surfaceText, padding: "10px 13px", boxShadow: "0 5px 16px rgba(15,23,42,0.06)" }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : "Logic Gate transfer"}</strong>
+                      <time dateTime={item.created_timestamp} style={{ fontSize: 10.5, opacity: 0.68 }}>{createdLabel}</time>
+                    </div>
+                    {isVerification ? (
+                      <>
+                        <div style={{ marginTop: 5, fontSize: 12 }}><strong>{item.actor_display_name}</strong> requested verification from:</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
+                          {item.verification_recipients.map((recipient) => {
+                            const completed = Boolean(recipient.completed_timestamp);
+                            const isCurrentUser = recipient.user_id === author.userID;
+                            const pending = verificationCompletionPendingID === item.event_id;
+                            return (
+                              <button
+                                key={recipient.user_id}
+                                type="button"
+                                aria-label={`${recipient.user_display_name}: ${completed ? "verified" : "verification pending"}`}
+                                title={isCurrentUser && !completed ? "Confirm your verification" : completed ? "Verified" : "Waiting for this person"}
+                                disabled={!isCurrentUser || completed || pending}
+                                onClick={() => { void completeVerificationRequest(item.event_id); }}
+                                style={{ minHeight: 30, borderRadius: 999, border: `1px solid ${completed ? "rgba(16,185,129,0.42)" : "rgba(99,102,241,0.25)"}`, background: completed ? "rgba(209,250,229,0.9)" : "rgba(255,255,255,0.8)", color: completed ? "#047857" : surfaceText, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 9px 4px 5px", cursor: isCurrentUser && !completed ? "pointer" : "default", opacity: pending ? 0.65 : 1 }}
+                              >
+                                <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: "50%", border: `1px solid ${completed ? "#10b981" : "rgba(99,102,241,0.38)"}`, display: "grid", placeItems: "center", background: completed ? "#10b981" : "transparent", color: "white", fontSize: 12, fontWeight: 950 }}>{completed ? "✓" : ""}</span>
+                                <span style={{ fontSize: 11.5, fontWeight: 750 }}>{recipient.user_display_name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.45 }}>
+                        <strong>{item.actor_display_name}</strong> moved this node from <strong>{item.from_logic_gate_name || "Deleted logic gate"}</strong> to <strong>{item.to_logic_gate_name || "Deleted logic gate"}</strong>.
+                      </div>
+                    )}
+                  </article>
+                </div>
+              );
+            })}
+          </section>
+        )}
         <div
           ref={rowVirtualizer.listRef}
           data-mango-bounded-editor-rows="node"
