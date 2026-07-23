@@ -41,8 +41,9 @@ import {
   type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
-import { NOTIFICATION_TYPE_MENTION, NOTIFICATION_TYPE_URGENT_MENTION, type NotificationSummary } from "../modules/notifications/notificationsApi";
+import { NOTIFICATION_TYPE_MENTION, NOTIFICATION_TYPE_URGENT_MENTION, type NotificationSummary, type UpdateFeedFilter } from "../modules/notifications/notificationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
+import { requestUpdatesFilter } from "../modules/notifications/updatesFilterRequests";
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
@@ -355,6 +356,11 @@ export function AppSidebar({
     () => Math.max(0, normalizeSidebarNotificationCount(notificationSummary.total_unread) - updatesUrgentNotificationCount - updatesMentionNotificationCount),
     [notificationSummary.total_unread, updatesMentionNotificationCount, updatesUrgentNotificationCount],
   );
+  const openUpdatesFilter = useCallback((filter: UpdateFeedFilter) => {
+    selectBuiltInHomeSavedView("updates", companyID, currentUserID);
+    requestUpdatesFilter(companyID, filter);
+    onHomeViewSelect("updates");
+  }, [companyID, currentUserID, onHomeViewSelect]);
   const [sharedTriageHovered, setSharedTriageHovered] = useState(false);
   const [sharedTriageFocused, setSharedTriageFocused] = useState(false);
   const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
@@ -1246,9 +1252,9 @@ export function AppSidebar({
           icon={<HeaderUpdatesIcon color="#f59e0b" />}
           splitTrailing
           trailing={<SidebarNotificationBadges large badges={[
-            { key: "updates-urgent", label: "!", count: updatesUrgentNotificationCount, tone: "urgent", title: `${updatesUrgentNotificationCount} urgent mentions`, showZero: true },
-            { key: "updates-mentions", label: "@", count: updatesMentionNotificationCount, tone: "mention", title: `${updatesMentionNotificationCount} mentions`, showZero: true },
-            { key: "updates-other", label: <HeaderUpdatesIcon />, count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} regular updates`, showZero: true },
+            { key: "updates-urgent", label: "!", count: updatesUrgentNotificationCount, tone: "urgent", title: `${updatesUrgentNotificationCount} urgent mentions`, showZero: true, onClick: () => openUpdatesFilter("urgent") },
+            { key: "updates-mentions", label: "@", count: updatesMentionNotificationCount, tone: "mention", title: `${updatesMentionNotificationCount} mentions`, showZero: true, onClick: () => openUpdatesFilter("mention") },
+            { key: "updates-other", label: <HeaderUpdatesIcon />, count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} regular updates`, showZero: true, onClick: () => openUpdatesFilter("update") },
           ]} />}
           elevated
           onClick={() => {

@@ -7,6 +7,7 @@ import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenP
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
 import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
+import { consumeRequestedUpdatesFilter, requestUpdatesFilter, updatesFilterFromRequestEvent } from "../../../../frontend/src/modules/notifications/updatesFilterRequests.js";
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
   const orderedIDs = ["a", "b", "c", "d"];
@@ -95,36 +96,48 @@ test("Updates Seen selects and opens the successor row, retaining the clicked pr
   assert.ok(source.includes("{ advanceFromRowKey: row.rowKey, previewRow: row }"));
 });
 
-test("local Seen events do not reload Updates, while external same-company events do", () => {
+test("local Seen events do not reload Updates, while external and reconnect events do", () => {
   const localSeenSource = "updates-local-seen";
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-a",
     source: localSeenSource,
     localSeenSource,
-    summaryOnlySource: "realtime-accepted-summary",
   }), false);
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-b",
     source: "",
     localSeenSource,
-    summaryOnlySource: "realtime-accepted-summary",
   }), false);
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-a",
     source: "realtime-accepted-summary",
     localSeenSource,
-    summaryOnlySource: "realtime-accepted-summary",
-  }), false);
+  }), true);
   assert.equal(updatesNotificationEventRequiresReload({
     activeCompanyID: "company-a",
     eventCompanyID: "company-a",
     source: "realtime",
     localSeenSource,
-    summaryOnlySource: "realtime-accepted-summary",
   }), true);
+});
+
+test("Updates sidebar filter requests are company-scoped and survive page mounting", () => {
+  requestUpdatesFilter(" company-a ", "urgent");
+  assert.equal(consumeRequestedUpdatesFilter("company-b"), null);
+  assert.equal(consumeRequestedUpdatesFilter("company-a"), "urgent");
+  assert.equal(consumeRequestedUpdatesFilter("company-a"), null);
+
+  const matchingEvent = {
+    detail: { companyID: "company-a", filter: "mention" },
+  } as unknown as Event;
+  const otherCompanyEvent = {
+    detail: { companyID: "company-b", filter: "update" },
+  } as unknown as Event;
+  assert.equal(updatesFilterFromRequestEvent(matchingEvent, "company-a"), "mention");
+  assert.equal(updatesFilterFromRequestEvent(otherCompanyEvent, "company-a"), null);
 });
 
 test("Updates rows invert Seen into Unsee in seen-history mode", () => {

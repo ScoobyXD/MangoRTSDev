@@ -1443,16 +1443,17 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setExplorerNodePopup({ nodeID: cleanNodeID, nodeTitle: cleanNodeID, focusRequestID: Date.now() });
   }, [closeMenus, onNavigate]);
 
-  const openProjectManagementLogicGate = useCallback((logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => {
+  const openProjectManagementLogicGate = useCallback((logicGateID: string, label?: string, returnContext?: ProjectLogicGateReturnContext) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
     closeMenus();
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
     routeManagedExplorerNodePopupRef.current = false;
+    const cleanLabel = label?.trim() || "Logic Gate";
     setLogicGateArenaTarget({
       logicGateID: cleanLogicGateID,
-      label: "Logic Gate",
+      label: cleanLabel,
       requestID: Date.now(),
     });
     const ensured = activatePrimaryPage("logic-gate-arena");

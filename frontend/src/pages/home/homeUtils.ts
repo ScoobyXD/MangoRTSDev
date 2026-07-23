@@ -269,6 +269,10 @@ export function condenseEmailThreadMessages(messages: EmailMessage[]): EmailMess
   return condensed;
 }
 
+export function shouldAutoMarkEmailSelectionRead(unreadOnly: boolean): boolean {
+  return !unreadOnly;
+}
+
 export function unreadEmailThreadMessagesForSelection(
   messages: EmailMessage[],
   selected: EmailMessage,

@@ -866,7 +866,7 @@ export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInbo
   });
   const acceptedIDs = cleanIDs(payload.accepted_ids ?? []);
   const archivedIDs = cleanIDs(payload.archived_ids ?? []);
-  for (const messageID of archivedIDs) {
+  for (const messageID of cleanIDs([...acceptedIDs, ...archivedIDs])) {
     markCachedMessageArchived(messageID, { companyID, sharedInboxID, accountEmail: options.accountEmail });
   }
   return {
