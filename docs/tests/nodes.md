@@ -688,7 +688,7 @@ N118 - A Node timeline transfer event is immutable and read-only. Later actor or
 N119 - The Node timeline plus button opens a keyboard-labelled menu with New text box and Verification stamp choices. New text box preserves existing behavior; the plus itself no longer creates a text box immediately.
 N120 - A verification stamp snapshots every current effective Node Verified user once, requires at least one recipient, preserves that snapshot across later GVIC changes, and renders one individually actionable check beside each name.
 N121 - Only a snapshotted recipient can complete their own verification. Completion is one-way, stores the first server timestamp, is idempotent under retry/concurrency, and cannot complete another recipient.
-N122 - Transfer and verification stamps stack as short cards on the existing line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing.
+N122 - Transfer and verification stamps stack as short cards on the exact shared text-box line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing. The timestamp and clock lead the card; Logic Gate transfer headings and both stored from/to gate-name snapshots use the established Logic Gate icon.
 N123 - Updates deep links use the verification stamp event ID, and the Node editor scrolls that exact `data-node-timeline-event-id` row into view without opening or editing an unrelated text box.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction

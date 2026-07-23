@@ -143,10 +143,11 @@ type TimelineCellProps = {
   accent: string;
   muted: boolean;
   isLast: boolean;
+  minHeight?: number;
 };
 
-export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast }) => (
-  <div style={{ position: "relative", alignSelf: "stretch", minHeight: TEXT_BLOCK_ROW_HEIGHT, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
+export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast, minHeight = TEXT_BLOCK_ROW_HEIGHT }) => (
+  <div style={{ position: "relative", alignSelf: "stretch", minHeight, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
     <div
       aria-hidden="true"
       style={{

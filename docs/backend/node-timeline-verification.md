@@ -11,6 +11,7 @@ This document defines the durable business rules for compact activity entries on
 3. Each event snapshots the actor's display name and the source and destination Logic Gate names at commit time. Later user or Logic Gate renames, removal from the company, or Logic Gate deletion do not rewrite historical copy.
 4. Transfer rows are ordered by event time, then stable event ID, newest first. They use the sentence: `{actor} moved this node from {source Logic Gate} to {destination Logic Gate}.`
 5. Transfer stamps are read-only. Authorization to read them is the same as authorization to read the owning Node.
+6. A compact stamp reuses the exact shared Node timeline rail and circle used by text boxes. Its leading timestamp includes a clock icon, and its header, source snapshot, and destination snapshot use the established Logic Gate icon. Visual labels must render the stored name snapshots, not a generic replacement label.
 
 ## Verification assignment rules
 
@@ -21,14 +22,15 @@ This document defines the durable business rules for compact activity entries on
 
 ## Creating a verification request
 
-1. The Node timeline plus action opens a choice. `New text box` preserves the existing text-box creation behavior; `Verification stamp` creates a verification request.
+1. The Node timeline plus action opens a choice. `New text box` preserves the existing text-box creation behavior; `Verification stamp` creates a verification request. Both choices are neutral at rest and expose the same visible hover and keyboard-focus selection treatment.
 2. Creating a verification request requires current Node edit authorization and a nonblank idempotency key.
-3. The request snapshots all current effective Node GVIC users whose role is Verified. Duplicate effective rows collapse to one recipient by user ID.
-4. At least one Verified recipient is required. Otherwise the API returns a conflict and no stamp or update is created.
-5. The actor is included in the recipient snapshot when the actor is currently Verified. The actor may complete their own verification, but does not receive a self-notification.
-6. Later GVIC additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.
-7. Every deliberate plus-menu action uses a new idempotency key and may create a new request. Retrying the same key for the same Node returns the original stamp, creates no second domain event, and sends no duplicate updates. Concurrent retries for one Node serialize against the same Node row before insert.
-8. The actor display name and every recipient display name are stored as historical snapshots. User rename or company removal does not rewrite the stamp.
+3. Browser CORS preflight must allow both `Idempotency-Key` and the supported `X-Idempotency-Key` alias so a valid verification request reaches the API rather than failing at the transport boundary.
+4. The request snapshots all current effective Node GVIC users whose role is Verified. Duplicate effective rows collapse to one recipient by user ID.
+5. At least one Verified recipient is required. Otherwise the API returns a conflict and no stamp or update is created.
+6. The actor is included in the recipient snapshot when the actor is currently Verified. The actor may complete their own verification, but does not receive a self-notification.
+7. Later GVIC additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.
+8. Every deliberate plus-menu action uses a new idempotency key and may create a new request. Retrying the same key for the same Node returns the original stamp, creates no second domain event, and sends no duplicate updates. Concurrent retries for one Node serialize against the same Node row before insert.
+9. The actor display name and every recipient display name are stored as historical snapshots. User rename or company removal does not rewrite the stamp.
 
 ## Recipient updates and completion
 
