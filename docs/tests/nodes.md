@@ -357,6 +357,7 @@ Business logic covered:
 - N93
 - N94
 - N95
+- N116
 
 Given:
 - A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, and a Project Logic Gates / Nodes row.
@@ -371,6 +372,7 @@ Expected:
 - Close buttons use the unified red close chrome with a white X on every full node shell surface that renders a close action.
 - The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
 - Activating that Kanban/My Work fullscreen control pins the node overlay to the browser viewport, not merely to the visible Kanban board bounds.
+- The Updates Node detail panel exposes the shared fullscreen/restore control, enters the blocking body-level overlay with standard viewport insets, and returns to the saved Updates split ratio without changing the selected update or Node context.
 - Clicking a Project Logic Gates / Nodes node row expands its editor directly beneath that row; clicking it again collapses the editor without resetting Project grouping or node selection state.
 - Node text boxes use the unified editor semantics on every node-window surface.
 - Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
@@ -680,6 +682,7 @@ N112 - Every Node has one optional, independently resizable, full-height email c
 N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; their opened panes and linked-email expansion use the shared short, reduced-motion-aware entrance transition without changing persisted open/closed state. A linked exact-message email preview always belongs to the left content column, sharing that column vertically with Editor when both are open. Chat always owns a separate right column at full row-body height and is never shortened by the email preview. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
 N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients from that Node's current effective GVIC assignments. A parent Logic Gate's GVIC never substitutes for Node GVIC. A Node GVIC assignment update is sent only to a newly assigned or effective-role-changed user, not unchanged, removed, unrelated, or actor users.
 N115 - An authenticated user with Node Edit access may edit or delete only a Node chat comment whose stored `author_id` is that user. Comment edits use the exact projection ID through PATCH, preserve the original comment envelope and attachment/source relationships, refresh direct mention notifications and collaboration participants, and publish one compact `chat.message.updated` hint on the existing exact Node chat scope. Generic information/projection POST routes must reject attempts to overwrite an existing chat comment so the author check cannot be bypassed.
+N116 - The Updates row-detail Node panel exposes the shared fullscreen/restore shell action. Fullscreen uses the body-level blocking overlay, shared viewport insets, focus/Escape handling, and app-chrome suppression; restore returns to the existing Updates split ratio without changing the selected update or Node context.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 

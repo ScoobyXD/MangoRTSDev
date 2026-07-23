@@ -69,7 +69,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "open-in-new-tab", "pin"],
+    actions: ["close", "fullscreen", "open-in-new-tab", "pin"],
   },
   {
     id: "kanban-my-work-node-overlay",

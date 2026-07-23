@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppModalPortal } from "../../app/AppModalPortal";
 import { buildNodeRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  setNodeEditorFullscreenChromeActive,
+} from "../../modules/editor/nodeEditorFullscreenChrome";
 import { UnifiedNodeShell } from "../../modules/editor/UnifiedNodeShell";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
@@ -1602,11 +1608,20 @@ function UpdatesNodePanel({
   resolveUserLabel?: (userID: string) => string;
   onClose: () => void;
 }) {
+  const [fullscreen, setFullscreen] = useState(false);
   const details = resolveNodeDetails?.(panel.nodeID) ?? null;
   const nodeTitle = details?.title?.trim() || panel.nodeTitle;
   const body = panel.row ? formatUpdateRowBody(panel.row, resolveUserLabel) : "";
-  return (
-    <aside style={updatesNodePanelStyle(Boolean(panel.row))} aria-label="Selected update node">
+
+  useEffect(() => setFullscreen(false), [panel.nodeID]);
+  useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
+
+  const shell = (
+    <aside
+      data-mango-updates-node-fullscreen={fullscreen ? "true" : undefined}
+      style={updatesNodePanelStyle(Boolean(panel.row), fullscreen)}
+      aria-label="Selected update node"
+    >
       {panel.row && (
         <div style={updatesNodePanelNotificationStyle}>
           <span style={updateRowIconStyle(updateRowTone(panel.row.item))}>{updateRowIcon(panel.row.item)}</span>
@@ -1624,6 +1639,8 @@ function UpdatesNodePanel({
       <UnifiedNodeShell
         surfaceID="updates-node-panel"
         title={nodeTitle}
+        role={fullscreen ? "dialog" : "group"}
+        ariaModal={fullscreen}
         ariaLabel="Selected update node editor"
         actionTop={4}
         actionButtonStyle={updatesNodePanelIconButtonStyle}
@@ -1639,6 +1656,11 @@ function UpdatesNodePanel({
             title: "Pin node to Pinned",
             ariaLabel: "Pin node to Pinned",
             onClick: () => requestAppSidebarPin({ kind: "node", id: panel.nodeID, name: nodeTitle }),
+          },
+          {
+            id: "fullscreen",
+            pressed: fullscreen,
+            onClick: () => setFullscreen((current) => !current),
           },
           {
             id: "close",
@@ -1664,6 +1686,22 @@ function UpdatesNodePanel({
         </React.Suspense>
       </UnifiedNodeShell>
     </aside>
+  );
+
+  if (!fullscreen) return shell;
+
+  return (
+    <AppModalPortal trapFocus onRequestClose={() => setFullscreen(false)}>
+      <div
+        data-mango-updates-node-fullscreen-backdrop="true"
+        style={updatesNodePanelFullscreenBackdropStyle}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setFullscreen(false);
+        }}
+      >
+        {shell}
+      </div>
+    </AppModalPortal>
   );
 }
 
@@ -2447,19 +2485,36 @@ const updateInlineTokenStyle: React.CSSProperties = {
   textOverflow: "ellipsis",
 };
 
-function updatesNodePanelStyle(hasNotification: boolean): React.CSSProperties {
+function updatesNodePanelStyle(hasNotification: boolean, fullscreen: boolean): React.CSSProperties {
   return {
+    position: fullscreen ? "fixed" : undefined,
+    zIndex: fullscreen ? 2 : undefined,
+    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : undefined,
+    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : undefined,
+    width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : undefined,
+    height: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : undefined,
+    maxWidth: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : undefined,
+    maxHeight: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : undefined,
     minWidth: 0,
     minHeight: 0,
     display: "grid",
     gridTemplateRows: hasNotification ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
     border: "1px solid rgba(15, 23, 42, 0.14)",
-    borderRadius: 8,
+    borderRadius: fullscreen ? 14 : 8,
     background: "rgba(255, 255, 255, 0.96)",
     boxShadow: "0 18px 40px rgba(15, 23, 42, 0.14)",
+    boxSizing: "border-box",
     overflow: "hidden",
   };
 }
+
+const updatesNodePanelFullscreenBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1,
+  background: "rgba(15, 23, 42, 0.18)",
+  pointerEvents: "auto",
+};
 
 const updatesNodePanelIconButtonStyle: React.CSSProperties = {
   width: 28,

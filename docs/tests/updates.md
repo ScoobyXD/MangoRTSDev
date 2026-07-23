@@ -4,7 +4,7 @@ Last updated: 2026-07-22
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
@@ -100,6 +100,7 @@ U88 - Update actor identity remains keyed by `actor_user_id`, but user-facing Up
 U89 - Seen Updates exposes separate From and To editable text fields in exact `DD/MM/YYYY` format. A date commits on blur or Enter only after strict calendar validation; impossible dates, other formats, and dates outside the available Seen-history bounds are marked invalid and do not issue a new feed query.
 U90 - Seen-history date queries use inclusive UTC calendar days. The initial window ends on the newest available Seen update and includes at most the latest 30 days. Any edited range remains within available history and at most 90 inclusive days; moving one edge beyond that maximum moves the opposite edge rather than sending an invalid backend request.
 U91 - Every row in Seen Updates replaces the normal **Seen** action with **Unsee**. Unsee clears only that notification's read timestamp through the existing current-user notification mutation, removes the row optimistically from Seen Updates without a full-feed reload or blink, and makes it eligible for the normal Updates inbox and unread badge counts. Failure restores the Seen Updates row and reports the error; unrelated notifications and the selected date window are unchanged.
+U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscreen action in its top-right controls. Activating it moves the complete selected Node panel into the shared body-level blocking overlay with the standard 8px vertical and 12px horizontal viewport insets, hides conflicting app chrome, traps focus, and preserves the selected update, Node editor, and chat context. The same control, Escape, or backdrop restores the existing Updates split-panel layout and its saved ratio; closing still closes the Node panel.
 
 ## Update Row Copy And Visual Language
 
@@ -609,3 +610,25 @@ Expected:
 - If the unread mutation fails, the row returns to Seen Updates and an actionable error is displayed.
 
 Focused coverage lives in `tests/frontend/pages/home/updatesSelection.test.ts` and `tests/frontend/modules/notifications/notificationsApi.test.ts`.
+
+### Scenario U-S17: Fullscreen The Updates Node Panel
+
+Business logic covered:
+- U68
+- U92
+
+Given:
+- The user activates an Updates row that opens its Node in the right-hand detail panel.
+- The Updates and Node panes have a previously saved split ratio, and the Node has live editor and chat context.
+
+When:
+- The user clicks the fullscreen icon in the Node panel's top-right controls.
+- The user then clicks the restore icon, presses Escape, or clicks the fullscreen backdrop.
+
+Expected:
+- The complete selected Node panel uses the shared blocking overlay above app chrome with the standard viewport insets, and the shared fullscreen icon changes to its pressed/restore state.
+- Focus is trapped while fullscreen, conflicting app chrome is hidden, and the selected update, Node editor, and chat context remain associated with the same panel.
+- Restore returns to the Updates split panel at its saved ratio without changing the selected update.
+- The red close action still closes the Node panel from either mode.
+
+Focused structural coverage lives in `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.

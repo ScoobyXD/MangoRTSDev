@@ -1359,6 +1359,12 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "pin",
     "delete",
   ]);
+  assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "updates-node-panel")?.actions, [
+    "close",
+    "fullscreen",
+    "open-in-new-tab",
+    "pin",
+  ]);
   assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "project-relationships-inline-node")?.actions, [
     "close",
     "fullscreen",
@@ -1383,6 +1389,12 @@ test("node window adapters mount the shared unified node shell", () => {
     "function ProjectRelationshipNodePanel(",
     "function CriticalPulseBeacon(",
     "Project relationship node panel",
+  );
+  const updatesNodePanel = sourceSliceBetween(
+    updatesView,
+    "function UpdatesNodePanel(",
+    "function formatUpdateRowBody(",
+    "Updates node panel",
   );
 
   assert.match(unifiedShell, /data-mango-unified-node-shell/);
@@ -1423,6 +1435,13 @@ test("node window adapters mount the shared unified node shell", () => {
 
   assert.match(updatesView, /UnifiedNodeShell/);
   assert.match(updatesView, /surfaceID="updates-node-panel"/);
+  assert.match(updatesNodePanel, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(updatesNodePanel, /id: "fullscreen"/);
+  assert.match(updatesNodePanel, /pressed: fullscreen/);
+  assert.match(updatesNodePanel, /<AppModalPortal trapFocus onRequestClose=\{\(\) => setFullscreen\(false\)\}>/);
+  assert.match(updatesNodePanel, /updatesNodePanelStyle\(Boolean\(panel\.row\), fullscreen\)/);
+  assert.match(updatesView, /top: fullscreen \? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : undefined/);
+  assert.match(updatesView, /left: fullscreen \? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : undefined/);
 
   assert.match(projectSummary, /UnifiedNodeShell/);
   assert.match(projectSummary, /surfaceID="project-critical-path-inline-node"/);
