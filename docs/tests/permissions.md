@@ -5,7 +5,7 @@ Last updated: 2026-07-22
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save and duplicate-write prevention still require focused interaction coverage.
-- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node access denial. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
+- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, current-policy apply-to-descendants snapshots, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node access denial. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -50,16 +50,16 @@ P38 - Kanban board/card visibility follows the owning Logic Gate access, but ope
 P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
 P41 - Direct user permission rows override group permission rows for that user; group rows override default access, and the nearest matching group row wins before same-depth access-rank tie breaking.
-P42 - On company Explorer folders, apply-to-descendants applies the changed permission rule keys to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
-P43 - On Logic Gates, apply-to-descendants applies the changed permission rule keys to nodes currently assigned to that Logic Gate.
+P42 - On company Explorer folders, apply-to-descendants replaces the permission policy on all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates with the folder's complete current default and user/group rules, even when the folder was not changed in that request.
+P43 - On Logic Gates, apply-to-descendants replaces the permission policy on nodes currently assigned to that Logic Gate with the Logic Gate's complete current default and user/group rules, even when the Logic Gate was not changed in that request.
 P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Editable dialogs retain close-with-save for pending changes, but closing after a successful explicit Save must not issue a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 P46 - Editing a parent without apply-to-descendants changes only that parent and the template future direct children will receive; existing descendants keep their current permission policies.
 P47 - Permission policy inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full permission rows per descendant.
 P48 - Creating or transferring a resource may copy resolved permission rule pointers from the direct parent, but it must not leave the child live-linked to future parent edits.
-P49 - Apply-to-descendants should record changed rule applications for the subtree instead of rewriting a full permission policy for every descendant; the operation must remain feasible for subtrees with hundreds of thousands of descendants.
-P50 - Removing a permission rule with apply-to-descendants requires an explicit tombstone/delete application so older child or ancestor rules do not reappear.
-P51 - Apply-to-descendants overwrites existing descendant special rules for the same changed rule keys as of that operation; later descendant edits can override again until a newer ancestor apply occurs.
+P49 - Apply-to-descendants records one full-current-policy snapshot boundary plus the parent's current rules for the subtree instead of rewriting policy rows for every descendant; the operation must remain feasible for subtrees with hundreds of thousands of descendants.
+P50 - The snapshot boundary clears older ancestor applications and descendant-only rules; applying an empty current rule set therefore clears all descendant exception rules.
+P51 - Apply-to-descendants is a complete one-time overwrite of the current descendants, including descendant-only rules. Later descendant edits can override again until a newer ancestor apply occurs.
 P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
 P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and GVIC assignments never authorize the delete.
@@ -221,12 +221,12 @@ Expected:
 - Moving to a different folder or Logic Gate replaces the child policy with the new parent's current template.
 - Detaching from a parent or moving to a root/non-template location preserves the child's current policy.
 - Project permission changes do not cascade into related Logic Gates or nodes.
-- Applying a folder permission change to descendants updates descendant folders, contained projects, contained Logic Gates, and assigned nodes for that specific setting.
-- Applying a Logic Gate permission change to descendants updates nodes currently assigned to that Logic Gate for that specific setting.
+- Applying a folder's permissions to descendants copies the folder's complete current policy to descendant folders, contained projects, contained Logic Gates, and assigned nodes, even when the folder policy was not edited in that request.
+- Applying a Logic Gate's permissions to descendants copies the Logic Gate's complete current policy to every currently assigned node, even when the Logic Gate policy was not edited in that request.
 - A normal parent edit changes the parent and future direct children only; existing descendants are unchanged.
 - A copied child policy may be represented by policy/rule pointers or immutable rule versions instead of duplicated permission rows.
-- Apply-to-descendants records changed rule applications or tombstones for the subtree instead of materializing a full policy on every descendant.
-- The apply operation overwrites descendant rules for the same changed keys, while unrelated child-specific rules remain unless the saved change removes or replaces them.
+- Apply-to-descendants records a snapshot boundary and the parent's complete current rules for the subtree instead of materializing a full policy on every descendant.
+- The apply operation replaces the complete descendant policy, so child-specific rules are removed; an empty parent rule set clears descendant exception rules.
 - Later descendant edits win over earlier ancestor applies until a newer ancestor apply is recorded.
 - Group permission rules remain group pointers and are not expanded into one source row per user.
 - Permission explanations identify whether access came from a direct rule, create/transfer inheritance, descendant apply, or group membership, and do not treat GVIC assignment as resource-permission access.

@@ -612,18 +612,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 				return nil, err
 			}
 		}
-		var beforeDefaultAccess string
-		var beforeAssignments []resourcePermissionAssignment
-		if input.ApplyToDescendants {
-			beforeDefaultAccess, err = postgresResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
-			if err != nil {
-				return nil, err
-			}
-			beforeAssignments, err = postgresResourcePermissionAssignmentsTx(ctx, tx, companyID, entityType, entityID)
-			if err != nil {
-				return nil, err
-			}
-		}
+
 		policySequence, err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID)
 		if err != nil {
 			return nil, err
@@ -638,7 +627,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			if err != nil {
 				return nil, err
 			}
-			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, policySequence, beforeDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
+			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, policySequence, afterDefaultAccess, afterAssignments)
 			if err != nil {
 				return nil, err
 			}

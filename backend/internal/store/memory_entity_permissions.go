@@ -504,10 +504,7 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		return nil, ErrNotFound
 	}
 	oldDefaultAccess := beforePolicy.DefaultAccess
-	beforeAssignments := beforePolicy.Assignments
-	if input.ApplyToDescendants {
-		beforeAssignments = beforePolicy.Assignments
-	}
+
 	canMutateManagerOverrides := true
 	if strings.TrimSpace(input.ActorUserID) != "" {
 		canMutateManagerOverrides = r.userCanMutateManagerResourceOverridesLocked(companyID, input.ActorUserID)
@@ -664,7 +661,7 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			restore()
 			return nil, ErrNotFound
 		}
-		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, policySequence, oldDefaultAccess, beforeAssignments, afterPolicy.DefaultAccess, afterPolicy.Assignments)
+		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, policySequence, afterPolicy.DefaultAccess, afterPolicy.Assignments)
 		if err != nil {
 			restore()
 			return nil, err
@@ -1233,7 +1230,7 @@ func (r *MemoryRepo) resourcePermissionDescendantTargetsLocked(companyID, resour
 	return targets
 }
 
-func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input EntityPermissionUpdateInput, policySequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
+func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input EntityPermissionUpdateInput, policySequence int64, currentDefault string, currentAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
 	if !input.ApplyToDescendants {
 		return []resourcePermissionTarget{}, nil
 	}
@@ -1247,7 +1244,7 @@ func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input Enti
 	if len(targets) == 0 {
 		return targets, nil
 	}
-	r.recordPermissionSubtreeApplicationsLocked(companyID, resourceType, resourceID, policySequence, beforeDefault, beforeAssignments, afterDefault, afterAssignments)
+	r.recordPermissionSubtreeApplicationsLocked(companyID, resourceType, resourceID, policySequence, currentDefault, currentAssignments)
 	return targets, nil
 }
 

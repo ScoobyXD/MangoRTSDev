@@ -539,7 +539,7 @@ func TestMemoryResourceAccessPolicyGroupPointerFollowsLaterMembershipAndUserOver
 }
 
 func TestMemoryResourceAccessPolicyApplyToDescendantsUpdatesExplorerTree(t *testing.T) {
-	repo, companyID, _, _, other := setupResourceAccessPolicyTest(t)
+	repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Descendant Team")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup: %v", err)
@@ -641,6 +641,42 @@ func TestMemoryResourceAccessPolicyApplyToDescendantsUpdatesExplorerTree(t *test
 		}
 	}
 
+	// Business rule: Apply copies the parent's complete current policy. It is
+	// not limited to fields changed in the Apply request, and it replaces a
+	// descendant policy that was edited after an earlier Apply.
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   allowed.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions descendant custom policy: %v", err)
+	}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessEdit, map[string]string{
+		resourcePermissionSubjectKeyForTest(EntityPermissionSubjectUser, allowed.UserID): EntityPermissionNoAccess,
+	})
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:          companyID,
+		EntityType:         EntityTypeCompanyExplorerFolder,
+		EntityID:           parentFolder.EntityID,
+		DefaultAccess:      ResourceDefaultAccessNoAccess,
+		DefaultAccessSet:   true,
+		ApplyToDescendants: true,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectGroup,
+			SubjectID:   group.GroupID,
+			AccessLevel: EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions reapply unchanged current policy: %v", err)
+	}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessNoAccess, wantGroupEdit)
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:          companyID,
 		EntityType:         EntityTypeCompanyExplorerFolder,

@@ -170,7 +170,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 
 	affected := []resourceGVICKey{keyValue}
 	if input.ApplyToDescendants {
-		descendantAffected, descendantChanged, err := r.applyResourceGVICCommandToDescendantsLocked(keyValue, policySequence, before, after)
+		descendantAffected, descendantChanged, err := r.applyResourceGVICCommandToDescendantsLocked(keyValue, policySequence, after)
 		if err != nil {
 			restore()
 			return ResourceGVICAssignmentMutationResult{}, err
@@ -207,7 +207,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	return result, nil
 }
 
-func (r *MemoryRepo) applyResourceGVICCommandToDescendantsLocked(keyValue resourceGVICKey, policySequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
+func (r *MemoryRepo) applyResourceGVICCommandToDescendantsLocked(keyValue resourceGVICKey, policySequence int64, currentAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
 	if keyValue.resourceType != EntityTypeLogicGate {
 		return []resourceGVICKey{}, false, nil
 	}
@@ -224,7 +224,7 @@ func (r *MemoryRepo) applyResourceGVICCommandToDescendantsLocked(keyValue resour
 	if len(nodeIDs) == 0 {
 		return []resourceGVICKey{}, false, nil
 	}
-	changed := r.recordGVICSubtreeApplicationsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, beforeAssignments, afterAssignments)
+	changed := r.recordGVICSubtreeApplicationsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, currentAssignments)
 	affected := make([]resourceGVICKey, 0, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
 		affected = append(affected, resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeNode, resourceID: nodeID})

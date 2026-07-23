@@ -78,13 +78,6 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 	if err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
-	var beforeAssignments []domain.ResourceGVICAssignment
-	if input.ApplyToDescendants {
-		beforeAssignments, err = postgresResourceGVICAssignmentsForResource(ctx, tx, keyValue)
-		if err != nil {
-			return ResourceGVICAssignmentMutationResult{}, err
-		}
-	}
 
 	changed := false
 	switch operation {
@@ -227,7 +220,7 @@ where company_id=$1::uuid
 
 	affected := []resourceGVICKey{keyValue}
 	if input.ApplyToDescendants {
-		descendantAffected, descendantChanged, err := applyPostgresResourceGVICCommandToDescendantsTx(ctx, tx, keyValue, policySequence, beforeAssignments, afterAssignments)
+		descendantAffected, descendantChanged, err := applyPostgresResourceGVICCommandToDescendantsTx(ctx, tx, keyValue, policySequence, afterAssignments)
 		if err != nil {
 			return ResourceGVICAssignmentMutationResult{}, err
 		}
@@ -287,7 +280,7 @@ where company_id=$1::uuid
 	return result, nil
 }
 
-func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, policySequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
+func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, policySequence int64, currentAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
 	if keyValue.resourceType != EntityTypeLogicGate {
 		return []resourceGVICKey{}, false, nil
 	}
@@ -298,7 +291,7 @@ func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sq
 	if len(nodeIDs) == 0 {
 		return []resourceGVICKey{}, false, nil
 	}
-	changed, err := postgresRecordGVICSubtreeApplicationsTx(ctx, tx, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, beforeAssignments, afterAssignments)
+	changed, err := postgresRecordGVICSubtreeApplicationsTx(ctx, tx, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, currentAssignments)
 	if err != nil {
 		return nil, false, err
 	}

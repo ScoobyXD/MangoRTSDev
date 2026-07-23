@@ -180,6 +180,16 @@ direct_sequence(policy_sequence) as (
   ), 0)
 ),
 `+postgresResourcePolicyAncestorsCTE+`,
+latest_snapshot_application as (
+  select max(app.policy_sequence) as policy_sequence
+  from resource_permission_subtree_applications app
+  join resource_policy_ancestors ancestor
+    on ancestor.resource_type=app.ancestor_resource_type
+   and ancestor.resource_id=app.ancestor_resource_id
+  join requested req on app.company_id=req.company_id
+  join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+  where app.rule_key=$6
+),
 latest_default_application as (
   select app.access_level
   from resource_permission_subtree_applications app
@@ -189,10 +199,11 @@ latest_default_application as (
   join requested req on app.company_id=req.company_id
   join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
   where app.rule_key=$5
+    and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application), 0)
   order by app.policy_sequence desc, app.application_id desc
   limit 1
 )
-select coalesce((select access_level from latest_default_application), $4)`, companyID, resourceType, resourceID, directDefaultAccess, resourcePermissionDefaultRuleKey).Scan(&defaultAccess)
+select coalesce((select access_level from latest_default_application), $4)`, companyID, resourceType, resourceID, directDefaultAccess, resourcePermissionDefaultRuleKey, resourcePermissionSnapshotRuleKey).Scan(&defaultAccess)
 	if err != nil {
 		return "", err
 	}
@@ -221,6 +232,16 @@ direct_sequence(policy_sequence) as (
   ), 0)
 ),
 `+postgresResourcePolicyAncestorsCTE+`,
+latest_snapshot_application as (
+  select max(app.policy_sequence) as policy_sequence
+  from resource_permission_subtree_applications app
+  join resource_policy_ancestors ancestor
+    on ancestor.resource_type=app.ancestor_resource_type
+   and ancestor.resource_id=app.ancestor_resource_id
+  join requested req on app.company_id=req.company_id
+  join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+  where app.rule_key=$5
+),
 direct_assignments as (
   select access.subject_type,
          access.subject_id,
@@ -245,17 +266,19 @@ application_rules as (
    and ancestor.resource_id=app.ancestor_resource_id
   join requested req on app.company_id=req.company_id
   join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
-  where app.rule_key<>$4
+  where app.rule_key not in ($4, $5)
+    and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application), 0)
   order by app.rule_key, app.policy_sequence desc, app.application_id desc
 ),
 merged_assignments as (
   select direct.subject_type, direct.subject_id, direct.access_level
   from direct_assignments direct
-  where not exists (
-    select 1
-    from application_rules app
-    where app.rule_key=direct.rule_key
-  )
+  where not exists (select 1 from latest_snapshot_application where policy_sequence is not null)
+    and not exists (
+      select 1
+      from application_rules app
+      where app.rule_key=direct.rule_key
+    )
   union all
   select app.subject_type, app.subject_id, app.access_level
   from application_rules app
@@ -266,7 +289,7 @@ from merged_assignments
 where subject_type in ('user', 'group')
   and subject_id is not null
   and access_level is not null
-order by subject_type, subject_id::text`, companyID, resourceType, resourceID, resourcePermissionDefaultRuleKey)
+order by subject_type, subject_id::text`, companyID, resourceType, resourceID, resourcePermissionDefaultRuleKey, resourcePermissionSnapshotRuleKey)
 	if err != nil {
 		return nil, err
 	}
@@ -347,46 +370,44 @@ insert into resource_permission_subtree_applications (
 	return err
 }
 
-func postgresRecordPermissionSubtreeApplicationsTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) (bool, error) {
-	changed := false
-	if beforeDefault != afterDefault {
-		if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, resourcePermissionDefaultRuleKey, "", "", afterDefault, false); err != nil {
+func postgresRecordPermissionSubtreeApplicationsTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, currentDefault string, currentAssignments []resourcePermissionAssignment) (bool, error) {
+	// A subtree Apply command is a complete snapshot of the policy that exists
+	// now. Recording the boundary first prevents descendant-only or older rules
+	// from leaking through when the parent itself was unchanged in this request.
+	if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, resourcePermissionSnapshotRuleKey, "", "", "", false); err != nil {
+		return false, err
+	}
+	if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, resourcePermissionDefaultRuleKey, "", "", currentDefault, false); err != nil {
+		return false, err
+	}
+	for _, current := range currentAssignments {
+		if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, resourcePermissionAssignmentKey(current), current.SubjectType, current.SubjectID, current.AccessLevel, false); err != nil {
 			return false, err
 		}
-		changed = true
 	}
-	beforeByKey := resourcePermissionAssignmentMap(beforeAssignments)
-	afterByKey := resourcePermissionAssignmentMap(afterAssignments)
-	for ruleKey, before := range beforeByKey {
-		if _, ok := afterByKey[ruleKey]; ok {
-			continue
-		}
-		if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, ruleKey, before.SubjectType, before.SubjectID, "", true); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	for ruleKey, after := range afterByKey {
-		if before, ok := beforeByKey[ruleKey]; ok && before == after {
-			continue
-		}
-		if err := insertPostgresResourcePermissionSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, ruleKey, after.SubjectType, after.SubjectID, after.AccessLevel, false); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	return changed, nil
+	return true, nil
 }
 
-func insertPostgresGVICSubtreeApplicationTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, role, principalType, principalID string, deleted bool) error {
+func insertPostgresGVICSubtreeApplicationTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, role, principalType, principalID string, deleted, snapshot bool) error {
 	companyID = cleanUUIDText(companyID)
 	ancestorID = cleanUUIDText(ancestorID)
 	ancestorType, ok := NormalizeGVICResourceType(ancestorType)
-	role, roleOK := NormalizeGVICRole(role)
-	principalType, principalOK := NormalizeGVICPrincipalType(principalType)
-	principalID = cleanUUIDText(principalID)
-	if ctx == nil || tx == nil || companyID == "" || ancestorID == "" || !ok || sequence <= 0 || !roleOK || !principalOK || principalID == "" {
+	if ctx == nil || tx == nil || companyID == "" || ancestorID == "" || !ok || sequence <= 0 {
 		return ErrInvalid
+	}
+	var roleValue any
+	var principalTypeValue any
+	var principalIDValue any
+	if !snapshot {
+		normalizedRole, roleOK := NormalizeGVICRole(role)
+		normalizedPrincipalType, principalOK := NormalizeGVICPrincipalType(principalType)
+		cleanPrincipalID := cleanUUIDText(principalID)
+		if !roleOK || !principalOK || cleanPrincipalID == "" {
+			return ErrInvalid
+		}
+		roleValue = normalizedRole
+		principalTypeValue = normalizedPrincipalType
+		principalIDValue = cleanPrincipalID
 	}
 	_, err := tx.ExecContext(ctx, `
 insert into resource_gvic_subtree_applications (
@@ -398,49 +419,34 @@ insert into resource_gvic_subtree_applications (
   principal_type,
   principal_id,
   deleted,
+  snapshot,
   created_timestamp
-) values ($1, $2::uuid, $3, $4::uuid, $5, $6, $7::uuid, $8, now())`,
+) values ($1, $2::uuid, $3, $4::uuid, $5, $6, $7::uuid, $8, $9, now())`,
 		sequence,
 		companyID,
 		ancestorType,
 		ancestorID,
-		role,
-		principalType,
-		principalID,
+		roleValue,
+		principalTypeValue,
+		principalIDValue,
 		deleted,
+		snapshot,
 	)
 	return err
 }
 
-func postgresRecordGVICSubtreeApplicationsTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) (bool, error) {
-	beforeByKey := map[string]domain.ResourceGVICAssignment{}
-	for _, assignment := range beforeAssignments {
-		beforeByKey[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
+func postgresRecordGVICSubtreeApplicationsTx(ctx context.Context, tx *sql.Tx, companyID, ancestorType, ancestorID string, sequence int64, currentAssignments []domain.ResourceGVICAssignment) (bool, error) {
+	// The marker makes an unchanged or empty current GVIC policy a complete
+	// replacement while keeping the write proportional to the gate's rules.
+	if err := insertPostgresGVICSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, "", "", "", false, true); err != nil {
+		return false, err
 	}
-	afterByKey := map[string]domain.ResourceGVICAssignment{}
-	for _, assignment := range afterAssignments {
-		afterByKey[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-	}
-	changed := false
-	for ruleKey, before := range beforeByKey {
-		if _, ok := afterByKey[ruleKey]; ok {
-			continue
-		}
-		if err := insertPostgresGVICSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, before.Role, before.PrincipalType, before.PrincipalID, true); err != nil {
+	for _, current := range currentAssignments {
+		if err := insertPostgresGVICSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, current.Role, current.PrincipalType, current.PrincipalID, false, false); err != nil {
 			return false, err
 		}
-		changed = true
 	}
-	for ruleKey, after := range afterByKey {
-		if _, ok := beforeByKey[ruleKey]; ok {
-			continue
-		}
-		if err := insertPostgresGVICSubtreeApplicationTx(ctx, tx, companyID, ancestorType, ancestorID, sequence, after.Role, after.PrincipalType, after.PrincipalID, false); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	return changed, nil
+	return true, nil
 }
 
 func postgresResolvedResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
@@ -459,6 +465,16 @@ direct_sequence(policy_sequence) as (
   ), 0)
 ),
 `+postgresGVICPolicyAncestorsCTE+`,
+latest_snapshot_application as (
+  select max(app.policy_sequence) as policy_sequence
+  from resource_gvic_subtree_applications app
+  join resource_policy_ancestors ancestor
+    on ancestor.resource_type=app.ancestor_resource_type
+   and ancestor.resource_id=app.ancestor_resource_id
+  join requested req on app.company_id=req.company_id
+  join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+  where app.snapshot
+),
 direct_assignments as (
   select assignment.role,
          assignment.principal_type,
@@ -487,16 +503,19 @@ application_rules as (
    and ancestor.resource_id=app.ancestor_resource_id
   join requested req on app.company_id=req.company_id
   join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+  where not app.snapshot
+    and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application), 0)
   order by app.role, app.principal_type, app.principal_id, app.policy_sequence desc, app.application_id desc
 ),
 merged_assignments as (
   select direct.role, direct.principal_type, direct.principal_id, direct.created_timestamp, direct.updated_timestamp
   from direct_assignments direct
-  where not exists (
-    select 1
-    from application_rules app
-    where app.rule_key=direct.rule_key
-  )
+  where not exists (select 1 from latest_snapshot_application where policy_sequence is not null)
+    and not exists (
+      select 1
+      from application_rules app
+      where app.rule_key=direct.rule_key
+    )
   union all
   select app.role, app.principal_type, app.principal_id, app.created_timestamp, app.updated_timestamp
   from application_rules app

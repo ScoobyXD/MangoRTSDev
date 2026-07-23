@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const resourcePermissionDefaultRuleKey = "__default__"
+const (
+	resourcePermissionDefaultRuleKey  = "__default__"
+	resourcePermissionSnapshotRuleKey = "__snapshot__"
+)
 
 type resourcePermissionSubtreeApplication struct {
 	CompanyID            string
@@ -28,6 +31,7 @@ type resourceGVICSubtreeApplication struct {
 	Role                 string
 	PrincipalType        string
 	PrincipalID          string
+	Snapshot             bool
 	Deleted              bool
 	Sequence             int64
 }
@@ -205,22 +209,38 @@ func (r *MemoryRepo) resolvedResourcePermissionPolicyLocked(companyID, resourceT
 	}
 	defaultRule := resolvedRule{assignment: resourcePermissionAssignment{AccessLevel: defaultAccess}, sequence: directSequence}
 	rules := map[string]resolvedRule{}
-	for _, assignment := range r.directResourcePermissionAssignmentsLocked(companyID, resourceType, resourceID) {
-		rules[resourcePermissionAssignmentKey(assignment)] = resolvedRule{assignment: assignment, sequence: directSequence}
-	}
 	ancestors := r.resourcePermissionAncestorsLocked(companyID, resourceType, resourceID)
-	for _, application := range r.resourcePermissionApplications {
-		if application.CompanyID != companyID || application.Sequence <= directSequence {
-			continue
-		}
-		matches := false
+	matchesAncestor := func(ancestorType, ancestorID string) bool {
 		for _, ancestor := range ancestors {
-			if ancestor.ResourceType == application.AncestorResourceType && ancestor.ResourceID == application.AncestorResourceID {
-				matches = true
-				break
+			if ancestor.ResourceType == ancestorType && ancestor.ResourceID == ancestorID {
+				return true
 			}
 		}
-		if !matches {
+		return false
+	}
+	// A snapshot boundary means "replace the descendant policy with this
+	// ancestor's complete current policy." Direct descendant rules and older
+	// ancestor applications must not leak through that one-shot overwrite.
+	snapshotSequence := int64(0)
+	for _, application := range r.resourcePermissionApplications {
+		if application.CompanyID == companyID &&
+			application.Sequence > directSequence &&
+			application.RuleKey == resourcePermissionSnapshotRuleKey &&
+			matchesAncestor(application.AncestorResourceType, application.AncestorResourceID) &&
+			application.Sequence > snapshotSequence {
+			snapshotSequence = application.Sequence
+		}
+	}
+	if snapshotSequence == 0 {
+		for _, assignment := range r.directResourcePermissionAssignmentsLocked(companyID, resourceType, resourceID) {
+			rules[resourcePermissionAssignmentKey(assignment)] = resolvedRule{assignment: assignment, sequence: directSequence}
+		}
+	}
+	for _, application := range r.resourcePermissionApplications {
+		if application.CompanyID != companyID || application.Sequence <= directSequence || application.Sequence < snapshotSequence {
+			continue
+		}
+		if !matchesAncestor(application.AncestorResourceType, application.AncestorResourceID) || application.RuleKey == resourcePermissionSnapshotRuleKey {
 			continue
 		}
 		if application.RuleKey == resourcePermissionDefaultRuleKey {
@@ -260,46 +280,36 @@ func (r *MemoryRepo) resolvedResourcePermissionPolicyLocked(companyID, resourceT
 	return resolvedResourcePermissionPolicy{DefaultAccess: defaultAccess, Assignments: assignments}, true
 }
 
-func (r *MemoryRepo) recordPermissionSubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) {
-	if beforeDefault != afterDefault {
-		r.resourcePermissionApplications = append(r.resourcePermissionApplications, resourcePermissionSubtreeApplication{
+func (r *MemoryRepo) recordPermissionSubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, currentDefault string, currentAssignments []resourcePermissionAssignment) {
+	// Apply-to-descendants copies the complete policy that exists now, even when
+	// the parent was not edited in the same request. The snapshot marker clears
+	// descendant-only rules; the following rows define the current parent policy.
+	r.resourcePermissionApplications = append(r.resourcePermissionApplications,
+		resourcePermissionSubtreeApplication{
+			CompanyID:            companyID,
+			AncestorResourceType: ancestorType,
+			AncestorResourceID:   ancestorID,
+			RuleKey:              resourcePermissionSnapshotRuleKey,
+			Sequence:             sequence,
+		},
+		resourcePermissionSubtreeApplication{
 			CompanyID:            companyID,
 			AncestorResourceType: ancestorType,
 			AncestorResourceID:   ancestorID,
 			RuleKey:              resourcePermissionDefaultRuleKey,
-			AccessLevel:          afterDefault,
+			AccessLevel:          currentDefault,
 			Sequence:             sequence,
-		})
-	}
-	beforeByKey := resourcePermissionAssignmentMap(beforeAssignments)
-	afterByKey := resourcePermissionAssignmentMap(afterAssignments)
-	for ruleKey, before := range beforeByKey {
-		if _, ok := afterByKey[ruleKey]; ok {
-			continue
-		}
+		},
+	)
+	for _, current := range currentAssignments {
 		r.resourcePermissionApplications = append(r.resourcePermissionApplications, resourcePermissionSubtreeApplication{
 			CompanyID:            companyID,
 			AncestorResourceType: ancestorType,
 			AncestorResourceID:   ancestorID,
-			RuleKey:              ruleKey,
-			SubjectType:          before.SubjectType,
-			SubjectID:            before.SubjectID,
-			Deleted:              true,
-			Sequence:             sequence,
-		})
-	}
-	for ruleKey, after := range afterByKey {
-		if before, ok := beforeByKey[ruleKey]; ok && before == after {
-			continue
-		}
-		r.resourcePermissionApplications = append(r.resourcePermissionApplications, resourcePermissionSubtreeApplication{
-			CompanyID:            companyID,
-			AncestorResourceType: ancestorType,
-			AncestorResourceID:   ancestorID,
-			RuleKey:              ruleKey,
-			SubjectType:          after.SubjectType,
-			SubjectID:            after.SubjectID,
-			AccessLevel:          after.AccessLevel,
+			RuleKey:              resourcePermissionAssignmentKey(current),
+			SubjectType:          current.SubjectType,
+			SubjectID:            current.SubjectID,
+			AccessLevel:          current.AccessLevel,
 			Sequence:             sequence,
 		})
 	}
@@ -406,22 +416,35 @@ func (r *MemoryRepo) resolvedResourceGVICAssignmentsLocked(companyID, resourceTy
 		deleted    bool
 	}
 	rules := map[string]resolvedRule{}
-	for _, assignment := range r.directGVICAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
-		rules[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = resolvedRule{assignment: assignment, sequence: directSequence}
-	}
 	ancestors := r.resourcePermissionAncestorsLocked(companyID, resourceType, resourceID)
-	for _, application := range r.gvicSubtreeApplications {
-		if application.CompanyID != companyID || application.Sequence <= directSequence {
-			continue
-		}
-		matches := false
+	matchesAncestor := func(ancestorType, ancestorID string) bool {
 		for _, ancestor := range ancestors {
-			if ancestor.ResourceType == application.AncestorResourceType && ancestor.ResourceID == application.AncestorResourceID {
-				matches = true
-				break
+			if ancestor.ResourceType == ancestorType && ancestor.ResourceID == ancestorID {
+				return true
 			}
 		}
-		if !matches {
+		return false
+	}
+	snapshotSequence := int64(0)
+	for _, application := range r.gvicSubtreeApplications {
+		if application.CompanyID == companyID &&
+			application.Sequence > directSequence &&
+			application.Snapshot &&
+			matchesAncestor(application.AncestorResourceType, application.AncestorResourceID) &&
+			application.Sequence > snapshotSequence {
+			snapshotSequence = application.Sequence
+		}
+	}
+	if snapshotSequence == 0 {
+		for _, assignment := range r.directGVICAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
+			rules[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = resolvedRule{assignment: assignment, sequence: directSequence}
+		}
+	}
+	for _, application := range r.gvicSubtreeApplications {
+		if application.CompanyID != companyID || application.Sequence <= directSequence || application.Sequence < snapshotSequence {
+			continue
+		}
+		if !matchesAncestor(application.AncestorResourceType, application.AncestorResourceID) || application.Snapshot {
 			continue
 		}
 		ruleKey := gvicRuleKey(application.Role, application.PrincipalType, application.PrincipalID)
@@ -458,46 +481,26 @@ func (r *MemoryRepo) directGVICAssignmentsForResourceLocked(companyID, resourceT
 	return items
 }
 
-func (r *MemoryRepo) recordGVICSubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) bool {
-	beforeByKey := map[string]domain.ResourceGVICAssignment{}
-	for _, assignment := range beforeAssignments {
-		beforeByKey[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-	}
-	afterByKey := map[string]domain.ResourceGVICAssignment{}
-	for _, assignment := range afterAssignments {
-		afterByKey[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-	}
-	changed := false
-	for ruleKey, before := range beforeByKey {
-		if _, ok := afterByKey[ruleKey]; ok {
-			continue
-		}
+func (r *MemoryRepo) recordGVICSubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, currentAssignments []domain.ResourceGVICAssignment) bool {
+	// An explicit snapshot makes an unchanged Apply command meaningful and
+	// removes descendant-only GVIC rules before current parent rules are read.
+	r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceGVICSubtreeApplication{
+		CompanyID:            companyID,
+		AncestorResourceType: ancestorType,
+		AncestorResourceID:   ancestorID,
+		Snapshot:             true,
+		Sequence:             sequence,
+	})
+	for _, current := range currentAssignments {
 		r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceGVICSubtreeApplication{
 			CompanyID:            companyID,
 			AncestorResourceType: ancestorType,
 			AncestorResourceID:   ancestorID,
-			Role:                 before.Role,
-			PrincipalType:        before.PrincipalType,
-			PrincipalID:          before.PrincipalID,
-			Deleted:              true,
+			Role:                 current.Role,
+			PrincipalType:        current.PrincipalType,
+			PrincipalID:          current.PrincipalID,
 			Sequence:             sequence,
 		})
-		changed = true
 	}
-	for ruleKey, after := range afterByKey {
-		if _, ok := beforeByKey[ruleKey]; ok {
-			continue
-		}
-		r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceGVICSubtreeApplication{
-			CompanyID:            companyID,
-			AncestorResourceType: ancestorType,
-			AncestorResourceID:   ancestorID,
-			Role:                 after.Role,
-			PrincipalType:        after.PrincipalType,
-			PrincipalID:          after.PrincipalID,
-			Sequence:             sequence,
-		})
-		changed = true
-	}
-	return changed
+	return true
 }
