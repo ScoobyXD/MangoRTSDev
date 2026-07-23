@@ -140,6 +140,39 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Run("Node verification request", func(t *testing.T) {
+		verifier, err := repo.UpsertAuthUser("realtime-pg-verifier", "realtime-pg-verifier@example.test", "Realtime PG Verifier")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.AddCompanyMembership("realtime-pg-verifier", company.CompanyID, "company_user"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+			Assignments: []ResourceGVICAssignmentInput{{
+				Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
+			CompanyID: company.CompanyID, NodeID: node.NodeID, ActorUserID: user.UserID, IdempotencyKey: "realtime-pg-verification-request",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.TimelineEvent.VerificationRecipients) != 1 || result.TimelineEvent.VerificationRecipients[0].UserID != verifier.UserID {
+			t.Fatalf("verification recipients = %+v, want verifier", result.TimelineEvent.VerificationRecipients)
+		}
+		if len(result.Events) != 1 {
+			t.Fatalf("verification domain events = %+v, want one", result.Events)
+		}
+		if title, _ := result.Events[0].Payload["node_title"].(string); title != node.Title {
+			t.Fatalf("verification node title = %q, want %q", title, node.Title)
+		}
+	})
+
 	t.Run("Node chat", func(t *testing.T) {
 		forceRealtimeOutboxEvent(t, db, "chat.message.created", true)
 		input := NodeInformationInput{

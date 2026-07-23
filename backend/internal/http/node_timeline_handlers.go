@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -80,6 +81,7 @@ func (s *Server) handleNodeVerificationRequests(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err != nil {
+		log.Printf("node_verification_request status=failed company_id=%s node_id=%s actor_user_id=%s err=%v", request.CompanyID, nodeID, actor.User.UserID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_verification_request")
 		return
 	}

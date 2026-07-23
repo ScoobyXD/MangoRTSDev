@@ -132,7 +132,7 @@ where company_id=$1::uuid and node_id=$2::uuid and event_type='verification_requ
 
 	var nodeTitle, actorDisplayName string
 	if err := tx.QueryRowContext(ctx, `
-select n.title, coalesce(nullif(u.display_name, ''), nullif(u.email, ''), 'Unknown user')
+select n.name, coalesce(nullif(u.display_name, ''), nullif(u.email, ''), 'Unknown user')
 from nodes n left join users u on u.user_id=$3::uuid
 where n.company_id=$1::uuid and n.node_id=$2::uuid for update of n`, input.CompanyID, input.NodeID, input.ActorUserID).Scan(&nodeTitle, &actorDisplayName); errors.Is(err, sql.ErrNoRows) {
 		return NodeTimelineMutationResult{}, ErrNotFound

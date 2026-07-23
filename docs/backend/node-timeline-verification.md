@@ -31,6 +31,8 @@ This document defines the durable business rules for compact activity entries on
 7. Later GVIC additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.
 8. Every deliberate plus-menu action uses a new idempotency key and may create a new request. Retrying the same key for the same Node returns the original stamp, creates no second domain event, and sends no duplicate updates. Concurrent retries for one Node serialize against the same Node row before insert.
 9. The actor display name and every recipient display name are stored as historical snapshots. User rename or company removal does not rewrite the stamp.
+10. PostgreSQL request creation reads the current Node label from the canonical `nodes.name` column while locking that Node. The label is copied into the verification domain event so recipient Updates identify the correct Node.
+11. Unexpected repository failures are logged server-side with the company, Node, and actor IDs plus the internal error. The API response remains the stable generic error and does not expose database details to the browser.
 
 ## Recipient updates and completion
 
