@@ -365,9 +365,27 @@ function logicGateOptionLabel(logicGate: LogicGateRecord): string {
   return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Logic Gate"));
 }
 
+function nodeTimelineErrorMessage(cause: unknown, fallback: string): string {
+  const message = cause instanceof Error ? cause.message : fallback;
+  if (message === "verification_recipients_required") {
+    return "Add at least one person to Verified before requesting verification.";
+  }
+  if (message.toLowerCase() === "failed to fetch") {
+    return "Could not reach the server. Check your connection and try again.";
+  }
+  return message;
+}
+
 const RelationshipCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
     <path d="m3.4 8.15 2.8 2.75 6.35-6.65" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const TimelineClockIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg data-node-timeline-clock-icon="true" aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <circle cx="8" cy="8" r="5.7" fill="none" stroke={color} strokeWidth="1.45" />
+    <path d="M8 4.65v3.6l2.55 1.5" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -2204,8 +2222,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       );
       setTimelineEvents(payload.timeline_events ?? []);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_list_node_timeline_events";
-      setTimelineEventsError(message);
+      setTimelineEventsError(nodeTimelineErrorMessage(cause, "failed_to_list_node_timeline_events"));
     } finally {
       setTimelineEventsLoading(false);
     }
@@ -2231,13 +2248,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       );
       setTimelineEvents((current) => [payload.timeline_event, ...current.filter((item) => item.event_id !== payload.timeline_event.event_id)]);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_create_verification_request";
-      setTimelineEventsError(message === "verification_recipients_required" ? "Add at least one person to Verified before requesting verification." : message);
-      onError(message);
+      setTimelineEventsError(nodeTimelineErrorMessage(cause, "failed_to_create_verification_request"));
     } finally {
       setVerificationRequestPending(false);
     }
-  }, [canEdit, companyID, nodeID, onError, requestJSON, verificationRequestPending]);
+  }, [canEdit, companyID, nodeID, requestJSON, verificationRequestPending]);
 
   const completeVerificationRequest = useCallback(async (eventID: string) => {
     const cleanEventID = eventID.trim();
@@ -2251,13 +2266,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       );
       setTimelineEvents((current) => current.map((item) => item.event_id === cleanEventID ? payload.timeline_event : item));
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_complete_verification_request";
-      setTimelineEventsError(message);
-      onError(message);
+      setTimelineEventsError(nodeTimelineErrorMessage(cause, "failed_to_complete_verification_request"));
     } finally {
       setVerificationCompletionPendingID("");
     }
-  }, [author.userID, companyID, nodeID, onError, requestJSON, verificationCompletionPendingID]);
+  }, [author.userID, companyID, nodeID, requestJSON, verificationCompletionPendingID]);
 
   const assignToLogicGate = useCallback(async (logicGateID: string, rawLabel: string) => {
     if (!canEdit) return;
@@ -3078,6 +3091,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <button
                     type="button"
                     role="menuitem"
+                    className="mango-timeline-create-menu-item"
                     onClick={() => { setTimelineCreateMenuOpen(false); createTextBlock(); }}
                     style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: "pointer" }}
                   >
@@ -3087,11 +3101,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <button
                     type="button"
                     role="menuitem"
+                    className="mango-timeline-create-menu-item"
                     disabled={verificationRequestPending}
                     onClick={() => { void createVerificationRequest(); }}
-                    style={{ width: "100%", border: 0, borderRadius: 8, background: "rgba(99,102,241,0.08)", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
+                    style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
                   >
-                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", background: "rgba(99,102,241,0.14)", color: accent, fontWeight: 950 }}>✓</span>
+                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, border: `1px solid ${ruleColor}`, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.55)", color: accent, fontWeight: 950, boxSizing: "border-box" }}>✓</span>
                     <span><strong style={{ display: "block", fontSize: 12 }}>Verification stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verified</small></span>
                   </button>
                 </div>
@@ -3397,38 +3412,40 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           <section
             aria-label="Node activity timeline"
             data-node-timeline-activity="true"
-            style={{ gridColumn: "1 / -1", display: "grid", gap: 9, minWidth: 0, margin: "2px 0 4px" }}
+            style={{ gridColumn: "1 / -1", display: "grid", gap: 4, minWidth: 0, margin: "2px 0 4px" }}
           >
             {timelineEventsLoading && timelineEvents.length === 0 && (
               <div role="status" style={{ marginLeft: 42, fontSize: 12, color: surfaceText, opacity: 0.66 }}>Loading timeline activity…</div>
             )}
             {timelineEventsError && (
-              <div role="alert" style={{ marginLeft: 42, maxWidth: 680, borderRadius: 9, padding: "8px 10px", background: "rgba(254,226,226,0.72)", color: "#b91c1c", fontSize: 12 }}>
+              <div role="alert" style={{ marginLeft: 42, maxWidth: 680, borderRadius: 9, padding: "6px 9px", background: "rgba(254,226,226,0.72)", color: "#b91c1c", fontSize: 12 }}>
                 {timelineEventsError}
               </div>
             )}
             {timelineEvents.map((item) => {
               const createdLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_timestamp));
               const isVerification = item.type === "verification_request";
+              const fromLogicGateName = item.from_logic_gate_name?.trim() || "Deleted logic gate";
+              const toLogicGateName = item.to_logic_gate_name?.trim() || "Deleted logic gate";
               return (
                 <div key={item.event_id} style={{ display: "grid", gridTemplateColumns: `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`, columnGap: 4, alignItems: "stretch", minWidth: 0 }}>
-                  <div aria-hidden="true" style={{ position: "relative", display: "flex", justifyContent: "center" }}>
-                    <span style={{ position: "absolute", top: -9, bottom: -9, width: 2, borderRadius: 2, background: `linear-gradient(${ruleColor}, ${accent}55, ${ruleColor})` }} />
-                    <span style={{ position: "relative", zIndex: 1, marginTop: 18, width: 13, height: 13, borderRadius: "50%", border: `3px solid ${panelBackground}`, background: isVerification ? "#6366f1" : "#0ea5e9", boxShadow: `0 0 0 1px ${isVerification ? "rgba(99,102,241,0.42)" : "rgba(14,165,233,0.42)"}` }} />
-                  </div>
+                  <TimelineCell accent={accent} muted={false} isLast={false} minHeight={isVerification ? 58 : 52} />
                   <article
                     data-node-timeline-event-id={item.event_id}
+                    data-node-timeline-event-type={item.type}
                     tabIndex={-1}
-                    style={{ width: "min(680px, calc(100% - 16px))", borderRadius: 13, border: `1px solid ${isVerification ? "rgba(99,102,241,0.27)" : "rgba(14,165,233,0.27)"}`, background: isVerification ? "linear-gradient(135deg, rgba(238,242,255,0.95), rgba(255,255,255,0.82))" : "linear-gradient(135deg, rgba(240,249,255,0.96), rgba(255,255,255,0.82))", color: surfaceText, padding: "10px 13px", boxShadow: "0 5px 16px rgba(15,23,42,0.06)" }}
+                    style={{ width: "min(680px, calc(100% - 16px))", borderRadius: 11, border: `1px solid ${isVerification ? "rgba(99,102,241,0.22)" : ruleColor}`, background: "rgba(255,255,255,0.78)", color: surfaceText, padding: isVerification ? "7px 10px" : "6px 10px", boxShadow: "0 3px 10px rgba(15,23,42,0.05)", boxSizing: "border-box" }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 7, flexWrap: "wrap", minHeight: 15 }}>
+                      <time dateTime={item.created_timestamp} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, opacity: 0.72 }}><TimelineClockIcon color={surfaceText} />{createdLabel}</time>
+                      <span aria-hidden="true" style={{ width: 1, height: 12, background: ruleColor }} />
+                      {!isVerification && <span data-node-timeline-gate-icon="header" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span>}
                       <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : "Logic Gate transfer"}</strong>
-                      <time dateTime={item.created_timestamp} style={{ fontSize: 10.5, opacity: 0.68 }}>{createdLabel}</time>
                     </div>
                     {isVerification ? (
                       <>
-                        <div style={{ marginTop: 5, fontSize: 12 }}><strong>{item.actor_display_name}</strong> requested verification from:</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
+                        <div style={{ marginTop: 4, fontSize: 11.5 }}><strong>{item.actor_display_name}</strong> requested verification from:</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                           {item.verification_recipients.map((recipient) => {
                             const completed = Boolean(recipient.completed_timestamp);
                             const isCurrentUser = recipient.user_id === author.userID;
@@ -3441,18 +3458,26 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 title={isCurrentUser && !completed ? "Confirm your verification" : completed ? "Verified" : "Waiting for this person"}
                                 disabled={!isCurrentUser || completed || pending}
                                 onClick={() => { void completeVerificationRequest(item.event_id); }}
-                                style={{ minHeight: 30, borderRadius: 999, border: `1px solid ${completed ? "rgba(16,185,129,0.42)" : "rgba(99,102,241,0.25)"}`, background: completed ? "rgba(209,250,229,0.9)" : "rgba(255,255,255,0.8)", color: completed ? "#047857" : surfaceText, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 9px 4px 5px", cursor: isCurrentUser && !completed ? "pointer" : "default", opacity: pending ? 0.65 : 1 }}
+                                style={{ minHeight: 27, borderRadius: 999, border: `1px solid ${completed ? "rgba(16,185,129,0.42)" : "rgba(99,102,241,0.25)"}`, background: completed ? "rgba(209,250,229,0.9)" : "rgba(255,255,255,0.8)", color: completed ? "#047857" : surfaceText, display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px 3px 4px", cursor: isCurrentUser && !completed ? "pointer" : "default", opacity: pending ? 0.65 : 1 }}
                               >
-                                <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: "50%", border: `1px solid ${completed ? "#10b981" : "rgba(99,102,241,0.38)"}`, display: "grid", placeItems: "center", background: completed ? "#10b981" : "transparent", color: "white", fontSize: 12, fontWeight: 950 }}>{completed ? "✓" : ""}</span>
-                                <span style={{ fontSize: 11.5, fontWeight: 750 }}>{recipient.user_display_name}</span>
+                                <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: "50%", border: `1px solid ${completed ? "#10b981" : "rgba(99,102,241,0.38)"}`, display: "grid", placeItems: "center", background: completed ? "#10b981" : "transparent", color: "white", fontSize: 11, fontWeight: 950 }}>{completed ? "✓" : ""}</span>
+                                <span style={{ fontSize: 11, fontWeight: 750 }}>{recipient.user_display_name}</span>
                               </button>
                             );
                           })}
                         </div>
                       </>
                     ) : (
-                      <div style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.45 }}>
-                        <strong>{item.actor_display_name}</strong> moved this node from <strong>{item.from_logic_gate_name || "Deleted logic gate"}</strong> to <strong>{item.to_logic_gate_name || "Deleted logic gate"}</strong>.
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 4, fontSize: 11.5, lineHeight: 1.25 }}>
+                        <strong>{item.actor_display_name}</strong>
+                        <span>moved this node from</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 20, borderRadius: 6, padding: "1px 5px", border: `1px solid ${ruleColor}`, background: "rgba(248,250,252,0.9)" }}>
+                          <span data-node-timeline-gate-icon="from" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span><strong>{fromLogicGateName}</strong>
+                        </span>
+                        <span>to</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 20, borderRadius: 6, padding: "1px 5px", border: `1px solid ${ruleColor}`, background: "rgba(248,250,252,0.9)" }}>
+                          <span data-node-timeline-gate-icon="to" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span><strong>{toLogicGateName}</strong>
+                        </span>
                       </div>
                     )}
                   </article>
