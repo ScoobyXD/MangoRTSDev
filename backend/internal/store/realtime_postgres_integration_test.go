@@ -156,6 +156,10 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := db.Exec(`delete from resource_gvic_effective_assignments
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and role='verified'`, company.CompanyID, node.NodeID); err != nil {
+			t.Fatal(err)
+		}
 		result, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
 			CompanyID: company.CompanyID, NodeID: node.NodeID, ActorUserID: user.UserID, IdempotencyKey: "realtime-pg-verification-request",
 		})

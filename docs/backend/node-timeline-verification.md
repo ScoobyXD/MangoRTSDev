@@ -1,4 +1,4 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 # Node Timeline Transfer And Verification Rules
 
@@ -12,6 +12,8 @@ This document defines the durable business rules for compact activity entries on
 4. Transfer rows are ordered by event time, then stable event ID, newest first. They use the sentence: `{actor} moved this node from {source Logic Gate} to {destination Logic Gate}.`
 5. Transfer stamps are read-only. Authorization to read them is the same as authorization to read the owning Node.
 6. A compact stamp reuses the exact shared Node timeline rail and circle used by text boxes. Its leading timestamp includes a clock icon, and its header, source snapshot, and destination snapshot use the established Logic Gate icon. Visual labels must render the stored name snapshots, not a generic replacement label.
+7. The transfer card consumes only its content height; spare Node-workspace viewport height must remain below the timeline rows and must never stretch a transfer card or create blank space inside it.
+8. Source and destination Logic Gate chips are keyboard-accessible links whenever their snapshotted IDs are present. Opening one pushes the Logic Gate route onto browser history so Back returns to the exact Node route and preserved workspace state. A missing ID remains readable historical text and is not presented as an actionable link.
 
 ## Verification assignment rules
 
@@ -22,10 +24,10 @@ This document defines the durable business rules for compact activity entries on
 
 ## Creating a verification request
 
-1. The Node timeline plus action opens a choice. `New text box` preserves the existing text-box creation behavior; `Verification stamp` creates a verification request. Both choices are neutral at rest and expose the same visible hover and keyboard-focus selection treatment.
+1. The Node timeline plus action opens a choice. `New text box` preserves the existing text-box creation behavior; `Verify stamp` creates a verification request. Both choices are neutral at rest and expose the same visible hover and keyboard-focus selection treatment.
 2. Creating a verification request requires current Node edit authorization and a nonblank idempotency key.
 3. Browser CORS preflight must allow both `Idempotency-Key` and the supported `X-Idempotency-Key` alias so a valid verification request reaches the API rather than failing at the transport boundary.
-4. The request snapshots all current effective Node GVIC users whose role is Verified. Duplicate effective rows collapse to one recipient by user ID.
+4. The request snapshots all current effective Node GVIC users whose role is Verified. PostgreSQL derives that effective set synchronously from canonical GVIC assignments, current company membership, and applicable snapshot rules inside the request transaction instead of trusting the materialized effective-assignment projection. This keeps the request consistent with the GVIC editor even if that rebuildable projection is stale. Duplicate effective users collapse to one recipient by user ID.
 5. At least one Verified recipient is required. Otherwise the API returns a conflict and no stamp or update is created.
 6. The actor is included in the recipient snapshot when the actor is currently Verified. The actor may complete their own verification, but does not receive a self-notification.
 7. Later GVIC additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.

@@ -150,14 +150,13 @@ where company_id=$1::uuid and node_id=$2::uuid and event_type='verification_requ
 		return NodeTimelineMutationResult{}, err
 	}
 
-	rows, err := tx.QueryContext(ctx, `
-select distinct effective.user_id::text,
+	rows, err := tx.QueryContext(ctx, postgresDerivedResourceGVICEffectiveAssignmentsCTE+`
+select distinct derived.user_id::text,
        coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), 'Unknown user')
-from resource_gvic_effective_assignments effective
-join users app_user on app_user.user_id=effective.user_id
-where effective.company_id=$1::uuid and effective.resource_type='node'
-  and effective.resource_id=$2::uuid and effective.role='verified'
-order by 2, 1`, input.CompanyID, input.NodeID)
+from derived
+join users app_user on app_user.user_id=derived.user_id
+where derived.role='verified'
+order by 2, 1`, input.CompanyID, EntityTypeNode, input.NodeID)
 	if err != nil {
 		return NodeTimelineMutationResult{}, err
 	}
