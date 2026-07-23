@@ -75,6 +75,7 @@ import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
+import { openEditorEntityLink } from "./editorEntityLinks";
 
 import {
   AttachedEmailOrganizerPane,
@@ -368,7 +369,7 @@ function logicGateOptionLabel(logicGate: LogicGateRecord): string {
 function nodeTimelineErrorMessage(cause: unknown, fallback: string): string {
   const message = cause instanceof Error ? cause.message : fallback;
   if (message === "verification_recipients_required") {
-    return "Add at least one person to Verified before requesting verification.";
+    return "Add at least one person to Verified before requesting a verify stamp.";
   }
   if (message.toLowerCase() === "failed to fetch") {
     return "Could not reach the server. Check your connection and try again.";
@@ -388,6 +389,36 @@ const TimelineClockIcon: React.FC<{ color: string }> = ({ color }) => (
     <path d="M8 4.65v3.6l2.55 1.5" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+const TimelineLogicGateLink: React.FC<{
+  logicGateID: string;
+  logicGateName: string;
+  position: "from" | "to";
+}> = ({ logicGateID, logicGateName, position }) => {
+  const cleanLogicGateID = logicGateID.trim();
+  const content = (
+    <>
+      <span data-node-timeline-gate-icon={position} aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span>
+      <strong>{logicGateName}</strong>
+    </>
+  );
+  if (!cleanLogicGateID) {
+    return <span className="mango-editor-entity-link mango-editor-entity-link--logic_gate" style={{ margin: 0, cursor: "default", pointerEvents: "none" }}>{content}</span>;
+  }
+  return (
+    <button
+      type="button"
+      className="mango-editor-entity-link mango-editor-entity-link--logic_gate"
+      data-node-timeline-logic-gate-link={position}
+      aria-label={`Open Logic Gate ${logicGateName}`}
+      title={`Open Logic Gate: ${logicGateName}`}
+      onClick={() => openEditorEntityLink({ entityType: "logic_gate", entityID: cleanLogicGateID, label: logicGateName })}
+      style={{ margin: 0 }}
+    >
+      {content}
+    </button>
+  );
+};
 
 function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
   return [...items].sort((a, b) => (
@@ -3107,7 +3138,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
                   >
                     <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, border: `1px solid ${ruleColor}`, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.55)", color: accent, fontWeight: 950, boxSizing: "border-box" }}>✓</span>
-                    <span><strong style={{ display: "block", fontSize: 12 }}>Verification stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verified</small></span>
+                    <span><strong style={{ display: "block", fontSize: 12 }}>Verify stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verified</small></span>
                   </button>
                 </div>
               )}
@@ -3351,7 +3382,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           data-node-email-workspace-mode={nodeEmailWorkspaceMode}
           data-node-email-focus-mode={nodeEmailFocusActive ? "expanded" : "normal"}
           data-node-email-column-visible={nodeEmailColumnVisible ? "true" : "false"}
-          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
+          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch", alignContent: "start", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
         >
         {nodeAttachedEmails.length > 0 && (
           <div
@@ -3471,13 +3502,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 4, fontSize: 11.5, lineHeight: 1.25 }}>
                         <strong>{item.actor_display_name}</strong>
                         <span>moved this node from</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 20, borderRadius: 6, padding: "1px 5px", border: `1px solid ${ruleColor}`, background: "rgba(248,250,252,0.9)" }}>
-                          <span data-node-timeline-gate-icon="from" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span><strong>{fromLogicGateName}</strong>
-                        </span>
+                        <TimelineLogicGateLink logicGateID={item.from_logic_gate_id ?? ""} logicGateName={fromLogicGateName} position="from" />
                         <span>to</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 20, borderRadius: 6, padding: "1px 5px", border: `1px solid ${ruleColor}`, background: "rgba(248,250,252,0.9)" }}>
-                          <span data-node-timeline-gate-icon="to" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span><strong>{toLogicGateName}</strong>
-                        </span>
+                        <TimelineLogicGateLink logicGateID={item.to_logic_gate_id ?? ""} logicGateName={toLogicGateName} position="to" />
                       </div>
                     )}
                   </article>
