@@ -502,7 +502,10 @@ func (r *MemoryRepo) upsertProjectRelationshipSourceLocked(input ProjectRelation
 			relationship.ResourceID != input.ResourceID {
 			continue
 		}
-		if resourceType == EntityTypeNode || relationship.ProjectID == input.ProjectID {
+		if resourceType == EntityTypeNode && relationship.ProjectID != input.ProjectID {
+			return domain.ProjectRelationshipProjection{}, ErrProjectNodeInAnotherProject
+		}
+		if relationship.ProjectID == input.ProjectID {
 			relationshipID = relationship.RelationshipID
 			break
 		}

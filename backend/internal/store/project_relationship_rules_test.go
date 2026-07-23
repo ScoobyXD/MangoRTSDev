@@ -66,7 +66,7 @@ func TestMemoryProjectRelationshipsRequireAssignedNodesAndImplicitlyAddLogicGate
 	}
 }
 
-func TestMemoryProjectRelationshipsMoveNodesButKeepLogicGateInEveryProject(t *testing.T) {
+func TestMemoryProjectRelationshipsRejectNodeInAnotherProjectAndKeepAllRelationships(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701400000103"
 	repo.EnsureCompany(companyID, "Multi-project Logic Gate company")
@@ -126,27 +126,35 @@ func TestMemoryProjectRelationshipsMoveNodesButKeepLogicGateInEveryProject(t *te
 		t.Fatalf("Logic Gate project relationships = %+v err=%v, want Alpha and Bravo", gateRelationships, err)
 	}
 
-	moved, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID: companyID, ProjectID: bravoResult.Project.ProjectID,
+	readded, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: alphaResult.Project.ProjectID,
 		ResourceType: EntityTypeNode, ResourceID: alphaNode.NodeID,
 	})
 	if err != nil {
-		t.Fatalf("move Alpha Node to Bravo: %v", err)
+		t.Fatalf("re-add Alpha Node to Alpha: %v", err)
 	}
-	if moved.Relationship == nil || moved.Relationship.RelationshipID != alpha.Relationship.RelationshipID || moved.Relationship.ProjectID != bravoResult.Project.ProjectID {
-		t.Fatalf("moved Node relationship = %+v, want stable relationship in Bravo", moved.Relationship)
+	if readded.Relationship == nil || readded.Relationship.RelationshipID != alpha.Relationship.RelationshipID {
+		t.Fatalf("same-Project re-add = %+v, want stable Node relationship %s", readded.Relationship, alpha.Relationship.RelationshipID)
+	}
+
+	_, err = repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: bravoResult.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: alphaNode.NodeID,
+	})
+	if !errors.Is(err, ErrProjectNodeInAnotherProject) {
+		t.Fatalf("add Alpha Node to Bravo err = %v, want ErrProjectNodeInAnotherProject", err)
 	}
 	alphaRows, err := repo.ListProjectRelationshipProjections(companyID, alphaResult.Project.ProjectID)
-	if err != nil || len(alphaRows) != 1 || alphaRows[0].ResourceType != EntityTypeLogicGate || alphaRows[0].ResourceID != logicGate.LogicGateID {
-		t.Fatalf("Alpha relationships after Node move = %+v err=%v, want retained Logic Gate", alphaRows, err)
+	if err != nil || len(alphaRows) != 2 {
+		t.Fatalf("Alpha relationships after rejected addition = %+v err=%v, want Node and Logic Gate unchanged", alphaRows, err)
 	}
 	bravoRows, err := repo.ListProjectRelationshipProjections(companyID, bravoResult.Project.ProjectID)
-	if err != nil || len(bravoRows) != 3 {
-		t.Fatalf("Bravo relationships after Node move = %+v err=%v, want one Logic Gate and two Nodes", bravoRows, err)
+	if err != nil || len(bravoRows) != 2 {
+		t.Fatalf("Bravo relationships after rejected addition = %+v err=%v, want its original Node and Logic Gate only", bravoRows, err)
 	}
 	gateRelationships, err = repo.ListProjectRelationshipsForResource(companyID, EntityTypeLogicGate, logicGate.LogicGateID, "")
 	if err != nil || len(gateRelationships) != 2 {
-		t.Fatalf("Logic Gate relationships after Node move = %+v err=%v, want both Projects retained", gateRelationships, err)
+		t.Fatalf("Logic Gate relationships after rejected addition = %+v err=%v, want both Projects unchanged", gateRelationships, err)
 	}
 }
 

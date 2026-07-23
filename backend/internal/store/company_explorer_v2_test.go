@@ -272,10 +272,10 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 		t.Fatalf("project children = %+v, want project relationship outside Explorer tree", projectChildren.Rows)
 	}
 }
-func TestMemoryProjectRelationshipMovesEligibleNodeAndImplicitGateBetweenProjects(t *testing.T) {
+func TestMemoryProjectRelationshipRejectsEligibleNodeAlreadyInAnotherProject(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000003"
-	repo.EnsureCompany(companyID, "Project Relationship Move Co")
+	repo.EnsureCompany(companyID, "Project Relationship Conflict Co")
 
 	user, err := repo.UpsertAuthUser("project-move-user", "project-move@example.com", "Project Move User")
 	if err != nil {
@@ -299,7 +299,7 @@ func TestMemoryProjectRelationshipMovesEligibleNodeAndImplicitGateBetweenProject
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	node, err := repo.CreateNode(companyID, "Movable project node")
+	node, err := repo.CreateNode(companyID, "Single-project node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -317,38 +317,37 @@ func TestMemoryProjectRelationshipMovesEligibleNodeAndImplicitGateBetweenProject
 	if err != nil {
 		t.Fatalf("UpsertProjectRelationship first: %v", err)
 	}
-	second, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID: companyID, ProjectID: bravo.Project.ProjectID,
+	readded, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: alpha.Project.ProjectID,
 		ResourceType: EntityTypeNode, ResourceID: node.NodeID, ActorUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("UpsertProjectRelationship move: %v", err)
+		t.Fatalf("UpsertProjectRelationship same Project: %v", err)
 	}
-	if first.Relationship == nil || second.Relationship == nil || len(second.ImplicitRelationships) != 1 {
-		t.Fatalf("relationship mutation missing node or implicit gate projection: first=%+v second=%+v", first, second)
+	if first.Relationship == nil || readded.Relationship == nil || readded.Relationship.RelationshipID != first.Relationship.RelationshipID {
+		t.Fatalf("same-Project re-add = %+v, want stable relationship from %+v", readded, first)
 	}
-	if second.Relationship.RelationshipID != first.Relationship.RelationshipID {
-		t.Fatalf("move created a new node relationship id %s, want existing %s", second.Relationship.RelationshipID, first.Relationship.RelationshipID)
-	}
-	if second.Relationship.ProjectID != bravo.Project.ProjectID || second.ImplicitRelationships[0].ResourceID != logicGate.LogicGateID {
-		t.Fatalf("moved relationships = %+v, want node and implicit gate in Bravo", second)
-	}
-	if len(first.ImplicitRelationships) != 1 || first.ImplicitRelationships[0].RelationshipID == second.ImplicitRelationships[0].RelationshipID {
-		t.Fatalf("Logic Gate relationship must be distinct per Project: first=%+v second=%+v", first, second)
+
+	_, err = repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: bravo.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID, ActorUserID: user.UserID,
+	})
+	if !errors.Is(err, ErrProjectNodeInAnotherProject) {
+		t.Fatalf("UpsertProjectRelationship another Project err = %v, want ErrProjectNodeInAnotherProject", err)
 	}
 	alphaRows, err := repo.ListProjectRelationshipProjections(companyID, alpha.Project.ProjectID)
 	if err != nil {
 		t.Fatalf("ListProjectRelationshipProjections alpha: %v", err)
 	}
-	if len(alphaRows) != 1 || alphaRows[0].ResourceType != EntityTypeLogicGate || alphaRows[0].ResourceID != logicGate.LogicGateID {
-		t.Fatalf("alpha relationships after move = %+v, want retained Logic Gate", alphaRows)
+	if len(alphaRows) != 2 {
+		t.Fatalf("alpha relationships after rejected addition = %+v, want Node and Logic Gate unchanged", alphaRows)
 	}
 	bravoRows, err := repo.ListProjectRelationshipProjections(companyID, bravo.Project.ProjectID)
 	if err != nil {
 		t.Fatalf("ListProjectRelationshipProjections bravo: %v", err)
 	}
-	if len(bravoRows) != 2 {
-		t.Fatalf("bravo relationships after move = %+v, want node and implicit gate", bravoRows)
+	if len(bravoRows) != 0 {
+		t.Fatalf("bravo relationships after rejected addition = %+v, want no partial Logic Gate or Node relationship", bravoRows)
 	}
 }
 func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *testing.T) {

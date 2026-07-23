@@ -61,11 +61,11 @@ P49 - Project Field, Status, Health, Account, and Team dropdowns commit and clos
 P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
 P51 - Every Project chat comment authored by the current user exposes the shared inline Edit action after send. Saving uses the stable Project projection ID, replaces only trimmed text and resolved mention IDs, records an edit timestamp, and preserves author, original creation time, attachments, reply/source-selection context, text-box ownership, and thread order. Project Edit access never permits editing or deleting another author's comment, and legacy information POST requests cannot overwrite a chat projection even when they disguise the replacement as another information type.
 P52 - A Node may have at most one active Logic Gate assignment. A Node must have that assignment before it can be related to a Project.
-P53 - A Node may be related to at most one Project. Adding the same Node to another Project moves its existing Node relationship to the destination Project and preserves the Node and relationship identities.
+P53 - A Node may be related to at most one Project. Re-adding it to that same Project reuses its relationship, but attempting to add it to another Project is rejected without changing any existing relationship. The UI explains: **This Node is already in another Project. A Node can belong to only one Project. Remove it from its current Project before adding it here.**
 P54 - Adding a Node to a Project implicitly creates or reuses a separate Logic Gate relationship for that exact Project and the Node's current Logic Gate.
 P55 - A Logic Gate may be related to any number of Projects. Relating it to a new Project must never move, overwrite, or delete its relationships with other Projects.
 P56 - Each Project/Logic Gate pair has its own stable relationship row and relationship ID. Re-adding another Node from that Logic Gate to the same Project reuses the existing Project/Logic Gate row instead of creating a duplicate.
-P57 - Moving or removing a Node relationship does not silently remove the Logic Gate's relationship from the former Project. Logic Gate relationships are persistent Project associations, including when no related Node is currently visible in that Project.
+P57 - Removing a Node relationship does not silently remove the Logic Gate's relationship from that Project. Logic Gate relationships are persistent Project associations, including when no related Node is currently visible in that Project. A rejected cross-Project Node addition changes neither the Node relationship nor either Project's Logic Gate relationships.
 P58 - Users do not add a Logic Gate directly to a Project. The supported command adds a Node, verifies that Node's single Logic Gate assignment, and brings that Logic Gate into the Project implicitly.
 P59 - Node-based Project context in My Work, Updates, and other derived views comes only from that Node's direct Project relationship. A Logic Gate's membership in multiple Projects must never make all Nodes in that Logic Gate appear in every one of those Projects.
 
@@ -394,17 +394,17 @@ Given:
 - Project Alpha receives Node A and Project Bravo receives Node B.
 
 When:
-- Node A is later added to Project Bravo.
-- Either Node is re-added to Project Bravo.
+- A user attempts to add Node A to Project Bravo while it still belongs to Project Alpha.
+- Either Node is re-added to its current Project.
 
 Expected:
 - Node A and Node B each retain exactly one active Logic Gate assignment.
 - Project Alpha and Project Bravo have distinct persistent relationship rows for the same Logic Gate.
 - Adding the Logic Gate to Project Bravo never moves or deletes its Project Alpha relationship.
-- Node A has one Project relationship, and moving it to Project Bravo preserves that relationship ID instead of duplicating it.
-- Project Alpha retains its Logic Gate relationship after Node A moves.
-- Project Bravo contains one relationship for the Logic Gate and one relationship for each Node; re-adding a Node creates no duplicates.
-- My Work and Updates place Node A only under Project Bravo after the move; they do not infer an Alpha Node relationship merely because the shared Logic Gate remains in Project Alpha.
+- The attempt to add Node A to Project Bravo is rejected with a clear one-Project-per-Node message and no relationship is moved, added, or deleted.
+- Node A and its stable relationship remain in Project Alpha; Project Bravo still contains only Node B and its relationship to the shared Logic Gate.
+- Re-adding a Node to its current Project reuses the existing Node and Logic Gate relationship rows and creates no duplicates.
+- My Work and Updates keep Node A only under Project Alpha; they do not infer a Bravo Node relationship merely because the shared Logic Gate is also in Project Bravo.
 - A direct Logic Gate addition and a Project Node without a Logic Gate assignment are rejected.
 
 Focused coverage lives in `backend/internal/store/project_relationship_rules_test.go`, `backend/internal/store/project_relationship_schema_test.go`, `backend/internal/store/project_relationship_postgres_integration_test.go`, `backend/internal/store/work_item_reads_test.go`, and `backend/internal/http/notification_handlers_test.go`.

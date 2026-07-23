@@ -512,6 +512,8 @@ function friendlyApiError(code: string): string {
       return "Connect your mailbox before opening Home.";
     case "nylas_not_configured":
       return "Google connection is not configured for this environment.";
+    case "project_node_already_in_another_project":
+      return "This Node is already in another Project. A Node can belong to only one Project. Remove it from its current Project before adding it here.";
     case "failed_to_list_shared_inboxes":
       return "Shared Triage folders could not be loaded.";
     case "failed_to_create_shared_inbox":

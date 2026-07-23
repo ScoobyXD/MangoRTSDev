@@ -1042,14 +1042,14 @@ func upsertProjectRelationshipSourceTx(ctx context.Context, tx *sql.Tx, input Pr
 	var conflictClause string
 	switch input.ResourceType {
 	case EntityTypeNode:
-		// A Node belongs to at most one Project. Re-adding it moves the
-		// existing relationship while preserving its stable relationship ID.
+		// A Node belongs to at most one Project. Re-adding it to that same
+		// Project is idempotent; a different Project must not move it.
 		conflictClause = `
 on conflict (company_id, resource_id) where resource_type='node'
 do update set
-  project_id=excluded.project_id,
   position=excluded.position,
-  updated_timestamp=now()`
+  updated_timestamp=now()
+where project_relationships.project_id=excluded.project_id`
 	case EntityTypeLogicGate:
 		// A Logic Gate may be related to many Projects. Reuse only the
 		// relationship for this exact Project and Gate.
@@ -1068,6 +1068,9 @@ insert into project_relationships (
 ) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
 `+conflictClause+`
 returning relationship_id::text`, input.CompanyID, relationshipID, input.ProjectID, input.ResourceType, input.ResourceID, input.Position).Scan(&returnedID)
+	if errors.Is(err, sql.ErrNoRows) && input.ResourceType == EntityTypeNode {
+		return "", ErrProjectNodeInAnotherProject
+	}
 	if err == nil && input.ResourceType == EntityTypeNode {
 		_, err = tx.ExecContext(ctx, `select mangorts_bump_logic_gate_work_versions_for_node($1::uuid, $2::uuid)`, input.CompanyID, input.ResourceID)
 	}

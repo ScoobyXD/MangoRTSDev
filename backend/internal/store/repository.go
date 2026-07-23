@@ -21,6 +21,7 @@ var (
 	ErrPriorityRequired              = errors.New("priority required")
 	ErrDirectProjectLogicGate        = errors.New("logic gates cannot be added directly to projects")
 	ErrProjectNodeLogicGateRequired  = errors.New("project nodes must belong to a logic gate")
+	ErrProjectNodeInAnotherProject   = errors.New("node already belongs to another project")
 	ErrInvitationBadToken            = errors.New("invitation bad token")
 	ErrInvitationExpired             = errors.New("invitation expired")
 	ErrInvitationAlreadyAccepted     = errors.New("invitation already accepted")

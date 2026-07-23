@@ -42,6 +42,7 @@ func TestProjectRelationshipSchemaAllowsLogicGateInManyProjects(t *testing.T) {
 	postgres := strings.ToLower(strings.Join(strings.Fields(string(postgresRaw)), " "))
 	for _, required := range []string{
 		"on conflict (company_id, resource_id) where resource_type='node'",
+		"where project_relationships.project_id=excluded.project_id",
 		"on conflict (company_id, project_id, resource_type, resource_id)",
 	} {
 		if !strings.Contains(postgres, required) {

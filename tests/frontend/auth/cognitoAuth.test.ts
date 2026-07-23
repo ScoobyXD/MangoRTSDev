@@ -92,3 +92,19 @@ test("communications provider reauth responses do not mark Mango auth terminal",
     resetTerminalAuthFailure();
   }
 });
+
+test("project node conflict explains the one-project-per-node rule", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: "project_node_already_in_another_project" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  });
+  try {
+    await assert.rejects(
+      apiFetchJSON("/v1/projects/project-bravo/relationships", { method: "POST" }),
+      /This Node is already in another Project\. A Node can belong to only one Project\. Remove it from its current Project before adding it here\./,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

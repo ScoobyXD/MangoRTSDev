@@ -227,3 +227,22 @@ func assertProjectRelationshipResourcesForHTTPTest(t *testing.T, relationships [
 		}
 	}
 }
+
+func TestWriteProjectMutationErrorReportsNodeAlreadyInAnotherProject(t *testing.T) {
+	server := &Server{}
+	rr := httptest.NewRecorder()
+	server.writeProjectMutationError(rr, store.ErrProjectNodeInAnotherProject, "failed_to_save_project_relationship")
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s, want 409", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
+	if payload.Error != "project_node_already_in_another_project" {
+		t.Fatalf("error = %q, want project_node_already_in_another_project", payload.Error)
+	}
+}

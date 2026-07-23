@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"reflect"
 	"sort"
@@ -216,7 +217,7 @@ func TestMemoryRepoLogicGateGVICGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	}
 }
 
-func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships(t *testing.T) {
+func TestMemoryRepoMyWorkMatrixRowsKeepResourceInProjectAfterRejectedAddition(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "44444444-4444-4444-8444-444444444444"
 	repo.EnsureCompany(companyID, "My Work Projects Company")
@@ -243,26 +244,34 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	alpha := mustCreateInboxReadProject(t, repo, companyID, "Alpha Project", "Active", user.UserID)
 	bravo := mustCreateInboxReadProject(t, repo, companyID, "Bravo Project", "In Progress", user.UserID)
 	mustLinkInboxReadProjectResource(t, repo, companyID, alpha.ProjectID, EntityTypeNode, node.NodeID, 1, user.UserID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, bravo.ProjectID, EntityTypeNode, node.NodeID, 2, user.UserID)
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: bravo.ProjectID, ResourceType: EntityTypeNode,
+		ResourceID: node.NodeID, Position: 2, ActorUserID: user.UserID,
+	}); !errors.Is(err, ErrProjectNodeInAnotherProject) {
+		t.Fatalf("add node to Bravo err = %v, want ErrProjectNodeInAnotherProject", err)
+	}
 
 	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrixRows: %v", err)
 	}
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Bravo Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Alpha Project"})
 
 	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrix: %v", err)
 	}
-	if alpha := findMyWorkTestRow(matrix.Rows, EntityTypeProject, alpha.ProjectID); alpha != nil {
-		t.Fatalf("alpha project still contains moved resource: %+v", alpha)
+	if alphaRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, alpha.ProjectID); alphaRow == nil {
+		t.Fatalf("Alpha project missing after rejected addition; rows=%+v", matrix.Rows)
+	}
+	if bravoRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, bravo.ProjectID); bravoRow != nil {
+		t.Fatalf("Bravo project contains rejected Node: %+v", bravoRow)
 	}
 	nodeRow := findMyWorkTestRow(matrix.Rows, EntityTypeNode, node.NodeID)
 	if nodeRow == nil ||
 		nodeRow.ProjectionRowID == "" ||
-		nodeRow.ProjectID != bravo.ProjectID ||
-		nodeRow.ProjectName != "Bravo Project" ||
+		nodeRow.ProjectID != alpha.ProjectID ||
+		nodeRow.ProjectName != "Alpha Project" ||
 		nodeRow.LogicGateID == nil ||
 		*nodeRow.LogicGateID != logicGate.LogicGateID ||
 		nodeRow.LogicGateName != "Single Project Gate" ||

@@ -737,6 +737,8 @@ func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fal
 		writeError(w, http.StatusBadRequest, "direct_project_logic_gate_addition_not_allowed")
 	case errors.Is(err, store.ErrProjectNodeLogicGateRequired):
 		writeError(w, http.StatusBadRequest, "project_node_logic_gate_required")
+	case errors.Is(err, store.ErrProjectNodeInAnotherProject):
+		writeError(w, http.StatusConflict, "project_node_already_in_another_project")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_project")
 	case errors.Is(err, store.ErrAlreadyExists):

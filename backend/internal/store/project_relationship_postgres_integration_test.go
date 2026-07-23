@@ -1,8 +1,11 @@
 package store
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
-func TestPostgresRealtimeProjectRelationshipsKeepLogicGateInManyProjects(t *testing.T) {
+func TestPostgresRealtimeProjectRelationshipsRejectNodeInAnotherProject(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Project relationship cardinality")
 	if err != nil {
@@ -61,24 +64,32 @@ func TestPostgresRealtimeProjectRelationshipsKeepLogicGateInManyProjects(t *test
 		t.Fatalf("Logic Gate reused one relationship across Projects: alpha=%+v bravo=%+v", alpha, bravo)
 	}
 
-	moved, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID: company.CompanyID, ProjectID: bravoResult.Project.ProjectID,
+	readded, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: company.CompanyID, ProjectID: alphaResult.Project.ProjectID,
 		ResourceType: EntityTypeNode, ResourceID: alphaNode.NodeID,
 	})
 	if err != nil {
-		t.Fatalf("move Alpha Node to Bravo: %v", err)
+		t.Fatalf("re-add Alpha Node to Alpha: %v", err)
 	}
-	if moved.Relationship == nil || moved.Relationship.RelationshipID != alpha.Relationship.RelationshipID || moved.Relationship.ProjectID != bravoResult.Project.ProjectID {
-		t.Fatalf("moved Node relationship = %+v, want stable relationship in Bravo", moved.Relationship)
+	if readded.Relationship == nil || readded.Relationship.RelationshipID != alpha.Relationship.RelationshipID {
+		t.Fatalf("same-Project re-add = %+v, want stable Node relationship %s", readded.Relationship, alpha.Relationship.RelationshipID)
+	}
+
+	_, err = repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: company.CompanyID, ProjectID: bravoResult.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: alphaNode.NodeID,
+	})
+	if !errors.Is(err, ErrProjectNodeInAnotherProject) {
+		t.Fatalf("add Alpha Node to Bravo err = %v, want ErrProjectNodeInAnotherProject", err)
 	}
 
 	alphaRows, err := repo.ListProjectRelationshipProjections(company.CompanyID, alphaResult.Project.ProjectID)
-	if err != nil || len(alphaRows) != 1 || alphaRows[0].ResourceType != EntityTypeLogicGate || alphaRows[0].ResourceID != logicGate.LogicGateID {
-		t.Fatalf("Alpha relationships after Node move = %+v err=%v, want retained Logic Gate", alphaRows, err)
+	if err != nil || len(alphaRows) != 2 {
+		t.Fatalf("Alpha relationships after rejected addition = %+v err=%v, want Node and Logic Gate unchanged", alphaRows, err)
 	}
 	bravoRows, err := repo.ListProjectRelationshipProjections(company.CompanyID, bravoResult.Project.ProjectID)
-	if err != nil || len(bravoRows) != 3 {
-		t.Fatalf("Bravo relationships after Node move = %+v err=%v, want one Logic Gate and two Nodes", bravoRows, err)
+	if err != nil || len(bravoRows) != 2 {
+		t.Fatalf("Bravo relationships after rejected addition = %+v err=%v, want its original Node and Logic Gate only", bravoRows, err)
 	}
 	if got := countPostgresRows(t, db, `
 select count(*)
@@ -94,6 +105,24 @@ from project_relationships
 where company_id=$1::uuid
   and resource_type='node'
   and resource_id=$2::uuid`, company.CompanyID, alphaNode.NodeID); got != 1 {
-		t.Fatalf("moved Node project relationship rows = %d, want 1", got)
+		t.Fatalf("Alpha Node project relationship rows = %d, want 1", got)
+	}
+	if got := countPostgresRows(t, db, `
+select count(*)
+from project_relationships
+where company_id=$1::uuid
+  and project_id=$2::uuid
+  and resource_type='node'
+  and resource_id=$3::uuid`, company.CompanyID, alphaResult.Project.ProjectID, alphaNode.NodeID); got != 1 {
+		t.Fatalf("Alpha Node relationship rows in Alpha = %d, want 1", got)
+	}
+	if got := countPostgresRows(t, db, `
+select count(*)
+from project_relationships
+where company_id=$1::uuid
+  and project_id=$2::uuid
+  and resource_type='node'
+  and resource_id=$3::uuid`, company.CompanyID, bravoResult.Project.ProjectID, alphaNode.NodeID); got != 0 {
+		t.Fatalf("Alpha Node relationship rows in Bravo = %d, want 0", got)
 	}
 }
