@@ -4,19 +4,13 @@ import {
   hexToRgba,
   type KanbanCard,
 } from "./shared";
+import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { KANBAN_EDGE_FRAME } from "./KanbanContentModel";
 
 const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="19" height="19" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
     <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="rgba(255,255,255,0.58)" stroke={color} strokeWidth="1.45" />
     <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.18" />
-  </svg>
-);
-
-const ProjectFolderIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-    <path d="M1.75 4.25h4.1l1.25 1.5h7.15v7.1H1.75z" fill="rgba(255,255,255,0.72)" stroke={color} strokeWidth="1.35" strokeLinejoin="round" />
-    <path d="M1.75 5.75h12.5" fill="none" stroke={color} strokeWidth="1.15" />
   </svg>
 );
 
@@ -178,7 +172,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           </span>
           {hasProject && (
             <span title="Part of a Project" aria-label="Part of a Project" style={{ width: 18, height: 17, display: "grid", placeItems: "center" }}>
-              <ProjectFolderIcon color={color} />
+              <ExplorerRowIcon kind="project" />
             </span>
           )}
         </span>
