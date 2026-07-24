@@ -144,3 +144,76 @@ func TestNotificationReadStateDoesNotRemoveFeedRow(t *testing.T) {
 		t.Fatalf("unread notifications = %+v, want none after marking read", unread)
 	}
 }
+
+func TestNotificationReadStateCanChangeAfterReferencedNodeIsDeleted(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "61616161-6161-4161-8161-616161616163"
+	repo.EnsureCompany(companyID, "Deleted Notification Target Co")
+	user, err := repo.UpsertAuthUser("deleted-target-subject", "deleted-target@example.com", "Deleted Target User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("deleted-target-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Soon deleted node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: EntityPermissionEdit,
+			Permission:  EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateNotifications(CreateNotificationsInput{Notifications: []NotificationCreateInput{{
+		CompanyID:       companyID,
+		RecipientUserID: user.UserID,
+		Type:            domain.NotificationEventNodeFieldsChanged,
+		SourceEventID:   "61616161-6161-4161-8161-000000000004",
+		EntityType:      EntityTypeNode,
+		EntityID:        node.NodeID,
+		Title:           "Node changed before deletion",
+		NodeID:          node.NodeID,
+	}}})
+	if err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+	if err := repo.DeleteNode(companyID, node.NodeID); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+
+	item, err := repo.MarkNotificationRead(user.UserID, created[0].NotificationID, true)
+	if err != nil {
+		t.Fatalf("MarkNotificationRead after node deletion: %v", err)
+	}
+	if item.ReadTimestamp == nil {
+		t.Fatal("notification read timestamp is nil after marking deleted-node update read")
+	}
+
+	item, err = repo.MarkNotificationRead(user.UserID, created[0].NotificationID, false)
+	if err != nil {
+		t.Fatalf("MarkNotificationRead unread after node deletion: %v", err)
+	}
+	if item.ReadTimestamp != nil {
+		t.Fatalf("notification read timestamp = %v after marking deleted-node update unread, want nil", item.ReadTimestamp)
+	}
+
+	count, err := repo.MarkNotificationsRead(NotificationMarkReadInput{
+		UserID:    user.UserID,
+		CompanyID: companyID,
+	})
+	if err != nil {
+		t.Fatalf("MarkNotificationsRead after node deletion: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("MarkNotificationsRead count = %d, want 1 deleted-node notification", count)
+	}
+}

@@ -92,6 +92,24 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	return true
 }
 
+// Read state stays recipient-owned after a node or Logic Gate is deleted, while
+// existing targets still require the notification's normal visibility check.
+func (r *MemoryRepo) notificationReadStateMutableByUserLocked(item domain.Notification, userID string) bool {
+	if r.notificationVisibleToUserLocked(item, userID) {
+		return true
+	}
+	target, ok := NotificationPrimaryAccessTarget(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID)
+	if !ok {
+		return false
+	}
+	switch target.EntityType {
+	case EntityTypeNode, EntityTypeLogicGate:
+		return !r.entityExistsLocked(item.CompanyID, target.EntityType, target.EntityID)
+	default:
+		return false
+	}
+}
+
 func notificationLogicGateGVICRole(role string) bool {
 	switch strings.TrimSpace(role) {
 	case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
@@ -377,7 +395,7 @@ func (r *MemoryRepo) MarkNotificationRead(userID, notificationID string, read bo
 	if !ok || item.RecipientUserID != userID {
 		return domain.Notification{}, ErrNotFound
 	}
-	if !r.notificationVisibleToUserLocked(item, userID) {
+	if !r.notificationReadStateMutableByUserLocked(item, userID) {
 		return domain.Notification{}, ErrNotFound
 	}
 	if read {
@@ -436,7 +454,7 @@ func (r *MemoryRepo) MarkNotificationsRead(input NotificationMarkReadInput) (int
 		if !notificationMatchesMarkReadInput(item, input) {
 			continue
 		}
-		if !r.notificationVisibleToUserLocked(item, input.UserID) {
+		if !r.notificationReadStateMutableByUserLocked(item, input.UserID) {
 			continue
 		}
 		item.ReadTimestamp = &now

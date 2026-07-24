@@ -55,8 +55,7 @@ notification_id::text, company_id::text, recipient_user_id::text, actor_user_id:
 notification_type, source_event_id::text, entity_type, entity_id, title, body_preview,
 surface, role, logic_gate_id, node_id, information_id, priority, read_timestamp, created_timestamp`
 
-const notificationRecipientVisibilityWhereSQL = `
-  and (
+const notificationRecipientVisibilityConditionSQL = `(
     company_id is null
     or case
         when btrim(node_id) <> ''
@@ -110,6 +109,48 @@ const notificationRecipientVisibilityWhereSQL = `
         )
         else true
       end
+  )`
+
+const notificationRecipientVisibilityWhereSQL = `
+  and ` + notificationRecipientVisibilityConditionSQL
+
+// This narrow missing-target exception lets stale clients dismiss an update
+// without relaxing the access check for a live resource whose access was revoked.
+const notificationMissingNodeOrLogicGateTargetConditionSQL = `(
+    company_id is not null
+    and case
+        when btrim(node_id) <> '' then not exists (
+          select 1
+          from nodes
+          where nodes.company_id=notifications.company_id
+            and nodes.node_id=notifications.node_id::uuid
+        )
+        when btrim(logic_gate_id) <> '' then not exists (
+          select 1
+          from logic_gates
+          where logic_gates.company_id=notifications.company_id
+            and logic_gates.logic_gate_id=notifications.logic_gate_id::uuid
+        )
+        when entity_type = 'logic_gate' then not exists (
+          select 1
+          from logic_gates
+          where logic_gates.company_id=notifications.company_id
+            and logic_gates.logic_gate_id=notifications.entity_id::uuid
+        )
+        when entity_type = 'node' then not exists (
+          select 1
+          from nodes
+          where nodes.company_id=notifications.company_id
+            and nodes.node_id=notifications.entity_id::uuid
+        )
+        else false
+      end
+  )`
+
+const notificationRecipientReadStateWhereSQL = `
+  and (
+    ` + notificationRecipientVisibilityConditionSQL + `
+    or ` + notificationMissingNodeOrLogicGateTargetConditionSQL + `
   )`
 
 const notificationRoleSummaryTargetSQL = `
@@ -340,7 +381,7 @@ func (r *PostgresRepo) MarkNotificationRead(userID, notificationID string, read 
 	item, err := scanNotification(r.db.QueryRow(`
 update notifications
 set read_timestamp=case when $3::boolean then coalesce(read_timestamp, now()) else null end
-where recipient_user_id=$1::uuid and notification_id=$2::uuid`+notificationRecipientVisibilityWhereSQL+`
+where recipient_user_id=$1::uuid and notification_id=$2::uuid`+notificationRecipientReadStateWhereSQL+`
 returning `+notificationSelectColumns, userID, notificationID, read))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Notification{}, ErrNotFound
@@ -369,7 +410,7 @@ where recipient_user_id=$1::uuid
   and ($4 = '' or surface = $4)
   and ($5 = '' or role = $5)
   and ($6 = '' or logic_gate_id = $6)
-  and ($7 = '' or node_id = $7)`+notificationRecipientVisibilityWhereSQL,
+  and ($7 = '' or node_id = $7)`+notificationRecipientReadStateWhereSQL,
 		input.UserID,
 		input.CompanyID,
 		input.NotificationType,

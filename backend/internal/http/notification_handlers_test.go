@@ -1666,3 +1666,48 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 		t.Fatalf("summary role counts = %+v, want one current node generated target", summary.RoleCounts)
 	}
 }
+
+func TestMarkNotificationReadSucceedsAfterReferencedNodeIsDeleted(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "58585858-5858-4858-8858-585858585859"
+	repo.EnsureCompany(companyID, "Deleted Update Target Company")
+	user := mustCreateNotificationTestUser(t, repo, "deleted-update-target", companyID, "deleted-update@example.com", "Deleted Update User")
+	node, err := repo.CreateNode(companyID, "Deleted update node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{
+		CompanyID:       companyID,
+		RecipientUserID: user.UserID,
+		Type:            domain.NotificationEventNodeFieldsChanged,
+		SourceEventID:   "58585858-5858-4858-8858-585858585860",
+		EntityType:      store.EntityTypeNode,
+		EntityID:        node.NodeID,
+		Title:           "Deleted node update",
+		NodeID:          node.NodeID,
+	}}})
+	if err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+	if err := repo.DeleteNode(companyID, node.NodeID); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/notifications/"+created[0].NotificationID+"/read", nil)
+	req = requestWithActorForNotifications(req, user, companyID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST notification read after node deletion status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var item domain.Notification
+	if err := json.NewDecoder(rec.Body).Decode(&item); err != nil {
+		t.Fatalf("decode marked notification: %v", err)
+	}
+	if item.NotificationID != created[0].NotificationID || item.ReadTimestamp == nil {
+		t.Fatalf("marked notification = %+v, want deleted-node update with read timestamp", item)
+	}
+}
