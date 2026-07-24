@@ -102,6 +102,7 @@ import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
+import { preferResolvedEntityLabel } from "../entityLabels.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
@@ -650,6 +651,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const flushPendingLocalInputRef = useRef<() => void>(() => undefined);
   const indentGuideFrameRef = useRef<number | null>(null);
+  const outlineStyleRef = useRef(outlineStyle);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const documentInformationIDRef = useRef("");
@@ -738,12 +740,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return () => observer.disconnect();
   }, []);
 
+  outlineStyleRef.current = outlineStyle;
+
   const scheduleIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
       window.cancelAnimationFrame(indentGuideFrameRef.current);
       indentGuideFrameRef.current = null;
     }
-    if (outlineStyle !== "indent-guides") {
+    if (outlineStyleRef.current !== "indent-guides") {
       setIndentGuideSegments((current) => current.length > 0 ? [] : current);
       return;
     }
@@ -755,7 +759,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       indentGuideFrameRef.current = null;
       setIndentGuideSegments(buildEditorIndentGuideSegments(text, EDITOR_TAB_TEXT.length));
     });
-  }, [outlineStyle]);
+  }, []);
 
   useEffect(() => {
     scheduleIndentGuideUpdate(editorDocumentRef.current ? readEditorDocumentText(editorDocumentRef.current) : documentDraftRef.current);
@@ -1209,8 +1213,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
-    if (!isSameEntity || !editingTitleActiveRef.current) {
+    if (!isSameEntity) {
       setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
+    } else if (!editingTitleActiveRef.current) {
+      setLinkedNodeTitle((current) => preferResolvedEntityLabel(current, label, "Logic Gate"));
     }
     if (logicGateID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
@@ -2412,6 +2418,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             (current, update) => update.entityType === "logic_gate" && update.resourceID === linkedNodeID ? update.title : current,
           );
           setLinkedNodeTitle((current) => editingTitleActiveRef.current ? current : loadedLogicGateTitle);
+          if (!editingTitleActiveRef.current) {
+            onLogicGateTitleChange?.({ logicGateID: linkedNodeID, label: loadedLogicGateTitle });
+          }
           setNodeStatus("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
@@ -2522,7 +2531,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;

@@ -13,3 +13,14 @@ export function humanLabelOrFallback(value: string | undefined | null, fallback:
   if (!clean || isLikelyOpaqueEntityID(clean)) return fallback;
   return clean;
 }
+
+export function preferResolvedEntityLabel(
+  currentValue: string | undefined | null,
+  nextValue: string | undefined | null,
+  fallback: string,
+): string {
+  const current = humanLabelOrFallback(currentValue, "");
+  const next = humanLabelOrFallback(nextValue, fallback);
+  if (next === fallback && current && current !== fallback) return current;
+  return next;
+}

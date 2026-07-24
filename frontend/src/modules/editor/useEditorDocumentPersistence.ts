@@ -111,6 +111,14 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     initialHTML: persistedDocumentRef.current,
     requestJSON,
     onHTML: applyCommittedHTML,
+    onLocalCommit: () => {
+      if (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate") return;
+      invalidateDocumentTargetCaches({
+        entityKind: linkedEntityKind,
+        entityID: linkedEntityID,
+        informationID: documentInformationID,
+      });
+    },
     flushPendingLocalInput,
     onPendingChange: (count) => {
       saveInFlightRef.current = count > 0;
@@ -144,9 +152,10 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     pendingSaveRef.current = request;
     if (!request) return;
     setError("");
+    invalidateDocumentTargetCaches(request.target);
     scheduleSyncedSave(nextText, immediate);
     if (immediate) pendingSaveRef.current = null;
-  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, scheduleSyncedSave, setError]);
+  }, [buildDocumentSaveRequest, documentDraftRef, invalidateDocumentTargetCaches, pendingSaveRef, scheduleSyncedSave, setError]);
 
   const flushPendingDocumentSave = useCallback((fallbackText?: string) => {
     const next = typeof fallbackText === "string" ? fallbackText : documentDraftRef.current;

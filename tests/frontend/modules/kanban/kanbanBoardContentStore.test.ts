@@ -16,10 +16,18 @@ import {
   type KanbanBoard,
   type KanbanColumn,
 } from "../../../../frontend/src/modules/kanban/shared.js";
+import { preferResolvedEntityLabel } from "../../../../frontend/src/modules/entityLabels.js";
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(payload), { ...init, headers: { "Content-Type": "application/json" } });
 }
+
+test("same-entity fallback labels cannot replace a resolved Logic Gate title", () => {
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "Logic Gate", "Logic Gate"), "Daily Operations");
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "", "Logic Gate"), "Daily Operations");
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "Renamed Operations", "Logic Gate"), "Renamed Operations");
+  assert.equal(preferResolvedEntityLabel("", "Logic Gate", "Logic Gate"), "Logic Gate");
+});
 
 test("Kanban board content store loads Logic Gate board contents from v2 work read", async () => {
   const originalFetch = globalThis.fetch;

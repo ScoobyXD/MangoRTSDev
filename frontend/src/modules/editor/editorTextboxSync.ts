@@ -40,6 +40,7 @@ export type EditorTextboxSyncOptions = {
   requestJSON: EditorTextboxSyncRequest;
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
+  onLocalCommit?: () => void;
   onDeleted?: () => void;
   flushPendingLocalInput?: () => void;
   onError?: (cause: unknown) => void;
@@ -689,6 +690,7 @@ export class EditorTextboxSync {
       await putPending(this.pending);
       if (this.recovery) this.rebuildOptimistic();
       this.options.onPendingChange?.(this.pending.length);
+      this.options.onLocalCommit?.();
       return;
     }
     let remoteForOptimistic = operation.patch;

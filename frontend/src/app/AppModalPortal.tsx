@@ -18,10 +18,15 @@ function readViewportAnchorRect(element: Element | null): AppViewportAnchorRect 
 
 export function useAppViewportAnchorRect(
   anchorRef: React.RefObject<Element | null>,
+  enabled = true,
 ): AppViewportAnchorRect | null {
   const [rect, setRect] = React.useState<AppViewportAnchorRect | null>(null);
 
   React.useLayoutEffect(() => {
+    if (!enabled) {
+      setRect((current) => current === null ? current : null);
+      return undefined;
+    }
     const element = anchorRef.current;
     if (!element) {
       setRect(null);
@@ -52,7 +57,7 @@ export function useAppViewportAnchorRect(
       view?.removeEventListener("resize", update);
       view?.removeEventListener("scroll", update, true);
     };
-  }, [anchorRef]);
+  }, [anchorRef, enabled]);
 
   return rect;
 }
@@ -105,6 +110,7 @@ export function useAppFloatingMenuDismissal(
   open: boolean,
   containerRef: React.RefObject<HTMLElement | null>,
   onClose: () => void,
+  additionalContainerRef?: React.RefObject<HTMLElement | null>,
 ): void {
   const onCloseRef = React.useRef(onClose);
   onCloseRef.current = onClose;
@@ -116,7 +122,11 @@ export function useAppFloatingMenuDismissal(
     if (!targetDocument) return undefined;
 
     const closeOnPointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) onCloseRef.current();
+      const target = event.target as Node;
+      if (
+        !containerRef.current?.contains(target)
+        && !additionalContainerRef?.current?.contains(target)
+      ) onCloseRef.current();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -138,7 +148,7 @@ export function useAppFloatingMenuDismissal(
       targetDocument.removeEventListener("pointerdown", closeOnPointerDown, true);
       targetDocument.removeEventListener("keydown", closeOnEscape, true);
     };
-  }, [containerRef, open]);
+  }, [additionalContainerRef, containerRef, open]);
 }
 
 function elementIsVisibleForModalFocus(element: HTMLElement): boolean {

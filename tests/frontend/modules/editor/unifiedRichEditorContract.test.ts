@@ -450,6 +450,17 @@ test("external hydration preserves logical selection and node teardown retains f
   assert.doesNotMatch(nodeWorkspaceParts, /readStoredTextBlockHeight|storeTextBlockHeight/);
 });
 
+test("outline style changes stay visual and queued editor work invalidates stale projections", () => {
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const persistence = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentPersistence.ts"), "utf8");
+
+  assert.match(editorContent, /const outlineStyleRef = useRef\(outlineStyle\)/);
+  assert.match(editorContent, /outlineStyleRef\.current = outlineStyle/);
+  assert.match(editorContent, /const scheduleIndentGuideUpdate = useCallback\(\(text: string\) => \{[\s\S]*outlineStyleRef\.current !== "indent-guides"[\s\S]*\}, \[\]\)/);
+  assert.match(persistence, /pendingSaveRef\.current = request;\s*if \(!request\) return;\s*setError\(""\);\s*invalidateDocumentTargetCaches\(request\.target\);\s*scheduleSyncedSave/);
+  assert.match(persistence, /onLocalCommit: \(\) => \{[\s\S]*invalidateDocumentTargetCaches\(\{[\s\S]*informationID: documentInformationID/);
+});
+
 test("shared editor clipboard routing keeps mixed content and copies images before cut deletion", () => {
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
   const editorRichClipboard = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorRichClipboard.ts"), "utf8");

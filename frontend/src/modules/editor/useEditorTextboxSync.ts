@@ -17,6 +17,7 @@ type UseEditorTextboxSyncInput = {
   requestJSON: EditorTextboxSyncRequest;
   onHTML: (html: string, source: "remote" | "recovery") => void;
   onPendingChange?: (pendingCount: number) => void;
+  onLocalCommit?: () => void;
   flushPendingLocalInput?: () => void;
   onDeleted?: () => void;
   onError?: (cause: unknown) => void;
@@ -46,6 +47,7 @@ export function useEditorTextboxSync(input: UseEditorTextboxSyncInput) {
       requestJSON: current.requestJSON,
       onHTML: (html, source) => callbacksRef.current.onHTML(html, source),
       onPendingChange: (count) => callbacksRef.current.onPendingChange?.(count),
+      onLocalCommit: () => current.onLocalCommit?.(),
       flushPendingLocalInput: () => callbacksRef.current.flushPendingLocalInput?.(),
       onDeleted: () => callbacksRef.current.onDeleted?.(),
       onError: (cause) => callbacksRef.current.onError?.(cause),

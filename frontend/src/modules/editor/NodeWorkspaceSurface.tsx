@@ -62,7 +62,6 @@ import {
   stageEditorChatAttachmentTransfer,
   transferTextBlockImageToChatDraft,
   nodeAttachmentUploadScopeMatches,
-  textBlockAttachmentContextLabel,
   visibleNodeAttachmentUploads,
   type NodeAttachmentUploadScope,
 } from "./nodeTextBlockAttachments";
@@ -104,7 +103,6 @@ import {
   ChatIcon,
   MailIcon,
   messageAttachmentPayload,
-  PaperclipIcon,
   parseDraggedEmail,
   PlusIcon,
   TextEditorIcon,
@@ -657,13 +655,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const nodeTextBlockAttachmentsByInformationID = useMemo(() => groupMangoResourceAttachmentsByInformationID(
     filterMangoResourceAttachments(nodeFileAttachments, { editorSurface: "node_text_block" }),
   ), [nodeFileAttachments]);
-  const textBlockTitleByID = useMemo(() => new Map(blocks.map((block) => [block.id, block.title.trim() || "Text box"])), [blocks]);
-  const nodeAttachmentDropdownItems = useMemo(() => nodeFileAttachments.map((resourceAttachment) => {
-    return {
-      resourceAttachment,
-      contextLabel: textBlockAttachmentContextLabel(resourceAttachment.information_id, textBlockTitleByID),
-    };
-  }), [nodeFileAttachments, textBlockTitleByID]);
+  const nodeAttachmentDropdownItems = useMemo(() => nodeFileAttachments.map((resourceAttachment) => ({
+    resourceAttachment,
+  })), [nodeFileAttachments]);
   const nodeAttachmentUploadDropdownItems = useMemo(() => {
     const completedAttachmentIDs = new Set(nodeFileAttachments.map((item) => item.attachment_id.trim()).filter(Boolean));
     return visibleNodeAttachmentUploads(nodeAttachmentUploads, completedAttachmentIDs);
@@ -3798,17 +3792,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
                           Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                         </span>
-                        {canEdit && (
-                          <label title="Add attachment" aria-label="Add attachment" style={{ width: 26, height: 24, flex: "0 0 auto", borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}>
-                            <PaperclipIcon color={accent} />
-                            <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
-                              const files = event.currentTarget.files;
-                              if (files) void addTextBlockAttachments(block.id, files);
-                              event.currentTarget.value = "";
-                            }} />
-                          </label>
-                        )}
-                        <AttachmentCountDropdown items={blockAttachmentDropdownItems} apiBase={apiBase} companyID={companyID} accent={accent} surfaceText={surfaceText} compact loading={nodeAttachmentsLoading} loadError={nodeAttachmentsLoadError} onRetry={refreshNodeAttachments} onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined} onError={onError} />
+                        <AttachmentCountDropdown
+                          items={blockAttachmentDropdownItems}
+                          apiBase={apiBase}
+                          companyID={companyID}
+                          accent={accent}
+                          surfaceText={surfaceText}
+                          compact
+                          loading={nodeAttachmentsLoading}
+                          loadError={nodeAttachmentsLoadError}
+                          onRetry={refreshNodeAttachments}
+                          onAddFiles={canEdit ? (files) => addTextBlockAttachments(block.id, files) : undefined}
+                          onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
+                          onError={onError}
+                        />
                         {canEdit && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}
                       </div>
                       <div data-node-pane-header="chat" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>

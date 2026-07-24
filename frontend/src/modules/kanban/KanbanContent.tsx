@@ -285,7 +285,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { createRequestJSON } from "../api/requestJSON";
-import { humanLabelOrFallback } from "../entityLabels.js";
+import { humanLabelOrFallback, preferResolvedEntityLabel } from "../entityLabels.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup } from "../grouping/universalGrouping";
 import {
   createSavedViewID,
@@ -1335,7 +1335,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const nextHighlightedEntity = forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null;
     if (activeBoardIDRef.current === nextBoardID && activeLogicGateID === logicGateID) {
       setHighlightedEntity(nextHighlightedEntity);
-      setActiveLogicGateLabel(nextLabel);
+      setActiveLogicGateLabel((current) => preferResolvedEntityLabel(current, nextLabel, "Logic Gate"));
       loadLogicGateArenaView(logicGateID, nextBoardID);
       return;
     }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
+import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
@@ -3463,7 +3463,6 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
 
 export type AttachmentCountDropdownItem = {
   resourceAttachment: MangoResourceAttachment;
-  contextLabel?: string;
 };
 
 export type AttachmentUploadDropdownItem = {
@@ -3486,6 +3485,7 @@ type AttachmentCountDropdownProps = {
   loading?: boolean;
   loadError?: string;
   onRetry?: () => void;
+  onAddFiles?: (files: File[]) => void | Promise<void>;
   onRemove?: (item: AttachmentCountDropdownItem) => void;
   onCancelUpload?: (uploadID: string) => void;
   onRetryUpload?: (uploadID: string) => void;
@@ -3791,6 +3791,11 @@ const ATTACHMENT_UPLOAD_STATE_LABELS: Record<MangoAttachmentUploadProgress["stat
   failed: "Failed",
 };
 
+const ATTACHMENT_CONTROL_SELECTED_BACKGROUND = "linear-gradient(105deg, rgba(224, 253, 255, 0.98) 0%, rgba(183, 242, 255, 0.98) 48%, rgba(216, 230, 251, 0.98) 100%)";
+const ATTACHMENT_CONTROL_HOVER_BACKGROUND = "linear-gradient(105deg, rgba(244, 254, 255, 0.98) 0%, rgba(225, 248, 255, 0.98) 50%, rgba(235, 242, 252, 0.98) 100%)";
+const ATTACHMENT_CONTROL_SELECTED_SHADOW = "inset 0 0 0 1px rgba(34, 211, 238, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.94), 0 1px 3px rgba(14, 116, 144, 0.14)";
+const ATTACHMENT_CONTROL_HOVER_SHADOW = "inset 0 0 0 1px rgba(34, 211, 238, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.94), 0 1px 3px rgba(14, 116, 144, 0.09)";
+
 const AttachmentUploadProgressRow: React.FC<{
   item: AttachmentUploadDropdownItem;
   accent: string;
@@ -3852,6 +3857,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   loading = false,
   loadError = "",
   onRetry,
+  onAddFiles,
   onRemove,
   onCancelUpload,
   onRetryUpload,
@@ -3861,14 +3867,42 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   const [attachmentMenu, setAttachmentMenu] = useState<{ item: AttachmentCountDropdownItem; x: number; y: number } | null>(null);
   const [previewItem, setPreviewItem] = useState<AttachmentCountDropdownItem | null>(null);
   const [downloadingResourceAttachmentID, setDownloadingResourceAttachmentID] = useState("");
+  const [hoveredControlZone, setHoveredControlZone] = useState<"list" | "add" | null>(null);
   const activeUploadCount = uploads.filter((item) => item.progress.state === "preparing" || item.progress.state === "uploading" || item.progress.state === "retrying" || item.progress.state === "completing").length;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const portalTarget = useAppOverlayPortalTarget(triggerRef.current?.ownerDocument);
+  const triggerRect = useAppViewportAnchorRect(triggerRef, open);
+  const attachmentMenuWidth = compact ? 264 : 340;
+  const attachmentMenuPlacement = useMemo(() => {
+    if (!triggerRect) return null;
+    const view = triggerRef.current?.ownerDocument.defaultView;
+    const viewportWidth = view?.innerWidth ?? attachmentMenuWidth + 16;
+    const viewportHeight = view?.innerHeight ?? 720;
+    const width = Math.min(attachmentMenuWidth, Math.max(160, viewportWidth - 16));
+    const preferredLeft = align === "right"
+      ? triggerRect.left + triggerRect.width - width
+      : triggerRect.left;
+    const left = Math.max(8, Math.min(preferredLeft, viewportWidth - width - 8));
+    const gap = 7;
+    const availableBelow = viewportHeight - triggerRect.top - triggerRect.height - gap - 8;
+    const availableAbove = triggerRect.top - gap - 8;
+    const openAbove = availableBelow < 180 && availableAbove > availableBelow;
+    return {
+      width,
+      left,
+      top: openAbove ? undefined : triggerRect.top + triggerRect.height + gap,
+      bottom: openAbove ? viewportHeight - triggerRect.top + gap : undefined,
+      maxHeight: Math.max(96, Math.min(330, openAbove ? availableAbove : availableBelow)),
+    };
+  }, [align, attachmentMenuWidth, triggerRect]);
   const close = useCallback(() => {
     setOpen(false);
     setAttachmentMenu(null);
   }, []);
-  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close);
+  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close, menuRef);
   useEffect(() => {
     if (activeUploadCount > 0) setOpen(true);
   }, [activeUploadCount]);
@@ -3908,15 +3942,24 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   }, [apiBase, companyID, onError]);
   return (
     <>
-    <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
+    <div
+      ref={rootRef}
+      data-mango-attachment-control="split"
+      style={{ position: "relative", flex: "0 0 auto", minWidth: 0, display: "inline-flex", alignItems: "stretch", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: compact ? 8 : 9, background: EDITOR_NEU_SURFACE, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}
+    >
       <button
         ref={triggerRef}
+        data-mango-attachment-control-zone="list"
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={loadError ? "Attachments unavailable" : `Attachments (${items.length} complete${activeUploadCount ? `, ${activeUploadCount} uploading` : ""})`}
         title={activeUploadCount ? `${activeUploadCount} attachment upload${activeUploadCount === 1 ? "" : "s"} in progress` : "Attachments"}
         onClick={() => setOpen((nextOpen) => !nextOpen)}
+        onMouseEnter={() => setHoveredControlZone("list")}
+        onMouseLeave={() => setHoveredControlZone((current) => current === "list" ? null : current)}
+        onFocus={() => setHoveredControlZone("list")}
+        onBlur={() => setHoveredControlZone((current) => current === "list" ? null : current)}
         style={{
           minHeight: compact ? 24 : 30,
           minWidth: compact ? 38 : 54,
@@ -3924,9 +3967,9 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
           alignItems: "center",
           justifyContent: "center",
           gap: 6,
-          border: open ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-          borderRadius: compact ? 8 : 9,
-          background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+          border: 0,
+          borderRadius: 0,
+          background: open ? ATTACHMENT_CONTROL_SELECTED_BACKGROUND : hoveredControlZone === "list" ? ATTACHMENT_CONTROL_HOVER_BACKGROUND : "transparent",
           color: open ? accent : surfaceText,
           cursor: "pointer",
           font: "inherit",
@@ -3934,26 +3977,54 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
           fontWeight: 900,
           letterSpacing: 0,
           padding: compact ? "2px 7px" : "0 10px",
-          boxShadow: open ? "0 8px 18px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW,
+          boxShadow: open ? ATTACHMENT_CONTROL_SELECTED_SHADOW : hoveredControlZone === "list" ? ATTACHMENT_CONTROL_HOVER_SHADOW : undefined,
+          transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease",
         }}
       >
         <PaperclipIcon color={open ? accent : "rgba(100,116,139,0.85)"} />
         <span>{loading ? "..." : loadError ? "!" : items.length}</span>
         {activeUploadCount > 0 && <span aria-hidden="true" style={{ color: accent, fontSize: 9, fontWeight: 950 }}>+{activeUploadCount}</span>}
       </button>
-      {open && (
+      {onAddFiles && (
+        <>
+          <button
+            data-mango-attachment-control-zone="add"
+            type="button"
+            title="Add attachment"
+            aria-label="Add attachment"
+            onClick={() => fileInputRef.current?.click()}
+            onMouseEnter={() => setHoveredControlZone("add")}
+            onMouseLeave={() => setHoveredControlZone((current) => current === "add" ? null : current)}
+            onFocus={() => setHoveredControlZone("add")}
+            onBlur={() => setHoveredControlZone((current) => current === "add" ? null : current)}
+            style={{ width: compact ? 27 : 31, minHeight: compact ? 24 : 30, flex: "0 0 auto", display: "grid", placeItems: "center", border: 0, borderLeft: "1px solid rgba(100,116,139,0.18)", borderRadius: 0, background: hoveredControlZone === "add" ? ATTACHMENT_CONTROL_HOVER_BACKGROUND : "transparent", color: accent, cursor: "pointer", padding: 0, boxShadow: hoveredControlZone === "add" ? ATTACHMENT_CONTROL_HOVER_SHADOW : undefined, transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease" }}
+          >
+            <PlusIcon color={accent} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            tabIndex={-1}
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              event.currentTarget.value = "";
+              if (files.length > 0) void onAddFiles(files);
+            }}
+          />
+        </>
+      )}
+      {open && portalTarget && attachmentMenuPlacement && createPortal(
         <div
+          ref={menuRef}
           role="menu"
           aria-label="Attachments"
           style={{
-            position: "absolute",
-            zIndex: 80,
-            top: "calc(100% + 7px)",
-            right: align === "right" ? 0 : undefined,
-            left: align === "left" ? 0 : undefined,
-            width: compact ? 264 : 340,
-            maxWidth: "min(86vw, 340px)",
-            maxHeight: 330,
+            position: "fixed",
+            zIndex: 1020,
+            ...attachmentMenuPlacement,
+            maxWidth: "calc(100vw - 16px)",
             overflowY: "auto",
             display: "grid",
             gap: 5,
@@ -3999,7 +4070,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             </div>
           )}
           {!loading && !loadError && items.map((item) => {
-            const { resourceAttachment, contextLabel } = item;
+            const { resourceAttachment } = item;
             const attachment = resourceAttachment.attachment;
             const filename = attachment?.original_filename?.trim() || "Attachment";
             const filenamePresentation = splitAttachmentFilename(filename);
@@ -4056,7 +4127,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                     </span>
                   </span>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
-                    {[contextLabel?.trim(), attachment ? formatFileSize(attachment.byte_size) : "File unavailable"].filter(Boolean).join(" - ")}
+                    {attachment ? formatFileSize(attachment.byte_size) : "File unavailable"}
                   </span>
                 </span>
               </span>
@@ -4078,14 +4149,15 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             </div>
             );
           })}
-        </div>
+        </div>,
+        portalTarget,
       )}
       {attachmentMenu && onRemove && (
         <div
           role="menu"
           aria-label="Attachment actions"
           onContextMenu={(event) => event.preventDefault()}
-          style={{ position: "fixed", zIndex: 160, top: attachmentMenu.y, left: attachmentMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
+          style={{ position: "fixed", zIndex: 1030, top: attachmentMenu.y, left: attachmentMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
         >
           <button
             type="button"

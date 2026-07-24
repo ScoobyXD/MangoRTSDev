@@ -234,10 +234,12 @@ test("Enter then typing keeps rows and caret intact when acknowledgement and dup
     const server = new HTMLPatchTestServer(initial);
     const bus = new RealtimeBus();
     let renders = 0;
+    let localCommits = 0;
     const scope = "editor:node:node-1:enter-caret";
     const controller = new EditorTextboxSync(controllerOptions(server, "enter-caret", {
       subscribe: bus.subscribe,
       onHTML: (html) => { renders += 1; dom.editor.innerHTML = html; },
+      onLocalCommit: () => { localCommits += 1; },
       requestJSON: async <T,>(_path: string, init?: RequestInit) => {
         if (!init?.method) return server.currentSnapshot() as T;
         const commit = server.commit(JSON.parse(String(init.body)) as CommitBody);
@@ -260,6 +262,7 @@ test("Enter then typing keeps rows and caret intact when acknowledgement and dup
     bus.publish(scope, commit);
     await controller.flush();
     assert.equal(renders, 0, "own acknowledgement/broadcast must not replace the live editor DOM");
+    assert.equal(localCommits, 1, "the accepted local operation invalidates identity-scoped projections once");
     assert.equal(dom.editor.innerHTML, next);
     assert.equal(dom.editor.children.length, 2);
     assert.equal(selection.anchorNode?.textContent, "N");

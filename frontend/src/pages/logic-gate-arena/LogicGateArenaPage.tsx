@@ -5,7 +5,7 @@ import type { ArenaBoardLeftResizeRequest, ArenaBoardLeftResizeResult } from "..
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import { humanLabelOrFallback } from "../../modules/entityLabels.js";
+import { humanLabelOrFallback, preferResolvedEntityLabel } from "../../modules/entityLabels.js";
 import { consumePendingLogicGateArenaSelection, readPendingLogicGateArenaSelection, type PendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
@@ -116,6 +116,18 @@ function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: Are
     && (current.requestID ?? 0) === (next.requestID ?? 0);
 }
 
+function reconcileArenaLogicGateSelection(
+  current: ArenaLogicGateSelection,
+  next: ArenaLogicGateSelection,
+): ArenaLogicGateSelection {
+  if (current.id !== next.id) return next;
+  const reconciled = {
+    ...next,
+    label: preferResolvedEntityLabel(current.label, next.label, "Logic Gate"),
+  };
+  return sameArenaLogicGateSelection(current, reconciled) ? current : reconciled;
+}
+
 function getArenaFrames(frames: FrameDataModel[]) {
   return {
     editor: frames.find((frame) => frame.kind === "editor") ?? null,
@@ -215,14 +227,14 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     const changedAt = arenaSelectionChangedAt(pendingSelection);
     if (changedAt <= lastArenaSelectionChangedAtRef.current) return;
     lastArenaSelectionChangedAtRef.current = changedAt;
-    setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, pendingSelection) ? current : pendingSelection);
+    setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, pendingSelection));
   }, [companyID]);
 
   useEffect(() => {
     const nextSelection = selectionFromTargetLogicGate(targetLogicGate);
     if (!nextSelection) return;
     lastArenaSelectionChangedAtRef.current = Math.max(lastArenaSelectionChangedAtRef.current, arenaSelectionChangedAt(nextSelection));
-    setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, nextSelection) ? current : nextSelection);
+    setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, nextSelection));
   }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
@@ -230,13 +242,21 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     if (selection.changedAt > 0 && selection.changedAt < lastArenaSelectionChangedAtRef.current) return;
     if (selection.entityKind === "logic_gate") {
       lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
-      setSelectedLogicGate({ id: selection.entityID.trim(), label: humanLabelOrFallback(selection.label, ""), emptyMessage: "" });
+      setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, {
+        id: selection.entityID.trim(),
+        label: humanLabelOrFallback(selection.label, ""),
+        emptyMessage: "",
+      }));
       return;
     }
     if (selection.entityKind === "kanban") {
       const logicGateID = logicGateIDFromKanbanBoardID(selection.entityID);
       lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
-      setSelectedLogicGate({ id: logicGateID, label: logicGateID ? humanLabelOrFallback(selection.label, "") : "", emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates." });
+      setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, {
+        id: logicGateID,
+        label: logicGateID ? humanLabelOrFallback(selection.label, "") : "",
+        emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates.",
+      }));
       return;
     }
     if (selection.entityKind === "node" && selection.sourceModule === "company-explorer") {
