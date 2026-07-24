@@ -1941,6 +1941,7 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
     <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
+        className="mango-shared-inbox-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Assign email to inbox"
@@ -1951,6 +1952,7 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
           onSubmit();
         }}
       >
+        <div aria-hidden="true" style={sharedInboxEmailModalAccentStyle} />
         <div style={sharedInboxEmailModalTitleStyle}>Assign email to inbox</div>
         <div style={sharedInboxEmailModalDetailStyle}>Type down the email that you want to use here.</div>
         <label style={sharedInboxEmailModalLabelStyle}>
@@ -1962,13 +1964,14 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
             onChange={(event) => onDraftChange(event.target.value)}
             placeholder="name@example.com"
             disabled={busy}
+            className="mango-shared-inbox-dialog-input"
             style={sharedInboxEmailModalInputStyle}
           />
         </label>
         {error && <div style={sharedInboxEmailModalErrorStyle}>{error}</div>}
         <div style={sharedInboxEmailModalActionsStyle}>
-          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
-          <button type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-secondary" type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-primary" type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
         </div>
       </form>
     </div>
@@ -1995,6 +1998,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
     <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <form
+        className="mango-shared-inbox-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={isSharedInbox ? "Create shared inbox" : "Create Shared Triage folder"}
@@ -2005,6 +2009,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
           onSubmit();
         }}
       >
+        <div aria-hidden="true" style={sharedInboxEmailModalAccentStyle} />
         <div style={sharedInboxEmailModalTitleStyle}>{isSharedInbox ? "Create shared inbox" : "Create folder"}</div>
         <div style={sharedInboxEmailModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Triage"}</div>
         <label style={sharedInboxEmailModalLabelStyle}>
@@ -2015,6 +2020,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
             onChange={(event) => onNameChange(event.target.value)}
             placeholder={isSharedInbox ? "Support inbox" : "Finance"}
             disabled={busy}
+            className="mango-shared-inbox-dialog-input"
             style={sharedInboxEmailModalInputStyle}
           />
         </label>
@@ -2027,14 +2033,15 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
               onChange={(event) => onAccountEmailChange(event.target.value)}
               placeholder="support@example.com"
               disabled={busy}
+              className="mango-shared-inbox-dialog-input"
               style={sharedInboxEmailModalInputStyle}
             />
           </label>
         )}
         {error && <div style={sharedInboxEmailModalErrorStyle}>{error}</div>}
         <div style={sharedInboxEmailModalActionsStyle}>
-          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
-          <button type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Creating" : "Create"}</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-secondary" type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-primary" type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Creating" : "Create"}</button>
         </div>
       </form>
     </div>
@@ -2076,19 +2083,21 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCan
     <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
     <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
       <div
+        className="mango-shared-inbox-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Connect shared inbox email"
         style={sharedInboxEmailModalStyle}
         onPointerDown={(event) => event.stopPropagation()}
       >
+        <div aria-hidden="true" style={sharedInboxEmailModalAccentStyle} />
         <div style={sharedInboxEmailModalTitleStyle}>Connect shared inbox email</div>
         <div style={sharedInboxEmailModalDetailStyle}>{accountEmail} is not connected yet.</div>
         <div style={sharedInboxEmailModalActionsStyle}>
-          <button type="button" disabled={busy} onClick={() => onConnect("google")} style={sharedInboxEmailModalPrimaryButtonStyle}>Google</button>
-          <button type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={sharedInboxEmailModalPrimaryButtonStyle}>Microsoft</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-primary" type="button" disabled={busy} onClick={() => onConnect("google")} style={sharedInboxEmailModalPrimaryButtonStyle}>Google</button>
+          <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-primary" type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={sharedInboxEmailModalPrimaryButtonStyle}>Microsoft</button>
         </div>
-        <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+        <button className="mango-shared-inbox-dialog-action mango-shared-inbox-dialog-action-secondary" type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
       </div>
     </div>
     </AppModalPortal>
@@ -3036,81 +3045,112 @@ const sharedInboxEmailModalBackdropStyle: React.CSSProperties = {
   zIndex: 1,
   display: "grid",
   placeItems: "center",
-  background: "rgba(0,0,0,0.28)",
-  padding: 16,
+  background: "radial-gradient(circle at 50% 38%, rgba(219, 234, 254, 0.24), transparent 36%), rgba(15, 23, 42, 0.38)",
+  padding: 20,
+  backdropFilter: "blur(8px) saturate(1.08)",
+  WebkitBackdropFilter: "blur(8px) saturate(1.08)",
 };
 
 const sharedInboxEmailModalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   display: "grid",
-  gap: 10,
-  border: "1px solid rgba(100,116,139,0.45)",
-  borderRadius: 10,
-  background: "#ffffff",
-  color: "#111827",
-  padding: 12,
-  boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
+  gap: 12,
+  border: "1px solid transparent",
+  borderRadius: 14,
+  background: `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`,
+  color: "#0f172a",
+  padding: 18,
+  boxShadow: `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`,
+  backdropFilter: "blur(18px) saturate(1.1)",
+  WebkitBackdropFilter: "blur(18px) saturate(1.1)",
+};
+
+const sharedInboxEmailModalAccentStyle: React.CSSProperties = {
+  width: 56,
+  height: 4,
+  borderRadius: 999,
+  background: "linear-gradient(90deg, #22d3ee 0%, #60a5fa 46%, #a78bfa 100%)",
+  boxShadow: "0 5px 14px rgba(96, 165, 250, 0.22), 0 0 12px rgba(167, 139, 250, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.52)",
 };
 
 const sharedInboxEmailModalTitleStyle: React.CSSProperties = {
-  fontSize: 13,
+  color: "#0f172a",
+  fontSize: 15,
   fontWeight: 800,
+  letterSpacing: "-0.01em",
 };
 
 const sharedInboxEmailModalDetailStyle: React.CSSProperties = {
-  color: "rgba(15, 23, 42, 0.68)",
-  fontSize: 11,
-  lineHeight: 1.35,
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 520,
+  lineHeight: 1.45,
 };
 
 const sharedInboxEmailModalLabelStyle: React.CSSProperties = {
   display: "grid",
-  gap: 5,
+  gap: 7,
   minWidth: 0,
+  color: "#334155",
   fontSize: 11,
-  fontWeight: 700,
+  fontWeight: 760,
 };
 
 const sharedInboxEmailModalInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
-  height: 34,
-  border: "1px solid rgba(100, 116, 139, 0.28)",
-  borderRadius: 6,
-  padding: "0 9px",
+  height: 40,
+  border: "1px solid rgba(255, 255, 255, 0.82)",
+  borderRadius: 9,
+  background: SIDEBAR_NEUMORPHIC_SURFACE,
+  color: "#0f172a",
+  padding: "0 12px",
   font: "inherit",
-  fontSize: 12,
+  fontSize: 13,
+  fontWeight: 540,
   boxSizing: "border-box",
+  outline: "none",
+  boxShadow: "inset 3px 3px 7px rgba(174, 174, 192, 0.22), inset -3px -3px 7px rgba(255, 255, 255, 0.92), 0 0 0 1px rgba(100, 116, 139, 0.08)",
 };
 
 const sharedInboxEmailModalErrorStyle: React.CSSProperties = {
+  border: "1px solid rgba(244, 63, 94, 0.18)",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(253, 242, 248, 0.9))",
   color: "#8b123f",
   fontSize: 11,
   fontWeight: 700,
+  lineHeight: 1.4,
+  padding: "8px 10px",
 };
 
 const sharedInboxEmailModalActionsStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
-  gap: 8,
+  gap: 10,
+  marginTop: 2,
 };
 
 const sharedInboxEmailModalSecondaryButtonStyle: React.CSSProperties = {
-  minHeight: 32,
-  border: "1px solid rgba(0,0,0,0.16)",
-  borderRadius: 6,
-  background: "#ffffff",
-  color: "#111111",
+  minHeight: 38,
+  border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
+  borderRadius: 9,
+  background: SIDEBAR_NEUMORPHIC_SURFACE,
+  color: "#334155",
   cursor: "pointer",
   font: "inherit",
-  fontWeight: 700,
+  fontSize: 12,
+  fontWeight: 760,
+  padding: "0 12px",
+  boxShadow: SIDEBAR_NEUMORPHIC_SHADOW,
 };
 
 const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
   ...sharedInboxEmailModalSecondaryButtonStyle,
-  border: "1px solid rgba(100,116,139,0.74)",
-  background: "#64748b",
-  color: "#111111",
+  border: "1px solid transparent",
+  background: `${SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`,
+  color: "#0f172a",
+  boxShadow: `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`,
 };
 
 const nodeEditorPopupBackdropStyle: React.CSSProperties = {

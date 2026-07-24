@@ -100,6 +100,80 @@ button, input, textarea, select {
   opacity: 0.58;
 }
 
+.mango-shared-inbox-dialog,
+.mango-shared-inbox-dialog-input,
+.mango-shared-inbox-dialog-action {
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease, color 150ms ease, filter 150ms ease;
+}
+
+.mango-shared-inbox-dialog-input::placeholder {
+  color: rgba(71, 85, 105, 0.5);
+}
+
+.mango-shared-inbox-dialog-input:not(:disabled):hover {
+  border-color: rgba(128, 216, 255, 0.56) !important;
+  box-shadow:
+    0 0 0 2px rgba(92, 238, 255, 0.08),
+    inset 3px 3px 7px rgba(174, 174, 192, 0.2),
+    inset -3px -3px 7px rgba(255, 255, 255, 0.94) !important;
+}
+
+.mango-shared-inbox-dialog-input:focus {
+  border-color: rgba(92, 238, 255, 0.82) !important;
+  box-shadow:
+    0 0 0 3px rgba(92, 238, 255, 0.16),
+    0 0 18px rgba(183, 124, 255, 0.18),
+    inset 2px 2px 6px rgba(174, 174, 192, 0.18),
+    inset -2px -2px 6px rgba(255, 255, 255, 0.92) !important;
+}
+
+.mango-shared-inbox-dialog-action:not(:disabled):hover {
+  border-color: transparent !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(230, 252, 255, 0.6) 46%, rgba(247, 239, 255, 0.7)) padding-box,
+    linear-gradient(135deg, rgba(92, 238, 255, 0.95), rgba(128, 216, 255, 0.84) 34%, rgba(183, 124, 255, 0.9) 72%, rgba(255, 255, 255, 0.88)) border-box !important;
+  color: #0f172a !important;
+  filter: saturate(1.06);
+  transform: translateY(-1px);
+}
+
+.mango-shared-inbox-dialog-action-secondary:not(:disabled):hover {
+  box-shadow:
+    8px 8px 18px rgba(174, 174, 192, 0.28),
+    -6px -6px 15px rgba(255, 255, 255, 0.94),
+    0 0 14px rgba(183, 124, 255, 0.16),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.88) !important;
+}
+
+.mango-shared-inbox-dialog-action-primary:not(:disabled):hover {
+  box-shadow:
+    9px 9px 20px rgba(174, 174, 192, 0.32),
+    -7px -7px 16px rgba(255, 255, 255, 0.96),
+    0 0 18px rgba(183, 124, 255, 0.25),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.mango-shared-inbox-dialog-action:not(:disabled):active {
+  filter: saturate(1.02) brightness(0.99);
+  box-shadow:
+    2px 2px 6px rgba(174, 174, 192, 0.2),
+    -2px -2px 6px rgba(255, 255, 255, 0.72),
+    inset 3px 3px 7px rgba(15, 23, 42, 0.14) !important;
+  transform: translateY(0);
+}
+
+.mango-shared-inbox-dialog-action:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.82);
+  outline-offset: 3px;
+}
+
+.mango-shared-inbox-dialog-input:disabled,
+.mango-shared-inbox-dialog-action:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.48);
+  opacity: 0.56;
+}
+
 /* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */
 .company-explorer-scroll {
   --company-explorer-scroll-accent: rgb(71, 85, 105);
