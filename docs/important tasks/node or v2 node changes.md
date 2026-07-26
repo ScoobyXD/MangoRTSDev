@@ -614,6 +614,467 @@ This is a conceptual target, not an approved exact schema.
 - completed, aborted, failed, or expired upload-processing rows;
 - automatic recovery checkpoints outside retention policy.
 
+## Concrete Node v2 relational model
+
+The working architecture now has two deliberately separate layers:
+
+1. **Ownership:** the permanent record states which Node and, when applicable, which text box owns it.
+2. **Timeline placement:** a small Node timeline row states whether and where that record appears in the mixed chronological feed.
+
+The timeline must never be the only relationship between a record and its Node. If the timeline projection is damaged or rebuilt, the authoritative text box, comment, email link, attachment link, movement, and verification records must still identify their Node directly.
+
+The intended relationship shape is:
+
+```text
+Node
+|- Node text boxes
+|  |- Comment threads
+|  |  |- Comments
+|  |     |- Comment attachments
+|  |- Optional text-box/email links
+|  |- Optional text-box attachment links
+|- Node email-thread links
+|  |- Durable email thread
+|     |- Durable email messages
+|- Node-wide attachment links
+|- Node movements
+|- Verification requests
+|  |- Verification events/stamps
+|- Future intentional Node snapshots
+|- Node timeline items pointing to the records that appear in the feed
+```
+
+### Permanent table map
+
+The recommended permanent business tables are:
+
+| Table or table family | Authoritative responsibility |
+| --- | --- |
+| `nodes` | Node identity and current basic state. |
+| candidate `node_textboxes` | One current Tiptap document and collaboration checkpoint per independently editable Node text box. |
+| candidate `node_movements` | Immutable Logic Gate/status movement facts. |
+| candidate `node_verification_requests` | The request, assigned verifier, requested scope, and content state presented for verification. |
+| candidate `node_verification_events` | Requested, approved, rejected, cancelled, or revoked verification actions/stamps. |
+| candidate `node_timeline_items` | A small ordered read index pointing to records that appear in the Node feed. |
+| candidate `node_textbox_comment_threads` | A conversation attached to a text box or selected range. |
+| candidate `node_textbox_comments` | Individual messages and replies within one comment thread. |
+| candidate `comment_mentions` | Explicit user/group principals mentioned by a comment. |
+| `communications_email_threads` | Durable provider-independent email-thread identity. |
+| `communications_email_messages` | Durable individual email messages and bodies. |
+| candidate `node_email_threads` | The association between a Node and a durable email thread. |
+| candidate `node_textbox_email_links` | Optional association of a Node text box with a thread or exact message already attached to that Node. |
+| `attachments` | File identity, immutable object-storage metadata, hash, MIME type, and byte size. |
+| candidate `node_attachment_links` | Node-wide or text-box-specific attachment ownership. |
+| candidate `comment_attachment_links` | Attachment ownership by an exact comment. |
+| `attachment_variants` | Rebuildable thumbnail/display/send variants. |
+| candidate collaboration update storage | Small high-frequency editor updates with compaction and expiry. This is operational infrastructure, not a generic permanent content table. |
+
+Exact names remain subject to schema review, but the ownership boundaries are the working decision. Permissions and GVIC remain separate business tables; they do not belong in editor JSON or timeline payloads.
+
+## Node and text-box ownership keys
+
+Every permanent Node-owned record must carry:
+
+```text
+company_id
+node_id
+```
+
+Every permanent text-box-owned record must carry:
+
+```text
+company_id
+node_id
+textbox_id
+```
+
+Repeating `node_id` on a nested record is intentional. It makes the normal hot query a narrow tenant- and Node-scoped lookup instead of requiring several joins merely to discover the Node. It also lets permissions, deletion, export, and migration jobs operate on one Node without scanning unrelated owners.
+
+Composite foreign keys must prevent cross-Node associations. For example:
+
+```sql
+foreign key (company_id, node_id, textbox_id)
+references node_textboxes(company_id, node_id, textbox_id)
+```
+
+A comment, attachment, or email link therefore cannot claim a text box belonging to another company or Node. IDs should remain stable across migration; when practical, the legacy text-box `information_id` should become the new `textbox_id` rather than generating an unnecessary replacement identity.
+
+Do not use unvalidated `owner_type` plus `owner_id` strings for these core business relationships. A generic owner pair is acceptable only for isolated operational infrastructure where domain content is not searched and where service-level validation, partitioning, retention, and orphan repair are explicit.
+
+## Concrete Node text-box model
+
+A Node text-box row should contain approximately:
+
+```text
+company_id
+node_id
+textbox_id
+document_json
+plain_text
+document_schema_version
+content_revision
+created_by_user_id
+created_timestamp
+updated_by_user_id
+updated_timestamp
+deleted_timestamp
+
+collaboration_checkpoint
+collaboration_state_vector
+compacted_through_sequence
+materialized_through_sequence
+```
+
+The primary key or an equivalent unique key must include `(company_id, node_id, textbox_id)`. The hot list index should begin with `(company_id, node_id)` and support newest-first creation ordering with a stable ID tie-breaker.
+
+`document_json` is the materialized Tiptap/ProseMirror document used for initial display, export, static rendering, and plain-text/search extraction. It must not be reserialized and rewritten for every short typing batch.
+
+If Yjs is selected, small binary Yjs updates are the durable changes between checkpoints. A hot collaboration process may retain an active document in memory; a cold open loads the compacted checkpoint plus the un-compacted update tail. Compaction refreshes the checkpoint, state vector, materialized Tiptap JSON, and extracted plain text outside the critical typing path.
+
+The product content remains in the domain-specific `node_textboxes`, `project_textboxes`, and Logic Gate storage. A shared collaboration-update table is acceptable because it is operational infrastructure rather than a user-facing content/search table. At scale it should be physically partitioned, indexed by document and sequence, and pruned only after a durable checkpoint includes the updates and the recovery window has elapsed. Three owner-specific operational tables remain an alternative if benchmarks or foreign-key requirements justify the duplication.
+
+## Concrete comments and chats model
+
+Node text-box chats and anchored comments should leave the mixed `information_type = 'Text block chat'` projection model.
+
+A thread should own the selected-text relationship:
+
+```text
+node_textbox_comment_threads
+  company_id
+  node_id
+  textbox_id
+  thread_id
+  selected_quote
+  anchor_start
+  anchor_end
+  anchor_format
+  anchor_status
+  created_by_user_id
+  created_timestamp
+  resolved_by_user_id
+  resolved_timestamp
+```
+
+Individual messages should remain small independently paginated rows:
+
+```text
+node_textbox_comments
+  company_id
+  node_id
+  textbox_id
+  thread_id
+  comment_id
+  parent_comment_id
+  author_user_id
+  body_text
+  created_timestamp
+  edited_timestamp
+  deleted_timestamp
+```
+
+The thread, not every reply, owns the text anchor. Mentions and attachments should use explicit association rows rather than being discoverable only by parsing comment JSON.
+
+If Yjs is selected, new comment anchors should use encoded Yjs relative positions so insertions and deletions before the selection do not invalidate ordinary integer offsets. Store the selected quote and a small amount of surrounding text as recovery/display context. When a relative position can no longer resolve because the selected content was deleted, the conversation remains available and becomes visibly unanchored instead of being deleted.
+
+Comments are ordered and paginated within their thread. They normally do not each become a full Node timeline item because thousands of chat messages would overwhelm the primary Node feed. The main timeline contains the owning text box; opening its conversation pane loads comments by cursor. A future activity view may index comment events separately without changing their authoritative ownership.
+
+## Concrete email associations
+
+Email threads and messages are durable records independent of Nodes. An email thread may eventually be associated with more than one Node, so `communications_email_threads` itself must not contain one authoritative `node_id`.
+
+Use a Node association such as:
+
+```text
+node_email_threads
+  company_id
+  node_id
+  node_email_thread_id
+  email_thread_id
+  attached_by_user_id
+  attached_timestamp
+  detached_timestamp
+```
+
+Then use an optional text-box association:
+
+```text
+node_textbox_email_links
+  company_id
+  node_id
+  textbox_id
+  node_email_thread_id
+  email_message_id nullable
+  linked_by_user_id
+  linked_timestamp
+```
+
+This supports all required cases without copying email content:
+
+- a thread associated with the Node generally;
+- a thread associated with one or more text boxes;
+- an exact message associated with a text box;
+- a Node-wide email column independent of the lifetime of any originating text box.
+
+The text-box link must reference a Node-email link for the same `(company_id, node_id)`. It must not be possible to link a text box directly to a thread that is not attached to its Node.
+
+The Node-open response loads thread summaries, not every body. Message bodies load in bounded pages or when a thread/message is expanded. Detaching a thread soft-deletes the Node association; it does not delete the durable email thread or provider-independent messages.
+
+## Concrete attachment associations
+
+`attachments` owns the file metadata and object-storage identity. Attachment bytes remain outside PostgreSQL. Association rows own where the file is used.
+
+A typed Node link may use:
+
+```text
+node_attachment_links
+  company_id
+  node_id
+  attachment_link_id
+  attachment_id
+  textbox_id nullable
+  relationship_kind
+  created_by_user_id
+  created_timestamp
+  deleted_timestamp
+```
+
+The meaning is:
+
+- `textbox_id is null`: Node-wide file;
+- `textbox_id is not null`: file or inline image associated through that exact text box;
+- `relationship_kind`: an approved value such as `file_attachment` or `inline_image`.
+
+Comment attachments should use a separate comment link because their immediate owner is an exact comment. Email attachments remain associated with `communications_email_messages`; they become Node/text-box files only after an explicit user action creates the corresponding attachment and link.
+
+An inline Tiptap image stores only its permanent attachment ID and presentation attributes in `document_json`. The typed attachment-link row is the authoritative ownership relationship. Never persist file bytes, Blob URLs, data URLs, object URLs, or presigned URLs in Tiptap JSON.
+
+## Concrete Node timeline model
+
+The Node timeline is the common ordered read layer for different business record types. It contains small pointers and presentation metadata, not copied text-box documents, comment bodies, email bodies, or file bytes.
+
+A timeline row should contain approximately:
+
+```text
+company_id
+node_id
+timeline_item_id
+timeline_sequence
+item_type
+occurred_at
+recorded_at
+actor_user_id
+
+textbox_id nullable
+movement_id nullable
+verification_event_id nullable
+node_email_thread_id nullable
+attachment_link_id nullable
+snapshot_id nullable
+
+summary_json
+```
+
+`occurred_at` is when the product event happened. `recorded_at` is when Mango learned about or committed it. The difference matters for imported email, backfilled history, and delayed offline actions.
+
+`timeline_sequence` is a stable tie-breaker when timestamps match. It may be a cached database identity/sequence rather than a contended per-Node counter. The normal ordering and keyset cursor are:
+
+```sql
+order by occurred_at desc, timeline_sequence desc
+```
+
+with a matching index beginning with:
+
+```sql
+(company_id, node_id, occurred_at desc, timeline_sequence desc)
+```
+
+A database check should require exactly the source column appropriate to the `item_type`. Examples:
+
+- `textbox_created` points to `textbox_id`;
+- `node_moved` points to `movement_id`;
+- `verification_requested`, `verification_approved`, `verification_rejected`, and `verification_revoked` point to `verification_event_id`;
+- `email_thread_attached` points to `node_email_thread_id`;
+- `attachment_added` points to `attachment_link_id` when product chooses to show it;
+- `node_snapshot_created` points to `snapshot_id`.
+
+Typed nullable source columns and check constraints are preferred over one unvalidated polymorphic source string for the small, stable set of core timeline types. Adding a genuinely new business timeline type through a migration is acceptable because it keeps referential integrity explicit.
+
+`summary_json` is a deliberately small immutable display snapshot, for example the source/destination Logic Gate names recorded by a movement or the verifier name shown on a stamp. It may make the first page render without several joins, but it is not the source of truth and must be rebuildable from authoritative records.
+
+### What appears in the primary timeline
+
+Everything must be associated with the Node and must have its own timestamps, but not everything should become a full primary timeline row.
+
+The current recommendation is:
+
+- every text box: yes;
+- every Node movement: yes;
+- every verification request and resolution/stamp: yes;
+- attaching an email thread: yes;
+- adding a Node/file attachment: product choice, likely yes for meaningful files;
+- every individual comment/chat message: no;
+- every individual email message: no.
+
+Comments and email messages remain chronologically ordered within their own independently paginated thread. Otherwise thousands of chats and hundreds of replies would drown the work timeline and make the Node-open response unnecessarily large.
+
+The final product decision about attachment and incoming-email activity rows may change which timeline types are visible, but it must not change their direct Node/text-box ownership.
+
+## Movement and verification facts
+
+`node_logic_gate_assignments` represents the Node's current location. It cannot also be the complete movement history. Each move should append an immutable `node_movements` row containing the Node, source and destination Logic Gates/statuses, actor, occurred timestamp, and any historical display-name snapshots required by the audit UI.
+
+A verification stamp must identify a specific content state. It cannot mean "whatever the Node contains when somebody views the stamp later."
+
+A verification request should record:
+
+- requesting user;
+- assigned Verified user at request time, even if GVIC changes later;
+- request timestamp;
+- scope, such as the whole Node or a specific text box;
+- the exact Node snapshot or immutable manifest of text-box IDs and content revisions presented for verification;
+- current request status.
+
+`node_verification_events` should append the request and each approval, rejection, cancellation, or revocation. The visible stamp is backed by the exact event row, and the timeline points to that event. Later user-name, GVIC, or content changes do not rewrite what was originally requested or approved.
+
+## Atomic association and timeline writes
+
+Each user command must write the authoritative record, its timeline item when applicable, and its realtime/outbox event in one database transaction.
+
+Creating a text box:
+
+1. insert `node_textboxes`;
+2. insert its `node_timeline_items` row;
+3. insert the business realtime/outbox event;
+4. commit all three together.
+
+Moving a Node:
+
+1. update the current `node_logic_gate_assignments` row;
+2. insert an immutable `node_movements` row;
+3. insert the movement timeline item;
+4. insert the business realtime/outbox event;
+5. commit together.
+
+Recording a verification stamp:
+
+1. update the request's current status;
+2. insert the immutable verification event;
+3. insert its timeline item;
+4. insert the business realtime/outbox event;
+5. commit together.
+
+Attaching an email or file follows the same rule: write the association and optional timeline item atomically. A unique idempotency key or unique source/event constraint must prevent a retried command from producing two timeline items.
+
+This prevents a timeline pointer to an uncommitted record and prevents an authoritative business event from committing without its required feed entry.
+
+## Scalable Node workspace loading
+
+Opening a Node should normally make one workspace HTTP request, but the backend should satisfy it with several small indexed queries instead of one enormous join that multiplies text boxes, comments, messages, and attachments together.
+
+The first response should include:
+
+- Node header and current placement/GVIC summaries;
+- the first bounded timeline page;
+- text-box documents referenced by the visible timeline page;
+- email-thread summaries, counts, and cursors;
+- attachment metadata summaries and counts;
+- cursors or continuation tokens for every bounded collection.
+
+It should not include:
+
+- thousands of comments;
+- every email body;
+- attachment bytes;
+- all historical timeline pages;
+- old collaboration updates already represented by a checkpoint;
+- editor documents outside the visible text-box window.
+
+The API should collect the visible typed IDs from the timeline page and hydrate each type in a batch such as `where textbox_id = any($1)`. It must not issue one query per timeline row. Comments load when their conversation opens; email messages load when a thread opens; attachment bytes load through the attachment service only when previewed or downloaded.
+
+This provides one convenient initial API call without creating one giant permanent table or one giant SQL join.
+
+## Legacy HTML to Node v2 Tiptap JSON conversion
+
+Only editor HTML becomes Tiptap/ProseMirror JSON. Comments, chats, email bodies, attachment metadata, movements, GVIC, permissions, and verification records remain typed database rows and associations.
+
+The repository currently has JSON storage and validation foundations but no approved complete legacy conversion pipeline. The converter should be a deterministic TypeScript/Node command using the exact same ProseMirror schema as Mango's editor. Tiptap's server-capable HTML utility can generate ProseMirror JSON from HTML when supplied the extension list; do not implement an independent approximate HTML parser in Go.
+
+The conversion-safe extension factory must share node, mark, and attribute definitions with the browser editor while excluding UI-only plugins, DOM menus, uploads, provider connections, and other interactive behavior. Because static conversion does not run ordinary editor transaction hooks, the converter must explicitly add required stable block IDs and other migration-time attributes.
+
+### Conversion sequence
+
+For each current Node `Text box` projection:
+
+1. Read the authoritative current legacy HTML and stable `information_id`.
+2. Calculate and record a source checksum before transformation.
+3. Sanitize the HTML using the approved legacy-input rules.
+4. Discover legacy inline images and resolve/import them into permanent `attachments` before creating JSON.
+5. Replace each image with a permanent Mango attachment reference; never carry temporary URLs into JSON.
+6. Run the Tiptap HTML-to-JSON conversion with Mango's exact conversion-safe extension list.
+7. Add deterministic stable block IDs so the same source and converter version produce the same identities on every rerun.
+8. Wrap the ProseMirror document in the Mango format/schema envelope.
+9. Validate the complete JSON contract, supported nodes/marks/attributes, safe links, mentions, tables, and attachment references.
+10. Extract normalized plain text and compare it with normalized source text.
+11. Compare important structural counts such as lists, tables, links, mentions, and images.
+12. Insert or upsert the domain-specific `node_textboxes` target with an idempotent source mapping.
+13. If Yjs is selected, seed the initial collaboration checkpoint from the validated ProseMirror document once; do not turn the migration into a series of synthetic keystroke updates.
+14. Record the conversion result, target checksum, validation evidence, and any warning in the migration ledger.
+
+The same converter core should support Project text boxes and Logic Gate documents through owner-specific readers/writers. It should never put all converted content into one generic permanent editor table merely for migration convenience.
+
+### Comment-anchor conversion
+
+Legacy comment/chat payloads currently use a text-box/block ID, selected quote, and integer selection offsets. They must be migrated independently from editor content.
+
+For each thread:
+
+1. preserve the original conversation, author IDs, timestamps, reply relationships, mentions, and attachment references;
+2. map the legacy owning `block_id` to the stable new `textbox_id`;
+3. locate the selected quote in the normalized converted document using the old offsets plus before/after context;
+4. classify the result as exact, uniquely recovered, ambiguous, or unanchored;
+5. if Yjs is selected, convert a successful position into encoded relative start/end positions against the seeded document;
+6. preserve ambiguous or unanchored conversations and show their quote/context without a false highlight.
+
+Migration must never silently attach a comment to the wrong repeated phrase merely to achieve a 100-percent anchored count.
+
+### Migration control and rollback
+
+Use an idempotent migration ledger with records such as:
+
+```text
+migration_run_id
+company_id
+source_owner_type
+source_owner_id
+source_document_id
+source_checksum
+target_document_id
+converter_version
+status
+warning_or_error
+target_checksum
+converted_timestamp
+validated_timestamp
+```
+
+The ledger is transitional data retained through conversion, validation, cutover, and the rollback window. It is not a permanent editor-history product.
+
+Recommended rollout:
+
+1. create the new owner-specific tables without changing live reads;
+2. run the converter in dry-run mode against representative fixtures and production-shaped read-only samples;
+3. backfill in small resumable batches;
+4. shadow-read and compare legacy and converted documents;
+5. validate every expected document and association for one workspace;
+6. cut over that workspace atomically;
+7. retain legacy HTML and an immediate rollback path;
+8. observe real editing, multi-tab sync, comments, emails, and attachments;
+9. retire legacy readers/writers only after the rollback period and explicit approval;
+10. delete legacy and migration tables only through a later separately reviewed cleanup.
+
+Do not combine table creation, bulk conversion, live cutover, and legacy deletion into one migration or deployment.
+
 ## Current table audit concerns
 
 Before designing migrations, classify every existing table as authoritative, derived/rebuildable, transitional, or operational/expiring.
@@ -758,7 +1219,7 @@ Measure at minimum:
 
 ## Recommended next design work
 
-The next Codex task should not begin by editing migrations. It should first produce a concrete architecture decision record based on this file and current main.
+The next Codex task should not begin by editing migrations. It should turn this working model into a reviewed architecture decision record, an audited table-lifecycle map, and an implementation sequence based on current main.
 
 Recommended sequence:
 
@@ -767,15 +1228,15 @@ Recommended sequence:
 3. Read `docs/important tasks/realtimechanges.md` for the legacy collaboration history and tests.
 4. Read the current Node timeline documentation and current main implementation.
 5. Audit the exact current readers/writers and row lifecycles of editor, Node information/projection, chat, email, attachment, domain-event, and realtime-outbox tables.
-6. Propose the domain-specific permanent schema for Node text boxes, Project text boxes, and retained Logic Gate storage.
-7. Propose the collaboration stream/checkpoint model without committing to table names prematurely.
-8. Compare Yjs against ProseMirror-step collaboration using Mango's requirements and a small benchmark/prototype plan.
-9. Define JSON's role if Yjs is selected: materialized projection/export rather than per-keystroke authoritative write stream.
-10. Define comment anchor storage and old-comment fallback behavior.
-11. Define exact retention and compaction rules for every operational table.
-12. Define API routes and paginated read models.
-13. Define a safe migration/cutover/rollback sequence.
-14. Only after review and product approval should implementation work begin.
+6. Translate the concrete ownership model in this document into reviewed DDL-level keys, constraints, indexes, deletion behavior, and authoritative/derived classifications.
+7. Decide the collaboration stream/checkpoint storage through a measured Yjs versus ProseMirror-step proof of concept.
+8. Confirm JSON's role as the domain row's materialized document/export rather than a per-keystroke full-snapshot write stream.
+9. Finalize comment-thread, anchor, email-link, attachment-link, movement, verification, and timeline columns.
+10. Define exact retention and compaction rules for every operational table.
+11. Define Node workspace APIs, batch hydration, keyset cursors, and realtime messages.
+12. Implement and test the conversion command in dry-run mode before any live backfill.
+13. Define and test the migration, shadow-read, cutover, and rollback sequence.
+14. Only after review and product approval should live schema/application cutover work begin.
 
 ## Decisions currently considered confirmed
 
@@ -788,6 +1249,16 @@ Recommended sequence:
 - The current Logic Gate information/projection structure is preferred pending detailed review.
 - Editor behavior and collaboration protocol should still be shared.
 - A Node ties together timeline, text boxes, chats, email associations, attachments, permissions, GVIC, movements, verification, and future snapshots.
+- Every permanent Node-owned record identifies its company and Node directly; text-box-owned records also identify the owning text box and use composite foreign keys that prevent cross-Node links.
+- The Node timeline is a small ordered read index with typed pointers to authoritative records, not the sole ownership relationship and not a container for copied documents or bodies.
+- Text boxes, movements, verification requests/resolutions, and attached email threads appear in the primary timeline; individual comments and email messages remain ordered and paginated inside their own threads.
+- Current Node placement and immutable movement history are separate facts.
+- A verification stamp records the exact content snapshot or revision manifest that was presented, along with the assigned verifier and immutable action history.
+- Email association has two levels: durable thread-to-Node ownership plus optional text-box/thread or text-box/message links.
+- Attachment ownership uses typed Node/text-box/comment/message links while bytes remain in object storage.
+- Commands that create an authoritative record, a timeline item, and a realtime event commit those changes atomically and idempotently.
+- Node open uses one convenient workspace API backed by several bounded indexed queries and batch hydration rather than one enormous join.
+- Only legacy editor HTML converts to Tiptap JSON; comments, email, attachments, movements, GVIC, permissions, and verification remain typed rows.
 - Heavy records remain separate and independently loadable.
 - Emails remain durable independent HTML/message records.
 - Attachments remain external bytes with permanent IDs and relationships.
@@ -811,11 +1282,10 @@ Recommended sequence:
 - How frequently automatic compaction occurs.
 - How long acknowledged updates and automatic checkpoints remain.
 - Whether users receive editor version history beyond intentional Node snapshots.
-- Exact normalized chat and comment-anchor tables.
-- Exact Node-to-email/text-box/message association constraints.
+- Final SQL names/types for normalized comment threads, comments, mentions, attachments, and anchors; relative-position encoding depends on the collaboration choice.
+- Exact SQL constraint names and detach/delete lifecycle for the confirmed Node-email and optional text-box/message association pattern.
 - How large Logic Gate documents are internally segmented if benchmarks require it.
-- Whether `domain_events` becomes the deliberate permanent lightweight event log or is reduced/replaced.
-- Whether the existing Node timeline table is authoritative history or a projection of underlying business facts.
+- Whether `domain_events` becomes the deliberate permanent lightweight event log or is reduced/replaced; the Node timeline itself remains a typed read index over authoritative facts.
 - Search technology and indexing cadence.
 - Migration handling for legacy HTML documents that expand significantly during conversion.
 
