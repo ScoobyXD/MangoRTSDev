@@ -766,13 +766,26 @@ test("IndexedDB cleanup failure after acknowledgement unpins and clears after st
     }
   }
 });
-test("non-email document surfaces share the gate and email stays on the HTML editor", () => {
+test("non-email document surfaces share the gate, proof dependencies stay dev-only, and email stays HTML", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
   assert.doesNotMatch(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /MangoTiptapEditor|useMangoEditorDataFormat|tiptap_json/);
   assert.match(read("frontend/src/modules/editor/EditorContent.tsx"), /useMangoEditorDataFormat/);
-  const packageJSON = read("frontend/package.json").toLowerCase();
-  assert.doesNotMatch(packageJSON, /hocuspocus|\byjs\b|tiptap-cloud/);
+  const packageJSON = JSON.parse(read("frontend/package.json")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  assert.doesNotMatch(JSON.stringify(packageJSON.dependencies ?? {}).toLowerCase(), /hocuspocus|\byjs\b|tiptap-cloud/);
+  assert.match(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /@hocuspocus\/server/);
+  assert.match(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /"yjs"/);
+  for (const runtimePath of [
+    "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
+    "frontend/src/modules/editor/EditorContent.tsx",
+    "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx",
+    "frontend/src/modules/editor/tiptap/mangoTiptapSync.ts",
+  ]) {
+    assert.doesNotMatch(read(runtimePath).toLowerCase(), /hocuspocus|from ["']yjs["']|tiptap-cloud/);
+  }
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
   assert.match(sync, /store\.get\(storage_key\)/);
   assert.doesNotMatch(sync, /getAll\(/);
