@@ -47,14 +47,22 @@ Completed decisions and discovery:
 
 Remaining foundation work:
 
-- [ ] Reconcile the live dev schema and `schema_migrations` ledger before authoring new migrations.
-- [ ] Finish the authoritative/derived/transitional/operational lifecycle map for every affected existing table.
-- [ ] Finalize DDL-level names, columns, composite foreign keys, deletion behavior, indexes, and retention rules.
-- [ ] Decide the exact Yjs provider, update/checkpoint layout, compaction cadence, and recovery retention through a measured proof of concept.
-- [ ] Define the Node workspace API, cursor contracts, batch hydration, idempotent mutations, and realtime messages.
-- [ ] Implement additive Node-text-box, normalized comment, email-link, attachment-link, movement, verification, and three-type timeline foundations behind inactive gates.
+- [ ] Complete the human-controlled live dev schema and `schema_migrations` reconciliation before applying another migration. The read-only audit proved 168 repository files versus 87 ledger rows while many unledgered objects already exist; blindly running the missing files is unsafe.
+- [x] Finish the authoritative/derived/transitional/operational lifecycle map for every affected existing table.
+- [x] Finalize DDL-level names, columns, composite foreign keys, deletion behavior, indexes, and retention rules for the inactive Node foundation.
+- [ ] Finish the Yjs provider decision with PostgreSQL durability/acknowledgement and compute measurements. A six-client Hocuspocus v4/Yjs 13.6.8 proof now passes concurrent, offline, reordered/idempotent, and restart recovery and fixes the candidate layout/cadence/retention.
+- [x] Define the Node workspace API, cursor contracts, batch hydration, idempotent mutations, transaction boundaries, collaboration tickets, durable state-vector acknowledgements, and realtime boundaries.
+- [x] Implement additive Node-text-box, normalized comment, email-link, attachment-link, movement, verification, three-type timeline, Yjs update/checkpoint, and migration-ledger table foundations behind inactive gates.
 - [ ] Implement the shared Tiptap schema and Mango migration wrapper around Tiptap's HTML-to-JSON utility.
 - [ ] Build dry-run conversion, validation, migration-ledger, shadow-read, and rollback tooling without cutting over live reads.
+
+2026-07-26 Phase 1 foundation milestone evidence:
+
+- `docs/backend/node-v2-phase1-foundation.md` records the forced-read-only development audit, complete affected-table lifecycle map, exact API/cursor/transaction contracts, Hocuspocus/Yjs measurements, compaction and retention policy, and conversion/rollback rules.
+- `backend/db/migrations/20260726_node_v2_phase1_foundation.sql` and the marked block in `backend/db/schema.sql` create only additive inactive storage. They do not backfill, enable a workspace gate, redirect a reader, delete a legacy row, convert email HTML, or impose a document-size constraint.
+- `backend/internal/store/node_v2_foundation_schema_test.go` keeps migration and canonical schema definitions identical and rejects destructive/cutover/content-boundary regressions.
+- `frontend/scripts/node-v2-yjs-hocuspocus-poc.mjs` uses generated inputs at the live p50, p95, and maximum text-box byte sizes. It does not read or print document content.
+- The migration-ledger blocker, real PostgreSQL collaboration persistence/acknowledgement proof, shared converter, dry-run/shadow tooling, and post-cutover rollback exporter remain open. Therefore Phase 1 as a whole is not complete.
 
 Phase 1 completion gate: reviewed DDL and APIs exist; representative legacy content converts and validates in dry-run/shadow mode; old HTML remains recoverable; and no unresolved ownership rule or unexplained live-table lifecycle remains.
 
@@ -1083,6 +1091,8 @@ This provides one convenient initial API call without creating one giant permane
 
 Only editor HTML becomes Tiptap/ProseMirror JSON. Comments, chats, email bodies, attachment metadata, movements, GVIC, permissions, and verification records remain typed database rows and associations.
 
+The physical 3.58 GB `node_information` footprint is not the conversion input. The migration must follow the current authoritative projection or pointer, deduplicate by stable document identity, and create one target document for each real retained Node text box, Project text box, or Logic Gate editor. It must not convert superseded whole-document saves, obsolete collaboration operations, duplicate historical payloads, or other write-amplification debris into additional Tiptap documents. The 2026-07-26 audit found only about 3.5 MB of active projected `information` values; that is useful scope evidence, not a promised final converted size. Soft-deleted or otherwise recoverable editor documents require an explicit retention decision before backfill rather than being silently converted or discarded.
+
 The repository currently has JSON storage and validation foundations but no approved complete legacy conversion pipeline. The converter should be a deterministic TypeScript/Node command using the exact same ProseMirror schema as Mango's editor. Tiptap's server-capable HTML utility can generate ProseMirror JSON from HTML when supplied the extension list; do not implement an independent approximate HTML parser in Go.
 
 The conversion-safe extension factory must share node, mark, and attribute definitions with the browser editor while excluding UI-only plugins, DOM menus, uploads, provider connections, and other interactive behavior. Because static conversion does not run ordinary editor transaction hooks, the converter must explicitly add required stable block IDs and other migration-time attributes.
@@ -1125,6 +1135,10 @@ Migration must never silently attach a comment to the wrong repeated phrase mere
 
 ### Migration control and rollback
 
+Conversion must be additive: it writes new owner-specific JSON/collaboration storage without overwriting or deleting the source HTML. Before the first real backfill or workspace cutover, take a verified restorable development-database snapshot or approved logical backup and record source checksums in the migration ledger. Keep the original HTML tables and readers intact throughout shadow comparison and the rollback window.
+
+A cutover rollback must also preserve edits made after cutover. Before switching a workspace back to the legacy reader, either those edits must already have been safely mirrored through a controlled compatibility path or the current Tiptap document must be exported back to validated legacy HTML. Merely pointing users at a stale pre-cutover HTML copy is not an acceptable rollback.
+
 Use an idempotent migration ledger with records such as:
 
 ```text
@@ -1149,14 +1163,15 @@ Recommended rollout:
 
 1. create the new owner-specific tables without changing live reads;
 2. run the converter in dry-run mode against representative fixtures and production-shaped read-only samples;
-3. backfill in small resumable batches;
-4. shadow-read and compare legacy and converted documents;
-5. validate every expected document and association for one workspace;
-6. cut over that workspace atomically;
-7. retain legacy HTML and an immediate rollback path;
-8. observe real editing, multi-tab sync, comments, emails, and attachments;
-9. retire legacy readers/writers only after the rollback period and explicit approval;
-10. delete legacy and migration tables only through a later separately reviewed cleanup.
+3. take and verify a restorable backup before changing live dev data;
+4. backfill only the deduplicated current/recoverable editor-document set in small resumable batches;
+5. shadow-read and compare legacy and converted documents;
+6. validate every expected document and association for one workspace;
+7. cut over that workspace atomically;
+8. retain legacy HTML and a tested immediate rollback path that preserves post-cutover edits;
+9. observe real editing, multi-tab sync, comments, emails, and attachments;
+10. retire legacy readers/writers only after the rollback period and explicit approval;
+11. delete legacy and migration tables only through a later separately reviewed cleanup.
 
 Do not combine table creation, bulk conversion, live cutover, and legacy deletion into one migration or deployment.
 
