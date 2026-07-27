@@ -154,6 +154,7 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /line-height:\s*20px/);
   assert.match(presentationCSS, /padding:\s*12px 13px/);
   assert.match(presentationCSS, /min-height:\s*100%/);
+  assert.match(presentationCSS, /\.mango-tiptap-active-surface[^}]+height:\s*100%/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror:focus[^}]+outline:\s*none/s);
   assert.match(presentationCSS, /data-mango-editor-editable="true"[^}]+cursor:\s*text/s);
   assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) > li::before/);
@@ -396,6 +397,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(preventScrollEditorFocuses >= 1, "pointer activation must focus without asking the browser to scroll");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
+    assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
     const activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
