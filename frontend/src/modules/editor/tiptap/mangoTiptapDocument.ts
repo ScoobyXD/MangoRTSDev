@@ -271,3 +271,15 @@ export function serializeMangoTiptapDocument(value: MangoTiptapDocument): string
   }
   return serialized;
 }
+
+export function needsMangoTiptapLegacyDateHeadingBreak(value: MangoTiptapDocument): boolean {
+  const firstBlock = value.document.content?.[0];
+  if (firstBlock?.type !== "paragraph") return false;
+  const [dateNode, headingNode] = firstBlock.content ?? [];
+  if (
+    dateNode?.type !== "text"
+    || !/^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/.test(dateNode.text ?? "")
+    || headingNode?.type !== "text"
+  ) return false;
+  return (headingNode.marks ?? []).some((mark) => mark.type === "bold");
+}

@@ -43,6 +43,7 @@ import {
 } from "./mangoTiptapAnnotations.js";
 import {
   createEmptyMangoTiptapDocument,
+  needsMangoTiptapLegacyDateHeadingBreak,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
   type MangoTiptapDocument,
@@ -845,6 +846,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           "aria-label": ariaLabel,
           "aria-multiline": "true",
           "data-placeholder": placeholder ?? "",
+          "data-mango-legacy-leading-date-heading": needsMangoTiptapLegacyDateHeadingBreak(currentDocumentRef.current) ? "true" : "false",
           class: "mango-tiptap-prosemirror",
         },
         handleKeyDown: (_view, event) => {

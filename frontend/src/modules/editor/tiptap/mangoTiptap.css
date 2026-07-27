@@ -1,13 +1,16 @@
 .mango-tiptap-static-document,
 .mango-tiptap-prosemirror {
-  line-height: 1.55;
+  padding: 12px 13px;
+  font-family: var(--mango-font-family);
+  font-size: 14px;
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
 
 .mango-tiptap-static-document p,
 .mango-tiptap-prosemirror p {
-  min-height: 1.55em;
-  margin: 0 0 0.2em;
+  min-height: 20px;
+  margin: 0;
   white-space: pre-wrap;
 }
 
@@ -73,13 +76,108 @@
   list-style: none;
 }
 
+/* Match the legacy Node text-box list geometry and four-level marker sequence. */
+.mango-tiptap-static-document ul:not([data-type="taskList"]),
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) {
+  margin: 2px 0;
+  padding-left: 20px;
+  list-style: none;
+  white-space: pre-wrap;
+  clear: both;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]),
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) {
+  margin: 2px 0 2px 2px;
+  padding-left: 22px;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) > li,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) > li {
+  position: relative;
+  min-height: 20px;
+  margin: 1px 0;
+  padding-left: 24px;
+  list-style: none;
+  white-space: pre-wrap;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) > li::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  width: 5px;
+  height: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: #000000;
+  box-shadow: none;
+  transform: translateY(-50%);
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 1px solid #000000;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 0;
+  border-radius: 1px;
+  background: #000000;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 1px solid #000000;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.mango-tiptap-static-document ol,
+.mango-tiptap-prosemirror ol {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 2px 0;
+  padding-inline-start: 32px;
+  list-style-type: decimal;
+  list-style-position: outside;
+  white-space: pre-wrap;
+  clear: both;
+}
+
+.mango-tiptap-static-document ol ol,
+.mango-tiptap-prosemirror ol ol {
+  padding-inline-start: 28px;
+}
+
+.mango-tiptap-static-document ol > li,
+.mango-tiptap-prosemirror ol > li {
+  min-height: 20px;
+  margin: 1px 0;
+  padding-inline-start: 4px;
+}
+
+.mango-tiptap-static-document[data-mango-legacy-leading-date-heading="true"] > p:first-child > strong:first-of-type,
+.mango-tiptap-static-document[data-mango-legacy-leading-date-heading="true"] > p:first-child > span:first-of-type,
+.mango-tiptap-prosemirror[data-mango-legacy-leading-date-heading="true"] > p:first-child > strong:first-of-type,
+.mango-tiptap-prosemirror[data-mango-legacy-leading-date-heading="true"] > p:first-child > span:first-of-type {
+  display: block;
+  margin-top: 20px;
+}
+
 .mango-tiptap-static-document .mango-tiptap-annotation--chat,
 .mango-tiptap-static-document .mango-tiptap-annotation--comment,
 .mango-tiptap-prosemirror .mango-tiptap-annotation--chat,
 .mango-tiptap-prosemirror .mango-tiptap-annotation--comment {
   border-radius: 2px;
-  background: rgba(250, 204, 21, 0.38);
-  box-shadow: inset 0 -2px 0 rgba(202, 138, 4, 0.65);
+  background: linear-gradient(135deg, rgba(254, 255, 102, 0.72), rgba(250, 232, 28, 0.58));
+  box-shadow: none;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   cursor: pointer;
@@ -89,9 +187,8 @@
 .mango-tiptap-static-document .mango-tiptap-annotation--comment.is-active,
 .mango-tiptap-prosemirror .mango-tiptap-annotation--chat.is-active,
 .mango-tiptap-prosemirror .mango-tiptap-annotation--comment.is-active {
-  background: rgba(250, 204, 21, 0.58);
-  outline: 1px solid rgba(202, 138, 4, 0.78);
-  outline-offset: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 80, 0.88), rgba(250, 245, 24, 0.78));
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.72), 0 0 18px rgba(250, 255, 0, 0.34);
 }
 
 .mango-tiptap-static-document .mango-tiptap-annotation--change,

@@ -223,6 +223,22 @@ function normalizeLegacyTables(root: Element): void {
   }
 }
 
+
+function normalizeVisibleLegacyRootNewlines(root: Element, document: Document): void {
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType !== 3) continue;
+    const value = child.textContent ?? "";
+    if (!value.trim() || !/[\r\n]/.test(value)) continue;
+    const lines = value.replace(/\r\n?/g, "\n").split("\n");
+    const fragment = document.createDocumentFragment();
+    lines.forEach((line, index) => {
+      if (line) fragment.appendChild(document.createTextNode(line));
+      if (index < lines.length - 1) fragment.appendChild(document.createElement("br"));
+    });
+    child.replaceWith(fragment);
+  }
+}
+
 function normalizeLegacyHTML(storedHTML: string): { html: string; text: string; sourceCounts: MangoHTMLConversionCounts } {
   const html = storedHTML.startsWith(LEGACY_HTML_PREFIX)
     ? storedHTML.slice(LEGACY_HTML_PREFIX.length)
@@ -245,6 +261,7 @@ function normalizeLegacyHTML(storedHTML: string): { html: string; text: string; 
     normalizeLegacyTextStyles(root);
     normalizeLegacyHighlights(root, document);
     normalizeLegacyTables(root);
+    normalizeVisibleLegacyRootNewlines(root, document);
     const normalized = root.innerHTML;
     return {
       html: normalized,
