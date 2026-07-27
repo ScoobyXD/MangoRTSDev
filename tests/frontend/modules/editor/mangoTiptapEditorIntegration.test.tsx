@@ -153,6 +153,8 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /font-size:\s*14px/);
   assert.match(presentationCSS, /line-height:\s*20px/);
   assert.match(presentationCSS, /padding:\s*12px 13px/);
+  assert.match(presentationCSS, /min-height:\s*100%/);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror:focus[^}]+outline:\s*none/s);
   assert.match(presentationCSS, /data-mango-editor-editable="true"[^}]+cursor:\s*text/s);
   assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) > li::before/);
   assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) > li::before/);
@@ -192,6 +194,28 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("indexedDB", fakeIndexedDB, restores);
   installGlobal("IDBKeyRange", IDBKeyRange, restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  const imageFetchURLs: string[] = [];
+  const NativeResponse = globalThis.Response;
+  installGlobal("fetch", async (input: RequestInfo | URL) => {
+    imageFetchURLs.push(String(input));
+    return new NativeResponse(new Blob(["image-bytes"], { type: "image/png" }), {
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+    });
+  }, restores);
+  const originalFocus = dom.window.HTMLElement.prototype.focus;
+  let preventScrollEditorFocuses = 0;
+  dom.window.HTMLElement.prototype.focus = function focus(options?: FocusOptions) {
+    if (this.classList.contains("mango-tiptap-prosemirror")) {
+      if (options?.preventScroll) preventScrollEditorFocuses += 1;
+      else {
+        const editorRoot = this.closest<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
+        if (editorRoot) editorRoot.scrollTop = 0;
+      }
+    }
+    originalFocus.call(this, options);
+  };
+  restores.push(() => { dom.window.HTMLElement.prototype.focus = originalFocus; });
   const requestFrame = (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) as unknown as number;
   const cancelFrame = (handle: number) => clearTimeout(handle);
   dom.window.requestAnimationFrame = requestFrame;
@@ -311,6 +335,15 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           resourceID="node-1"
           documentID="document-1"
           requestJSON={requestJSON}
+          attachmentContext={{
+            requestJSON,
+            apiBase: "http://localhost",
+            companyID: "company-1",
+            resourceType: "node",
+            resourceID: "node-1",
+            informationID: "document-1",
+            editorSurface: "node",
+          }}
           subscribeToCanonicalChange={(recover) => {
             subscriptionRecover = recover;
             subscriptions += 1;
@@ -353,14 +386,39 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       "visible entry should subscribe and refresh canonical state",
     );
 
+    editorRoot.scrollTop = 287;
     await act(async () => {
       editorRoot.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 }));
     });
     await waitFor(() => controllerRef.current !== null, "a normal pointer click should activate a visible ProseMirror editor");
+    await flushAsyncWork(2);
+    assert.equal(editorRoot.scrollTop, 287, "activating a scrolled JSON document must keep its exact text-box scroll position");
+    assert.ok(preventScrollEditorFocuses >= 1, "pointer activation must focus without asking the browser to scroll");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
+    const activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    assert.ok(activeImageFrame);
+    await act(async () => {
+      activeImageFrame.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(() => activeImageFrame.dataset.selected === "true", "clicking an inline image should create a visible Tiptap node selection");
+    assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
+    assert.ok(Array.from(activeImageFrame.querySelectorAll("button")).some((button) => button.textContent === "Download"), "selected inline images expose their download controls");
+    assert.equal(editorRoot.querySelector('[aria-label="Highlighted text actions"]'), null, "image node selections must not open the text-selection toolbar");
+    await act(async () => {
+      activeImageFrame.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(() => Boolean(editorRoot.querySelector('[role="dialog"][aria-label="Preview image.png"]')), "double-clicking an inline image should open its full-screen preview");
+    const imagePreview = editorRoot.querySelector<HTMLElement>('[role="dialog"][aria-label="Preview image.png"]');
+    assert.ok(imagePreview?.querySelector('button[aria-label="Download image"]'), "the full-screen image preview should expose a download button");
+    await waitFor(() => Boolean(imagePreview?.querySelector("img")), "the full-screen image preview should load the original attachment");
+    assert.ok(imageFetchURLs.some((url) => url.includes("variant=original")), "the full-screen preview should request the original image variant");
+    const closeImagePreview = imagePreview?.querySelector<HTMLButtonElement>('button[aria-label="Close image preview"]');
+    assert.ok(closeImagePreview);
+    await act(async () => { closeImagePreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => !editorRoot.querySelector('[role="dialog"][aria-label="Preview image.png"]'), "the inline image preview should close normally");
     resetEditorRuntimeMetricsForTests();
     const changeCountBeforeTyping = changes.length;
     const alphaWalker = dom.window.document.createTreeWalker(activeProseMirror, dom.window.NodeFilter.SHOW_TEXT);
