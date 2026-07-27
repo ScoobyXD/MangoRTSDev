@@ -1070,6 +1070,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       className={className}
       style={{ position: "relative", minWidth: 0, minHeight: 0, ...style }}
       data-mango-editor-format="tiptap_json"
+      data-mango-editor-editable={editable || undefined}
       data-mango-editor-state={lifecycle.state}
       data-mango-editor-pinned={lifecycle.pinned || undefined}
       onPointerDown={!isActive ? activateFromPointer : undefined}

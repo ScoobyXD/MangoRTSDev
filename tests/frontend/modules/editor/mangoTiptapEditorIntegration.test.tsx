@@ -6,6 +6,7 @@ import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { Simulate } from "react-dom/test-utils";
 
 import { getEditorRuntimeMetrics, resetEditorRuntimeMetricsForTests } from "../../../../frontend/src/modules/editor/editorRuntimeMetrics.ts";
 import type { MangoTiptapFormattingController } from "../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx";
@@ -152,6 +153,7 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /font-size:\s*14px/);
   assert.match(presentationCSS, /line-height:\s*20px/);
   assert.match(presentationCSS, /padding:\s*12px 13px/);
+  assert.match(presentationCSS, /data-mango-editor-editable="true"[^}]+cursor:\s*text/s);
   assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) > li::before/);
   assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) > li::before/);
   assert.match(presentationCSS, /border-radius:\s*999px/);
@@ -199,6 +201,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   if (!dom.window.HTMLElement.prototype.scrollIntoView) dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
   if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  if (!dom.window.document.elementFromPoint) {
+    Object.defineProperty(dom.window.document, "elementFromPoint", {
+      configurable: true,
+      value: () => dom.window.document.querySelector(".mango-tiptap-prosemirror") ?? dom.window.document.body,
+    });
+  }
 
   const observers: TestIntersectionObserver[] = [];
   class TestIntersectionObserver {
@@ -244,6 +252,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let canonicalDocument = value;
   let canonicalAnnotations = annotations.map(({ id, kind, from, to }) => ({ id, kind, from, to }));
   let postStarted = false;
+  let postedDocument: MangoTiptapDocument | null = null;
   let releasePost: (() => void) | undefined;
   let subscriptions = 0;
   let unsubscriptions = 0;
@@ -258,6 +267,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
     }
     postStarted = true;
+    postedDocument = init.json && typeof init.json === "object" && "document" in init.json
+      ? (init.json as { document: MangoTiptapDocument }).document
+      : null;
     await new Promise<void>((resolve) => { releasePost = resolve; });
     canonicalRevision += 1;
     canonicalDocument = init.json && typeof init.json === "object" && "document" in init.json
@@ -325,6 +337,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const editorRoot = container.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
     assert.ok(editorRoot);
     await waitFor(() => editorRoot.dataset.mangoEditorState === "sleeping", "canonical preparation should finish before visibility changes");
+    assert.equal(editorRoot.dataset.mangoEditorEditable, "true", "editable sleeping JSON documents must advertise their text cursor state");
     assert.equal(subscriptions, 0, "the 600px preparation margin must not create a realtime document scope");
     for (const annotation of annotations) {
       assert.ok(editorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `sleeping renderer should paint ${annotation.id}`);
@@ -336,16 +349,67 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => subscriptions === 1 && canonicalReads === 2, "visible entry should subscribe and refresh canonical state");
 
     await act(async () => {
-      editorRoot.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
+      editorRoot.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 }));
     });
-    await waitFor(() => controllerRef.current !== null, "visible focused JSON document should activate a ProseMirror editor");
+    await waitFor(() => controllerRef.current !== null, "a normal pointer click should activate a visible ProseMirror editor");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
+    assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
     resetEditorRuntimeMetricsForTests();
     const changeCountBeforeTyping = changes.length;
+    const alphaWalker = dom.window.document.createTreeWalker(activeProseMirror, dom.window.NodeFilter.SHOW_TEXT);
+    let alphaText: Text | null = null;
+    while (alphaWalker.nextNode()) {
+      const candidate = alphaWalker.currentNode as Text;
+      if (candidate.data === "Alpha") {
+        alphaText = candidate;
+        break;
+      }
+    }
+    assert.ok(alphaText, "the active document should contain the paragraph used for the typing regression test");
+    const typedText = " typed through the editor";
     await act(async () => {
-      for (let index = 0; index < 10; index += 1) assert.equal(controllerRef.current?.indent(), true);
+      activeProseMirror.focus();
+      const range = dom.window.document.createRange();
+      range.setStart(alphaText!, alphaText!.data.length);
+      range.collapse(true);
+      const selection = dom.window.document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      const beforeInput = new dom.window.InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: typedText,
+      });
+      Simulate.beforeInput(activeProseMirror, {
+        data: typedText,
+        inputType: "insertText",
+        nativeEvent: beforeInput,
+      } as never);
+      if (!beforeInput.defaultPrevented) {
+        const inserted = dom.window.document.createTextNode(typedText);
+        range.insertNode(inserted);
+        range.setStartAfter(inserted);
+        range.collapse(true);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      const input = new dom.window.InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: typedText,
+      });
+      Simulate.input(activeProseMirror, {
+        data: typedText,
+        inputType: "insertText",
+        nativeEvent: input,
+      } as never);
+    });
+    await waitFor(() => getEditorRuntimeMetrics().transactions >= 1, "normal typing should create an immediate ProseMirror transaction");
+    await act(async () => {
+      for (let index = 0; index < 9; index += 1) assert.equal(controllerRef.current?.indent(), true);
     });
     assert.ok(getEditorRuntimeMetrics().transactions >= 10, "each immediate ProseMirror edit should transact in memory");
     assert.equal(getEditorRuntimeMetrics().full_document_serializations, 0, "transaction burst must not serialize eagerly");
@@ -354,6 +418,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(editorRoot.dataset.mangoEditorPinned, "true", "dirty work pins the mounted editor immediately");
 
     await waitFor(() => postStarted, "quiet-period batch should start one backend save");
+    assert.match(JSON.stringify(postedDocument), /Alpha typed through the editor/, "the backend save must contain text entered through the normal editable surface");
     assert.equal(getEditorRuntimeMetrics().full_document_serializations, 1);
     assert.equal(getEditorRuntimeMetrics().indexeddb_writes, 1);
     assert.equal(changes.length, changeCountBeforeTyping + 1);
@@ -362,7 +427,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     });
     const pendingRecord = await readExactMangoTiptapPending(pendingKey);
     assert.ok(pendingRecord);
-    assert.deepEqual(pendingRecord.commits[0]?.annotations, canonicalAnnotations, "mapped positions share the exact pending save batch");
+    const alphaAnnotation = canonicalAnnotations.find((annotation) => annotation.id === "annotation-1");
+    assert.ok(alphaAnnotation);
+    const expectedMappedAnnotations = canonicalAnnotations.map((annotation) => annotation.from >= alphaAnnotation.to
+      ? { ...annotation, from: annotation.from + typedText.length, to: annotation.to + typedText.length }
+      : annotation);
+    assert.deepEqual(pendingRecord.commits[0]?.annotations, expectedMappedAnnotations, "typed text and shifted annotation positions share the exact pending save batch");
 
     exactObserver.trigger(false);
     assert.equal(unsubscriptions, 1, "offscreen dirty editor releases the exact realtime scope immediately");

@@ -7,6 +7,11 @@
   overflow-wrap: anywhere;
 }
 
+[data-mango-editor-format="tiptap_json"][data-mango-editor-editable="true"] .mango-tiptap-static-document,
+.mango-tiptap-prosemirror[contenteditable="true"] {
+  cursor: text;
+}
+
 .mango-tiptap-static-document p,
 .mango-tiptap-prosemirror p {
   min-height: 20px;
