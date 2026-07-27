@@ -1,15 +1,16 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Editor, type JSONContent } from "@tiptap/core";
+import { Editor } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
-import { absolutePositionToRelativePosition, yUndoPluginKey } from "@tiptap/y-tiptap";
+import { absolutePositionToRelativePosition, relativePositionToAbsolutePosition, yUndoPluginKey } from "@tiptap/y-tiptap";
 import * as Y from "yjs";
 import { fetchMangoAttachmentBlob } from "../../attachments/attachmentApi.js";
 import type { MentionableCompanyUser } from "../editorMentions.js";
+import { MangoTiptapAnnotations, navigateMangoTiptapTarget, updateMangoTiptapAnnotations } from "../tiptap/mangoTiptapAnnotations.js";
 import { createMangoTiptapExtensions, MangoAttachmentImage, type MangoAttachmentImageAttributes } from "../tiptap/mangoTiptapExtensions.js";
 import type { NodeV2Client } from "./nodeV2Api.js";
 import { NodeV2SyncController, type NodeV2SaveState } from "./nodeV2Sync.js";
-import type { NodeV2TextBox } from "./nodeV2Types.js";
+import type { NodeV2CommentThread, NodeV2TextBox } from "./nodeV2Types.js";
 
 export type NodeV2SelectionAnchor = {
   selectedQuote: string;
@@ -17,7 +18,7 @@ export type NodeV2SelectionAnchor = {
   afterText: string;
   startBase64: string;
   endBase64: string;
-  status: "anchored" | "legacy_unanchored";
+  status: "anchored" | "unanchored";
 };
 
 export type NodeV2InlineImage = Pick<MangoAttachmentImageAttributes, "attachmentId" | "filename" | "mimeType" | "width" | "height">;
@@ -26,6 +27,7 @@ export type NodeV2EditorHandle = {
   flush: (reason?: string) => Promise<void>;
   selectionAnchor: () => NodeV2SelectionAnchor | null;
   insertImages: (images: NodeV2InlineImage[], position?: number | null) => void;
+  focusComment: (threadID: string) => boolean;
   focus: () => void;
 };
 
@@ -37,9 +39,9 @@ type Props = {
   textbox: NodeV2TextBox;
   client: NodeV2Client;
   canEdit: boolean;
+  comments: NodeV2CommentThread[];
   mentionUsers: MentionableCompanyUser[];
   onSaveState: (state: NodeV2SaveState) => void;
-  onDocumentChange: (document: JSONContent, plainText: string) => void;
   onUploadInlineImages: (files: File[]) => Promise<NodeV2InlineImage[]>;
   onError: (message: string) => void;
 };
@@ -50,6 +52,35 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+export function resolveNodeV2CommentAnchors(editor: Editor, document: Y.Doc, comments: readonly NodeV2CommentThread[]) {
+  const binding = collaborationMapping(editor);
+  if (!binding) return [];
+  const fragment = document.getXmlFragment("default");
+  const resolvePosition = relativePositionToAbsolutePosition as unknown as (
+    ydoc: Y.Doc,
+    xmlFragment: Y.XmlFragment,
+    position: Y.RelativePosition,
+    mapping: unknown,
+  ) => number | null;
+  return comments.flatMap((thread) => {
+    if (thread.anchor_format !== "yjs_relative_v1" || !thread.anchor_start_base64 || !thread.anchor_end_base64) return [];
+    try {
+      const start = Y.decodeRelativePosition(base64ToBytes(thread.anchor_start_base64));
+      const end = Y.decodeRelativePosition(base64ToBytes(thread.anchor_end_base64));
+      const from = resolvePosition(document, fragment, start, binding.mapping);
+      const to = resolvePosition(document, fragment, end, binding.mapping);
+      if (from === null || to === null || to <= from) return [];
+      return [{ id: thread.thread_id, kind: "comment" as const, from, to, durable: false as const }];
+    } catch {
+      return [];
+    }
+  });
+}
 function authenticatedImageExtension(apiBase: string, companyID: string) {
   const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected }) => {
     const [objectURL, setObjectURL] = useState("");
@@ -90,25 +121,16 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
   textbox,
   client,
   canEdit,
+  comments,
   mentionUsers,
   onSaveState,
-  onDocumentChange,
   onUploadInlineImages,
   onError,
 }, forwardedRef) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const controllerRef = useRef<NodeV2SyncController | null>(null);
   const editorRef = useRef<Editor | null>(null);
-  const checkpointRequestedRef = useRef(false);
   const imageExtension = useMemo(() => authenticatedImageExtension(apiBase, companyID), [apiBase, companyID]);
-
-  const checkpoint = async (reason: string) => {
-    const activeEditor = editorRef.current;
-    const controller = controllerRef.current;
-    if (!activeEditor || !controller) return;
-    await controller.checkpoint(activeEditor.getJSON() as Record<string, unknown>, activeEditor.getText({ blockSeparator: "\n" }), reason);
-    onDocumentChange(activeEditor.getJSON(), activeEditor.getText({ blockSeparator: "\n" }));
-  };
 
   useEffect(() => {
     let disposed = false;
@@ -119,14 +141,6 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
       nodeID,
       userID,
       onSaveState,
-      onCheckpointNeeded: () => {
-        if (checkpointRequestedRef.current) return;
-        checkpointRequestedRef.current = true;
-        queueMicrotask(() => {
-          checkpointRequestedRef.current = false;
-          void checkpoint("idle").catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to save the text box"));
-        });
-      },
       onError,
     });
     controllerRef.current = controller;
@@ -166,8 +180,8 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
             "aria-multiline": "true",
           },
         },
-        onBlur: () => { void checkpoint("blur").catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to save the text box")); },
       });
+      nextEditor.registerPlugin(MangoTiptapAnnotations);
       editorRef.current = nextEditor;
       setEditor(nextEditor);
     }).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to recover the text box"));
@@ -183,8 +197,13 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
     };
   }, [client, textbox.textbox_id, companyID, nodeID, userID, canEdit, imageExtension]);
 
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!editor || !controller) return;
+    updateMangoTiptapAnnotations(editor, resolveNodeV2CommentAnchors(editor, controller.document, comments));
+  }, [editor, comments]);
   useImperativeHandle(forwardedRef, () => ({
-    flush: async (reason = "manual") => checkpoint(reason),
+    flush: async () => { await controllerRef.current?.flush(); },
     selectionAnchor: () => {
       const activeEditor = editorRef.current;
       const controller = controllerRef.current;
@@ -203,7 +222,7 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
         const end = absolutePositionToRelativePosition(to, fragment, binding.mapping as never);
         return { selectedQuote, beforeText, afterText, startBase64: bytesToBase64(Y.encodeRelativePosition(start)), endBase64: bytesToBase64(Y.encodeRelativePosition(end)), status: "anchored" };
       } catch {
-        return { selectedQuote, beforeText, afterText, startBase64: "", endBase64: "", status: "legacy_unanchored" };
+        return { selectedQuote, beforeText, afterText, startBase64: "", endBase64: "", status: "unanchored" };
       }
     },
     insertImages: (images, position) => {
@@ -211,6 +230,7 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
       if (!activeEditor) return;
       activeEditor.chain().focus().insertContentAt(position ?? activeEditor.state.selection.to, images.map((image) => ({ type: "mangoAttachmentImage", attrs: { ...image, displayWidth: null, displayHeight: null, alignment: "center", position: "break", layout: "content", alt: image.filename, title: image.filename } }))).run();
     },
+    focusComment: (threadID) => Boolean(editorRef.current && navigateMangoTiptapTarget(editorRef.current, { annotationID: threadID })),
     focus: () => editorRef.current?.commands.focus(),
   }));
 

@@ -33,6 +33,37 @@ type NodeV2TextBox struct {
 	EmailLinkCount              int             `json:"email_link_count"`
 }
 
+// NodeV2TextBoxSummary is the bounded list/read-model shape. Rich document
+// JSON and plain text are intentionally available only from the exact textbox
+// hydration endpoint.
+type NodeV2TextBoxSummary struct {
+	CompanyID                   string     `json:"company_id"`
+	NodeID                      string     `json:"node_id"`
+	TextboxID                   string     `json:"textbox_id"`
+	DocumentSchemaVersion       int        `json:"document_schema_version"`
+	ContentRevision             int64      `json:"content_revision"`
+	CollaborationEpoch          string     `json:"collaboration_epoch"`
+	LatestUpdateSequence        int64      `json:"latest_update_sequence"`
+	MaterializedThroughSequence int64      `json:"materialized_through_sequence"`
+	DisplayOrder                int64      `json:"display_order"`
+	CreatedByUserID             string     `json:"created_by_user_id,omitempty"`
+	UpdatedByUserID             string     `json:"updated_by_user_id,omitempty"`
+	CreatedTimestamp            time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp            time.Time  `json:"updated_timestamp"`
+	DeletedTimestamp            *time.Time `json:"deleted_timestamp,omitempty"`
+	CommentCount                int        `json:"comment_count"`
+	AttachmentCount             int        `json:"attachment_count"`
+	EmailLinkCount              int        `json:"email_link_count"`
+}
+
+type NodeV2PlacementSummary struct {
+	LogicGateID   string `json:"logic_gate_id,omitempty"`
+	LogicGateName string `json:"logic_gate_name,omitempty"`
+	StatusKey     string `json:"status_key,omitempty"`
+	ColumnID      string `json:"column_id,omitempty"`
+	IsIssue       bool   `json:"is_issue"`
+}
+
 type NodeV2TimelineItem struct {
 	TimelineItemID      string          `json:"timeline_item_id"`
 	CompanyID           string          `json:"company_id"`

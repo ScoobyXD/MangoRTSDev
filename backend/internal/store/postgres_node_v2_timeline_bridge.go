@@ -12,7 +12,23 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
+func nodeV2TimelineBridgeAvailableTx(ctx context.Context, tx *sql.Tx) (bool, error) {
+	var available bool
+	err := tx.QueryRowContext(ctx, `select
+		to_regclass('public.node_textboxes') is not null
+		and to_regclass('public.node_movements') is not null
+		and to_regclass('public.node_timeline_items') is not null
+		and to_regclass('public.node_verification_requests') is not null
+		and to_regclass('public.node_verification_events') is not null
+		and to_regclass('public.node_verification_recipients') is not null`).Scan(&available)
+	return available, err
+}
+
 func insertNodeV2MovementForLegacyTimelineTx(ctx context.Context, tx *sql.Tx, item domain.NodeTimelineEvent) error {
+	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
+	if err != nil || !available {
+		return err
+	}
 	movementID := newUUIDv7String()
 	idempotencyKey := "legacy-transfer:" + item.EventID
 	if _, err := tx.ExecContext(ctx, `insert into node_movements(company_id,node_id,movement_id,source_timeline_event_id,from_logic_gate_id,from_logic_gate_name,to_logic_gate_id,to_logic_gate_name,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7::uuid,$8,$9::uuid,$10,$11,$12) on conflict(company_id,node_id,idempotency_key) do nothing`, item.CompanyID, item.NodeID, movementID, item.EventID, item.FromLogicGateID, item.FromLogicGateName, item.ToLogicGateID, item.ToLogicGateName, item.ActorUserID, item.ActorDisplayName, idempotencyKey, item.CreatedTimestamp); err != nil {
@@ -22,11 +38,15 @@ func insertNodeV2MovementForLegacyTimelineTx(ctx context.Context, tx *sql.Tx, it
 	if err := tx.QueryRowContext(ctx, `select movement_id::text from node_movements where company_id=$1::uuid and node_id=$2::uuid and idempotency_key=$3`, item.CompanyID, item.NodeID, idempotencyKey).Scan(&storedMovementID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `insert into node_timeline_items(company_id,node_id,timeline_item_id,item_type,occurred_at,actor_user_id,movement_id,summary_json) select $1::uuid,$2::uuid,$3::uuid,'node_moved',$4,$5::uuid,$6::uuid,jsonb_build_object('from_logic_gate_name',$7::text,'to_logic_gate_name',$8::text,'actor_display_name',$9::text) where not exists(select 1 from node_timeline_items where company_id=$1::uuid and node_id=$2::uuid and movement_id=$6::uuid)`, item.CompanyID, item.NodeID, newUUIDv7String(), item.CreatedTimestamp, item.ActorUserID, storedMovementID, item.FromLogicGateName, item.ToLogicGateName, item.ActorDisplayName)
+	_, err = tx.ExecContext(ctx, `insert into node_timeline_items(company_id,node_id,timeline_item_id,item_type,occurred_at,actor_user_id,movement_id,summary_json) select $1::uuid,$2::uuid,$3::uuid,'node_moved',$4,$5::uuid,$6::uuid,jsonb_build_object('from_logic_gate_name',$7::text,'to_logic_gate_name',$8::text,'actor_display_name',$9::text) where not exists(select 1 from node_timeline_items where company_id=$1::uuid and node_id=$2::uuid and movement_id=$6::uuid)`, item.CompanyID, item.NodeID, newUUIDv7String(), item.CreatedTimestamp, item.ActorUserID, storedMovementID, item.FromLogicGateName, item.ToLogicGateName, item.ActorDisplayName)
 	return err
 }
 
 func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationRequestInput, item domain.NodeTimelineEvent) error {
+	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
+	if err != nil || !available {
+		return err
+	}
 	rows, err := tx.QueryContext(ctx, `select textbox_id::text,content_revision,latest_update_sequence from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null order by display_order,textbox_id`, input.CompanyID, input.NodeID)
 	if err != nil {
 		return err
@@ -63,6 +83,10 @@ func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx,
 }
 
 func insertNodeV2VerificationStampForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationCompletionInput, item domain.NodeTimelineEvent) error {
+	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
+	if err != nil || !available {
+		return err
+	}
 	idempotencyKey := "approved:" + input.UserID
 	var actorDisplayName string
 	if err := tx.QueryRowContext(ctx, `select coalesce(nullif(display_name,''),nullif(email,''),'Unknown user') from users where user_id=$1::uuid`, input.UserID).Scan(&actorDisplayName); errors.Is(err, sql.ErrNoRows) {
@@ -71,7 +95,7 @@ func insertNodeV2VerificationStampForLegacyTx(ctx context.Context, tx *sql.Tx, i
 		return err
 	}
 	verificationEventID := newUUIDv7String()
-	err := tx.QueryRowContext(ctx, `insert into node_verification_events(company_id,node_id,verification_request_id,verification_event_id,event_type,recipient_user_id,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'approved',$5::uuid,$5::uuid,$6,$7,now()) on conflict(company_id,node_id,verification_request_id,idempotency_key) do nothing returning verification_event_id::text`, input.CompanyID, input.NodeID, input.EventID, verificationEventID, input.UserID, actorDisplayName, idempotencyKey).Scan(&verificationEventID)
+	err = tx.QueryRowContext(ctx, `insert into node_verification_events(company_id,node_id,verification_request_id,verification_event_id,event_type,recipient_user_id,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'approved',$5::uuid,$5::uuid,$6,$7,now()) on conflict(company_id,node_id,verification_request_id,idempotency_key) do nothing returning verification_event_id::text`, input.CompanyID, input.NodeID, input.EventID, verificationEventID, input.UserID, actorDisplayName, idempotencyKey).Scan(&verificationEventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

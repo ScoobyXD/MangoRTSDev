@@ -674,3 +674,11 @@ Step 4 is complete when the whole workspace is `tiptap_json/ready`, converted co
 - **Legacy editor deletion:** remove the old non-email HTML path and rollback-only data only after the successful cutover and confidence period. Email continues to use HTML.
 
 Last updated: 2026-07-20 13:33:31 -07:00
+
+## 2026-07-27 Node V2 write/read amplification fix
+
+The Node V2 browser no longer calls `getJSON()`/`getText()` or sends a full `Y.encodeStateAsUpdate()` checkpoint on a 1.5-second timer or unchanged blur. A 180-ms batching window merges only the Yjs transaction deltas and durably queues the exact bytes before sending. The trusted provider performs materialization/compaction only at 512 updates, 512 KiB, 15 minutes idle, or an explicit recovery boundary.
+
+Initial Node workspace reads now return only text-box metadata/counts and stable continuation cursors. Full TipTap JSON/plain text is fetched for the active or visible document, and archived summaries never hydrate document bodies. Text-box reordering uses a sparse single-item move command, so a paged browser never sends a partial list as if it were complete.
+
+Disposable PostgreSQL coverage measures 20 small durable update rows against a generated 1-MiB canonical document and asserts that ordinary input creates no extra checkpoint and does not increment the materialized revision. The production-path browser harness proves paged hydration and continuation instead of relying on source-text assertions.

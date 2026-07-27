@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -22,10 +23,20 @@ func decodeNodeV2Cursor(raw string) (*store.NodeV2Cursor, error) {
 		return nil, err
 	}
 	var cursor store.NodeV2Cursor
-	if err := json.Unmarshal(value, &cursor); err != nil || cursor.Timestamp.IsZero() || strings.TrimSpace(cursor.ID) == "" {
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || strings.TrimSpace(cursor.Kind) == "" || strings.TrimSpace(cursor.ID) == "" {
 		return nil, errors.New("invalid cursor")
 	}
 	return &cursor, nil
+}
+
+func decodeNodeV2CursorFor(raw, kind string) (*store.NodeV2Cursor, error) {
+	cursor, err := decodeNodeV2Cursor(raw)
+	if err != nil || (cursor != nil && cursor.Kind != kind) {
+		return nil, errors.New("invalid cursor")
+	}
+	return cursor, nil
 }
 
 func nodeV2Limit(r *http.Request) int {
@@ -66,6 +77,10 @@ func writeNodeV2StoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_node_v2_request")
 	case errors.Is(err, store.ErrVersionConflict), errors.Is(err, store.ErrAlreadyExists):
 		writeError(w, http.StatusConflict, "node_v2_sync_required")
+	case errors.Is(err, store.ErrNodeV2Inactive):
+		writeError(w, http.StatusConflict, "node_v2_workspace_inactive")
+	case errors.Is(err, store.ErrNodeV2UntrustedCheckpoint):
+		writeError(w, http.StatusForbidden, "node_v2_checkpoint_service_only")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "node_v2_resource_not_found")
 	default:
@@ -75,6 +90,10 @@ func writeNodeV2StoreError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) handleNodeV2(w http.ResponseWriter, r *http.Request, nodeID string, parts []string) {
+	if len(parts) == 1 && parts[0] == "availability" {
+		s.handleNodeV2Availability(w, r, nodeID)
+		return
+	}
 	if len(parts) == 1 && parts[0] == "workspace" {
 		s.handleNodeV2Workspace(w, r, nodeID)
 		return
@@ -87,8 +106,8 @@ func (s *Server) handleNodeV2(w http.ResponseWriter, r *http.Request, nodeID str
 		s.handleNodeV2Textboxes(w, r, nodeID)
 		return
 	}
-	if len(parts) == 1 && parts[0] == "textbox-order" {
-		s.handleNodeV2TextboxOrder(w, r, nodeID)
+	if len(parts) == 1 && parts[0] == "textbox-move" {
+		s.handleNodeV2TextboxMove(w, r, nodeID)
 		return
 	}
 	if len(parts) >= 2 && parts[0] == "textboxes" {
@@ -130,6 +149,23 @@ func (s *Server) handleNodeV2(w http.ResponseWriter, r *http.Request, nodeID str
 	writeError(w, http.StatusNotFound, "not_found")
 }
 
+func (s *Server) handleNodeV2Availability(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	if !ok {
+		return
+	}
+	item, err := s.repo.GetNodeV2Availability(companyID, nodeID)
+	if err != nil {
+		writeNodeV2StoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (s *Server) handleNodeV2Workspace(w http.ResponseWriter, r *http.Request, nodeID string) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -139,7 +175,7 @@ func (s *Server) handleNodeV2Workspace(w http.ResponseWriter, r *http.Request, n
 	if !ok {
 		return
 	}
-	cursor, err := decodeNodeV2Cursor(r.URL.Query().Get("cursor"))
+	cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_timeline")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_cursor")
 		return
@@ -161,7 +197,7 @@ func (s *Server) handleNodeV2Timeline(w http.ResponseWriter, r *http.Request, no
 	if !ok {
 		return
 	}
-	cursor, err := decodeNodeV2Cursor(r.URL.Query().Get("cursor"))
+	cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_timeline")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_cursor")
 		return
@@ -179,6 +215,29 @@ type nodeV2CreateTextboxRequest struct {
 }
 
 func (s *Server) handleNodeV2Textboxes(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if r.Method == http.MethodGet {
+		companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+		if !ok {
+			return
+		}
+		archived := r.URL.Query().Get("archived") == "1"
+		kind := "node_v2_textboxes_active"
+		if archived {
+			kind = "node_v2_textboxes_archived"
+		}
+		cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), kind)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_cursor")
+			return
+		}
+		page, err := s.repo.ListNodeV2TextBoxes(store.NodeV2TextBoxPageQuery{CompanyID: companyID, NodeID: nodeID, Archived: archived, Limit: nodeV2Limit(r), Cursor: cursor})
+		if err != nil {
+			writeNodeV2StoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -201,12 +260,15 @@ func (s *Server) handleNodeV2Textboxes(w http.ResponseWriter, r *http.Request, n
 	writeJSON(w, http.StatusCreated, result)
 }
 
-type nodeV2OrderRequest struct {
-	TextboxIDs []string `json:"textbox_ids"`
+type nodeV2MoveRequest struct {
+	TextboxID      string `json:"textbox_id"`
+	ReferenceID    string `json:"reference_textbox_id"`
+	Placement      string `json:"placement"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
-func (s *Server) handleNodeV2TextboxOrder(w http.ResponseWriter, r *http.Request, nodeID string) {
-	if r.Method != http.MethodPut {
+func (s *Server) handleNodeV2TextboxMove(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
@@ -214,21 +276,23 @@ func (s *Server) handleNodeV2TextboxOrder(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	var request nodeV2OrderRequest
+	var request nodeV2MoveRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	items, err := s.repo.SetNodeV2TextBoxOrder(store.NodeV2TextBoxOrderInput{CompanyID: companyID, NodeID: nodeID, ActorUserID: actorID, TextboxIDs: request.TextboxIDs})
+	item, err := s.repo.MoveNodeV2TextBox(store.NodeV2TextBoxMoveInput{CompanyID: companyID, NodeID: nodeID, ActorUserID: actorID, TextboxID: request.TextboxID, ReferenceID: request.ReferenceID, Placement: request.Placement, IdempotencyKey: request.IdempotencyKey})
 	if err != nil {
 		writeNodeV2StoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"textboxes": items})
+	s.wakeRealtimeSpine()
+	writeJSON(w, http.StatusOK, item)
 }
 
 type nodeV2ArchiveRequest struct {
-	Archived bool `json:"archived"`
+	Archived       bool   `json:"archived"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 func (s *Server) handleNodeV2Textbox(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
@@ -254,11 +318,12 @@ func (s *Server) handleNodeV2Textbox(w http.ResponseWriter, r *http.Request, nod
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	item, err := s.repo.SetNodeV2TextBoxArchived(store.NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, ActorUserID: actorID, Archived: request.Archived})
+	item, err := s.repo.SetNodeV2TextBoxArchived(store.NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, ActorUserID: actorID, Archived: request.Archived, IdempotencyKey: request.IdempotencyKey})
 	if err != nil {
 		writeNodeV2StoreError(w, err)
 		return
 	}
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -331,27 +396,10 @@ func (s *Server) handleNodeV2TextboxCheckpoint(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
-	if !ok {
+	if _, _, ok := s.nodeV2RequestActor(w, r, nodeID, true); !ok {
 		return
 	}
-	var request nodeV2CheckpointRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	payload, payloadErr := base64.StdEncoding.DecodeString(request.PayloadBase64)
-	stateVector, vectorErr := base64.StdEncoding.DecodeString(request.StateVectorBase64)
-	if payloadErr != nil || vectorErr != nil {
-		writeError(w, http.StatusBadRequest, "invalid_checkpoint_payload")
-		return
-	}
-	item, err := s.repo.CheckpointNodeV2TextBox(store.NodeV2CheckpointInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, ActorUserID: actorID, CheckpointID: request.CheckpointID, CollaborationEpoch: request.CollaborationEpoch, ThroughSequence: request.ThroughSequence, CheckpointPayload: payload, StateVector: stateVector, DocumentJSON: request.DocumentJSON, PlainText: request.PlainText, Reason: request.Reason})
-	if err != nil {
-		writeNodeV2StoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, item)
+	writeError(w, http.StatusForbidden, "node_v2_checkpoint_service_only")
 }
 
 type nodeV2CommentRequest struct {
@@ -373,7 +421,7 @@ func (s *Server) handleNodeV2Comments(w http.ResponseWriter, r *http.Request, no
 		return
 	}
 	if r.Method == http.MethodGet {
-		cursor, err := decodeNodeV2Cursor(r.URL.Query().Get("cursor"))
+		cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_comments")
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_cursor")
 			return
@@ -406,6 +454,7 @@ func (s *Server) handleNodeV2Comments(w http.ResponseWriter, r *http.Request, no
 		writeNodeV2StoreError(w, err)
 		return
 	}
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -428,6 +477,7 @@ func (s *Server) handleNodeV2CommentReply(w http.ResponseWriter, r *http.Request
 		writeNodeV2StoreError(w, err)
 		return
 	}
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -435,6 +485,7 @@ type nodeV2AttachmentRequest struct {
 	AttachmentID     string `json:"attachment_id"`
 	RelationshipKind string `json:"relationship_kind"`
 	Deleted          bool   `json:"deleted"`
+	IdempotencyKey   string `json:"idempotency_key"`
 }
 
 func (s *Server) handleNodeV2TextboxAttachment(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
@@ -451,11 +502,12 @@ func (s *Server) handleNodeV2TextboxAttachment(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	item, err := s.repo.SetNodeV2AttachmentLink(store.NodeV2AttachmentLinkInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, AttachmentID: request.AttachmentID, RelationshipKind: request.RelationshipKind, ActorUserID: actorID, Deleted: request.Deleted || r.Method == http.MethodDelete})
+	item, err := s.repo.SetNodeV2AttachmentLink(store.NodeV2AttachmentLinkInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, AttachmentID: request.AttachmentID, RelationshipKind: request.RelationshipKind, ActorUserID: actorID, Deleted: request.Deleted || r.Method == http.MethodDelete, IdempotencyKey: request.IdempotencyKey})
 	if err != nil {
 		writeNodeV2StoreError(w, err)
 		return
 	}
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -468,7 +520,7 @@ func (s *Server) handleNodeV2Attachments(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	cursor, err := decodeNodeV2Cursor(r.URL.Query().Get("cursor"))
+	cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_attachments")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_cursor")
 		return
@@ -485,6 +537,7 @@ type nodeV2EmailLinkRequest struct {
 	EmailThreadID  string `json:"email_thread_id"`
 	EmailMessageID string `json:"email_message_id"`
 	Deleted        bool   `json:"deleted"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 func (s *Server) handleNodeV2TextboxEmailLink(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
@@ -501,11 +554,12 @@ func (s *Server) handleNodeV2TextboxEmailLink(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	err := s.repo.SetNodeV2EmailLink(store.NodeV2EmailLinkInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, EmailThreadID: request.EmailThreadID, EmailMessageID: request.EmailMessageID, ActorUserID: actorID, Deleted: request.Deleted || r.Method == http.MethodDelete})
+	err := s.repo.SetNodeV2EmailLink(store.NodeV2EmailLinkInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, EmailThreadID: request.EmailThreadID, EmailMessageID: request.EmailMessageID, ActorUserID: actorID, Deleted: request.Deleted || r.Method == http.MethodDelete, IdempotencyKey: request.IdempotencyKey})
 	if err != nil {
 		writeNodeV2StoreError(w, err)
 		return
 	}
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -518,7 +572,7 @@ func (s *Server) handleNodeV2Emails(w http.ResponseWriter, r *http.Request, node
 	if !ok {
 		return
 	}
-	cursor, err := decodeNodeV2Cursor(r.URL.Query().Get("cursor"))
+	cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_email_threads")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_cursor")
 		return
@@ -540,8 +594,12 @@ func (s *Server) handleNodeV2EmailMessages(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	afterOrder, _ := strconv.Atoi(r.URL.Query().Get("after_order"))
-	page, err := s.repo.ListNodeV2EmailMessages(store.NodeV2EmailMessageQuery{CompanyID: companyID, NodeID: nodeID, EmailThreadID: emailThreadID, Limit: nodeV2Limit(r), AfterOrder: afterOrder, IncludeBody: r.URL.Query().Get("include_body") == "1"})
+	cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_email_messages")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_cursor")
+		return
+	}
+	page, err := s.repo.ListNodeV2EmailMessages(store.NodeV2EmailMessageQuery{CompanyID: companyID, NodeID: nodeID, EmailThreadID: emailThreadID, Limit: nodeV2Limit(r), Cursor: cursor, IncludeBody: r.URL.Query().Get("include_body") == "1"})
 	if err != nil {
 		writeNodeV2StoreError(w, err)
 		return

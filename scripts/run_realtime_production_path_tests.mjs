@@ -480,6 +480,7 @@ async function main() {
   const pgPort = await freePort();
   const apiPorts = [await freePort(), await freePort()];
   const frontendPort = await freePort();
+  const s3Port = await freePort();
   mkdirSync(pgData, { recursive: true });
   mkdirSync(migrationDir, { recursive: true });
   mkdirSync(legacyMigrationDir, { recursive: true });
@@ -577,6 +578,10 @@ async function main() {
   run("Migrate legacy structured state to authoritative projection rich HTML", migrateExe, [
     "-mode", "migrate", "-migrations", legacyMigrationDir,
   ], { cwd: backend, env: databaseEnv(pgPort, "mangorts_realtime_legacy") });
+  run("Prove legacy commands are safe before the Node V2 schema exists", "go", [
+    "test", "./internal/store", "-run", "TestPostgresPreV2TimelineBridgeIsCapabilityGated", "-count=1", "-v",
+  ], { cwd: backend, env: { ...databaseEnv(pgPort, "mangorts_realtime_legacy"), MANGORTS_PRE_V2_POSTGRES_TEST: "1" } });
+
   copyFileSync(resolve(backend, "db", "migrations", "20260718_tiptap_json_foundation.sql"), resolve(legacyMigrationDir, "20260718_tiptap_json_foundation.sql"));
   run("Add the inactive Tiptap JSON foundation without converting the legacy fixture", migrateExe, [
     "-mode", "migrate", "-migrations", legacyMigrationDir,
@@ -593,7 +598,7 @@ async function main() {
   assert.equal(psql(pgPort, "mangorts_realtime_legacy", "select count(*) from information_schema.columns where table_name in ('editor_collaboration_documents','editor_collaboration_operations') and column_name in ('model_version','snapshot_revision','snapshot_state','accumulated_delta_bytes','operation_kind','delta');"), "0");
 
   run("Real PostgreSQL producer atomicity and retry tests", "go", [
-    "test", "./internal/store", "-run", "TestPostgresRealtime", "-count=1", "-v",
+    "test", "./internal/store", "./internal/http", "-run", "TestPostgresRealtime", "-count=1", "-v",
   ], { cwd: backend, env: { ...cleanEnv, MANGORTS_REALTIME_POSTGRES_TEST: "1" } });
 
   psql(pgPort, "mangorts_realtime_test", [
@@ -606,6 +611,12 @@ async function main() {
     "insert into node_projection_table(company_id,node_id,information_id,type,information,is_deleted,revision,created_timestamp,updated_timestamp) values('" + COMPANY_A + "','" + NODE_A + "','" + DOC_A + "','Text box','" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false,1,now(),now());",
     "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,canonical_html,is_deleted) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',0,'" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false);",
   ].join("\n"));
+  psql(pgPort, "mangorts_realtime_test", [
+    "insert into communications_email_threads(company_id,email_thread_id,scope_type,personal_user_id,personal_account_email,account_email,provider_thread_key,provider_thread_id,root_provider_message_id,hydration_status,history_complete) values('" + COMPANY_A + "','44444444-0000-4000-8000-000000000001','personal','" + USER_A + "','browser-user-a@mangorts.test','browser-user-a@mangorts.test','durable-browser-thread','durable-browser-thread','browser-provider-001','complete',true);",
+    "insert into communications_email_messages(company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,message_timestamp,rich_html_body,text_fallback,snippet) select '" + COMPANY_A + "',('44444444-1000-4000-8000-'||lpad(series::text,12,'0'))::uuid,'44444444-0000-4000-8000-000000000001',('browser-provider-'||lpad(series::text,3,'0')),(series-1)/3,'Durable Node v2 email',1700000000+series,('<p>Durable independent HTML email body '||series||'<script>throw new Error(1)</script></p>'),('Durable independent HTML email body '||series),('Durable message '||series) from generate_series(1,35) series;",
+    "insert into communications_node_email_threads(company_id,node_id,information_id,email_thread_id,selected_provider_message_id,created_by_user_id) values('" + COMPANY_A + "','" + NODE_A + "','44444444-2000-4000-8000-000000000001','44444444-0000-4000-8000-000000000001','browser-provider-001','" + USER_A + "');",
+  ].join("\n"));
+
 
   const apiProcessOptions = (port) => ({
     cwd: backend,
@@ -617,8 +628,19 @@ async function main() {
       MANGORTS_REALTIME_TICKET_SECRET: "mangorts-realtime-browser-ticket-secret-32-bytes",
       MANGORTS_ALLOWED_ORIGIN: "http://127.0.0.1:" + frontendPort,
       MANGORTS_ADDR: "127.0.0.1:" + port,
+      MANGORTS_ATTACHMENT_S3_BUCKET: "mangorts-disposable-browser",
+      MANGORTS_ATTACHMENT_AWS_REGION: "us-west-1",
+      MANGORTS_ATTACHMENT_S3_ENDPOINT: "http://127.0.0.1:" + s3Port,
+      MANGORTS_ATTACHMENT_S3_PRESIGN_ENDPOINT: "http://127.0.0.1:" + s3Port,
+      MANGORTS_ATTACHMENT_S3_SERVER_SIDE_ENCRYPTION: "none",
+      AWS_ACCESS_KEY_ID: "disposable-test",
+      AWS_SECRET_ACCESS_KEY: "disposable-test",
+      AWS_EC2_METADATA_DISABLED: "true",
     },
   });
+  const s3Record = startProcess("node-v2-s3", process.execPath, [
+    resolve(frontend, "scripts", "node-v2-s3-mock.mjs"),
+  ], { cwd: frontend, env: { ...process.env, MANGORTS_NODE_V2_S3_PORT: String(s3Port) } });
   let apiRecords = apiPorts.map((port, index) =>
     startProcess("api-" + (index + 1), apiExe, [], apiProcessOptions(port)));
   const restartAPI = async (index) => {
@@ -629,9 +651,10 @@ async function main() {
   const viteRecord = startProcess("vite", process.execPath, [
     resolve(frontend, "node_modules", "vite", "bin", "vite.js"),
     "--host", "127.0.0.1", "--port", String(frontendPort), "--strictPort",
-  ], { cwd: frontend, env: process.env });
+  ], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: "http://127.0.0.1:" + apiPorts[0], VITE_COMPANY_ID: COMPANY_A, VITE_AUTH_MODE: "disabled", VITE_NODE_V2_PHASE2: "true" } });
   try {
     await Promise.all(apiPorts.map((port) => waitForURL("http://127.0.0.1:" + port + "/healthz")));
+    await waitForURL("http://127.0.0.1:" + s3Port + "/healthz");
     for (const port of apiPorts) {
       const response = await fetch("http://127.0.0.1:" + port + "/v1/me", {
         headers: { "X-Mango-Test-Subject": "browser-user-a" },
@@ -639,9 +662,36 @@ async function main() {
       const body = await response.text();
       assert.equal(response.status, 200, "test-only auth boundary failed on API " + port + ": " + body + "\n" + apiRecords.map((item) => item.label + ":\n" + item.logs.join("")).join("\n"));
     }
+    const inactiveResponse = await fetch("http://127.0.0.1:" + apiPorts[0] + "/v1/nodes/" + NODE_B + "/v2/availability?company_id=" + COMPANY_B, {
+      headers: { "X-Mango-Test-Subject": "browser-user-other" },
+    });
+    assert.equal(inactiveResponse.status, 200);
+    assert.equal((await inactiveResponse.json()).active, false, "unconverted workspace must retain the legacy editor");
+
     await waitForURL("http://127.0.0.1:" + frontendPort + "/editor-textbox-sync-e2e.html");
     try {
       await browserMatrix(frontendPort, apiPorts, pgPort, restartAPI);
+      psql(pgPort, "mangorts_realtime_test", "insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp) values('" + COMPANY_A + "','tiptap_json','ready',0,0,now(),now());");
+      for (let index = 0; index < 35; index++) {
+        const response = await fetch("http://127.0.0.1:" + apiPorts[0] + "/v1/nodes/" + NODE_A + "/v2/textboxes?company_id=" + COMPANY_A, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Mango-Test-Subject": "browser-user-a" },
+          body: JSON.stringify({ idempotency_key: "browser-seed-textbox-" + String(index).padStart(3, "0") }),
+        });
+        assert.equal(response.status, 201, "Node v2 browser seed " + index + ": " + await response.text());
+      }
+      run("Node v2 Phase 2 disposable PostgreSQL/API/Vite/S3 browser workflow", process.execPath, [
+        resolve(frontend, "scripts", "node-v2-phase2-browser.test.mjs"),
+      ], { cwd: frontend, env: {
+        ...process.env,
+        MANGORTS_NODE_V2_FRONTEND: "http://127.0.0.1:" + frontendPort,
+        MANGORTS_NODE_V2_API: "http://127.0.0.1:" + apiPorts[0],
+        MANGORTS_NODE_V2_COMPANY: COMPANY_A,
+        MANGORTS_NODE_V2_NODE: NODE_A,
+        MANGORTS_NODE_V2_SUBJECT: "browser-user-a",
+        MANGORTS_BROWSER_EXECUTABLE: browserExecutable,
+      } });
+
     } catch (cause) {
       process.stderr.write("\nBrowser matrix backend logs:\n" + apiRecords.map((item) => item.label + ":\n" + item.logs.join("")).join("\n"));
       throw cause;
@@ -651,6 +701,7 @@ async function main() {
     await browser?.close().catch(() => {});
     await stopProcess(viteRecord);
     for (const record of apiRecords) await stopProcess(record);
+    await stopProcess(s3Record);
   }
   process.stdout.write("\nProduction-path realtime collaboration tests passed.\n");
 }

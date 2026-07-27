@@ -14,12 +14,14 @@ const (
 )
 
 type NodeV2Repository interface {
+	GetNodeV2Availability(companyID, nodeID string) (NodeV2Availability, error)
 	GetNodeV2Workspace(query NodeV2WorkspaceQuery) (NodeV2WorkspaceResult, error)
+	ListNodeV2TextBoxes(query NodeV2TextBoxPageQuery) (NodeV2TextBoxPage, error)
 	ListNodeV2Timeline(query NodeV2TimelineQuery) (NodeV2TimelinePage, error)
 	CreateNodeV2TextBox(input NodeV2CreateTextBoxInput) (NodeV2TextBoxMutationResult, error)
 	GetNodeV2TextBox(companyID, nodeID, textboxID string) (domain.NodeV2TextBox, error)
 	SetNodeV2TextBoxArchived(input NodeV2ArchiveTextBoxInput) (domain.NodeV2TextBox, error)
-	SetNodeV2TextBoxOrder(input NodeV2TextBoxOrderInput) ([]domain.NodeV2TextBox, error)
+	MoveNodeV2TextBox(input NodeV2TextBoxMoveInput) (domain.NodeV2TextBoxSummary, error)
 	GetNodeV2TextBoxSync(query NodeV2SyncQuery) (NodeV2SyncPage, error)
 	AppendNodeV2YjsUpdate(input NodeV2YjsUpdateInput) (domain.NodeV2YjsUpdate, error)
 	CheckpointNodeV2TextBox(input NodeV2CheckpointInput) (domain.NodeV2TextBox, error)
@@ -34,9 +36,17 @@ type NodeV2Repository interface {
 }
 
 type NodeV2Cursor struct {
+	Version   int       `json:"v"`
+	Kind      string    `json:"kind"`
 	Timestamp time.Time `json:"timestamp"`
 	ID        string    `json:"id"`
 	Sequence  int64     `json:"sequence,omitempty"`
+	Order     int64     `json:"order,omitempty"`
+}
+
+type NodeV2Availability struct {
+	Active bool   `json:"active"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type NodeV2WorkspaceQuery struct {
@@ -49,14 +59,31 @@ type NodeV2WorkspaceQuery struct {
 
 type NodeV2WorkspaceResult struct {
 	Node                 domain.Node                       `json:"node"`
+	Placement            domain.NodeV2PlacementSummary     `json:"placement"`
+	GVICSummary          []domain.ResourceGVICAssignment   `json:"gvic_summary"`
 	Counts               domain.NodeV2WorkspaceCounts      `json:"counts"`
 	Timeline             NodeV2TimelinePage                `json:"timeline"`
-	Textboxes            []domain.NodeV2TextBox            `json:"textboxes"`
-	ArchivedTextboxes    []domain.NodeV2TextBox            `json:"archived_textboxes"`
+	Textboxes            []domain.NodeV2TextBoxSummary     `json:"textboxes"`
+	TextboxNextCursor    *NodeV2Cursor                     `json:"textbox_next_cursor,omitempty"`
+	ArchivedTextboxes    []domain.NodeV2TextBoxSummary     `json:"archived_textboxes"`
+	ArchivedNextCursor   *NodeV2Cursor                     `json:"archived_next_cursor,omitempty"`
 	EmailThreadSummaries []domain.NodeV2EmailThreadSummary `json:"email_thread_summaries"`
 	EmailNextCursor      *NodeV2Cursor                     `json:"email_next_cursor,omitempty"`
 	AttachmentSummaries  []domain.NodeV2AttachmentLink     `json:"attachment_summaries"`
 	AttachmentNextCursor *NodeV2Cursor                     `json:"attachment_next_cursor,omitempty"`
+}
+
+type NodeV2TextBoxPageQuery struct {
+	CompanyID string
+	NodeID    string
+	Archived  bool
+	Limit     int
+	Cursor    *NodeV2Cursor
+}
+
+type NodeV2TextBoxPage struct {
+	Items      []domain.NodeV2TextBoxSummary `json:"items"`
+	NextCursor *NodeV2Cursor                 `json:"next_cursor,omitempty"`
 }
 
 type NodeV2TimelineQuery struct {
@@ -85,18 +112,22 @@ type NodeV2TextBoxMutationResult struct {
 }
 
 type NodeV2ArchiveTextBoxInput struct {
-	CompanyID   string
-	NodeID      string
-	TextboxID   string
-	ActorUserID string
-	Archived    bool
+	CompanyID      string
+	NodeID         string
+	TextboxID      string
+	ActorUserID    string
+	Archived       bool
+	IdempotencyKey string
 }
 
-type NodeV2TextBoxOrderInput struct {
-	CompanyID   string
-	NodeID      string
-	ActorUserID string
-	TextboxIDs  []string
+type NodeV2TextBoxMoveInput struct {
+	CompanyID      string
+	NodeID         string
+	ActorUserID    string
+	TextboxID      string
+	ReferenceID    string
+	Placement      string
+	IdempotencyKey string
 }
 
 type NodeV2SyncQuery struct {
@@ -141,6 +172,7 @@ type NodeV2CheckpointInput struct {
 	DocumentJSON       json.RawMessage
 	PlainText          string
 	Reason             string
+	Trusted            bool
 }
 
 type NodeV2CommentQuery struct {
@@ -209,6 +241,7 @@ type NodeV2AttachmentLinkInput struct {
 	RelationshipKind string
 	ActorUserID      string
 	Deleted          bool
+	IdempotencyKey   string
 }
 
 type NodeV2EmailPage struct {
@@ -224,6 +257,7 @@ type NodeV2EmailLinkInput struct {
 	EmailMessageID string
 	ActorUserID    string
 	Deleted        bool
+	IdempotencyKey string
 }
 
 type NodeV2EmailMessageQuery struct {
@@ -231,12 +265,11 @@ type NodeV2EmailMessageQuery struct {
 	NodeID        string
 	EmailThreadID string
 	Limit         int
-	AfterOrder    int
+	Cursor        *NodeV2Cursor
 	IncludeBody   bool
 }
 
 type NodeV2EmailMessagePage struct {
-	Items     []domain.NodeV2EmailMessageSummary `json:"items"`
-	NextOrder int                                `json:"next_order,omitempty"`
-	HasMore   bool                               `json:"has_more"`
+	Items      []domain.NodeV2EmailMessageSummary `json:"items"`
+	NextCursor *NodeV2Cursor                      `json:"next_cursor,omitempty"`
 }

@@ -63,3 +63,18 @@ The complete repository gate passed on 2026-07-27. Existing React test warnings 
 `backend/db/migrations/20260727_node_v2_phase2_product.sql` is additive. It adds text-box display order and create-idempotency metadata plus comment thread/comment idempotency metadata and supporting indexes. The same definitions are present in `backend/db/schema.sql`.
 
 No agent should apply this migration to development while the human-controlled development `schema_migrations` discrepancy documented in the Phase 1 record remains unresolved. A human rollout must first reconcile that ledger, rehearse on a disposable restored copy, apply both Phase 1 and Phase 2 additive migrations in reviewed order, then perform the separate Phase 3 conversion/cutover process. No document-size constraint or old two-MiB limit is introduced.
+
+## 2026-07-27 quality-audit closure
+
+The Phase 2 repository implementation now also includes:
+
+- metadata-only initial workspaces, independently hydrated documents, stable active/archive cursors, incremental loading, and sparse single-item moves;
+- versioned timeline, comment, attachment, email-thread, and email-message cursors with unique tie-breakers;
+- rendered Yjs-relative comment decorations, click-to-focus navigation, moving-anchor behavior, and explicit unanchored/deleted/legacy fallbacks using the database's `none`, `legacy_offsets_v1`, `yjs_relative_v1` and anchor-status vocabulary;
+- atomic, idempotent domain-event plus realtime-outbox writes for create, move, archive/restore, comments/replies, attachment associations, and email associations; Yjs typing remains outside the business outbox;
+- trusted checkpoint authority: clients can append updates and read recovery state but cannot claim checkpoint coverage; and
+- placement/GVIC data in the workspace header plus server/workspace-scoped activation so a global build flag cannot hide an unconverted legacy workspace.
+
+`scripts/run_all_tests.mjs` now runs the executable Phase 2 durability suite and the production-path harness. That harness provisions disposable PostgreSQL, two API instances, Vite, Chromium, and an S3-compatible local fixture, then proves legacy-before-activation and V2-after-activation behavior in one command. Its V2 browser path covers bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and 35-message email continuation.
+
+Phase 2 is complete in the repository. Phase 1 migration/rollout is still in progress for the human ledger reconciliation, shared converter, and dry-run/shadow/rollback work listed in the foundation record. This change did not migrate a live database or authorize rollout.

@@ -186,6 +186,9 @@ func (r *PostgresRepo) CreateNodeV2CommentThread(input NodeV2CreateCommentThread
 	if err := insertNodeV2MentionsTx(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID, threadID, commentID, input.Mentions); err != nil {
 		return domain.NodeV2CommentThread{}, err
 	}
+	if _, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, "node.comment.created", "node-v2-comment:"+input.IdempotencyKey, map[string]any{"textbox_id": input.TextboxID, "thread_id": threadID, "comment_id": commentID}); err != nil {
+		return domain.NodeV2CommentThread{}, err
+	}
 	item, err := nodeV2CommentThreadByIDTx(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID, threadID)
 	if err != nil {
 		return item, err
@@ -238,6 +241,9 @@ func (r *PostgresRepo) ReplyNodeV2Comment(input NodeV2ReplyCommentInput) (domain
 	if err := insertNodeV2MentionsTx(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID, input.ThreadID, commentID, input.Mentions); err != nil {
 		return item, err
 	}
+	if _, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, "node.comment.replied", "node-v2-comment-reply:"+input.IdempotencyKey, map[string]any{"textbox_id": input.TextboxID, "thread_id": input.ThreadID, "comment_id": commentID}); err != nil {
+		return item, err
+	}
 	item.Mentions, err = nodeV2MentionsTx(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID, input.ThreadID, commentID)
 	if err != nil {
 		return item, err
@@ -282,6 +288,9 @@ func listPostgresNodeV2Attachments(ctx context.Context, queryer interface {
 	args := []any{query.CompanyID, query.NodeID, query.Limit + 1}
 	predicate := ""
 	if query.Cursor != nil {
+		if query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_attachments" || query.Cursor.Timestamp.IsZero() || cleanUUIDText(query.Cursor.ID) == "" {
+			return NodeV2AttachmentPage{}, ErrInvalid
+		}
 		predicate = ` and (l.created_timestamp<$4 or (l.created_timestamp=$4 and l.attachment_link_id<$5::uuid))`
 		args = append(args, query.Cursor.Timestamp, query.Cursor.ID)
 	}
@@ -305,7 +314,7 @@ func listPostgresNodeV2Attachments(ctx context.Context, queryer interface {
 	if len(items) > query.Limit {
 		last := items[query.Limit-1]
 		page.Items = items[:query.Limit]
-		page.NextCursor = &NodeV2Cursor{Timestamp: last.CreatedTimestamp, ID: last.AttachmentLinkID}
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_attachments", Timestamp: last.CreatedTimestamp, ID: last.AttachmentLinkID}
 	}
 	return page, nil
 }
@@ -319,8 +328,8 @@ func (r *PostgresRepo) ListNodeV2Attachments(query NodeV2AggregateQuery) (NodeV2
 
 func (r *PostgresRepo) SetNodeV2AttachmentLink(input NodeV2AttachmentLinkInput) (domain.NodeV2AttachmentLink, error) {
 	input.CompanyID, input.NodeID, input.TextboxID, input.AttachmentID, input.ActorUserID = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.TextboxID), cleanUUIDText(input.AttachmentID), cleanUUIDText(input.ActorUserID)
-	input.RelationshipKind = strings.TrimSpace(input.RelationshipKind)
-	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.AttachmentID == "" || input.ActorUserID == "" || !(input.RelationshipKind == "file_attachment" || input.RelationshipKind == "inline_image") {
+	input.RelationshipKind, input.IdempotencyKey = strings.TrimSpace(input.RelationshipKind), strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.AttachmentID == "" || input.ActorUserID == "" || input.IdempotencyKey == "" || len([]byte(input.IdempotencyKey)) > 160 || !(input.RelationshipKind == "file_attachment" || input.RelationshipKind == "inline_image") {
 		return domain.NodeV2AttachmentLink{}, ErrInvalid
 	}
 	ctx := context.Background()
@@ -329,6 +338,14 @@ func (r *PostgresRepo) SetNodeV2AttachmentLink(input NodeV2AttachmentLinkInput) 
 		return domain.NodeV2AttachmentLink{}, err
 	}
 	defer tx.Rollback()
+	eventKey := "node-v2-attachment:" + input.IdempotencyKey
+	var replayed bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from domain_events where company_id=$1::uuid and idempotency_key=$2)`, input.CompanyID, eventKey).Scan(&replayed); err != nil {
+		return domain.NodeV2AttachmentLink{}, err
+	}
+	if replayed {
+		return scanNodeV2AttachmentRow(tx.QueryRowContext(ctx, `select l.attachment_link_id::text,l.textbox_id::text,l.relationship_kind,l.created_timestamp,l.deleted_timestamp,a.company_id::text,a.attachment_id::text,coalesce(a.uploaded_by_user_id::text,''),a.original_filename,a.mime_type,a.byte_size,a.sha256,a.sha256_verification_method,a.storage_checksum_algorithm,a.storage_checksum_value,a.storage_checksum_type,a.storage_bucket,a.storage_key,a.original_width,a.original_height,a.source_kind,a.source_provider,a.created_timestamp,a.deleted_timestamp from node_textbox_attachment_links l join attachments a on (a.company_id,a.attachment_id)=(l.company_id,l.attachment_id) where l.company_id=$1::uuid and l.node_id=$2::uuid and l.textbox_id=$3::uuid and l.attachment_id=$4::uuid and l.relationship_kind=$5`, input.CompanyID, input.NodeID, input.TextboxID, input.AttachmentID, input.RelationshipKind))
+	}
 	if input.Deleted {
 		result, err := tx.ExecContext(ctx, `update node_textbox_attachment_links set deleted_timestamp=coalesce(deleted_timestamp,now()) where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and attachment_id=$4::uuid and relationship_kind=$5 and deleted_timestamp is null`, input.CompanyID, input.NodeID, input.TextboxID, input.AttachmentID, input.RelationshipKind)
 		if err != nil {
@@ -351,6 +368,13 @@ func (r *PostgresRepo) SetNodeV2AttachmentLink(input NodeV2AttachmentLinkInput) 
 			}
 		}
 	}
+	eventType := "node.attachment.linked"
+	if input.Deleted {
+		eventType = "node.attachment.unlinked"
+	}
+	if _, eventErr := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, eventType, eventKey, map[string]any{"textbox_id": input.TextboxID, "attachment_id": input.AttachmentID, "relationship_kind": input.RelationshipKind}); eventErr != nil {
+		return domain.NodeV2AttachmentLink{}, eventErr
+	}
 	item, err := scanNodeV2AttachmentRow(tx.QueryRowContext(ctx, `select l.attachment_link_id::text,l.textbox_id::text,l.relationship_kind,l.created_timestamp,l.deleted_timestamp,a.company_id::text,a.attachment_id::text,coalesce(a.uploaded_by_user_id::text,''),a.original_filename,a.mime_type,a.byte_size,a.sha256,a.sha256_verification_method,a.storage_checksum_algorithm,a.storage_checksum_value,a.storage_checksum_type,a.storage_bucket,a.storage_key,a.original_width,a.original_height,a.source_kind,a.source_provider,a.created_timestamp,a.deleted_timestamp from node_textbox_attachment_links l join attachments a on (a.company_id,a.attachment_id)=(l.company_id,l.attachment_id) where l.company_id=$1::uuid and l.node_id=$2::uuid and l.textbox_id=$3::uuid and l.attachment_id=$4::uuid and l.relationship_kind=$5`, input.CompanyID, input.NodeID, input.TextboxID, input.AttachmentID, input.RelationshipKind))
 	if err != nil {
 		return item, err
@@ -370,6 +394,9 @@ func listPostgresNodeV2Emails(ctx context.Context, queryer interface {
 	args := []any{query.CompanyID, query.NodeID, query.Limit + 1}
 	predicate := ""
 	if query.Cursor != nil {
+		if query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_email_threads" || query.Cursor.Timestamp.IsZero() || cleanUUIDText(query.Cursor.ID) == "" {
+			return NodeV2EmailPage{}, ErrInvalid
+		}
 		predicate = ` and (n.created_timestamp<$4 or (n.created_timestamp=$4 and n.email_thread_id<$5::uuid))`
 		args = append(args, query.Cursor.Timestamp, query.Cursor.ID)
 	}
@@ -400,7 +427,7 @@ func listPostgresNodeV2Emails(ctx context.Context, queryer interface {
 	if len(items) > query.Limit {
 		last := items[query.Limit-1]
 		page.Items = items[:query.Limit]
-		page.NextCursor = &NodeV2Cursor{Timestamp: last.NodeAttachedTimestamp, ID: last.EmailThreadID}
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_email_threads", Timestamp: last.NodeAttachedTimestamp, ID: last.EmailThreadID}
 	}
 	return page, nil
 }
@@ -414,7 +441,8 @@ func (r *PostgresRepo) ListNodeV2EmailThreads(query NodeV2AggregateQuery) (NodeV
 
 func (r *PostgresRepo) SetNodeV2EmailLink(input NodeV2EmailLinkInput) error {
 	input.CompanyID, input.NodeID, input.TextboxID, input.EmailThreadID, input.EmailMessageID, input.ActorUserID = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.TextboxID), cleanUUIDText(input.EmailThreadID), cleanUUIDText(input.EmailMessageID), cleanUUIDText(input.ActorUserID)
-	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.EmailThreadID == "" || input.ActorUserID == "" {
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.EmailThreadID == "" || input.ActorUserID == "" || input.IdempotencyKey == "" || len([]byte(input.IdempotencyKey)) > 160 {
 		return ErrInvalid
 	}
 	ctx := context.Background()
@@ -423,6 +451,14 @@ func (r *PostgresRepo) SetNodeV2EmailLink(input NodeV2EmailLinkInput) error {
 		return err
 	}
 	defer tx.Rollback()
+	eventKey := "node-v2-email:" + input.IdempotencyKey
+	var replayed bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from domain_events where company_id=$1::uuid and idempotency_key=$2)`, input.CompanyID, eventKey).Scan(&replayed); err != nil {
+		return err
+	}
+	if replayed {
+		return nil
+	}
 	if input.Deleted {
 		result, err := tx.ExecContext(ctx, `update node_textbox_email_links set deleted_timestamp=coalesce(deleted_timestamp,now()) where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and email_thread_id=$4::uuid and email_message_id is not distinct from nullif($5,'')::uuid and deleted_timestamp is null`, input.CompanyID, input.NodeID, input.TextboxID, input.EmailThreadID, input.EmailMessageID)
 		if err != nil {
@@ -457,12 +493,22 @@ func (r *PostgresRepo) SetNodeV2EmailLink(input NodeV2EmailLinkInput) error {
 			}
 		}
 	}
+	eventType := "node.email.linked"
+	if input.Deleted {
+		eventType = "node.email.unlinked"
+	}
+	if _, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, eventType, eventKey, map[string]any{"textbox_id": input.TextboxID, "email_thread_id": input.EmailThreadID, "email_message_id": input.EmailMessageID}); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 func (r *PostgresRepo) ListNodeV2EmailMessages(query NodeV2EmailMessageQuery) (NodeV2EmailMessagePage, error) {
 	query.CompanyID, query.NodeID, query.EmailThreadID = cleanUUIDText(query.CompanyID), cleanUUIDText(query.NodeID), cleanUUIDText(query.EmailThreadID)
-	if query.CompanyID == "" || query.NodeID == "" || query.EmailThreadID == "" || query.AfterOrder < 0 {
+	if query.CompanyID == "" || query.NodeID == "" || query.EmailThreadID == "" {
+		return NodeV2EmailMessagePage{}, ErrInvalid
+	}
+	if query.Cursor != nil && (query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_email_messages" || query.Cursor.ID == "") {
 		return NodeV2EmailMessagePage{}, ErrInvalid
 	}
 	if query.Limit <= 0 || query.Limit > NodeV2MaxPageLimit {
@@ -472,7 +518,11 @@ func (r *PostgresRepo) ListNodeV2EmailMessages(query NodeV2EmailMessageQuery) (N
 	if query.IncludeBody {
 		bodyColumn = "m.rich_html_body"
 	}
-	rows, err := r.db.QueryContext(context.Background(), `select m.email_message_id::text,m.email_thread_id::text,m.provider_message_id,m.message_order,m.subject,m.snippet,m.message_timestamp,m.sender_snapshot::text,m.to_snapshot::text,m.cc_snapshot::text,m.bcc_snapshot::text,`+bodyColumn+`,m.attachment_metadata::text from communications_email_messages m join communications_node_email_threads n on (n.company_id,n.email_thread_id)=(m.company_id,m.email_thread_id) where n.company_id=$1::uuid and n.node_id=$2::uuid and n.email_thread_id=$3::uuid and m.message_order>=$4 order by m.message_order,m.provider_message_id limit $5`, query.CompanyID, query.NodeID, query.EmailThreadID, query.AfterOrder, query.Limit+1)
+	afterOrder, afterID := int64(-1), ""
+	if query.Cursor != nil {
+		afterOrder, afterID = query.Cursor.Order, query.Cursor.ID
+	}
+	rows, err := r.db.QueryContext(context.Background(), "select m.email_message_id::text,m.email_thread_id::text,m.provider_message_id,m.message_order,m.subject,m.snippet,m.message_timestamp,m.sender_snapshot::text,m.to_snapshot::text,m.cc_snapshot::text,m.bcc_snapshot::text,"+bodyColumn+",m.attachment_metadata::text from communications_email_messages m join communications_node_email_threads n on (n.company_id,n.email_thread_id)=(m.company_id,m.email_thread_id) where n.company_id=$1::uuid and n.node_id=$2::uuid and n.email_thread_id=$3::uuid and (m.message_order>$4 or (m.message_order=$4 and m.provider_message_id>$5)) order by m.message_order,m.provider_message_id limit $6", query.CompanyID, query.NodeID, query.EmailThreadID, afterOrder, afterID, query.Limit+1)
 	if err != nil {
 		return NodeV2EmailMessagePage{}, err
 	}
@@ -498,9 +548,9 @@ func (r *PostgresRepo) ListNodeV2EmailMessages(query NodeV2EmailMessageQuery) (N
 		return page, err
 	}
 	if len(page.Items) > query.Limit {
+		last := page.Items[query.Limit-1]
 		page.Items = page.Items[:query.Limit]
-		page.HasMore = true
-		page.NextOrder = page.Items[len(page.Items)-1].MessageOrder + 1
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_email_messages", Order: int64(last.MessageOrder), ID: last.ProviderMessageID}
 	}
 	return page, nil
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestNodeV2Phase2TextboxesSyncCommentsAndBoundedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNodeV2Workspace: %v", err)
 	}
-	if workspace.Counts.Textboxes != 140 || len(workspace.Textboxes) != NodeV2MaxPageLimit {
+	if workspace.Counts.Textboxes != 140 || len(workspace.Textboxes) != 25 || workspace.TextboxNextCursor == nil {
 		t.Fatalf("workspace textboxes count=%d payload=%d", workspace.Counts.Textboxes, len(workspace.Textboxes))
 	}
 	if len(workspace.Timeline.Items) != 25 || workspace.Timeline.NextCursor == nil {
@@ -79,7 +80,16 @@ func TestNodeV2Phase2TextboxesSyncCommentsAndBoundedWorkspace(t *testing.T) {
 		t.Fatalf("sync page=%+v err=%v", syncPage, err)
 	}
 	document := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Recovered"}]}]}`)
-	checkpointed, err := repo.CheckpointNodeV2TextBox(NodeV2CheckpointInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, CheckpointID: "checkpoint-1", CollaborationEpoch: textbox.CollaborationEpoch, ThroughSequence: firstUpdate.UpdateSequence, CheckpointPayload: []byte{0, 0}, StateVector: []byte{0}, DocumentJSON: document, PlainText: "Recovered", Reason: "test"})
+	untrustedInput := NodeV2CheckpointInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, CheckpointID: "malicious-checkpoint", CollaborationEpoch: textbox.CollaborationEpoch, ThroughSequence: firstUpdate.UpdateSequence, CheckpointPayload: []byte{0, 0}, StateVector: []byte{0}, DocumentJSON: document, PlainText: "omits durable state", Reason: "test"}
+	if _, err := repo.CheckpointNodeV2TextBox(untrustedInput); !errors.Is(err, ErrNodeV2UntrustedCheckpoint) {
+		t.Fatalf("untrusted checkpoint err=%v", err)
+	}
+	staleClaim := untrustedInput
+	staleClaim.Trusted, staleClaim.CheckpointID, staleClaim.ThroughSequence = true, "future-checkpoint", firstUpdate.UpdateSequence+1
+	if _, err := repo.CheckpointNodeV2TextBox(staleClaim); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("future checkpoint claim err=%v", err)
+	}
+	checkpointed, err := repo.CheckpointNodeV2TextBox(NodeV2CheckpointInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, CheckpointID: "checkpoint-1", CollaborationEpoch: textbox.CollaborationEpoch, ThroughSequence: firstUpdate.UpdateSequence, CheckpointPayload: []byte{0, 0}, StateVector: []byte{0}, DocumentJSON: document, PlainText: "Recovered", Reason: "test", Trusted: true})
 	if err != nil || checkpointed.PlainText != "Recovered" || checkpointed.MaterializedThroughSequence != firstUpdate.UpdateSequence {
 		t.Fatalf("checkpoint=%+v err=%v", checkpointed, err)
 	}
@@ -103,11 +113,11 @@ func TestNodeV2Phase2TextboxesSyncCommentsAndBoundedWorkspace(t *testing.T) {
 		t.Fatalf("reply=%+v err=%v", reply, err)
 	}
 
-	archived, err := repo.SetNodeV2TextBoxArchived(NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, Archived: true})
+	archived, err := repo.SetNodeV2TextBoxArchived(NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, Archived: true, IdempotencyKey: "archive-1"})
 	if err != nil || archived.DeletedTimestamp == nil {
 		t.Fatalf("archive=%+v err=%v", archived, err)
 	}
-	restored, err := repo.SetNodeV2TextBoxArchived(NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, Archived: false})
+	restored, err := repo.SetNodeV2TextBoxArchived(NodeV2ArchiveTextBoxInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: textbox.TextboxID, ActorUserID: actor.UserID, Archived: false, IdempotencyKey: "restore-1"})
 	if err != nil || restored.DeletedTimestamp != nil {
 		t.Fatalf("restore=%+v err=%v", restored, err)
 	}

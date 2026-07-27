@@ -9,10 +9,7 @@ const PENDING_DATABASE = "mango-node-v2-recovery-v1";
 const PENDING_STORE = "updates";
 const FLUSH_INTERVAL_MS = 180;
 const POLL_INTERVAL_MS = 3_000;
-const CHECKPOINT_IDLE_MS = 1_500;
-const CHECKPOINT_UPDATE_COUNT = 512;
-const CHECKPOINT_UPDATE_BYTES = 512 * 1024;
-
+const MAX_BUFFERED_UPDATE_BYTES = 512 * 1024;
 export type NodeV2SaveState = "loading" | "saved" | "saving" | "offline" | "error";
 
 type PendingUpdate = {
@@ -33,7 +30,6 @@ type NodeV2SyncControllerOptions = {
   nodeID: string;
   userID: string;
   onSaveState: (state: NodeV2SaveState) => void;
-  onCheckpointNeeded: () => void;
   onError: (message: string) => void;
 };
 
@@ -139,11 +135,8 @@ export class NodeV2SyncController {
   private serverSequence = 0;
   private localUpdates: Uint8Array[] = [];
   private localUpdateBytes = 0;
-  private updatesSinceCheckpoint = 0;
-  private bytesSinceCheckpoint = 0;
   private flushTimer?: ReturnType<typeof setTimeout>;
   private pollTimer?: ReturnType<typeof setInterval>;
-  private checkpointTimer?: ReturnType<typeof setTimeout>;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private retryDelay = 1_000;
   private stopped = false;
@@ -194,15 +187,13 @@ export class NodeV2SyncController {
     this.localUpdates.push(update);
     this.localUpdateBytes += update.byteLength;
     this.options.onSaveState("saving");
-    if (!navigator.onLine || this.localUpdateBytes >= CHECKPOINT_UPDATE_BYTES) {
+    if (!navigator.onLine || this.localUpdateBytes >= MAX_BUFFERED_UPDATE_BYTES) {
       // Offline state is only shown after flush has durably queued the update in
       // IndexedDB. That makes "Offline" safe to use as the close/navigation gate.
       void this.flush().catch(() => undefined);
     } else if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => { this.flushTimer = undefined; void this.flush().catch(() => undefined); }, FLUSH_INTERVAL_MS);
     }
-    if (this.checkpointTimer) clearTimeout(this.checkpointTimer);
-    this.checkpointTimer = setTimeout(() => this.options.onCheckpointNeeded(), CHECKPOINT_IDLE_MS);
   };
 
   private readonly handleOnline = () => {
@@ -249,8 +240,6 @@ export class NodeV2SyncController {
       payload_base64: pending.payloadBase64,
     }, keepalive);
     this.serverSequence = Math.max(this.serverSequence, result.update_sequence ?? 0);
-    this.updatesSinceCheckpoint += 1;
-    this.bytesSinceCheckpoint += base64ToBytes(pending.payloadBase64).byteLength;
     await deletePending(pending.key);
   }
 
@@ -271,7 +260,6 @@ export class NodeV2SyncController {
         await this.sendPending(keepalive);
         this.retryDelay = 1_000;
         this.options.onSaveState("saved");
-        if (this.updatesSinceCheckpoint >= CHECKPOINT_UPDATE_COUNT || this.bytesSinceCheckpoint >= CHECKPOINT_UPDATE_BYTES) this.options.onCheckpointNeeded();
       } catch (cause) {
         this.options.onSaveState(navigator.onLine ? "error" : "offline");
         if (!this.stopped) {
@@ -303,32 +291,10 @@ export class NodeV2SyncController {
     }
   }
 
-  async checkpoint(documentJSON: Record<string, unknown>, plainText: string, reason: string): Promise<void> {
-    await this.flush();
-    await this.pullRemote();
-    await this.options.client.checkpoint(this.options.textboxID, {
-      checkpoint_id: randomID(),
-      collaboration_epoch: this.collaborationEpoch,
-      through_update_sequence: this.serverSequence,
-      payload_base64: bytesToBase64(Y.encodeStateAsUpdate(this.document)),
-      state_vector_base64: bytesToBase64(Y.encodeStateVector(this.document)),
-      document_json: {
-        format: "mango-tiptap-json",
-        schema_version: 1,
-        document: documentJSON,
-      },
-      plain_text: plainText,
-      reason: reason === "manual_recovery" ? reason : "idle",
-    });
-    this.updatesSinceCheckpoint = 0;
-    this.bytesSinceCheckpoint = 0;
-    this.options.onSaveState("saved");
-  }
 
   async stop(): Promise<void> {
     this.stopped = true;
     clearTimeout(this.flushTimer);
-    clearTimeout(this.checkpointTimer);
     clearTimeout(this.retryTimer);
     clearInterval(this.pollTimer);
     window.removeEventListener("online", this.handleOnline);

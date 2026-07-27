@@ -2,17 +2,23 @@ import type { MangoAttachment } from "../../attachments/attachmentApi.js";
 import type { MangoTiptapDocument } from "../tiptap/mangoTiptapDocument.js";
 
 export type NodeV2Cursor = {
-  timestamp: string;
+  v: 1;
+  kind: "node_v2_timeline" | "node_v2_textboxes_active" | "node_v2_textboxes_archived" | "node_v2_comments" | "node_v2_attachments" | "node_v2_email_threads" | "node_v2_email_messages";
+  timestamp?: string;
   id: string;
   sequence?: number;
+  order?: number;
 };
 
-export type NodeV2TextBox = {
+export type NodeV2Availability = {
+  active: boolean;
+  reason?: "node_v2_schema_unavailable" | "workspace_not_converted";
+};
+
+export type NodeV2TextBoxSummary = {
   company_id: string;
   node_id: string;
   textbox_id: string;
-  document_json: MangoTiptapDocument;
-  plain_text: string;
   document_schema_version: number;
   content_revision: number;
   collaboration_epoch: string;
@@ -27,6 +33,11 @@ export type NodeV2TextBox = {
   comment_count: number;
   attachment_count: number;
   email_link_count: number;
+};
+
+export type NodeV2TextBox = NodeV2TextBoxSummary & {
+  document_json: MangoTiptapDocument;
+  plain_text: string;
 };
 
 export type NodeV2TimelineItem = {
@@ -86,14 +97,17 @@ export type NodeV2Comment = {
   deleted_timestamp?: string;
 };
 
+export type NodeV2AnchorFormat = "none" | "legacy_offsets_v1" | "yjs_relative_v1";
+export type NodeV2AnchorStatus = "anchored" | "uniquely_recovered" | "ambiguous" | "unanchored" | "deleted_range";
+
 export type NodeV2CommentThread = {
   thread_id: string;
   textbox_id: string;
   selected_quote: string;
   anchor_before_text: string;
   anchor_after_text: string;
-  anchor_format: "yjs_relative_position_v1" | "legacy_unanchored";
-  anchor_status: "anchored" | "detached" | "legacy_unanchored";
+  anchor_format: NodeV2AnchorFormat;
+  anchor_status: NodeV2AnchorStatus;
   anchor_start_base64?: string;
   anchor_end_base64?: string;
   created_by_display_name: string;
@@ -141,10 +155,14 @@ export type NodeV2EmailMessage = {
 
 export type NodeV2Workspace = {
   node: { node_id: string; name: string };
+  placement: { logic_gate_id?: string; logic_gate_name?: string; status_key?: string; column_id?: string; is_issue: boolean };
+  gvic_summary: Array<{ assignment_id: string; role_key: string; principal_type: string; principal_id: string; principal_name: string }>;
   counts: { textboxes: number; archived_textboxes: number; comments: number; email_threads: number; attachments: number };
   timeline: { items: NodeV2TimelineItem[]; next_cursor?: NodeV2Cursor };
-  textboxes: NodeV2TextBox[];
-  archived_textboxes: NodeV2TextBox[];
+  textboxes: NodeV2TextBoxSummary[];
+  textbox_next_cursor?: NodeV2Cursor;
+  archived_textboxes: NodeV2TextBoxSummary[];
+  archived_next_cursor?: NodeV2Cursor;
   email_thread_summaries: NodeV2EmailThread[];
   email_next_cursor?: NodeV2Cursor;
   attachment_summaries: NodeV2AttachmentLink[];

@@ -1,16 +1,10 @@
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
 
 globalThis.indexedDB = indexedDB;
 globalThis.IDBKeyRange = IDBKeyRange;
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (relative) => fs.readFile(path.join(root, relative), "utf8");
 
 async function indexedDBRecoveryScenario() {
   const key = `node-v2-test:user:company:node:textbox:${Date.now()}`;
@@ -31,6 +25,38 @@ async function indexedDBRecoveryScenario() {
   recovered.destroy();
 }
 
+function smallDeltaAndRecoveryChainScenario() {
+  const source = new Y.Doc();
+  const body = source.getText("body");
+  body.insert(0, "x".repeat(1024 * 1024));
+  const checkpoint = Y.encodeStateAsUpdate(source);
+  const incremental = [];
+  source.on("update", (update) => incremental.push(update));
+  body.insert(512 * 1024, "!");
+
+  const delta = Y.mergeUpdates(incremental);
+  assert.ok(delta.byteLength < checkpoint.byteLength / 100,
+    `single-character delta ${delta.byteLength}B must stay far below ${checkpoint.byteLength}B checkpoint`);
+
+  const restored = new Y.Doc();
+  Y.applyUpdate(restored, checkpoint);
+  Y.applyUpdate(restored, delta);
+  Y.applyUpdate(restored, delta);
+  assert.equal(restored.getText("body").length, 1024 * 1024 + 1);
+  assert.equal(restored.getText("body").toString().at(512 * 1024), "!");
+
+  const omittedTail = new Y.Doc();
+  Y.applyUpdate(omittedTail, checkpoint);
+  assert.notDeepEqual(
+    [...Y.encodeStateVector(omittedTail)],
+    [...Y.encodeStateVector(restored)],
+    "a checkpoint that claims to cover an omitted durable update has a different state vector",
+  );
+  source.destroy();
+  restored.destroy();
+  omittedTail.destroy();
+}
+
 function retryAndMultiTabScenario() {
   const tabA = new Y.Doc();
   const tabB = new Y.Doc();
@@ -45,7 +71,7 @@ function retryAndMultiTabScenario() {
   const operationA = Y.mergeUpdates(updatesA);
   const operationB = Y.mergeUpdates(updatesB);
   Y.applyUpdate(server, operationA);
-  Y.applyUpdate(server, operationA); // exact idempotent retry
+  Y.applyUpdate(server, operationA);
   Y.applyUpdate(server, operationB);
   const canonical = Y.encodeStateAsUpdate(server);
   Y.applyUpdate(tabA, canonical);
@@ -53,49 +79,23 @@ function retryAndMultiTabScenario() {
   assert.equal(tabA.getText("body").toString(), tabB.getText("body").toString());
   assert.equal(tabA.getText("body").length, 9);
 
-  const start = Y.createRelativePositionFromTypeIndex(tabA.getText("body"), 1);
-  const encoded = Y.encodeRelativePosition(start);
-  tabA.getText("body").insert(0, "!");
-  const resolved = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(encoded), tabA);
-  assert.equal(resolved?.index, 2, "relative comment anchor follows inserted content");
-}
+  const text = tabA.getText("body");
+  const start = Y.createRelativePositionFromTypeIndex(text, 1, 0);
+  const end = Y.createRelativePositionFromTypeIndex(text, 4, 0);
+  const encodedStart = Y.encodeRelativePosition(start);
+  const encodedEnd = Y.encodeRelativePosition(end);
+  text.insert(0, "!");
+  const movedStart = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(encodedStart), tabA);
+  const movedEnd = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(encodedEnd), tabA);
+  assert.equal(movedStart?.index, 2, "comment start follows an insertion before its range");
+  assert.equal(movedEnd?.index, 5, "comment end follows an insertion before its range");
 
-async function sourceContractScenario() {
-  const [workspace, editor, sync, api, extensions] = await Promise.all([
-    read("src/modules/editor/nodeV2/NodeV2WorkspaceSurface.tsx"),
-    read("src/modules/editor/nodeV2/NodeV2Editor.tsx"),
-    read("src/modules/editor/nodeV2/nodeV2Sync.ts"),
-    read("src/modules/editor/nodeV2/nodeV2Api.ts"),
-    read("src/modules/editor/tiptap/mangoTiptapExtensions.ts"),
-  ]);
-  assert.match(workspace, /active && currentUserID[^]*\? <NodeV2Editor/);
-  assert.match(workspace, /<VirtualStaticTextbox/);
-  assert.match(workspace, /IntersectionObserver/);
-  assert.match(workspace, /Load more comments/);
-  assert.match(workspace, /Load message bodies/);
-  assert.match(workspace, /fetchMangoAttachmentBlob[^]*"thumbnail"/);
-  assert.match(workspace, /anchor_start_base64/);
-  assert.match(workspace, /Legacy unanchored comment/);
-  assert.doesNotMatch(editor, /onUpdate:[^\n]*getJSON/);
-  assert.match(editor, /Collaboration\.configure/);
-  assert.match(editor, /onFirstRender[^]*undoManager\?\.clear\(\)[^]*undoManager\?\.stopCapturing\(\)/);
-  assert.match(editor, /absolutePositionToRelativePosition/);
-  assert.match(sync, /IndexeddbPersistence/);
-  assert.match(sync, /Y\.mergeUpdates/);
-  assert.match(sync, /format: "mango-tiptap-json"[^]*schema_version: 1[^]*document: documentJSON/);
-  assert.match(sync, /reason: reason === "manual_recovery" \? reason : "idle"/);
-  assert.match(sync, /CHECKPOINT_UPDATE_COUNT = 512/);
-  assert.match(sync, /CHECKPOINT_UPDATE_BYTES = 512 \* 1024/);
-  assert.match(sync, /putPending\(pending\)[^]*sendOne\(pending\)/);
-  assert.match(api, /include_body: includeBody \? 1 : 0/);
-  assert.match(extensions, /undoRedo: options\.collaboration \? false/);
-
-  const timelineSource = workspace.slice(workspace.indexOf("function timelineLabel"), workspace.indexOf("function saveLabel"));
-  const timelineCases = [...timelineSource.matchAll(/case "([^"]+)": return "[^"]+";/g)].map((match) => match[1]);
-  assert.deepEqual(timelineCases, ["textbox_created", "node_moved", "verification_stamp"]);
+  tabA.destroy();
+  tabB.destroy();
+  server.destroy();
 }
 
 await indexedDBRecoveryScenario();
+smallDeltaAndRecoveryChainScenario();
 retryAndMultiTabScenario();
-await sourceContractScenario();
-console.log("Node v2 Phase 2 frontend durability and source-contract scenarios passed.");
+console.log("Node v2 Phase 2 executable durability, delta-size, recovery-chain, and anchor scenarios passed.");

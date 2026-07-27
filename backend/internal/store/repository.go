@@ -15,6 +15,8 @@ var (
 	ErrAlreadyExists                 = errors.New("already exists")
 	ErrVersionConflict               = errors.New("version conflict")
 	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
+	ErrNodeV2Inactive                = errors.New("node v2 inactive")
+	ErrNodeV2UntrustedCheckpoint     = errors.New("node v2 checkpoint requires trusted service")
 	ErrSendInProgress                = errors.New("send in progress")
 	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
 	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")

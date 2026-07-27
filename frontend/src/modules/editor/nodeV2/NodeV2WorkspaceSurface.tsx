@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { JSONContent } from "@tiptap/core";
 import { fetchMangoAttachmentBlob, uploadMangoAttachment, type AttachmentRequestJSON, type MangoAttachment } from "../../attachments/attachmentApi.js";
 import { sanitizeEditorDocumentHTML } from "../richTextEditing.js";
 import { MangoTiptapStaticRenderer } from "../tiptap/MangoTiptapStaticRenderer.js";
-import type { MangoTiptapDocument } from "../tiptap/mangoTiptapDocument.js";
 import type { MentionableCompanyUser, NodeWorkspaceSaveController, RequestJSON } from "../NodeWorkspaceSurfaceShared.js";
 import { createNodeV2Client } from "./nodeV2Api.js";
 import { NodeV2Editor, type NodeV2EditorHandle, type NodeV2InlineImage } from "./NodeV2Editor.js";
 import type { NodeV2SaveState } from "./nodeV2Sync.js";
-import type { NodeV2AttachmentLink, NodeV2CommentThread, NodeV2Cursor, NodeV2EmailMessage, NodeV2TextBox, NodeV2TimelineItem, NodeV2Workspace } from "./nodeV2Types.js";
+import type { NodeV2AttachmentLink, NodeV2CommentThread, NodeV2Cursor, NodeV2EmailMessage, NodeV2TextBox, NodeV2TextBoxSummary, NodeV2TimelineItem, NodeV2Workspace } from "./nodeV2Types.js";
 import "./nodeV2.css";
 
 type Props = {
@@ -85,24 +83,35 @@ const StaticAttachmentImage: React.FC<{ apiBase: string; companyID: string; atta
   return url ? <img className="node-v2-static-image" src={url} alt={filename} loading="lazy" /> : <span>Image preview unavailable</span>;
 };
 
-const VirtualStaticTextbox: React.FC<{ apiBase: string; companyID: string; textbox: NodeV2TextBox; onActivate: () => void }> = ({ apiBase, companyID, textbox, onActivate }) => {
+const VirtualStaticTextbox: React.FC<{ apiBase: string; companyID: string; textbox: NodeV2TextBoxSummary; client: ReturnType<typeof createNodeV2Client>; onActivate: () => void }> = ({ apiBase, companyID, textbox, client, onActivate }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [document, setDocument] = useState<NodeV2TextBox>();
   useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof IntersectionObserver === "undefined") { setVisible(true); return undefined; }
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: "600px 0px" });
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) setVisible(true);
+    }, { rootMargin: "600px 0px" });
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    if (!visible || document) return;
+    let cancelled = false;
+    void client.textbox(textbox.textbox_id).then((item) => {
+      if (!cancelled) setDocument(item);
+    });
+    return () => { cancelled = true; };
+  }, [visible, document, client, textbox.textbox_id]);
   return <div ref={rootRef} className="node-v2-static-document" onDoubleClick={onActivate} data-testid="node-v2-static-textbox">
-    {visible
+    {document
       ? <MangoTiptapStaticRenderer
-        value={textbox.document_json}
+        value={document.document_json}
         ariaLabel="Inactive Node text box"
         renderAttachmentImage={(attributes) => <StaticAttachmentImage apiBase={apiBase} companyID={companyID} attachmentID={attributes.attachmentId} filename={attributes.filename} />}
       />
-      : <div className="node-v2-virtual-placeholder" aria-hidden="true" />}
+      : <div className="node-v2-virtual-placeholder" aria-label={visible ? "Loading text box" : "Text box not yet loaded"} />}
   </div>;
 };
 
@@ -146,13 +155,16 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   const [commentCursor, setCommentCursor] = useState<NodeV2Cursor>();
   const [commentBody, setCommentBody] = useState("");
   const [mentionUserID, setMentionUserID] = useState("");
-  const [emailMessages, setEmailMessages] = useState<Record<string, NodeV2EmailMessage[]>>({});
+  const [emailMessages, setEmailMessages] = useState<Record<string, { items: NodeV2EmailMessage[]; nextCursor?: NodeV2Cursor }>>({});
+  const [documents, setDocuments] = useState<Record<string, NodeV2TextBox>>({});
   const [busy, setBusy] = useState(false);
 
-  const updateTextbox = useCallback((textboxID: string, document: JSONContent, plainText: string) => {
-    const documentEnvelope: MangoTiptapDocument = { format: "mango-tiptap-json", schema_version: 1, document };
-    setWorkspace((current) => current ? { ...current, textboxes: current.textboxes.map((item) => item.textbox_id === textboxID ? { ...item, document_json: documentEnvelope, plain_text: plainText } : item) } : current);
-  }, []);
+  const hydrateTextbox = useCallback(async (textboxID: string) => {
+    if (documents[textboxID]) return documents[textboxID];
+    const document = await client.textbox(textboxID);
+    setDocuments((current) => ({ ...current, [textboxID]: document }));
+    return document;
+  }, [client, documents]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -168,6 +180,11 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   }, [client, onError]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  useEffect(() => {
+    if (!activeTextboxID) return;
+    void hydrateTextbox(activeTextboxID).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load the text box"));
+  }, [activeTextboxID, hydrateTextbox, onError]);
 
   useEffect(() => {
     onRegisterSaveController?.({ flushPendingProjectionSaves: async () => { await editorRef.current?.flush("navigation"); } });
@@ -187,6 +204,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     if (textboxID === activeTextboxID) return;
     try {
       await editorRef.current?.flush("switch_textbox");
+      await hydrateTextbox(textboxID);
       setActiveTextboxID(textboxID);
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "The current text box could not be saved");
@@ -198,6 +216,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     try {
       await editorRef.current?.flush("create_textbox");
       const result = await client.createTextbox(randomID());
+      setDocuments((current) => ({ ...current, [result.textbox.textbox_id]: result.textbox }));
       setWorkspace((current) => current ? {
         ...current,
         textboxes: [result.textbox, ...current.textboxes],
@@ -212,11 +231,11 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     }
   };
 
-  const archiveTextbox = async (textbox: NodeV2TextBox, archived: boolean) => {
+  const archiveTextbox = async (textbox: NodeV2TextBoxSummary, archived: boolean) => {
     setBusy(true);
     try {
       if (textbox.textbox_id === activeTextboxID) await editorRef.current?.flush("archive");
-      const updated = await client.archiveTextbox(textbox.textbox_id, archived);
+      const updated = await client.archiveTextbox(textbox.textbox_id, archived, randomID());
       setWorkspace((current) => {
         if (!current) return current;
         const active = current.textboxes.filter((item) => item.textbox_id !== textbox.textbox_id);
@@ -240,8 +259,8 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     [next[index], next[target]] = [next[target], next[index]];
     setWorkspace({ ...workspace, textboxes: next });
     try {
-      const result = await client.orderTextboxes(next.map((item) => item.textbox_id));
-      setWorkspace((current) => current ? { ...current, textboxes: result.textboxes } : current);
+      const result = await client.moveTextbox(workspace.textboxes[index].textbox_id, workspace.textboxes[target].textbox_id, direction < 0 ? "before" : "after", randomID());
+      setWorkspace((current) => current ? { ...current, textboxes: current.textboxes.map((item) => item.textbox_id === result.textbox_id ? { ...item, display_order: result.display_order } : item) } : current);
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Unable to reorder text boxes");
       await reload();
@@ -262,7 +281,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
         sourceKind: inline ? "editor_paste" : "user_upload",
         relationshipKind: inline ? "inline_image" : "file_attachment",
       });
-      const link = await client.linkAttachment(activeTextboxID, uploaded.attachment.attachment_id, inline ? "inline_image" : "file_attachment");
+      const link = await client.linkAttachment(activeTextboxID, uploaded.attachment.attachment_id, inline ? "inline_image" : "file_attachment", randomID());
       setWorkspace((current) => current ? { ...current, attachment_summaries: [link, ...current.attachment_summaries], counts: { ...current.counts, attachments: current.counts.attachments + 1 } } : current);
       if (inline) images.push({ attachmentId: uploaded.attachment.attachment_id, filename: uploaded.attachment.original_filename, mimeType: uploaded.attachment.mime_type, width: uploaded.attachment.original_width ?? null, height: uploaded.attachment.original_height ?? null });
     }
@@ -280,7 +299,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
         selected_quote: anchor?.selectedQuote ?? "",
         anchor_before_text: anchor?.beforeText ?? "",
         anchor_after_text: anchor?.afterText ?? "",
-        anchor_status: anchor?.status ?? "legacy_unanchored",
+        anchor_status: anchor?.status ?? "unanchored",
         anchor_start_base64: anchor?.startBase64 ?? "",
         anchor_end_base64: anchor?.endBase64 ?? "",
         mentions: mentionUserID ? [{ principal_type: "user", principal_id: mentionUserID }] : [],
@@ -307,13 +326,39 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
 
   const loadEmail = async (threadID: string) => {
     try {
-      const page = await client.emailMessages(threadID, 0, true);
-      setEmailMessages((current) => ({ ...current, [threadID]: page.items }));
+	      const page = await client.emailMessages(threadID, undefined, true);
+      setEmailMessages((current) => ({ ...current, [threadID]: { items: page.items, nextCursor: page.next_cursor } }));
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Unable to load email bodies");
     }
   };
 
+  const loadMoreTextboxes = async (archived: boolean) => {
+    const cursor = archived ? workspace?.archived_next_cursor : workspace?.textbox_next_cursor;
+    if (!workspace || !cursor) return;
+    try {
+      const page = await client.textboxes(archived, cursor, 30);
+      setWorkspace((current) => {
+        if (!current) return current;
+        return archived
+          ? { ...current, archived_textboxes: [...current.archived_textboxes, ...page.items], archived_next_cursor: page.next_cursor }
+          : { ...current, textboxes: [...current.textboxes, ...page.items], textbox_next_cursor: page.next_cursor };
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Unable to load more text boxes");
+    }
+  };
+
+  const loadMoreEmailMessages = async (threadID: string) => {
+    const currentPage = emailMessages[threadID];
+    if (!currentPage?.nextCursor) return;
+    try {
+      const page = await client.emailMessages(threadID, currentPage.nextCursor, true);
+      setEmailMessages((current) => ({ ...current, [threadID]: { items: [...(current[threadID]?.items ?? []), ...page.items], nextCursor: page.next_cursor } }));
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Unable to load more email messages");
+    }
+  };
   const loadMoreTimeline = async () => {
     const cursor = workspace?.timeline.next_cursor;
     if (!workspace || !cursor) return;
@@ -330,9 +375,10 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   if (!workspace) return <section className="node-v2-workspace" style={{ top: topPx }}><p>Node v2 could not be loaded.</p></section>;
 
   const activeTextbox = workspace.textboxes.find((item) => item.textbox_id === activeTextboxID);
+  const activeDocument = activeTextboxID ? documents[activeTextboxID] : undefined;
   return <section className="node-v2-workspace" style={{ top: topPx }} aria-label="Node v2 workspace" data-testid="node-v2-workspace">
     <header className="node-v2-header">
-      <div><span className="node-v2-eyebrow">Node v2</span><h2>{workspace.node.name}</h2></div>
+      <div><span className="node-v2-eyebrow">Node v2</span><h2>{workspace.node.name}</h2><small>{workspace.placement.logic_gate_name || "Unplaced"} · {workspace.gvic_summary.length} GVIC assignments</small></div>
       <div className={`node-v2-save-state is-${saveState}`} role="status" aria-live="polite">{saveLabel(saveState)}</div>
       <button type="button" onClick={() => void createTextbox()} disabled={!canEdit || busy}>New text box</button>
     </header>
@@ -352,7 +398,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
                 <button type="button" onClick={() => void archiveTextbox(textbox, true)}>Archive</button>
               </div>}
             </header>
-            {active && currentUserID
+            {active && currentUserID && activeDocument
               ? <NodeV2Editor
                 key={textbox.textbox_id}
                 ref={editorRef}
@@ -360,22 +406,24 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
                 companyID={companyID}
                 nodeID={nodeID}
                 userID={currentUserID}
-                textbox={textbox}
+                textbox={activeDocument}
                 client={client}
                 canEdit={canEdit}
+                comments={comments}
                 mentionUsers={companyUsers}
                 onSaveState={setSaveState}
-                onDocumentChange={(document, plainText) => updateTextbox(textbox.textbox_id, document, plainText)}
                 onUploadInlineImages={(files) => uploadFiles(files, true)}
                 onError={onError}
               />
-              : <VirtualStaticTextbox apiBase={apiBase} companyID={companyID} textbox={textbox} onActivate={() => void activate(textbox.textbox_id)} />}
+              : active ? <div className="node-v2-editor-loading" role="status">Loading this text box…</div> : <VirtualStaticTextbox apiBase={apiBase} companyID={companyID} textbox={textbox} client={client} onActivate={() => void activate(textbox.textbox_id)} />}
           </article>;
         })}
 
+        {workspace.textbox_next_cursor && <button type="button" onClick={() => void loadMoreTextboxes(false)}>Load more text boxes</button>}
         {workspace.archived_textboxes.length > 0 && <details className="node-v2-archived">
           <summary>Archived text boxes ({workspace.archived_textboxes.length})</summary>
-          {workspace.archived_textboxes.map((textbox) => <div key={textbox.textbox_id}><span>{textbox.plain_text.slice(0, 120) || "Empty text box"}</span><button type="button" onClick={() => void archiveTextbox(textbox, false)} disabled={!canEdit}>Restore</button></div>)}
+          {workspace.archived_textboxes.map((textbox) => <div key={textbox.textbox_id} data-node-v2-textbox-id={textbox.textbox_id}><span>Archived text box · {textbox.comment_count} comments</span><button type="button" onClick={() => void archiveTextbox(textbox, false)} disabled={!canEdit}>Restore</button></div>)}
+          {workspace.archived_next_cursor && <button type="button" onClick={() => void loadMoreTextboxes(true)}>Load more archived text boxes</button>}
         </details>}
       </main>
 
@@ -391,9 +439,9 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
             <label className="node-v2-field">Mention<select value={mentionUserID} onChange={(event) => setMentionUserID(event.target.value)} disabled={!canEdit}><option value="">No mention</option>{companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name || user.email}</option>)}</select></label>
             <button type="button" onClick={() => void createComment()} disabled={!canEdit || busy || !commentBody.trim()}>Add comment</button>
             <div className="node-v2-comment-list">
-              {comments.map((thread) => <article key={thread.thread_id} className="node-v2-comment-thread">
-                {thread.selected_quote && <blockquote>{thread.selected_quote}</blockquote>}
-                {thread.anchor_status !== "anchored" && <p className="node-v2-anchor-fallback">{thread.anchor_status === "legacy_unanchored" ? "Legacy unanchored comment" : "The selected text moved; showing the saved quote."}</p>}
+              {comments.map((thread) => <article key={thread.thread_id} className="node-v2-comment-thread" data-anchor-status={thread.anchor_status}>
+                {thread.selected_quote && <button type="button" className="node-v2-comment-anchor" onClick={() => editorRef.current?.focusComment(thread.thread_id)} disabled={thread.anchor_format !== "yjs_relative_v1"}><q>{thread.selected_quote}</q></button>}
+                {thread.anchor_status !== "anchored" && thread.anchor_status !== "uniquely_recovered" && <p className="node-v2-anchor-fallback">{thread.anchor_format === "none" || thread.anchor_format === "legacy_offsets_v1" ? "Legacy comment without a durable highlight." : thread.anchor_status === "ambiguous" ? "This quote matches more than one place." : "The selected range was deleted; showing the saved quote."}</p>}
                 {thread.comments.map((comment) => <div key={comment.comment_id} className="node-v2-comment"><strong>{comment.author_display_name}</strong><p>{comment.body_text}</p>{comment.mentions.length > 0 && <small>Mentioned: {comment.mentions.map((mention) => mention.principal_display_name).join(", ")}</small>}</div>)}
                 <ThreadReply disabled={!canEdit} onReply={(body) => reply(thread, body)} />
               </article>)}
@@ -421,8 +469,9 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
         {panel === "emails" && <section aria-label="Node email">
           {workspace.email_thread_summaries.map((thread) => <article className="node-v2-email" key={thread.email_thread_id}>
             <strong>{thread.subject || "No subject"}</strong><p>{thread.snippet}</p><small>{thread.message_count} messages · {thread.account_email}</small>
-            <div>{activeTextbox && <button type="button" disabled={!canEdit || thread.linked_textbox_ids.includes(activeTextbox.textbox_id)} onClick={() => void client.linkEmail(activeTextbox.textbox_id, thread.email_thread_id).then(reload).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to link email"))}>Link to this text box</button>}<button type="button" onClick={() => void loadEmail(thread.email_thread_id)}>Load message bodies</button></div>
-            {emailMessages[thread.email_thread_id]?.map((message) => <div className="node-v2-email-message" key={message.email_message_id}><strong>{message.from.map((address) => address.name || address.email).join(", ")}</strong><div dangerouslySetInnerHTML={{ __html: sanitizeEditorDocumentHTML(message.body_html ?? "") }} /></div>)}
+            <div>{activeTextbox && <button type="button" disabled={!canEdit || thread.linked_textbox_ids.includes(activeTextbox.textbox_id)} onClick={() => void client.linkEmail(activeTextbox.textbox_id, thread.email_thread_id, randomID()).then(reload).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to link email"))}>Link to this text box</button>}<button type="button" onClick={() => void loadEmail(thread.email_thread_id)}>Load message bodies</button></div>
+            {emailMessages[thread.email_thread_id]?.items.map((message) => <div className="node-v2-email-message" data-provider-message-id={message.provider_message_id} key={message.email_message_id}><strong>{message.from.map((address) => address.name || address.email).join(", ")}</strong><div dangerouslySetInnerHTML={{ __html: sanitizeEditorDocumentHTML(message.body_html ?? "") }} /></div>)}
+            {emailMessages[thread.email_thread_id]?.nextCursor && <button type="button" onClick={() => void loadMoreEmailMessages(thread.email_thread_id)}>Load more messages</button>}
           </article>)}
           {workspace.email_next_cursor && <button type="button" onClick={() => void client.emails(workspace.email_next_cursor).then((page) => setWorkspace((current) => current ? { ...current, email_thread_summaries: [...current.email_thread_summaries, ...page.items], email_next_cursor: page.next_cursor } : current)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load more email"))}>Load more email</button>}
         </section>}
