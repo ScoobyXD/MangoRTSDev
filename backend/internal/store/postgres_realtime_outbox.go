@@ -26,8 +26,8 @@ func (r *PostgresRepo) EnqueueRealtimeOutbox(input RealtimeOutboxInput) (Realtim
 			event_id, company_id, scope, event_type, resource_type, resource_id,
 			permission, resource_revision, payload, allowed_user_ids, audience_restricted
 		) values (
-			$1::uuid, $2::uuid, $3, $4, nullif($5, ''), nullif($6, ''),
-			nullif($7, ''), $8, $9::jsonb, $10::jsonb, $11
+			$1::uuid, $2::uuid, $3::text, $4::text, nullif($5::text, ''), nullif($6::text, ''),
+			nullif($7::text, ''), $8, $9::jsonb, $10::jsonb, $11
 		)
 		on conflict (event_id) do update set event_id = excluded.event_id
 		returning outbox_sequence, event_id::text, company_id::text, scope, event_type,
@@ -58,8 +58,8 @@ func (r *PostgresRepo) enqueueRealtimeOutboxTx(ctx context.Context, tx *sql.Tx, 
 			event_id, company_id, scope, event_type, resource_type, resource_id,
 			permission, resource_revision, payload, allowed_user_ids, audience_restricted
 		) values (
-			$1::uuid, $2::uuid, $3, $4, nullif($5, ''), nullif($6, ''),
-			nullif($7, ''), $8, $9::jsonb, $10::jsonb, $11
+			$1::uuid, $2::uuid, $3::text, $4::text, nullif($5::text, ''), nullif($6::text, ''),
+			nullif($7::text, ''), $8, $9::jsonb, $10::jsonb, $11
 		)
 		on conflict (event_id) do update set event_id = excluded.event_id
 		returning outbox_sequence, event_id::text, company_id::text, scope, event_type,

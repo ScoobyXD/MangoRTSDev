@@ -175,6 +175,7 @@ export const MangoBlockIdentity = Extension.create({
 
 export type MangoTiptapExtensionOptions = {
   editable: boolean;
+	collaboration?: boolean;
   onImageFiles?: (files: File[], position: number | null) => void;
   attachmentImageExtension?: AnyExtension;
   mentionUsers?: ReadonlyArray<{ userID: string; name: string; email?: string }>;
@@ -194,7 +195,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         HTMLAttributes: { rel: "noopener noreferrer nofollow" },
       },
       underline: {},
-      undoRedo: { depth: 200, newGroupDelay: 500 },
+		undoRedo: options.collaboration ? false : { depth: 200, newGroupDelay: 500 },
     }),
     TextStyle,
     FontSize,

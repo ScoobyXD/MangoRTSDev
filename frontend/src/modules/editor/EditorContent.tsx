@@ -46,6 +46,7 @@ import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
+import { NodeV2WorkspaceSurface } from "./nodeV2/NodeV2WorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -581,6 +582,7 @@ const EditorSaveSettingsSurface: React.FC<{
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
+  const nodeV2Phase2Enabled = (import.meta.env.VITE_NODE_V2_PHASE2 as string | undefined)?.trim().toLowerCase() === "true";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
@@ -2896,7 +2898,21 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onRestore={(saveID) => { void restoreEditorSaveVersion(saveID); }}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (nodeV2Phase2Enabled ? (
+          <NodeV2WorkspaceSurface
+            apiBase={apiBase}
+            companyID={companyID}
+            nodeID={linkedNodeID}
+            currentUserID={currentUserID}
+            canEdit={linkedEntityCanEdit}
+            companyUsers={companyUsers}
+            hidden={documentIsolation.visibility === "hidden"}
+            topPx={documentTopPx}
+            requestJSON={requestJSON}
+            onRegisterSaveController={(controller) => { nodeWorkspaceSaveControllerRef.current = controller; }}
+            onError={setError}
+          />
+        ) : (
           <NodeWorkspaceSurface
             apiBase={apiBase}
             companyID={companyID}
@@ -2942,7 +2958,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             }}
             onError={setError}
           />
-        )}
+        ))}
         {hasLinkedDocument && linkedEntityKind !== "node" && editorDataFormat.gate?.editor_format === "legacy_html" && (
           <EditorDocumentSurface
             documentRef={editorDocumentRef}

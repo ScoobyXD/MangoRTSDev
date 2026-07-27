@@ -152,6 +152,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodeID := parts[0]
+	if len(parts) >= 2 && parts[1] == "v2" {
+		s.handleNodeV2(w, r, nodeID, parts[2:])
+		return
+	}
 
 	if len(parts) == 3 && parts[1] == "email-threads" {
 		s.handleNodeEmailThread(w, r, nodeID, parts[2])

@@ -766,7 +766,7 @@ test("IndexedDB cleanup failure after acknowledgement unpins and clears after st
     }
   }
 });
-test("non-email document surfaces share the gate, proof dependencies stay dev-only, and email stays HTML", () => {
+test("non-email document surfaces share the gate, Node v2 uses local Yjs recovery, and email stays HTML", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
   assert.doesNotMatch(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /MangoTiptapEditor|useMangoEditorDataFormat|tiptap_json/);
@@ -775,9 +775,13 @@ test("non-email document surfaces share the gate, proof dependencies stay dev-on
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
-  assert.doesNotMatch(JSON.stringify(packageJSON.dependencies ?? {}).toLowerCase(), /hocuspocus|\byjs\b|tiptap-cloud/);
+  const runtimeDependencies = JSON.stringify(packageJSON.dependencies ?? {}).toLowerCase();
+  assert.doesNotMatch(runtimeDependencies, /hocuspocus|tiptap-cloud/);
+  assert.match(runtimeDependencies, /"yjs"/);
+  assert.match(runtimeDependencies, /"y-indexeddb"/);
+  assert.match(runtimeDependencies, /"@tiptap\/extension-collaboration"/);
   assert.match(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /@hocuspocus\/server/);
-  assert.match(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /"yjs"/);
+  assert.doesNotMatch(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /"y-indexeddb"/);
   for (const runtimePath of [
     "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "frontend/src/modules/editor/EditorContent.tsx",
@@ -786,6 +790,10 @@ test("non-email document surfaces share the gate, proof dependencies stay dev-on
   ]) {
     assert.doesNotMatch(read(runtimePath).toLowerCase(), /hocuspocus|from ["']yjs["']|tiptap-cloud/);
   }
+  const nodeV2Sync = read("frontend/src/modules/editor/nodeV2/nodeV2Sync.ts");
+  assert.match(nodeV2Sync, /from ["']yjs["']/);
+  assert.match(nodeV2Sync, /IndexeddbPersistence/);
+  assert.doesNotMatch(nodeV2Sync.toLowerCase(), /hocuspocus|tiptap-cloud/);
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
   assert.match(sync, /store\.get\(storage_key\)/);
   assert.doesNotMatch(sync, /getAll\(/);

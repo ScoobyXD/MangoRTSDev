@@ -1,8 +1,18 @@
-Last updated: 2026-07-23
+Last updated: 2026-07-27
 
 # Node Timeline Transfer And Verification Rules
 
 This document defines the durable business rules for compact activity entries on a Node timeline. Text boxes remain editable document rows; transfer and verification entries are immutable activity stamps and use a shorter visual row.
+
+## Node v2 primary timeline projection
+
+The Phase 2 Node v2 workspace reads `node_timeline_items`, a narrow ordered projection that permits exactly `textbox_created`, `node_moved`, and `verification_stamp`. Comments, replies, email, attachments, inline images, typing updates, checkpoints, and snapshots never create primary timeline items.
+
+Creating a v2 text box writes the authoritative textbox, its timeline item, the business domain event, and realtime outbox work in one transaction. The existing Logic Gate movement and verification request commands now bridge their already-authoritative facts into the same three-type projection inside their existing transaction. A failure in any required write rolls back the command.
+
+Pages order newest first by `occurred_at`, then source sequence, then stable timeline item ID. The cursor carries all three values, so equal timestamps cannot duplicate or skip records. Source rows retain direct Node ownership; `node_timeline_items` is rebuildable placement and is never the only owner relationship.
+
+The v2 timeline remains behind `VITE_NODE_V2_PHASE2=true`. Apply the additive Phase 1 and Phase 2 migrations only through the reviewed human rollout after the development migration ledger is reconciled; no agent-run live database change is authorized. Full Phase 2 evidence is in `docs/backend/node-v2-phase2-completion.md`.
 
 ## Logic Gate transfer events
 

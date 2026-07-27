@@ -72,6 +72,7 @@ type Repository interface {
 	ProjectManagementRepository
 	NotificationRepository
 	NodeTimelineRepository
+	NodeV2Repository
 	RealtimeOutboxRepository
 	EditorCollaborationRepository
 	EditorJSONRepository
