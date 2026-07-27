@@ -1184,6 +1184,8 @@ The confirmed frontend causes are outside the Tiptap HTML parser:
 
 The immediate continuation on the same worker branch is to add shared, editor-scoped list/paragraph styling for static and active Tiptap rendering, add visible styles for `chat` and `change` annotations, and add focused regression coverage proving that a converted nested list and canonical chat range render with the expected structure/classes. The existing JSON row should not be reconverted merely to correct these display bugs.
 
+Frontend correction status (2026-07-27): the shared presentation rules now live in `frontend/src/modules/editor/tiptap/mangoTiptap.css` and apply to both the sleeping static JSON renderer and the active ProseMirror editor. They restore nested unordered/ordered list markers and indentation, retain paragraph spacing, and make canonical `chat`, `comment`, and `change` annotation ranges visible. The static renderer now always supplies a stable shared CSS scope, and the editor integration test covers a nested list plus a `kind: "chat"` range. Automated tests verify the structure and styling hooks; the user's local browser comparison is still required before this one-textbox experiment can be called visually successful. No reconversion or database change is required for this frontend-only correction.
+
 ### Conversion sequence
 
 For each current Node `Text box` projection:

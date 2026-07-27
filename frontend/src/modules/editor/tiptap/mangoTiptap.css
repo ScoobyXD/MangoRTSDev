@@ -1,0 +1,112 @@
+.mango-tiptap-static-document,
+.mango-tiptap-prosemirror {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.mango-tiptap-static-document p,
+.mango-tiptap-prosemirror p {
+  min-height: 1.55em;
+  margin: 0 0 0.2em;
+  white-space: pre-wrap;
+}
+
+.mango-tiptap-static-document ul,
+.mango-tiptap-static-document ol,
+.mango-tiptap-prosemirror ul,
+.mango-tiptap-prosemirror ol {
+  margin: 0.15em 0 0.4em;
+  padding-inline-start: 2rem;
+  list-style-position: outside;
+}
+
+.mango-tiptap-static-document ul,
+.mango-tiptap-prosemirror ul {
+  list-style-type: disc;
+}
+
+.mango-tiptap-static-document ul ul,
+.mango-tiptap-prosemirror ul ul {
+  list-style-type: circle;
+}
+
+.mango-tiptap-static-document ul ul ul,
+.mango-tiptap-prosemirror ul ul ul {
+  list-style-type: square;
+}
+
+.mango-tiptap-static-document ol,
+.mango-tiptap-prosemirror ol {
+  list-style-type: decimal;
+}
+
+.mango-tiptap-static-document li,
+.mango-tiptap-prosemirror li {
+  margin: 0.05em 0;
+  padding-inline-start: 0.2em;
+}
+
+.mango-tiptap-static-document li > p,
+.mango-tiptap-prosemirror li > p {
+  margin-bottom: 0;
+}
+
+.mango-tiptap-static-document li > ul,
+.mango-tiptap-static-document li > ol,
+.mango-tiptap-prosemirror li > ul,
+.mango-tiptap-prosemirror li > ol {
+  margin-top: 0.1em;
+  margin-bottom: 0.1em;
+}
+
+.mango-tiptap-static-document ul[data-type="taskList"],
+.mango-tiptap-prosemirror ul[data-type="taskList"] {
+  padding-inline-start: 0;
+  list-style: none;
+}
+
+.mango-tiptap-static-document li[data-type="taskItem"],
+.mango-tiptap-prosemirror li[data-type="taskItem"] {
+  display: flex;
+  gap: 0.45em;
+  padding-inline-start: 0;
+  list-style: none;
+}
+
+.mango-tiptap-static-document .mango-tiptap-annotation--chat,
+.mango-tiptap-static-document .mango-tiptap-annotation--comment,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--chat,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--comment {
+  border-radius: 2px;
+  background: rgba(250, 204, 21, 0.38);
+  box-shadow: inset 0 -2px 0 rgba(202, 138, 4, 0.65);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.mango-tiptap-static-document .mango-tiptap-annotation--chat.is-active,
+.mango-tiptap-static-document .mango-tiptap-annotation--comment.is-active,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--chat.is-active,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--comment.is-active {
+  background: rgba(250, 204, 21, 0.58);
+  outline: 1px solid rgba(202, 138, 4, 0.78);
+  outline-offset: 1px;
+}
+
+.mango-tiptap-static-document .mango-tiptap-annotation--change,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--change {
+  border-radius: 2px;
+  background: rgba(56, 189, 248, 0.2);
+  box-shadow: inset 0 -2px 0 rgba(2, 132, 199, 0.52);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.mango-tiptap-static-document .mango-tiptap-annotation--change.is-active,
+.mango-tiptap-prosemirror .mango-tiptap-annotation--change.is-active {
+  background: rgba(56, 189, 248, 0.34);
+  outline: 1px solid rgba(2, 132, 199, 0.72);
+  outline-offset: 1px;
+}
