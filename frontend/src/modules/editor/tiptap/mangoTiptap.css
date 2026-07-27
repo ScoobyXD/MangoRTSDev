@@ -7,6 +7,17 @@
   overflow-wrap: anywhere;
 }
 
+.mango-tiptap-prosemirror {
+  box-sizing: border-box;
+  min-height: 100%;
+  outline: none;
+}
+
+.mango-tiptap-prosemirror:focus,
+.mango-tiptap-prosemirror.ProseMirror-focused {
+  outline: none;
+}
+
 [data-mango-editor-format="tiptap_json"][data-mango-editor-editable="true"] .mango-tiptap-static-document,
 .mango-tiptap-prosemirror[contenteditable="true"] {
   cursor: text;

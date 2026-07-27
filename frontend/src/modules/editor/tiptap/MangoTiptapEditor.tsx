@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
+import { TextSelection } from "@tiptap/pm/state";
 import {
   downloadMangoAttachment,
   loadMangoAttachmentObjectURL,
@@ -158,6 +159,7 @@ type AuthenticatedImageProps = {
   editable?: boolean;
   updateAttributes?: (attributes: Partial<MangoAttachmentImageAttributes>) => void;
   deleteNode?: () => void;
+  onSelect?: () => void;
   onImageChatRequest?: (image: MangoTiptapImageAction) => void;
   onImageNodeRequest?: (image: MangoTiptapImageAction) => void;
 };
@@ -169,6 +171,7 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   editable = false,
   updateAttributes,
   deleteNode,
+  onSelect,
   onImageChatRequest,
   onImageNodeRequest,
 }) => {
@@ -316,11 +319,33 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
     };
   };
 
+  const downloadImage = useCallback(() => {
+    if (!attachmentContext) return;
+    void downloadMangoAttachment({
+      apiBase: attachmentContext.apiBase,
+      companyID: attachmentContext.companyID,
+      attachmentID: attributes.attachmentId,
+      filename: attributes.filename,
+    }).catch((cause) => attachmentContext.onError?.(cause instanceof Error ? cause.message : "Unable to download image"));
+  }, [attachmentContext, attributes.attachmentId, attributes.filename]);
+
   return (
     <div
       ref={rootRef}
       data-mango-attachment-id={attributes.attachmentId}
       data-selected={selected || undefined}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest?.("button")) return;
+        onSelect?.();
+      }}
+      onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest?.("button")) return;
+        if (!attachmentContext || !attributes.attachmentId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect?.();
+        setPreviewOpen(true);
+      }}
       style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0" }}
     >
       {objectURL ? (
@@ -346,16 +371,8 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         </span>
       )}
       {selected && (
-        <div contentEditable={false} style={{ position: "absolute", right: 4, top: 4, display: "flex", gap: 4 }}>
-          <button type="button" onClick={() => {
-            if (!attachmentContext) return;
-            void downloadMangoAttachment({
-              apiBase: attachmentContext.apiBase,
-              companyID: attachmentContext.companyID,
-              attachmentID: attributes.attachmentId,
-              filename: attributes.filename,
-            }).catch((cause) => attachmentContext.onError?.(cause instanceof Error ? cause.message : "Unable to download image"));
-          }}>Download</button>
+        <div contentEditable={false} style={{ position: "absolute", right: 4, top: 4, display: "flex", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "calc(100% - 8px)", gap: 4 }}>
+          <button type="button" onClick={downloadImage}>Download</button>
           {objectURL && <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>}
           {editable && onImageChatRequest && <button type="button" onClick={() => onImageChatRequest(imageAction())}>Comment</button>}
           {editable && onImageNodeRequest && <button type="button" onClick={() => onImageNodeRequest(imageAction())}>Create Node</button>}
@@ -375,7 +392,10 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
           onClick={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }}
           style={{ position: "fixed", inset: 0, zIndex: 2200, display: "grid", placeItems: "center", padding: 24, background: "rgba(15,23,42,.78)" }}
         >
-          <button type="button" aria-label="Close image preview" onClick={() => setPreviewOpen(false)} style={{ position: "fixed", top: 16, right: 16 }}>X</button>
+          <div style={{ position: "fixed", top: 16, right: 16, display: "flex", gap: 8 }}>
+            <button type="button" aria-label="Download image" onClick={downloadImage}>Download</button>
+            <button type="button" aria-label="Close image preview" onClick={() => setPreviewOpen(false)}>X</button>
+          </div>
           {previewObjectURL
             ? <img src={previewObjectURL} alt={attributes.alt || attributes.filename} style={{ maxWidth: "95vw", maxHeight: "90vh", objectFit: "contain" }} />
             : previewError
@@ -391,20 +411,29 @@ function attachmentNodeViewExtension(
   contextRef: React.MutableRefObject<EditorImageAttachmentContext | undefined>,
   actionsRef: React.MutableRefObject<Pick<MangoTiptapEditorProps, "onImageChatRequest" | "onImageNodeRequest">>,
 ): AnyExtension {
-  const ImageNodeView: React.FC<ReactNodeViewProps> = ({ node, selected, updateAttributes, deleteNode, editor }) => (
-    <NodeViewWrapper>
-      <MangoAuthenticatedImage
-        attributes={node.attrs as MangoStaticAttachmentImageProps}
-        attachmentContext={contextRef.current}
-        selected={selected}
-        editable={editor.isEditable}
-        updateAttributes={updateAttributes}
-        deleteNode={deleteNode}
-        onImageChatRequest={actionsRef.current.onImageChatRequest}
-        onImageNodeRequest={actionsRef.current.onImageNodeRequest}
-      />
-    </NodeViewWrapper>
-  );
+  const ImageNodeView: React.FC<ReactNodeViewProps> = ({ node, selected, updateAttributes, deleteNode, editor, getPos }) => {
+    const selectImage = () => {
+      const position = getPos();
+      if (typeof position !== "number") return;
+      (editor.view.dom as HTMLElement).focus({ preventScroll: true });
+      editor.commands.setNodeSelection(position);
+    };
+    return (
+      <NodeViewWrapper>
+        <MangoAuthenticatedImage
+          attributes={node.attrs as MangoStaticAttachmentImageProps}
+          attachmentContext={contextRef.current}
+          selected={selected}
+          editable={editor.isEditable}
+          updateAttributes={updateAttributes}
+          deleteNode={deleteNode}
+          onSelect={selectImage}
+          onImageChatRequest={actionsRef.current.onImageChatRequest}
+          onImageNodeRequest={actionsRef.current.onImageNodeRequest}
+        />
+      </NodeViewWrapper>
+    );
+  };
   return MangoAttachmentImage.extend({
     addNodeView() {
       return ReactNodeViewRenderer(ImageNodeView);
@@ -554,7 +583,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       strikethrough: state.strikethrough,
     });
     const selection = editor.state.selection;
-    if (selection.empty) {
+    if (selection.empty || !(selection instanceof TextSelection)) {
       setSelectionAction(null);
       return;
     }
@@ -739,6 +768,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const coordinates = { left: event.clientX, top: event.clientY };
+    const root = event.currentTarget;
+    const preservedScrollTop = root.scrollTop;
+    const preservedScrollLeft = root.scrollLeft;
     void activate().then(() => {
       let attempts = 0;
       const focusAtPointer = () => {
@@ -748,9 +780,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           if (attempts < 8) window.requestAnimationFrame(focusAtPointer);
           return;
         }
+        root.scrollTop = preservedScrollTop;
+        root.scrollLeft = preservedScrollLeft;
         const position = editor.view.posAtCoords(coordinates);
         if (position) editor.commands.setTextSelection(position.pos);
-        editor.commands.focus();
+        (editor.view.dom as HTMLElement).focus({ preventScroll: true });
+        root.scrollTop = preservedScrollTop;
+        root.scrollLeft = preservedScrollLeft;
+        window.requestAnimationFrame(() => {
+          root.scrollTop = preservedScrollTop;
+          root.scrollLeft = preservedScrollLeft;
+        });
       };
       window.requestAnimationFrame(focusAtPointer);
     });
