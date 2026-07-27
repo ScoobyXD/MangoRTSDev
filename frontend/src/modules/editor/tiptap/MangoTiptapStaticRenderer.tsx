@@ -1,6 +1,6 @@
 import React from "react";
 import type { JSONContent } from "@tiptap/core";
-import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
+import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../company-explorer/CompanyExplorerEntityIcon.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
@@ -217,6 +217,7 @@ export const MangoTiptapStaticRenderer: React.FC<MangoTiptapStaticRendererProps>
     style={style}
     aria-label={ariaLabel}
     data-mango-editor-state="sleeping"
+    data-mango-legacy-leading-date-heading={needsMangoTiptapLegacyDateHeadingBreak(value) ? "true" : undefined}
   >
     {renderNode(value.document, "document", renderAttachmentImage, annotations, 0)}
   </div>

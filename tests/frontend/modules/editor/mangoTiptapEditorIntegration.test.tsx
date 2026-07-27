@@ -45,6 +45,10 @@ function structuredDocument(): MangoTiptapDocument {
     format: "mango-tiptap-json",
     schema_version: 1,
     document: { type: "doc", content: [
+      { type: "paragraph", attrs: { blockId: "legacy-date-heading" }, content: [
+        { type: "text", text: "07/20/26 " },
+        { type: "text", text: "HR / EA, Sammie Lee", marks: [{ type: "textStyle", attrs: { fontSize: "14px" } }, { type: "bold" }] },
+      ] },
       { type: "paragraph", attrs: { blockId: "paragraph-1", indentLevel: 0 }, content: [
         { type: "text", text: "Alpha" },
         { type: "mangoEntityLink", attrs: { entityType: "project", entityId: "project-1", label: "Project One" } },
@@ -58,6 +62,16 @@ function structuredDocument(): MangoTiptapDocument {
             type: "listItem",
             content: [
               { type: "paragraph", content: [{ type: "text", text: "Nested item" }] },
+              { type: "bulletList", content: [{
+                type: "listItem",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "Third-level item" }] },
+                  { type: "bulletList", content: [{
+                    type: "listItem",
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Fourth-level item" }] }],
+                  }] },
+                ],
+              }] },
             ],
           }] },
         ],
@@ -123,7 +137,10 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /class="mango-tiptap-document mango-tiptap-static-document"/);
   assert.match(html, /mango-tiptap-annotation--chat/);
   assert.match(html, /<ul>/);
-  assert.match(html, /<ul><li><p>.*List item.*<\/p><ul><li><p>Nested item<\/p><\/li><\/ul><\/li><\/ul>/);
+  assert.match(html, /data-mango-legacy-leading-date-heading="true"/);
+  assert.equal((html.match(/<ul>/g) ?? []).length, 4);
+  assert.match(html, /Third-level item/);
+  assert.match(html, /Fourth-level item/);
   assert.match(html, /<table/);
   assert.match(html, /data-static-image="image-1"/);
   assert.match(html, /data-mango-entity-id="project-1"/);
@@ -132,11 +149,16 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /M2.3 3.1h11.4v9.8H2.3z/);
 
   const presentationCSS = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptap.css"), "utf8");
-  assert.match(presentationCSS, /\.mango-tiptap-static-document ul/);
-  assert.match(presentationCSS, /\.mango-tiptap-prosemirror ul/);
-  assert.match(presentationCSS, /list-style-type:\s*disc/);
-  assert.match(presentationCSS, /\.mango-tiptap-annotation--chat/);
-  assert.match(presentationCSS, /background:\s*rgba\(250, 204, 21,/);
+  assert.match(presentationCSS, /font-size:\s*14px/);
+  assert.match(presentationCSS, /line-height:\s*20px/);
+  assert.match(presentationCSS, /padding:\s*12px 13px/);
+  assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) > li::before/);
+  assert.match(presentationCSS, /ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) ul:not\(\[data-type="taskList"\]\) > li::before/);
+  assert.match(presentationCSS, /border-radius:\s*999px/);
+  assert.match(presentationCSS, /border-radius:\s*1px/);
+  assert.match(presentationCSS, /background:\s*linear-gradient\(135deg, rgba\(254, 255, 102, 0\.72\), rgba\(250, 232, 28, 0\.58\)\)/);
+  assert.match(presentationCSS, /data-mango-legacy-leading-date-heading="true"/);
+  assert.match(presentationCSS, /margin-top:\s*20px/);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {
@@ -317,6 +339,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       editorRoot.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
     });
     await waitFor(() => controllerRef.current !== null, "visible focused JSON document should activate a ProseMirror editor");
+    const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
+    assert.ok(activeProseMirror);
+    assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
     resetEditorRuntimeMetricsForTests();
     const changeCountBeforeTyping = changes.length;
     await act(async () => {

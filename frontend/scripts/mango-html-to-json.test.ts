@@ -70,6 +70,21 @@ test("official Tiptap conversion preserves Mango rich-text structures determinis
   assert.ok(mapped.annotations[0].to > mapped.annotations[0].from);
 });
 
+
+test("conversion preserves visible root newlines before a formatted heading", () => {
+  const converted = convertMangoLegacyHTML(`<!-- mango-editor-html-v1 -->07/20/26\n\n<span style="font-size:14px"><strong>HR / EA, Sammie Lee</strong></span>`);
+  assert.match(converted.normalizedHTML, /07\/20\/26<br><br>/);
+  const firstParagraph = converted.document.document.content?.[0];
+  assert.equal(firstParagraph?.type, "paragraph");
+  assert.deepEqual(
+    firstParagraph?.content?.map((node) => node.type),
+    ["text", "hardBreak", "hardBreak", "text"],
+  );
+  assert.equal(firstParagraph?.content?.[0].text, "07/20/26");
+  assert.equal(firstParagraph?.content?.[3].text, "HR / EA, Sammie Lee");
+  assert.ok(firstParagraph?.content?.[3].marks?.some((mark) => mark.type === "bold"));
+});
+
 test("conversion refuses images that do not have permanent attachment IDs", () => {
   assert.throws(
     () => convertMangoLegacyHTML('<!-- mango-editor-html-v1 --><p>Unsafe</p><img src="data:image/png;base64,AA==">'),

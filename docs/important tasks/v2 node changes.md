@@ -1184,7 +1184,21 @@ The confirmed frontend causes are outside the Tiptap HTML parser:
 
 The immediate continuation on the same worker branch is to add shared, editor-scoped list/paragraph styling for static and active Tiptap rendering, add visible styles for `chat` and `change` annotations, and add focused regression coverage proving that a converted nested list and canonical chat range render with the expected structure/classes. The existing JSON row should not be reconverted merely to correct these display bugs.
 
-Frontend correction status (2026-07-27): the shared presentation rules now live in `frontend/src/modules/editor/tiptap/mangoTiptap.css` and apply to both the sleeping static JSON renderer and the active ProseMirror editor. They restore nested unordered/ordered list markers and indentation, retain paragraph spacing, and make canonical `chat`, `comment`, and `change` annotation ranges visible. The static renderer now always supplies a stable shared CSS scope, and the editor integration test covers a nested list plus a `kind: "chat"` range. Automated tests verify the structure and styling hooks; the user's local browser comparison is still required before this one-textbox experiment can be called visually successful. No reconversion or database change is required for this frontend-only correction.
+Frontend correction status (2026-07-27): the shared presentation rules now live in `frontend/src/modules/editor/tiptap/mangoTiptap.css` and apply to both the sleeping static JSON renderer and the active ProseMirror editor. They restored the nested list tree and made the six canonical `chat` annotation ranges visible. The user then visually confirmed that all text, nested bullets, the permanent image, the right-side chat, and the yellow selections were present in the local JSON view.
+
+![Converted JSON after the first list/highlight correction, top](assets/node-v2-tiptap-json-trial-2026-07-27/after-json-lists-highlights-top.png)
+
+![Converted JSON after the first list/highlight correction, bottom](assets/node-v2-tiptap-json-trial-2026-07-27/after-json-lists-highlights-bottom.png)
+
+The remaining comparison was presentation parity rather than lost rich text. A live computed-style comparison found the same Inter font family and normal weight in both versions, but the legacy editor used 14px text, a 20.3px computed line height, and 12px top/13px side padding, while the JSON editor inherited 16px text, used a 24.8px line height, and had no content padding. The JSON chat highlight was also darker amber with an inset gold line instead of the legacy bright-yellow gradient. The legacy reference is preserved below.
+
+![Legacy HTML typography and highlight reference](assets/node-v2-tiptap-json-trial-2026-07-27/legacy-html-typography-reference.png)
+
+The second frontend parity correction sets JSON editors to a 14px default font, an exact 20px line height, and 12px top/13px side padding; restores the bright legacy yellow chat/comment gradient; and uses the legacy four-level unordered-list marker sequence: solid circle, hollow circle, solid square, hollow square. Tests cover both sleeping and active editor selectors and four nested list levels.
+
+The first trial row had already stored `07/20/26` and bold `HR / EA, Sammie Lee` in one paragraph because the legacy source represented their separation as visible root-level newline text. The existing row now gets a narrowly guarded display compatibility break, so it does not need a database rewrite. Future conversions replace visible root text newlines with real Tiptap `hardBreak` nodes before calling Tiptap's official `generateJSON`, with focused converter coverage. The second parity correction still requires a final user browser retest after merge.
+
+No database or schema change is part of either frontend correction.
 
 ### Conversion sequence
 
