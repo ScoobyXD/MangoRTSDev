@@ -547,14 +547,14 @@ func (r *MemoryRepo) CreateNodeV2CommentThread(input NodeV2CreateCommentThreadIn
 		}
 	}
 	now := time.Now().UTC()
-	format, status := "legacy_unanchored", input.AnchorStatus
+	format, status := "none", input.AnchorStatus
 	if len(input.AnchorStart) > 0 && len(input.AnchorEnd) > 0 {
-		format = "yjs_relative_position_v1"
+		format = "yjs_relative_v1"
 		if status == "" {
 			status = "anchored"
 		}
 	} else if status == "" {
-		status = "legacy_unanchored"
+		status = "unanchored"
 	}
 	threadID, commentID := newUUIDv7String(), newUUIDv7String()
 	thread := domain.NodeV2CommentThread{ThreadID: threadID, TextboxID: input.TextboxID, SelectedQuote: input.SelectedQuote, AnchorBeforeText: input.AnchorBeforeText, AnchorAfterText: input.AnchorAfterText, AnchorFormat: format, AnchorStatus: status, AnchorStartBase64: encodeBase64(input.AnchorStart), AnchorEndBase64: encodeBase64(input.AnchorEnd), CreatedByUserID: input.ActorUserID, CreatedByDisplayName: r.nodeV2DisplayNameLocked(input.ActorUserID), CreatedTimestamp: now}

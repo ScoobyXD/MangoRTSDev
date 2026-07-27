@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-27
 
-Status: authoritative architecture handoff and project tracker. Phase 2 is complete in repository and verified locally behind its development feature flag; Phase 1 live-ledger reconciliation and Phase 3 migration/cutover remain separate human-reviewed work.
+Status: authoritative architecture handoff and project tracker. The Phase 2 implementation exists behind its development feature flag, but the 2026-07-27 readiness re-audit below reopened its acceptance gate. Phase 1 live-ledger reconciliation and Phase 3 migration/cutover remain separate human-reviewed work.
 
 ## Why this document exists
 
@@ -68,7 +68,7 @@ Phase 1 completion gate: reviewed DDL and APIs exist; representative legacy cont
 
 ### Phase 2 - Build the complete Node v2 experience
 
-Status: **Complete in repository and locally verified behind `VITE_NODE_V2_PHASE2=true`**
+Status: **Implementation complete behind `VITE_NODE_V2_PHASE2=true`; acceptance reopened by the 2026-07-27 readiness re-audit below**
 
 Goal: make a large Node work end to end on the new model for a reliable single active editor before collaborative rollout.
 
@@ -82,9 +82,25 @@ Goal: make a large Node work end to end on the new model for a reliable single a
 - [x] Implement immediate local typing, undo/redo, save state, IndexedDB recovery, retry, idempotency, and safe refresh/navigation behavior.
 - [x] Prove bounded Node loading, timeline pagination, comment pagination, lazy email bodies, attachment previews, and textbox virtualization at target scale.
 
-Phase 2 completion gate: **Passed locally on 2026-07-27.** The complete Node v2 experience passed functional, durability, accessibility, and large-Node performance scenarios for one active editor without silent data loss or editor lag.
+Phase 2 completion gate: **Previously recorded as passed locally on 2026-07-27, but not currently satisfied.** The readiness re-audit below found that the test suite did not exercise the production materialization authority or current email/chat product parity.
 
-Evidence: `docs/backend/node-v2-phase2-completion.md` records implementation boundaries, the PostgreSQL-backed real-Mango browser workflow, target-scale scenarios (140 text boxes, 2,000 comments, 200 email threads/400 messages), focused checks, repeated disposable migration application, and the passing complete repository gate. This completion does not enable a live cutover or resolve the human-controlled development migration-ledger discrepancy.
+Evidence: `docs/backend/node-v2-phase2-completion.md` records implementation boundaries, the PostgreSQL-backed real-Mango browser workflow, target-scale scenarios (140 text boxes, 2,000 comments, 200 email threads/400 messages), focused checks, repeated disposable migration application, and the repository gate result. This implementation does not enable a live cutover or resolve the human-controlled development migration-ledger discrepancy.
+
+### 2026-07-27 Phase 3 readiness re-audit
+
+The implementation and disposable PostgreSQL/browser harness are substantial, but the project is **not ready for Phase 3 migration or cutover**:
+
+- The runtime editor appends durable Yjs updates, but no production service calls the trusted checkpoint/materialization store method. The public checkpoint route is intentionally rejected, and the Hocuspocus PostgreSQL store remains a proof-of-concept script rather than a production service. Consequently inactive static rendering, plain-text/search consumers, and any other materialized-document reader can remain stale after ordinary edits.
+- The REST update writer checks identity, size, and checksum but does not decode or validate Yjs semantics. The current PostgreSQL test persists arbitrary non-Yjs byte strings, proving that an edit client can durably poison later Yjs replay before a trusted provider is in the path.
+- The Node v2 surface implements a bounded email summary/body viewer, but it does not yet preserve the current separate email column, message-to-textbox workflow, or textbox-owned chat behavior documented in `docs/important tasks/email nodes.md`.
+- A verification request records text-box IDs, content revisions, and update heads, but it neither captures nor pins the referenced checkpoint/content. The seven-day update and 14-day checkpoint retention windows can therefore make the exact content presented for verification unreconstructable.
+- Comment pagination limits root threads only; it loads every comment and mention for each returned thread. One heavily replied-to thread can still produce an unbounded page, and the 2,000-comment fixture does not cover that shape.
+- Phase 1 still lacks the human migration-ledger reconciliation, shared HTML-to-Tiptap converter, dry-run conversion/validation, shadow-read, rollback, and post-cutover edit-preserving exporter.
+- Node v2 attachment and email typed links intentionally use restrictive ownership constraints. A complete company purge therefore needs an explicitly ordered deletion workflow; generic company deletion is currently blocked after either link type exists.
+
+This audit fixed two local correctness/test defects: every `/v2` route except the availability probe now enforces the workspace activation gate, and previously unreachable PostgreSQL assertions for email pagination and idempotent comment/attachment/email outbox writes now execute. Those fixes improve confidence in the implemented foundation but do not close the materialization, product-parity, migration, or lifecycle gaps above.
+
+It is safe to continue Phase 3 engineering behind inactive workspace gates. It is not safe to activate converted workspaces, migrate development data, or cut over durable reads/writes until the open gates are implemented and exercised end to end.
 
 ### Phase 3 - Collaboration, migration, rollout, and cleanup
 
