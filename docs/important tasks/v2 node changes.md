@@ -1,8 +1,8 @@
 # Node v2: product requirements, editor architecture, scale, and handoff
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
-Status: authoritative architecture handoff and project tracker. Phase 1 is in progress. Checked design or audit work is not evidence that the corresponding product code has been implemented.
+Status: authoritative architecture handoff and project tracker. Phase 2 is complete in repository and verified locally behind its development feature flag; Phase 1 live-ledger reconciliation and Phase 3 migration/cutover remain separate human-reviewed work.
 
 ## Why this document exists
 
@@ -68,21 +68,23 @@ Phase 1 completion gate: reviewed DDL and APIs exist; representative legacy cont
 
 ### Phase 2 - Build the complete Node v2 experience
 
-Status: **Not started**
+Status: **Complete in repository and locally verified behind `VITE_NODE_V2_PHASE2=true`**
 
 Goal: make a large Node work end to end on the new model for a reliable single active editor before collaborative rollout.
 
-- [ ] Create, load, edit, save, reload, order, archive, and restore independently owned Node text boxes.
-- [ ] Render inactive visible text boxes cheaply and activate Tiptap only for the text box being edited.
-- [ ] Replace whole-DOM serialization and broad Node rerenders with editor transactions and bounded persistence work.
-- [ ] Implement textbox-only comments, replies, mentions, durable anchors, selected-quote fallback, pagination, and legacy-unanchored presentation.
-- [ ] Implement textbox-owned files and inline images with a Node-wide aggregate attachment view.
-- [ ] Implement Node-level email membership plus optional textbox/thread or textbox/message context and a deduplicated Node-wide email view.
-- [ ] Implement exactly the three primary timeline item types with stable newest-first cursor ordering.
-- [ ] Implement immediate local typing, undo/redo, save state, IndexedDB recovery, retry, idempotency, and safe refresh/navigation behavior.
-- [ ] Prove bounded Node loading, timeline pagination, comment pagination, lazy email bodies, attachment previews, and textbox virtualization at target scale.
+- [x] Create, load, edit, save, reload, order, archive, and restore independently owned Node text boxes.
+- [x] Render inactive visible text boxes cheaply and activate Tiptap only for the text box being edited.
+- [x] Replace whole-DOM serialization and broad Node rerenders with editor transactions and bounded persistence work.
+- [x] Implement textbox-only comments, replies, mentions, durable anchors, selected-quote fallback, pagination, and legacy-unanchored presentation.
+- [x] Implement textbox-owned files and inline images with a Node-wide aggregate attachment view.
+- [x] Implement Node-level email membership plus optional textbox/thread or textbox/message context and a deduplicated Node-wide email view.
+- [x] Implement exactly the three primary timeline item types with stable newest-first cursor ordering.
+- [x] Implement immediate local typing, undo/redo, save state, IndexedDB recovery, retry, idempotency, and safe refresh/navigation behavior.
+- [x] Prove bounded Node loading, timeline pagination, comment pagination, lazy email bodies, attachment previews, and textbox virtualization at target scale.
 
-Phase 2 completion gate: the complete Node v2 experience passes functional, durability, accessibility, and large-Node performance scenarios for one active editor without silent data loss or editor lag.
+Phase 2 completion gate: **Passed locally on 2026-07-27.** The complete Node v2 experience passed functional, durability, accessibility, and large-Node performance scenarios for one active editor without silent data loss or editor lag.
+
+Evidence: `docs/backend/node-v2-phase2-completion.md` records implementation boundaries, the PostgreSQL-backed real-Mango browser workflow, target-scale scenarios (140 text boxes, 2,000 comments, 200 email threads/400 messages), focused checks, repeated disposable migration application, and the passing complete repository gate. This completion does not enable a live cutover or resolve the human-controlled development migration-ledger discrepancy.
 
 ### Phase 3 - Collaboration, migration, rollout, and cleanup
 

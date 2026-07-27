@@ -105,6 +105,7 @@ type MemoryRepo struct {
 	domainEventAppendErr           error
 	notifications                  map[string]domain.Notification
 	recycleBin                     map[string]memoryRecycleBinItem
+	nodeV2                         memoryNodeV2State
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -201,6 +202,7 @@ func NewMemoryRepo() *MemoryRepo {
 		workspaceReadVersions:          map[string]int64{},
 		notifications:                  map[string]domain.Notification{},
 		recycleBin:                     map[string]memoryRecycleBinItem{},
+		nodeV2:                         newMemoryNodeV2State(),
 	}
 }
 

@@ -1,0 +1,105 @@
+package store
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"miraeopus/backend/internal/domain"
+)
+
+func insertNodeV2MovementForLegacyTimelineTx(ctx context.Context, tx *sql.Tx, item domain.NodeTimelineEvent) error {
+	movementID := newUUIDv7String()
+	idempotencyKey := "legacy-transfer:" + item.EventID
+	if _, err := tx.ExecContext(ctx, `insert into node_movements(company_id,node_id,movement_id,source_timeline_event_id,from_logic_gate_id,from_logic_gate_name,to_logic_gate_id,to_logic_gate_name,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7::uuid,$8,$9::uuid,$10,$11,$12) on conflict(company_id,node_id,idempotency_key) do nothing`, item.CompanyID, item.NodeID, movementID, item.EventID, item.FromLogicGateID, item.FromLogicGateName, item.ToLogicGateID, item.ToLogicGateName, item.ActorUserID, item.ActorDisplayName, idempotencyKey, item.CreatedTimestamp); err != nil {
+		return err
+	}
+	var storedMovementID string
+	if err := tx.QueryRowContext(ctx, `select movement_id::text from node_movements where company_id=$1::uuid and node_id=$2::uuid and idempotency_key=$3`, item.CompanyID, item.NodeID, idempotencyKey).Scan(&storedMovementID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `insert into node_timeline_items(company_id,node_id,timeline_item_id,item_type,occurred_at,actor_user_id,movement_id,summary_json) select $1::uuid,$2::uuid,$3::uuid,'node_moved',$4,$5::uuid,$6::uuid,jsonb_build_object('from_logic_gate_name',$7::text,'to_logic_gate_name',$8::text,'actor_display_name',$9::text) where not exists(select 1 from node_timeline_items where company_id=$1::uuid and node_id=$2::uuid and movement_id=$6::uuid)`, item.CompanyID, item.NodeID, newUUIDv7String(), item.CreatedTimestamp, item.ActorUserID, storedMovementID, item.FromLogicGateName, item.ToLogicGateName, item.ActorDisplayName)
+	return err
+}
+
+func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationRequestInput, item domain.NodeTimelineEvent) error {
+	rows, err := tx.QueryContext(ctx, `select textbox_id::text,content_revision,latest_update_sequence from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null order by display_order,textbox_id`, input.CompanyID, input.NodeID)
+	if err != nil {
+		return err
+	}
+	manifest := make([]map[string]any, 0)
+	for rows.Next() {
+		var textboxID string
+		var revision, sequence int64
+		if err := rows.Scan(&textboxID, &revision, &sequence); err != nil {
+			rows.Close()
+			return err
+		}
+		manifest = append(manifest, map[string]any{"textbox_id": textboxID, "content_revision": revision, "latest_update_sequence": sequence})
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	manifestJSON, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(manifestJSON)
+	if _, err := tx.ExecContext(ctx, `insert into node_verification_requests(company_id,node_id,verification_request_id,verification_scope,requested_by_user_id,requested_by_display_name,content_manifest,content_manifest_sha256,idempotency_key,requested_timestamp) values($1::uuid,$2::uuid,$3::uuid,'node',$4::uuid,$5,$6::jsonb,$7,$8,$9) on conflict(company_id,node_id,idempotency_key) do nothing`, input.CompanyID, input.NodeID, item.EventID, input.ActorUserID, item.ActorDisplayName, manifestJSON, hex.EncodeToString(digest[:]), input.IdempotencyKey, item.CreatedTimestamp); err != nil {
+		return err
+	}
+	for _, recipient := range item.VerificationRecipients {
+		if _, err := tx.ExecContext(ctx, `insert into node_verification_recipients(company_id,node_id,verification_request_id,user_id,user_display_name,assigned_timestamp) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) on conflict do nothing`, input.CompanyID, input.NodeID, item.EventID, recipient.UserID, recipient.UserDisplayName, recipient.CreatedTimestamp); err != nil {
+			return err
+		}
+	}
+	verificationEventID := newUUIDv7String()
+	_, err = tx.ExecContext(ctx, `insert into node_verification_events(company_id,node_id,verification_request_id,verification_event_id,event_type,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'requested',$5::uuid,$6,'requested',$7) on conflict(company_id,node_id,verification_request_id,idempotency_key) do nothing`, input.CompanyID, input.NodeID, item.EventID, verificationEventID, input.ActorUserID, item.ActorDisplayName, item.CreatedTimestamp)
+	return err
+}
+
+func insertNodeV2VerificationStampForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationCompletionInput, item domain.NodeTimelineEvent) error {
+	idempotencyKey := "approved:" + input.UserID
+	var actorDisplayName string
+	if err := tx.QueryRowContext(ctx, `select coalesce(nullif(display_name,''),nullif(email,''),'Unknown user') from users where user_id=$1::uuid`, input.UserID).Scan(&actorDisplayName); errors.Is(err, sql.ErrNoRows) {
+		actorDisplayName = "Unknown user"
+	} else if err != nil {
+		return err
+	}
+	verificationEventID := newUUIDv7String()
+	err := tx.QueryRowContext(ctx, `insert into node_verification_events(company_id,node_id,verification_request_id,verification_event_id,event_type,recipient_user_id,actor_user_id,actor_display_name,idempotency_key,occurred_at) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'approved',$5::uuid,$5::uuid,$6,$7,now()) on conflict(company_id,node_id,verification_request_id,idempotency_key) do nothing returning verification_event_id::text`, input.CompanyID, input.NodeID, input.EventID, verificationEventID, input.UserID, actorDisplayName, idempotencyKey).Scan(&verificationEventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `insert into node_timeline_items(company_id,node_id,timeline_item_id,item_type,occurred_at,actor_user_id,verification_event_id,summary_json) values($1::uuid,$2::uuid,$3::uuid,'verification_stamp',now(),$4::uuid,$5::uuid,jsonb_build_object('actor_display_name',$6::text,'legacy_verification_request_id',$7::text))`, input.CompanyID, input.NodeID, newUUIDv7String(), input.UserID, verificationEventID, actorDisplayName, item.EventID); err != nil {
+		return err
+	}
+	var incomplete int
+	if err := tx.QueryRowContext(ctx, `select count(*)::integer from node_timeline_verification_recipients where company_id=$1::uuid and node_id=$2::uuid and event_id=$3::uuid and completed_timestamp is null`, input.CompanyID, input.NodeID, input.EventID).Scan(&incomplete); err != nil {
+		return err
+	}
+	if incomplete == 0 {
+		_, err = tx.ExecContext(ctx, `update node_verification_requests set current_status='approved',closed_timestamp=coalesce(closed_timestamp,now()) where company_id=$1::uuid and node_id=$2::uuid and verification_request_id=$3::uuid and current_status='requested'`, input.CompanyID, input.NodeID, input.EventID)
+		return err
+	}
+	return nil
+}
+
+func memoryNodeV2Summary(value map[string]any) json.RawMessage {
+	encoded, _ := json.Marshal(value)
+	return encoded
+}
+
+func cleanNodeV2Label(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
+}

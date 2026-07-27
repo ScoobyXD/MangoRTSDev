@@ -163,7 +163,7 @@ insert into domain_events (
   event_id, company_id, actor_user_id, stream_type, stream_id, sequence,
   event_type, idempotency_key, payload, created_timestamp
 )
-select $1::uuid, $2::uuid, nullif($3, '')::uuid, $4, $5, sequence, $6, $7, $8::jsonb, now()
+select $1::uuid, $2::uuid, nullif($3, '')::uuid, $4::text, $5::text, sequence, $6::text, $7::text, $8::jsonb, now()
 from next_sequence
 on conflict (company_id, idempotency_key) where btrim(idempotency_key) <> ''
 do update set idempotency_key=domain_events.idempotency_key
