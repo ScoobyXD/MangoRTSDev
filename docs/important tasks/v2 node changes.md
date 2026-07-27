@@ -1115,6 +1115,23 @@ The repository currently has JSON storage and validation foundations but no appr
 
 The conversion-safe extension factory must share node, mark, and attribute definitions with the browser editor while excluding UI-only plugins, DOM menus, uploads, provider connections, and other interactive behavior. Because static conversion does not run ordinary editor transaction hooks, the converter must explicitly add required stable block IDs and other migration-time attributes.
 
+### Implemented one-document dry-run tool (2026-07-27)
+
+The repository now includes `npm run convert:mango-html-to-json -- ...` in `frontend`. It uses Tiptap's official server `generateJSON` function with Mango's current extension factory. It reads one authoritative `editor_collaboration_documents.canonical_html` row inside a read-only transaction, rejects a database role that has insert/update/delete rights on the JSON table, and writes the JSON, validation report, browser preview, and guarded copy/paste SQL to a caller-selected local output directory.
+
+The dry-run handles the legacy mention, checklist, highlight, text-color, and permanent attachment-image forms; adds deterministic block IDs; runs Mango's strict JSON validator; checks normalized visible text and important structure counts; and performs a Tiptap JSON-to-HTML-to-JSON round trip. It maps a chat selection only when its stored quote occurs exactly once in the converted document. Ambiguous or missing quotes stop SQL generation rather than producing a false highlight.
+
+Example (use the designated read-only database credential):
+
+```powershell
+cd frontend
+npm run convert:mango-html-to-json -- --company-id <company-id> --node-id <node-id> --document-id <textbox-information-id> --host <dev-db-host> --database <dev-db-name> --user <read-only-user> --sslmode require --output-dir C:\tmp\mango-json-trial
+```
+
+The generated SQL inserts one shadow row in `editor_json_documents`, verifies the source revision and checksum again, refuses to overwrite an existing JSON row, and does not change `workspace_editor_formats`. Inserting this SQL therefore does **not** make the normal site read that one JSON row. The current format switch is company-wide; visual testing on the normal site requires either a separately approved per-document preview path or a validated full-company conversion and cutover.
+
+A representative development textbox dry run passed with 3,359 normalized visible characters, 15 bullet lists, 36 list items, one mention, one permanent attachment image, 12 linked chat/comment records, and six uniquely mapped selection highlights. This proves the one-document converter path, not the full backfill, migration ledger, all-document validation, or company cutover.
+
 ### Conversion sequence
 
 For each current Node `Text box` projection:
