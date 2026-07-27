@@ -1121,7 +1121,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onFocusCapture={!isActive ? activate : undefined}
       onDoubleClick={!isActive ? activate : undefined}
     >
-      {isActive ? <EditorContent editor={activeEditor} /> : (
+      {isActive ? <EditorContent editor={activeEditor} className="mango-tiptap-active-surface" /> : (
         <MangoTiptapStaticRenderer
           value={document}
           annotations={renderedAnnotations}
