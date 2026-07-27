@@ -128,3 +128,9 @@ On Jonat's current Windows laptop the repo is cloned at `C:\Users\Jonat\MangoRTS
 Respond to the user plainly without jargon and be concise and to the point.
 Do not use a bunch of weird vocabulary, if you use a vocab word explain what it means.
 Do not use made-up words that you just invent on the fly to describe something. Just plainly explain the process.
+
+
+
+
+
+IMPORTANT! IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
