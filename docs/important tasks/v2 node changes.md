@@ -1132,6 +1132,58 @@ The generated SQL inserts one shadow row in `editor_json_documents`, verifies th
 
 A representative development textbox dry run passed with 3,359 normalized visible characters, 15 bullet lists, 36 list items, one mention, one permanent attachment image, 12 linked chat/comment records, and six uniquely mapped selection highlights. This proves the one-document converter path, not the full backfill, migration ledger, all-document validation, or company cutover.
 
+### Active one-textbox browser experiment (2026-07-27)
+
+This section records the exact local experiment in progress so another agent can reproduce it without reconstructing context from chat history. It is a deliberately incomplete one-document cutover for visual testing, not an approved company migration.
+
+The test identity is:
+
+- company: `11111111-1111-1111-1111-111111111111`;
+- Node: `019f055e-c842-799b-83c9-f6adcd2375cb`;
+- text box/document: `e0cf4c32-5ec2-4729-8308-8056ae4d0a9d`;
+- recognizable content: the `07/20/26` HR huddle text box shown in the screenshots below;
+- authoritative conversion source: `editor_collaboration_documents.canonical_html`, source revision `681`, MD5 `43f563b922ec62dd18b518f519662c58`;
+- shadow target: one `editor_json_documents` row at revision `0`, with six `kind: "chat"` entries in `canonical_annotations`.
+
+The user applied `20260718_tiptap_json_foundation.sql` and `20260719_zz_tiptap_annotation_positions.sql` to the local test database. At the time of this experiment, the user reported that the separate `20260726_node_v2_phase1_foundation.sql` and `20260727_node_v2_phase2_product.sql` migrations had not been applied. Those Node v2 migrations are not required merely to exercise the existing HTML-versus-JSON editor format gate.
+
+The exact SQL artifacts used for this experiment are preserved with the screenshots:
+
+- [`trial-insert-editor-json-document.sql`](assets/node-v2-tiptap-json-trial-2026-07-27/trial-insert-editor-json-document.sql) is the converter-generated, source-revision/checksum-guarded insert. It inserts the JSON document and six canonical annotation positions without changing the source HTML or the format gate.
+- [`trial-cutover-to-json.sql`](assets/node-v2-tiptap-json-trial-2026-07-27/trial-cutover-to-json.sql) is the local-only company gate switch that the user ran after the insert. It refuses to run unless the exact test JSON row is present and is the only live JSON row for the company. It then records `expected_document_count = converted_document_count = 1`, marks the local experiment `ready`, and sets `editor_format = 'tiptap_json'`.
+- [`trial-rollback-to-html.sql`](assets/node-v2-tiptap-json-trial-2026-07-27/trial-rollback-to-html.sql) restores `legacy_html` while deliberately retaining the shadow JSON row for comparison.
+
+The cutover script intentionally makes the entire test company read JSON even though only one document was converted. Consequently, every other Node, Logic Gate, and Project editor in that company can appear empty, and database triggers reject legacy HTML writes while the gate is `tiptap_json`. This is acceptable only for the isolated local visual experiment. The count values in this trial are not evidence that every real company document was discovered or converted.
+
+#### Before: legacy HTML on the development site
+
+![Legacy HTML test text box, top](assets/node-v2-tiptap-json-trial-2026-07-27/before-html-top.png)
+
+![Legacy HTML test text box, bottom](assets/node-v2-tiptap-json-trial-2026-07-27/before-html-bottom.png)
+
+The legacy view shows nested solid and hollow bullets, indentation, paragraph spacing, the permanent inline image, bold text, a mention, the right-side chat, and yellow text ranges associated with six root chat selections.
+
+#### After: converted JSON on the local site before frontend corrections
+
+![Converted Tiptap JSON test text box, top before frontend corrections](assets/node-v2-tiptap-json-trial-2026-07-27/after-json-top.png)
+
+![Converted Tiptap JSON test text box, bottom before frontend corrections](assets/node-v2-tiptap-json-trial-2026-07-27/after-json-bottom.png)
+
+The first browser comparison established:
+
+- all 3,359 normalized visible characters remained present;
+- bold text, the mention, the permanent image, and the right-side chat remained visible;
+- the JSON still contains the same 15 nested `bulletList` nodes and 36 `listItem` nodes, but the local browser displayed them as flat lines with no bullets or indentation;
+- the six yellow comment-selection highlights were not visible, even though the converter stored their mapped ProseMirror ranges in `canonical_annotations`;
+- this is presentation and annotation-integration failure, not evidence that Tiptap discarded the list tree or that the converter lost the text.
+
+The confirmed frontend causes are outside the Tiptap HTML parser:
+
+1. `MangoTiptapStaticRenderer` emits ordinary `ul`, `ol`, and `li` elements, while Mango's global reset removes all margins and padding. The JSON editor has no shared scoped list/paragraph CSS to replace the browser defaults for either the sleeping static renderer or the active `.ProseMirror` editor.
+2. The converter stored annotations as `kind: "chat"`, and the shared renderer emits `mango-tiptap-annotation--chat`. There is no shared style for that class. The only related rule is scoped to `.node-v2-prosemirror .mango-tiptap-annotation--comment`, which has both the wrong scope for the current editor surface and the wrong annotation kind.
+
+The immediate continuation on the same worker branch is to add shared, editor-scoped list/paragraph styling for static and active Tiptap rendering, add visible styles for `chat` and `change` annotations, and add focused regression coverage proving that a converted nested list and canonical chat range render with the expected structure/classes. The existing JSON row should not be reconverted merely to correct these display bugs.
+
 ### Conversion sequence
 
 For each current Node `Text box` projection:
