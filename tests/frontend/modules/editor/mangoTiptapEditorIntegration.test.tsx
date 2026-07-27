@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import { JSDOM } from "jsdom";
@@ -48,7 +50,18 @@ function structuredDocument(): MangoTiptapDocument {
         { type: "mangoEntityLink", attrs: { entityType: "project", entityId: "project-1", label: "Project One" } },
       ] },
       { type: "paragraph", attrs: { blockId: "empty-paragraph" } },
-      { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "List item" }] }] }] },
+      { type: "bulletList", content: [{
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "List item" }] },
+          { type: "bulletList", content: [{
+            type: "listItem",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "Nested item" }] },
+            ],
+          }] },
+        ],
+      }] },
       { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 1, rowspan: 1 }, content: [{ type: "paragraph", content: [{ type: "text", text: "Cell" }] }] }] }] },
       { type: "mangoAttachmentImage", attrs: { attachmentId: "image-1", filename: "image.png", mimeType: "image/png", alignment: "center", position: "break", layout: "content" } },
     ] },
@@ -82,7 +95,8 @@ function structuredAnnotations(document: MangoTiptapDocument): MangoTiptapAnnota
   try {
     editor.state.doc.descendants((node, position) => {
       if (node.isText && ["Alpha", "List item", "Cell"].includes(node.text ?? "")) {
-        annotations.push({ id: `annotation-${annotations.length + 1}`, kind: "comment", from: position, to: position + node.nodeSize });
+        const kind = node.text === "List item" ? "chat" : "comment";
+        annotations.push({ id: `annotation-${annotations.length + 1}`, kind, from: position, to: position + node.nodeSize });
       }
       if (node.type.name === "mangoAttachmentImage") {
         annotations.push({ id: "annotation-image", kind: "change", from: position, to: position + node.nodeSize });
@@ -106,13 +120,23 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
     />,
   );
   for (const annotation of annotations) assert.match(html, new RegExp(`data-mango-annotation-id="${annotation.id}"`));
+  assert.match(html, /class="mango-tiptap-document mango-tiptap-static-document"/);
+  assert.match(html, /mango-tiptap-annotation--chat/);
   assert.match(html, /<ul>/);
+  assert.match(html, /<ul><li><p>.*List item.*<\/p><ul><li><p>Nested item<\/p><\/li><\/ul><\/li><\/ul>/);
   assert.match(html, /<table/);
   assert.match(html, /data-static-image="image-1"/);
   assert.match(html, /data-mango-entity-id="project-1"/);
   assert.match(html, /href="\/projects\/project-1"/);
   assert.match(html, /mango-editor-entity-icon/);
   assert.match(html, /M2.3 3.1h11.4v9.8H2.3z/);
+
+  const presentationCSS = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptap.css"), "utf8");
+  assert.match(presentationCSS, /\.mango-tiptap-static-document ul/);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror ul/);
+  assert.match(presentationCSS, /list-style-type:\s*disc/);
+  assert.match(presentationCSS, /\.mango-tiptap-annotation--chat/);
+  assert.match(presentationCSS, /background:\s*rgba\(250, 204, 21,/);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {
