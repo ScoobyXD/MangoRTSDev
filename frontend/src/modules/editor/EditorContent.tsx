@@ -48,6 +48,7 @@ import { EditorTabBar } from "./EditorTabBar";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeV2WorkspaceSurface } from "./nodeV2/NodeV2WorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
+import { createNodeV2Client } from "./nodeV2/nodeV2Api";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_PANEL_BACKGROUND,
@@ -804,8 +805,23 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, []);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const [nodeV2WorkspaceActive, setNodeV2WorkspaceActive] = useState(false);
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
 
+  useEffect(() => {
+    let cancelled = false;
+    setNodeV2WorkspaceActive(false);
+    if (!nodeV2Phase2Enabled || !companyID || !linkedNodeID || linkedEntityKind !== "node") return () => { cancelled = true; };
+    const client = createNodeV2Client(requestJSON, companyID, linkedNodeID);
+    void client.availability()
+      .then((availability) => {
+        if (!cancelled) setNodeV2WorkspaceActive(availability.active);
+      })
+      .catch(() => {
+        if (!cancelled) setNodeV2WorkspaceActive(false);
+      });
+    return () => { cancelled = true; };
+  }, [nodeV2Phase2Enabled, companyID, linkedNodeID, linkedEntityKind, requestJSON]);
   useEffect(() => {
     let cancelled = false;
     if (!companyID) {
@@ -2898,7 +2914,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onRestore={(saveID) => { void restoreEditorSaveVersion(saveID); }}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (nodeV2Phase2Enabled ? (
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (nodeV2WorkspaceActive ? (
           <NodeV2WorkspaceSurface
             apiBase={apiBase}
             companyID={companyID}

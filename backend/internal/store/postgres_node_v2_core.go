@@ -94,6 +94,116 @@ limit $4`, companyID, nodeID, archived, limit)
 	return items, rows.Err()
 }
 
+const postgresNodeV2TextBoxSummaryColumns = `
+t.company_id::text, t.node_id::text, t.textbox_id::text,
+t.document_schema_version, t.content_revision, t.collaboration_epoch::text,
+t.latest_update_sequence, t.materialized_through_sequence, t.display_order,
+coalesce(t.created_by_user_id::text, ''), coalesce(t.updated_by_user_id::text, ''),
+t.created_timestamp, t.updated_timestamp, t.deleted_timestamp,
+(select count(*) from node_textbox_comments c
+  where c.company_id=t.company_id and c.node_id=t.node_id and c.textbox_id=t.textbox_id
+    and c.deleted_timestamp is null)::integer,
+(select count(*) from node_textbox_attachment_links a
+  where a.company_id=t.company_id and a.node_id=t.node_id and a.textbox_id=t.textbox_id
+    and a.deleted_timestamp is null)::integer,
+(select count(*) from node_textbox_email_links e
+  where e.company_id=t.company_id and e.node_id=t.node_id and e.textbox_id=t.textbox_id
+    and e.deleted_timestamp is null)::integer`
+
+func scanPostgresNodeV2TextBoxSummary(scanner interface{ Scan(...any) error }) (domain.NodeV2TextBoxSummary, error) {
+	var item domain.NodeV2TextBoxSummary
+	var deleted sql.NullTime
+	err := scanner.Scan(
+		&item.CompanyID, &item.NodeID, &item.TextboxID,
+		&item.DocumentSchemaVersion, &item.ContentRevision, &item.CollaborationEpoch,
+		&item.LatestUpdateSequence, &item.MaterializedThroughSequence, &item.DisplayOrder,
+		&item.CreatedByUserID, &item.UpdatedByUserID, &item.CreatedTimestamp,
+		&item.UpdatedTimestamp, &deleted, &item.CommentCount, &item.AttachmentCount, &item.EmailLinkCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NodeV2TextBoxSummary{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.NodeV2TextBoxSummary{}, err
+	}
+	if deleted.Valid {
+		value := deleted.Time
+		item.DeletedTimestamp = &value
+	}
+	return item, nil
+}
+
+func listPostgresNodeV2TextBoxPage(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query NodeV2TextBoxPageQuery) (NodeV2TextBoxPage, error) {
+	if query.Limit <= 0 || query.Limit > NodeV2MaxPageLimit {
+		query.Limit = NodeV2DefaultPageLimit
+	}
+	args := []any{query.CompanyID, query.NodeID, query.Limit + 1, query.Archived}
+	predicate := ""
+	orderBy := "t.display_order asc, t.textbox_id asc"
+	if query.Archived {
+		orderBy = "t.deleted_timestamp desc, t.textbox_id desc"
+	}
+	if query.Cursor != nil {
+		if query.Cursor.Version != 1 || strings.TrimSpace(query.Cursor.ID) == "" {
+			return NodeV2TextBoxPage{}, ErrInvalid
+		}
+		if query.Archived {
+			if query.Cursor.Kind != "node_v2_textboxes_archived" || query.Cursor.Timestamp.IsZero() {
+				return NodeV2TextBoxPage{}, ErrInvalid
+			}
+			predicate = ` and (t.deleted_timestamp<$5 or (t.deleted_timestamp=$5 and t.textbox_id<$6::uuid))`
+			args = append(args, query.Cursor.Timestamp, query.Cursor.ID)
+		} else {
+			if query.Cursor.Kind != "node_v2_textboxes_active" {
+				return NodeV2TextBoxPage{}, ErrInvalid
+			}
+			predicate = ` and (t.display_order>$5 or (t.display_order=$5 and t.textbox_id>$6::uuid))`
+			args = append(args, query.Cursor.Order, query.Cursor.ID)
+		}
+	}
+	rows, err := queryer.QueryContext(ctx, `select `+postgresNodeV2TextBoxSummaryColumns+`
+from node_textboxes t
+where t.company_id=$1::uuid and t.node_id=$2::uuid
+  and (($4::boolean and t.deleted_timestamp is not null) or (not $4::boolean and t.deleted_timestamp is null))`+predicate+`
+order by `+orderBy+` limit $3`, args...)
+	if err != nil {
+		return NodeV2TextBoxPage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.NodeV2TextBoxSummary, 0, query.Limit+1)
+	for rows.Next() {
+		item, scanErr := scanPostgresNodeV2TextBoxSummary(rows)
+		if scanErr != nil {
+			return NodeV2TextBoxPage{}, scanErr
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return NodeV2TextBoxPage{}, err
+	}
+	page := NodeV2TextBoxPage{Items: items}
+	if len(items) > query.Limit {
+		last := items[query.Limit-1]
+		page.Items = items[:query.Limit]
+		if query.Archived {
+			page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_textboxes_archived", Timestamp: *last.DeletedTimestamp, ID: last.TextboxID}
+		} else {
+			page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_textboxes_active", Order: last.DisplayOrder, ID: last.TextboxID}
+		}
+	}
+	return page, nil
+}
+
+func (r *PostgresRepo) ListNodeV2TextBoxes(query NodeV2TextBoxPageQuery) (NodeV2TextBoxPage, error) {
+	query.CompanyID, query.NodeID = cleanUUIDText(query.CompanyID), cleanUUIDText(query.NodeID)
+	if query.CompanyID == "" || query.NodeID == "" {
+		return NodeV2TextBoxPage{}, ErrInvalid
+	}
+	return listPostgresNodeV2TextBoxPage(context.Background(), r.db, query)
+}
+
 func scanPostgresNodeV2TimelineItem(scanner interface{ Scan(...any) error }) (domain.NodeV2TimelineItem, error) {
 	var item domain.NodeV2TimelineItem
 	var summary string
@@ -118,11 +228,11 @@ func (r *PostgresRepo) ListNodeV2Timeline(query NodeV2TimelineQuery) (NodeV2Time
 	args := []any{query.CompanyID, query.NodeID, query.Limit + 1}
 	predicate := ""
 	if query.Cursor != nil {
-		if query.Cursor.Timestamp.IsZero() || query.Cursor.Sequence <= 0 {
+		if query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_timeline" || query.Cursor.Timestamp.IsZero() || query.Cursor.Sequence <= 0 || cleanUUIDText(query.Cursor.ID) == "" {
 			return NodeV2TimelinePage{}, ErrInvalid
 		}
-		predicate = ` and (occurred_at < $4 or (occurred_at=$4 and timeline_sequence < $5))`
-		args = append(args, query.Cursor.Timestamp, query.Cursor.Sequence)
+		predicate = ` and (occurred_at,timeline_sequence,timeline_item_id)<($4,$5,$6::uuid)`
+		args = append(args, query.Cursor.Timestamp, query.Cursor.Sequence, query.Cursor.ID)
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
 select timeline_item_id::text, company_id::text, node_id::text, timeline_sequence,
@@ -131,7 +241,7 @@ select timeline_item_id::text, company_id::text, node_id::text, timeline_sequenc
        coalesce(verification_event_id::text, ''), summary_json::text
 from node_timeline_items
 where company_id=$1::uuid and node_id=$2::uuid`+predicate+`
-order by occurred_at desc, timeline_sequence desc
+order by occurred_at desc, timeline_sequence desc, timeline_item_id desc
 limit $3`, args...)
 	if err != nil {
 		return NodeV2TimelinePage{}, err
@@ -152,9 +262,39 @@ limit $3`, args...)
 	if len(items) > query.Limit {
 		last := items[query.Limit-1]
 		page.Items = items[:query.Limit]
-		page.NextCursor = &NodeV2Cursor{Timestamp: last.OccurredAt, Sequence: last.TimelineSequence}
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_timeline", Timestamp: last.OccurredAt, Sequence: last.TimelineSequence, ID: last.TimelineItemID}
 	}
 	return page, nil
+}
+
+func (r *PostgresRepo) GetNodeV2Availability(companyID, nodeID string) (NodeV2Availability, error) {
+	companyID, nodeID = cleanUUIDText(companyID), cleanUUIDText(nodeID)
+	if companyID == "" || nodeID == "" {
+		return NodeV2Availability{}, ErrInvalid
+	}
+	ctx := context.Background()
+	var foundationReady bool
+	if err := r.db.QueryRowContext(ctx, `select
+  to_regclass('public.node_textboxes') is not null
+  and to_regclass('public.node_timeline_items') is not null
+  and to_regclass('public.workspace_editor_formats') is not null`).Scan(&foundationReady); err != nil {
+		return NodeV2Availability{}, err
+	}
+	if !foundationReady {
+		return NodeV2Availability{Active: false, Reason: "node_v2_schema_unavailable"}, nil
+	}
+	var active bool
+	if err := r.db.QueryRowContext(ctx, `select exists(
+  select 1 from workspace_editor_formats
+  where company_id=$1::uuid and editor_format='tiptap_json' and migration_state='ready'
+    and expected_document_count=converted_document_count
+)`, companyID).Scan(&active); err != nil {
+		return NodeV2Availability{}, err
+	}
+	if !active {
+		return NodeV2Availability{Active: false, Reason: "workspace_not_converted"}, nil
+	}
+	return NodeV2Availability{Active: true}, nil
 }
 
 func (r *PostgresRepo) GetNodeV2Workspace(query NodeV2WorkspaceQuery) (NodeV2WorkspaceResult, error) {
@@ -163,6 +303,13 @@ func (r *PostgresRepo) GetNodeV2Workspace(query NodeV2WorkspaceQuery) (NodeV2Wor
 		return NodeV2WorkspaceResult{}, ErrInvalid
 	}
 	ctx := context.Background()
+	availability, err := r.GetNodeV2Availability(query.CompanyID, query.NodeID)
+	if err != nil {
+		return NodeV2WorkspaceResult{}, err
+	}
+	if !availability.Active {
+		return NodeV2WorkspaceResult{}, ErrNodeV2Inactive
+	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return NodeV2WorkspaceResult{}, err
@@ -173,14 +320,32 @@ func (r *PostgresRepo) GetNodeV2Workspace(query NodeV2WorkspaceQuery) (NodeV2Wor
 	if err != nil {
 		return NodeV2WorkspaceResult{}, err
 	}
-	result.Textboxes, err = listPostgresNodeV2TextBoxes(ctx, tx, query.CompanyID, query.NodeID, false, 50)
+	placementErr := tx.QueryRowContext(ctx, `select a.logic_gate_id::text,g.header,a.status_key,a.column_id,a.is_issue
+from node_logic_gate_assignments a
+join logic_gates g on (g.company_id,g.logic_gate_id)=(a.company_id,a.logic_gate_id)
+where a.company_id=$1::uuid and a.node_id=$2::uuid`, query.CompanyID, query.NodeID).Scan(
+		&result.Placement.LogicGateID, &result.Placement.LogicGateName, &result.Placement.StatusKey,
+		&result.Placement.ColumnID, &result.Placement.IsIssue,
+	)
+	if placementErr != nil && !errors.Is(placementErr, sql.ErrNoRows) {
+		return NodeV2WorkspaceResult{}, placementErr
+	}
+	result.GVICSummary, err = postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{
+		companyID: query.CompanyID, resourceType: EntityTypeNode, resourceID: query.NodeID,
+	})
 	if err != nil {
 		return NodeV2WorkspaceResult{}, err
 	}
-	result.ArchivedTextboxes, err = listPostgresNodeV2TextBoxes(ctx, tx, query.CompanyID, query.NodeID, true, 50)
+	textboxPage, err := listPostgresNodeV2TextBoxPage(ctx, tx, NodeV2TextBoxPageQuery{CompanyID: query.CompanyID, NodeID: query.NodeID, Limit: query.AggregateLimit})
 	if err != nil {
 		return NodeV2WorkspaceResult{}, err
 	}
+	result.Textboxes, result.TextboxNextCursor = textboxPage.Items, textboxPage.NextCursor
+	archivedPage, err := listPostgresNodeV2TextBoxPage(ctx, tx, NodeV2TextBoxPageQuery{CompanyID: query.CompanyID, NodeID: query.NodeID, Archived: true, Limit: query.AggregateLimit})
+	if err != nil {
+		return NodeV2WorkspaceResult{}, err
+	}
+	result.ArchivedTextboxes, result.ArchivedNextCursor = archivedPage.Items, archivedPage.NextCursor
 	if err := tx.QueryRowContext(ctx, `
 select count(*) filter (where deleted_timestamp is null)::integer,
        count(*) filter (where deleted_timestamp is not null)::integer
@@ -231,14 +396,17 @@ func listNodeV2TimelineTx(ctx context.Context, tx *sql.Tx, query NodeV2TimelineQ
 	args := []any{query.CompanyID, query.NodeID, query.Limit + 1}
 	predicate := ""
 	if query.Cursor != nil {
-		predicate = ` and (occurred_at < $4 or (occurred_at=$4 and timeline_sequence < $5))`
-		args = append(args, query.Cursor.Timestamp, query.Cursor.Sequence)
+		if query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_timeline" || query.Cursor.Timestamp.IsZero() || query.Cursor.Sequence <= 0 || cleanUUIDText(query.Cursor.ID) == "" {
+			return NodeV2TimelinePage{}, ErrInvalid
+		}
+		predicate = ` and (occurred_at,timeline_sequence,timeline_item_id)<($4,$5,$6::uuid)`
+		args = append(args, query.Cursor.Timestamp, query.Cursor.Sequence, query.Cursor.ID)
 	}
 	rows, err := tx.QueryContext(ctx, `select timeline_item_id::text, company_id::text, node_id::text,
 timeline_sequence, item_type, occurred_at, recorded_at, coalesce(actor_user_id::text, ''),
 coalesce(textbox_id::text, ''), coalesce(movement_id::text, ''), coalesce(verification_event_id::text, ''), summary_json::text
 from node_timeline_items where company_id=$1::uuid and node_id=$2::uuid`+predicate+`
-order by occurred_at desc, timeline_sequence desc limit $3`, args...)
+order by occurred_at desc, timeline_sequence desc, timeline_item_id desc limit $3`, args...)
 	if err != nil {
 		return NodeV2TimelinePage{}, err
 	}
@@ -258,7 +426,7 @@ order by occurred_at desc, timeline_sequence desc limit $3`, args...)
 	if len(items) > query.Limit {
 		last := items[query.Limit-1]
 		page.Items = items[:query.Limit]
-		page.NextCursor = &NodeV2Cursor{Timestamp: last.OccurredAt, Sequence: last.TimelineSequence}
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_timeline", Timestamp: last.OccurredAt, Sequence: last.TimelineSequence, ID: last.TimelineItemID}
 	}
 	return page, nil
 }
@@ -338,7 +506,7 @@ func (r *PostgresRepo) CreateNodeV2TextBox(input NodeV2CreateTextBoxInput) (Node
 	if err != nil {
 		return NodeV2TextBoxMutationResult{}, fmt.Errorf("append Node v2 textbox timeline item: %w", err)
 	}
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{{CompanyID: input.CompanyID, StreamType: EntityTypeNode, StreamID: input.NodeID, Type: "node.textbox.created", ActorUserID: input.ActorUserID, IdempotencyKey: "node-v2-textbox:" + input.IdempotencyKey, Payload: map[string]any{"node_id": input.NodeID, "textbox_id": textboxID}}})
+	events, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, "node.textbox.created", "node-v2-textbox:"+input.IdempotencyKey, map[string]any{"textbox_id": textboxID})
 	if err != nil {
 		return NodeV2TextBoxMutationResult{}, fmt.Errorf("append Node v2 textbox domain event: %w", err)
 	}
@@ -362,65 +530,155 @@ func (r *PostgresRepo) GetNodeV2TextBox(companyID, nodeID, textboxID string) (do
 
 func (r *PostgresRepo) SetNodeV2TextBoxArchived(input NodeV2ArchiveTextBoxInput) (domain.NodeV2TextBox, error) {
 	input.CompanyID, input.NodeID, input.TextboxID, input.ActorUserID = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.TextboxID), cleanUUIDText(input.ActorUserID)
-	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.ActorUserID == "" {
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.ActorUserID == "" || input.IdempotencyKey == "" || len([]byte(input.IdempotencyKey)) > 160 {
 		return domain.NodeV2TextBox{}, ErrInvalid
 	}
 	ctx := context.Background()
-	result, err := r.db.ExecContext(ctx, `update node_textboxes set deleted_timestamp=case when $5 then coalesce(deleted_timestamp,now()) else null end,updated_by_user_id=$4::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID, input.ActorUserID, input.Archived)
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.NodeV2TextBox{}, err
+	}
+	defer tx.Rollback()
+	eventType := "node.textbox.restored"
+	if input.Archived {
+		eventType = "node.textbox.archived"
+	}
+	eventKey := "node-v2-textbox-archive:" + input.IdempotencyKey
+	var replayed bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from domain_events where company_id=$1::uuid and idempotency_key=$2)`, input.CompanyID, eventKey).Scan(&replayed); err != nil {
+		return domain.NodeV2TextBox{}, err
+	}
+	if replayed {
+		return postgresNodeV2TextBoxByID(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID)
+	}
+	result, err := tx.ExecContext(ctx, `update node_textboxes set deleted_timestamp=case when $5 then coalesce(deleted_timestamp,now()) else null end,updated_by_user_id=$4::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID, input.ActorUserID, input.Archived)
 	if err != nil {
 		return domain.NodeV2TextBox{}, err
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return domain.NodeV2TextBox{}, ErrNotFound
 	}
-	return postgresNodeV2TextBoxByID(ctx, r.db, input.CompanyID, input.NodeID, input.TextboxID)
-}
-
-func (r *PostgresRepo) SetNodeV2TextBoxOrder(input NodeV2TextBoxOrderInput) ([]domain.NodeV2TextBox, error) {
-	input.CompanyID, input.NodeID, input.ActorUserID = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.ActorUserID)
-	if input.CompanyID == "" || input.NodeID == "" || input.ActorUserID == "" || len(input.TextboxIDs) > 500 {
-		return nil, ErrInvalid
+	if _, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, eventType, eventKey, map[string]any{"textbox_id": input.TextboxID, "archived": input.Archived}); err != nil {
+		return domain.NodeV2TextBox{}, err
 	}
-	seen := map[string]bool{}
-	for i := range input.TextboxIDs {
-		input.TextboxIDs[i] = cleanUUIDText(input.TextboxIDs[i])
-		if input.TextboxIDs[i] == "" || seen[input.TextboxIDs[i]] {
-			return nil, ErrInvalid
-		}
-		seen[input.TextboxIDs[i]] = true
+	item, err := postgresNodeV2TextBoxByID(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID)
+	if err != nil {
+		return item, err
+	}
+	if err := tx.Commit(); err != nil {
+		return item, err
+	}
+	return item, nil
+}
+func (r *PostgresRepo) MoveNodeV2TextBox(input NodeV2TextBoxMoveInput) (domain.NodeV2TextBoxSummary, error) {
+	input.CompanyID, input.NodeID, input.ActorUserID = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.ActorUserID)
+	input.TextboxID, input.ReferenceID = cleanUUIDText(input.TextboxID), cleanUUIDText(input.ReferenceID)
+	input.Placement, input.IdempotencyKey = strings.TrimSpace(input.Placement), strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.NodeID == "" || input.ActorUserID == "" || input.TextboxID == "" || input.ReferenceID == "" || input.TextboxID == input.ReferenceID || !(input.Placement == "before" || input.Placement == "after") || input.IdempotencyKey == "" || len([]byte(input.IdempotencyKey)) > 160 {
+		return domain.NodeV2TextBoxSummary{}, ErrInvalid
 	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return domain.NodeV2TextBoxSummary{}, err
 	}
 	defer tx.Rollback()
-	var count int
-	if err := tx.QueryRowContext(ctx, `with locked as (select textbox_id from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null for update) select count(*)::integer from locked`, input.CompanyID, input.NodeID).Scan(&count); err != nil {
-		return nil, err
+	var replayed bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from domain_events where company_id=$1::uuid and idempotency_key=$2)`, input.CompanyID, "node-v2-textbox-move:"+input.IdempotencyKey).Scan(&replayed); err != nil {
+		return domain.NodeV2TextBoxSummary{}, err
 	}
-	if count != len(input.TextboxIDs) {
-		return nil, ErrVersionConflict
+	if replayed {
+		return scanPostgresNodeV2TextBoxSummary(tx.QueryRowContext(ctx, `select `+postgresNodeV2TextBoxSummaryColumns+` from node_textboxes t where t.company_id=$1::uuid and t.node_id=$2::uuid and t.textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID))
 	}
-	for position, id := range input.TextboxIDs {
-		result, err := tx.ExecContext(ctx, `update node_textboxes set display_order=$4,updated_by_user_id=$5::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null`, input.CompanyID, input.NodeID, id, int64(position)*1024, input.ActorUserID)
-		if err != nil {
-			return nil, err
-		}
-		if n, _ := result.RowsAffected(); n != 1 {
-			return nil, ErrVersionConflict
-		}
-	}
-	items, err := listPostgresNodeV2TextBoxes(ctx, tx, input.CompanyID, input.NodeID, false, NodeV2MaxPageLimit)
+	rows, err := tx.QueryContext(ctx, `select textbox_id::text,display_order from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null order by display_order,textbox_id for update`, input.CompanyID, input.NodeID)
 	if err != nil {
-		return nil, err
+		return domain.NodeV2TextBoxSummary{}, err
+	}
+	type orderedTextbox struct {
+		id    string
+		order int64
+	}
+	ordered := []orderedTextbox{}
+	for rows.Next() {
+		var item orderedTextbox
+		if err := rows.Scan(&item.id, &item.order); err != nil {
+			rows.Close()
+			return domain.NodeV2TextBoxSummary{}, err
+		}
+		ordered = append(ordered, item)
+	}
+	if err := rows.Close(); err != nil {
+		return domain.NodeV2TextBoxSummary{}, err
+	}
+	var moving orderedTextbox
+	foundMoving, foundReference := false, false
+	withoutMoving := make([]orderedTextbox, 0, len(ordered))
+	for _, item := range ordered {
+		if item.id == input.TextboxID {
+			moving, foundMoving = item, true
+			continue
+		}
+		if item.id == input.ReferenceID {
+			foundReference = true
+		}
+		withoutMoving = append(withoutMoving, item)
+	}
+	if !foundMoving || !foundReference {
+		return domain.NodeV2TextBoxSummary{}, ErrNotFound
+	}
+	insertAt := -1
+	for index, item := range withoutMoving {
+		if item.id == input.ReferenceID {
+			insertAt = index
+			if input.Placement == "after" {
+				insertAt++
+			}
+			break
+		}
+	}
+	finalOrder := append([]orderedTextbox{}, withoutMoving[:insertAt]...)
+	finalOrder = append(finalOrder, moving)
+	finalOrder = append(finalOrder, withoutMoving[insertAt:]...)
+	previousOrder, nextOrder := int64(0), int64(0)
+	if insertAt > 0 {
+		previousOrder = finalOrder[insertAt-1].order
+	}
+	if insertAt+1 < len(finalOrder) {
+		nextOrder = finalOrder[insertAt+1].order
+	}
+	var targetOrder int64
+	switch {
+	case insertAt == 0:
+		targetOrder = nextOrder - 1024
+	case insertAt == len(finalOrder)-1:
+		targetOrder = previousOrder + 1024
+	case nextOrder-previousOrder > 1:
+		targetOrder = previousOrder + (nextOrder-previousOrder)/2
+	default:
+		for index, item := range finalOrder {
+			order := int64(index) * 1024
+			if _, err := tx.ExecContext(ctx, `update node_textboxes set display_order=$4 where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, item.id, order); err != nil {
+				return domain.NodeV2TextBoxSummary{}, err
+			}
+		}
+		targetOrder = int64(insertAt) * 1024
+	}
+	if _, err := tx.ExecContext(ctx, `update node_textboxes set display_order=$4,updated_by_user_id=$5::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID, targetOrder, input.ActorUserID); err != nil {
+		return domain.NodeV2TextBoxSummary{}, err
+	}
+	if _, err := r.appendNodeV2BusinessMutationTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, "node.textbox.moved", "node-v2-textbox-move:"+input.IdempotencyKey, map[string]any{"textbox_id": input.TextboxID, "reference_textbox_id": input.ReferenceID, "placement": input.Placement}); err != nil {
+		return domain.NodeV2TextBoxSummary{}, err
+	}
+	item, err := scanPostgresNodeV2TextBoxSummary(tx.QueryRowContext(ctx, `select `+postgresNodeV2TextBoxSummaryColumns+` from node_textboxes t where t.company_id=$1::uuid and t.node_id=$2::uuid and t.textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID))
+	if err != nil {
+		return item, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return item, err
 	}
-	return items, nil
+	return item, nil
 }
-
 func (r *PostgresRepo) GetNodeV2TextBoxSync(query NodeV2SyncQuery) (NodeV2SyncPage, error) {
 	query.CompanyID, query.NodeID, query.TextboxID = cleanUUIDText(query.CompanyID), cleanUUIDText(query.NodeID), cleanUUIDText(query.TextboxID)
 	if query.CompanyID == "" || query.NodeID == "" || query.TextboxID == "" || query.AfterSequence < 0 {
@@ -533,6 +791,9 @@ func (r *PostgresRepo) AppendNodeV2YjsUpdate(input NodeV2YjsUpdateInput) (domain
 }
 
 func (r *PostgresRepo) CheckpointNodeV2TextBox(input NodeV2CheckpointInput) (domain.NodeV2TextBox, error) {
+	if !input.Trusted {
+		return domain.NodeV2TextBox{}, ErrNodeV2UntrustedCheckpoint
+	}
 	input.CompanyID, input.NodeID, input.TextboxID, input.ActorUserID, input.CheckpointID, input.CollaborationEpoch = cleanUUIDText(input.CompanyID), cleanUUIDText(input.NodeID), cleanUUIDText(input.TextboxID), cleanUUIDText(input.ActorUserID), cleanUUIDText(input.CheckpointID), cleanUUIDText(input.CollaborationEpoch)
 	input.Reason = strings.TrimSpace(input.Reason)
 	if input.CompanyID == "" || input.NodeID == "" || input.TextboxID == "" || input.ActorUserID == "" || input.CheckpointID == "" || input.CollaborationEpoch == "" || input.ThroughSequence < 0 || len(input.CheckpointPayload) == 0 || len(input.StateVector) == 0 || len(input.DocumentJSON) == 0 {

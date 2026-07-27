@@ -49,10 +49,10 @@ func TestNodeV2Phase2EmailAggregateAtTargetScaleAndLazyBodies(t *testing.T) {
 		target = imported.EmailThread
 	}
 
-	if err := repo.SetNodeV2EmailLink(NodeV2EmailLinkInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: firstTextbox.Textbox.TextboxID, EmailThreadID: target.EmailThreadID, ActorUserID: actor.UserID}); err != nil {
+	if err := repo.SetNodeV2EmailLink(NodeV2EmailLinkInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: firstTextbox.Textbox.TextboxID, EmailThreadID: target.EmailThreadID, ActorUserID: actor.UserID, IdempotencyKey: "scale-link-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetNodeV2EmailLink(NodeV2EmailLinkInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: secondTextbox.Textbox.TextboxID, EmailThreadID: target.EmailThreadID, EmailMessageID: target.Messages[0].EmailMessageID, ActorUserID: actor.UserID}); err != nil {
+	if err := repo.SetNodeV2EmailLink(NodeV2EmailLinkInput{CompanyID: companyID, NodeID: node.NodeID, TextboxID: secondTextbox.Textbox.TextboxID, EmailThreadID: target.EmailThreadID, EmailMessageID: target.Messages[0].EmailMessageID, ActorUserID: actor.UserID, IdempotencyKey: "scale-link-2"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +69,7 @@ func TestNodeV2Phase2EmailAggregateAtTargetScaleAndLazyBodies(t *testing.T) {
 	}
 
 	metadataOnly, err := repo.ListNodeV2EmailMessages(NodeV2EmailMessageQuery{CompanyID: companyID, NodeID: node.NodeID, EmailThreadID: target.EmailThreadID, Limit: 1})
-	if err != nil || len(metadataOnly.Items) != 1 || metadataOnly.Items[0].BodyHTML != "" || !metadataOnly.HasMore {
+	if err != nil || len(metadataOnly.Items) != 1 || metadataOnly.Items[0].BodyHTML != "" || metadataOnly.NextCursor == nil {
 		t.Fatalf("lazy message metadata page=%+v err=%v", metadataOnly, err)
 	}
 	withBody, err := repo.ListNodeV2EmailMessages(NodeV2EmailMessageQuery{CompanyID: companyID, NodeID: node.NodeID, EmailThreadID: target.EmailThreadID, Limit: 1, IncludeBody: true})

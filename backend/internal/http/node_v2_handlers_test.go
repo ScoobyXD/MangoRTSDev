@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -97,8 +98,8 @@ func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 		"state_vector_base64": base64.StdEncoding.EncodeToString([]byte{0}), "document_json": document,
 		"plain_text": "Durable API text", "reason": "test",
 	})
-	if checkpoint.Code != http.StatusCreated {
-		t.Fatalf("checkpoint status=%d body=%s", checkpoint.Code, checkpoint.Body.String())
+	if checkpoint.Code != http.StatusForbidden || !strings.Contains(checkpoint.Body.String(), "node_v2_checkpoint_service_only") {
+		t.Fatalf("untrusted checkpoint status=%d body=%s", checkpoint.Code, checkpoint.Body.String())
 	}
 
 	comment := request(http.MethodPost, root+"/textboxes/"+created.Textbox.TextboxID+"/comments"+companyQuery, map[string]any{
@@ -141,17 +142,21 @@ func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 		t.Fatalf("second timeline status=%d page=%+v", nextTimeline.Code, secondTimeline)
 	}
 
-	archive := request(http.MethodPatch, root+"/textboxes/"+created.Textbox.TextboxID+companyQuery, map[string]any{"archived": true})
+	archive := request(http.MethodPatch, root+"/textboxes/"+created.Textbox.TextboxID+companyQuery, map[string]any{"archived": true, "idempotency_key": "http-archive"})
 	if archive.Code != http.StatusOK {
 		t.Fatalf("archive status=%d body=%s", archive.Code, archive.Body.String())
 	}
-	restore := request(http.MethodPatch, root+"/textboxes/"+created.Textbox.TextboxID+companyQuery, map[string]any{"archived": false})
+	restore := request(http.MethodPatch, root+"/textboxes/"+created.Textbox.TextboxID+companyQuery, map[string]any{"archived": false, "idempotency_key": "http-restore"})
 	if restore.Code != http.StatusOK {
 		t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String())
 	}
 	workspace := request(http.MethodGet, root+"/workspace"+companyQuery+"&limit=10", nil)
-	if workspace.Code != http.StatusOK || !bytes.Contains(workspace.Body.Bytes(), []byte("Durable API text")) {
+	if workspace.Code != http.StatusOK || bytes.Contains(workspace.Body.Bytes(), []byte("document_json")) || bytes.Contains(workspace.Body.Bytes(), []byte("plain_text")) || !bytes.Contains(workspace.Body.Bytes(), []byte("textbox_next_cursor")) {
 		t.Fatalf("workspace status=%d body=%s", workspace.Code, workspace.Body.String())
+	}
+	hydrated := request(http.MethodGet, root+"/textboxes/"+created.Textbox.TextboxID+companyQuery, nil)
+	if hydrated.Code != http.StatusOK || !bytes.Contains(hydrated.Body.Bytes(), []byte("document_json")) {
+		t.Fatalf("hydrated textbox status=%d body=%s", hydrated.Code, hydrated.Body.String())
 	}
 }
 

@@ -100,13 +100,18 @@ const secondTextboxID = await activeCard.getAttribute("data-node-v2-textbox-id")
 await activeCard.getByRole("button", { name: "Archive", exact: true }).click();
 await page.locator(".node-v2-archived").waitFor({ state: "visible", timeout: 20_000 });
 await page.locator(".node-v2-archived > summary").click();
-await page.locator(".node-v2-archived > div").filter({ hasText: secondText }).getByRole("button", { name: "Restore" }).click();
+await page.locator(`.node-v2-archived > div[data-node-v2-textbox-id="${secondTextboxID}"]`).getByRole("button", { name: "Restore" }).click();
 await page.locator('[data-node-v2-textbox-id="' + secondTextboxID + '"]').waitFor({ state: "attached", timeout: 20_000 });
 
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.getByTestId("node-v2-workspace").waitFor({ timeout: 30_000 });
-assert.ok(await page.getByText(firstText, { exact: false }).count() >= 1, "first document survives reload");
-assert.ok(await page.getByText(secondText, { exact: false }).count() >= 1, "second document survives reload");
+await page.getByRole("button", { name: "Load more text boxes" }).click();
+await page.locator('[data-node-v2-textbox-id="' + firstTextboxID + '"]').waitFor({ state: "attached", timeout: 20_000 });
+await page.locator('[data-node-v2-textbox-id="' + firstTextboxID + '"]').getByRole("button", { name: /Text box/ }).click();
+await page.waitForFunction((expected) => document.querySelector('[aria-label="Node text box"]')?.textContent?.includes(expected), firstText);
+await page.locator('[data-node-v2-textbox-id="' + secondTextboxID + '"]').getByRole("button", { name: /Text box/ }).click();
+await page.waitForFunction((expected) => document.querySelector('[aria-label="Node text box"]')?.textContent?.includes(expected), secondText);
+
 
 const firstCard = page.locator('[data-node-v2-textbox-id="' + firstTextboxID + '"]');
 await firstCard.getByRole("button", { name: /Text box/ }).click();
@@ -148,10 +153,16 @@ await email.waitFor({ timeout: 20_000 });
 assert.equal(await page.locator(".node-v2-email").count(), 1, "Node-wide email aggregate is deduplicated");
 assert.equal(await page.locator(".node-v2-email-message").count(), 0, "email bodies are lazy");
 await email.getByRole("button", { name: "Load message bodies" }).click();
-await email.getByText("Durable independent HTML email body", { exact: false }).waitFor({ timeout: 20_000 });
+await email.getByText("Durable independent HTML email body", { exact: false }).first().waitFor({ timeout: 20_000 });
 assert.equal(await email.locator("script").count(), 0, "durable email HTML is sanitized only for presentation");
 await email.getByRole("button", { name: "Link to this text box" }).click();
 await page.waitForFunction(() => document.querySelector(".node-v2-email button")?.hasAttribute("disabled"), undefined, { timeout: 20_000 });
+assert.equal(await email.locator(".node-v2-email-message").count(), 30, "email message bodies are bounded to one page");
+await email.getByRole("button", { name: "Load more messages" }).click();
+await page.waitForFunction(() => document.querySelectorAll(".node-v2-email-message").length === 35);
+const providerIDs = await email.locator(".node-v2-email-message").evaluateAll((items) => items.map((item) => item.getAttribute("data-provider-message-id")));
+assert.equal(new Set(providerIDs).size, 35, "tied-order email continuation has no duplicates");
+assert.equal(providerIDs.length, 35, "all email messages are reachable");
 assert.equal(await email.getByRole("button", { name: "Link to this text box" }).isDisabled(), true, "textbox context is durable after reload");
 
 assert.deepEqual(failures, [], `browser/API failures: ${failures.join("; ")}`);

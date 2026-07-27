@@ -294,3 +294,18 @@ The focused checks for this milestone are:
 - The full repository gate must apply clean schema and forward migrations to disposable PostgreSQL and pass all backend/frontend tests before commit.
 
 No migration in this milestone may be applied to development until the migration-ledger blocker above is reconciled by a human.
+
+## 2026-07-27 quality-audit remediation
+
+The repository now enforces the operational boundary that this foundation described:
+
+- Browser typing persists only merged Yjs update deltas. It does not serialize TipTap JSON/plain text or request a checkpoint on blur or after a short idle timer.
+- The trusted PostgreSQL Yjs provider remains the only materializer/compactor. It uses the 512-update, 512-KiB, and 15-minute idle boundaries above. The authenticated browser checkpoint route is refused, and store callers must opt into the internal trusted boundary.
+- The workspace shell returns metadata pages only. Full documents are hydrated one at a time for the active or visible text box; archived pages never include editor JSON/plain text.
+- Text-box and timeline cursors use one versioned contract with stable unique tie-breakers. Reordering is a single-item move command and does not require a client to load or resend the whole list.
+- Legacy movement/verification bridges first detect the Node v2 table capability. A genuinely pre-v2 schema is a safe no-op; errors after the capability exists are still returned.
+- Rollout is company/workspace scoped through the validated `workspace_editor_formats` row. The frontend build flag is only a maximum enablement switch; an absent/unready row keeps the legacy editor visible.
+
+Disposable PostgreSQL and browser coverage verifies pre-schema and post-schema sequencing, 145 text boxes, tied timeline/email cursors, delta row/write counts for a 1-MiB document, checkpoint rejection/recovery chains, outbox rollback/idempotency, and the real API/Vite/S3-compatible workflow.
+
+This does **not** complete Phase 1 rollout. Human live-schema/migration-ledger reconciliation, the shared TipTap HTML-to-JSON converter, and reviewed dry-run/shadow/rollback tooling remain open. No live database was changed. The conversion boundary remains current/recoverable deduplicated documents only; the historical 3.58-GB editor-event pile is not a conversion source, and legacy HTML remains available for rollback.

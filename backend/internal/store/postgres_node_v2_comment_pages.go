@@ -32,7 +32,7 @@ func (r *PostgresRepo) ListNodeV2Comments(query NodeV2CommentQuery) (NodeV2Comme
 	args := []any{query.CompanyID, query.NodeID, query.TextboxID, query.Limit + 1}
 	predicate := ""
 	if query.Cursor != nil {
-		if query.Cursor.Timestamp.IsZero() || cleanUUIDText(query.Cursor.ID) == "" {
+		if query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_comments" || query.Cursor.Timestamp.IsZero() || cleanUUIDText(query.Cursor.ID) == "" {
 			return NodeV2CommentPage{}, ErrInvalid
 		}
 		predicate = ` and (t.created_timestamp<$5 or (t.created_timestamp=$5 and t.thread_id<$6::uuid))`
@@ -64,7 +64,7 @@ func (r *PostgresRepo) ListNodeV2Comments(query NodeV2CommentQuery) (NodeV2Comme
 	page := NodeV2CommentPage{Threads: threads}
 	if len(page.Threads) > query.Limit {
 		last := page.Threads[query.Limit-1]
-		page.NextCursor = &NodeV2Cursor{Timestamp: last.CreatedTimestamp, ID: last.ThreadID}
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_comments", Timestamp: last.CreatedTimestamp, ID: last.ThreadID}
 		page.Threads = page.Threads[:query.Limit]
 	}
 	if len(page.Threads) == 0 {

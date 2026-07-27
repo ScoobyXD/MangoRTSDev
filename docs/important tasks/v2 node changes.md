@@ -1414,3 +1414,25 @@ First establish the architecture, ownership, lifecycle, migration, rollback, and
 - `docs/tests/attachments.md`
 
 This file is the primary handoff for continuing the Node v2/editor architecture discussion. Where older planning documents conflict with the confirmed decisions listed here, future work must identify the conflict explicitly and obtain product approval rather than silently following the older plan.
+
+## 2026-07-27 Node V2 Phase 1/2 quality-audit remediation
+
+Status: **implemented and verified in the repository; live rollout remains blocked**.
+
+The audit findings are closed in code and executable tests:
+
+- ordinary input writes small Yjs deltas; browser blur/short-idle full checkpoints were removed;
+- initial and archived workspace results are metadata-only with visible/explicit document hydration;
+- stable cursor pages and a single-item move command make 145+ text boxes reachable without full-list reorder conflicts;
+- PostgreSQL timeline and email pagination include stable unique tie-breakers;
+- Yjs-relative comments render as durable decorations and support focus/navigation and detached/legacy fallbacks;
+- pre-v2 schema bridges are capability-gated, while post-v2 business writes remain atomic;
+- the full test gate includes Phase 2 and a self-provisioning PostgreSQL/API/Vite/Chromium/S3-compatible browser harness;
+- business mutations write idempotent domain events and realtime outbox rows in the same transaction, while high-frequency Yjs updates do not;
+- checkpoint coverage is server-owned and public checkpoint claims are rejected;
+- the workspace contract includes placement/GVIC summaries; and
+- the build flag no longer globally replaces legacy Node workspaces without a ready server-side workspace gate.
+
+Real PostgreSQL tests cover more than 140 text boxes, a 1-MiB document with measured delta/checkpoint/materialization writes, tied timeline timestamps, tied email orders, outbox rollback/retry, and pre-v2/post-v2 deployment states.
+
+Phase truth is unchanged: Phase 1 is **still in progress** until a human reconciles the live schema/migration ledger and completes the shared TipTap converter plus dry-run, shadow, and rollback tooling. Do not convert the historical 3.58-GB editor-event pile. Convert only the current/recoverable deduplicated documents, retain legacy HTML throughout rollback, and require verified backup/restore boundaries. No live database was written by this work.

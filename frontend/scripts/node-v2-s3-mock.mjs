@@ -18,6 +18,10 @@ async function readBody(request) {
 }
 
 const server = http.createServer(async (request, response) => {
+  if (request.method === "GET" && request.url === "/healthz") {
+    response.writeHead(200).end("ok");
+    return;
+  }
   cors(response);
   if (request.method === "OPTIONS") {
     response.writeHead(204).end();
