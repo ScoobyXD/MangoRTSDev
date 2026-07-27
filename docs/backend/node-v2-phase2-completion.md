@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-27
 
-Status: complete in repository and verified locally behind `VITE_NODE_V2_PHASE2=true`. No live database was written, no production or development cloud resource was changed, and no legacy data was migrated or deleted.
+Status: implementation record for the repository work behind `VITE_NODE_V2_PHASE2=true`. A 2026-07-27 Phase 3 readiness re-audit reopened Phase 2 acceptance because production materialization and current email/chat parity are incomplete. No live database was written, no production or development cloud resource was changed, and no legacy data was migrated or deleted.
 
 ## Product boundary
 
@@ -77,4 +77,19 @@ The Phase 2 repository implementation now also includes:
 
 `scripts/run_all_tests.mjs` now runs the executable Phase 2 durability suite and the production-path harness. That harness provisions disposable PostgreSQL, two API instances, Vite, Chromium, and an S3-compatible local fixture, then proves legacy-before-activation and V2-after-activation behavior in one command. Its V2 browser path covers bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and 35-message email continuation.
 
-Phase 2 is complete in the repository. Phase 1 migration/rollout is still in progress for the human ledger reconciliation, shared converter, and dry-run/shadow/rollback work listed in the foundation record. This change did not migrate a live database or authorize rollout.
+The Phase 2 implementation is present in the repository. Phase 1 migration/rollout is still in progress for the human ledger reconciliation, shared converter, and dry-run/shadow/rollback work listed in the foundation record. This change did not migrate a live database or authorize rollout.
+
+## 2026-07-27 Phase 3 readiness correction
+
+The later readiness audit found that the completion claim was broader than the exercised behavior:
+
+- The browser sync controller persists Yjs updates, while inactive readers render `node_textboxes.document_json`. No production runtime invokes the trusted `CheckpointNodeV2TextBox` materializer that advances that JSON/plain-text state; the public checkpoint route rejects clients, and the Hocuspocus materializer exists only in the Phase 1 proof-of-concept script. The browser test proves that a static component mounts, but not that its content advances after an ordinary edit.
+- The REST update endpoint accepts checksum-matching bytes without validating that they are a decodable Yjs update. The PostgreSQL integration fixture itself writes arbitrary byte strings, so a bad edit client can durably break replay before a trusted provider validates updates.
+- The Node v2 email panel proves paginated summaries, lazy bodies, sanitization, and durable context links, but does not implement the current separate email-column interaction, message-to-textbox action/accent, or textbox-owned chat contract.
+- Verification manifests record revisions and update heads without retaining the referenced content or checkpoint beyond normal recovery retention, so they do not yet guarantee that the content presented for verification remains reconstructable.
+- Comment pages bound root threads but fetch all child comments and mentions for those roots. A single large reply thread remains unbounded and is not represented by the target-scale fixture.
+- The PostgreSQL integration test accidentally nested email pagination and comment/attachment/email event assertions inside the timeline-count failure branch. The readiness audit moved those assertions onto the successful path; they now pass in the disposable production-path harness.
+- Only the workspace reader previously enforced activation in the store. The readiness audit made the HTTP boundary reject all other Node v2 reads and writes until the workspace is active, while retaining an ungated availability probe.
+- Typed attachment and email links block generic company deletion through restrictive foreign keys. The test harness now cleans them in dependency order, but the production company-deletion lifecycle still needs an explicit product-owned workflow before rollout.
+
+Therefore the Phase 2 acceptance gate is reopened. The foundation is suitable for continued gated Phase 3 engineering, but not for workspace activation, migration, or read/write cutover.

@@ -23,7 +23,23 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	t.Cleanup(func() {
+		if _, cleanupErr := db.Exec("delete from node_textbox_attachment_links where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("clean Node V2 attachment links: %v", cleanupErr)
+		}
+		if _, cleanupErr := db.Exec("delete from node_textbox_email_links where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("clean Node V2 email links: %v", cleanupErr)
+		}
+		if _, cleanupErr := db.Exec("delete from realtime_outbox where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("clean Node V2 realtime outbox: %v", cleanupErr)
+		}
+		if _, cleanupErr := db.Exec("delete from domain_events where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("clean Node V2 domain events: %v", cleanupErr)
+		}
+		if _, cleanupErr := db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("clean Node V2 company: %v", cleanupErr)
+		}
+	})
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	subject := "node-v2-postgres-" + suffix
 	actor, err := repo.UpsertAuthUser(subject, subject+"@example.test", "Node V2 PostgreSQL")
@@ -159,103 +175,103 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 		timelineCursor = page.NextCursor
 	}
 	if len(timelineSeen) != 145 {
-		emailThreadID := newUUIDv7String()
-		if _, err := db.Exec(`insert into communications_email_threads(
+		t.Fatalf("tied timeline items=%d want=145", len(timelineSeen))
+	}
+
+	emailThreadID := newUUIDv7String()
+	if _, err := db.Exec(`insert into communications_email_threads(
 company_id,email_thread_id,scope_type,personal_user_id,personal_account_email,account_email,
 provider_thread_key,provider_thread_id,root_provider_message_id,hydration_status,history_complete)
 values($1::uuid,$2::uuid,'personal',$3::uuid,$4,$4,'audit-thread','audit-thread','provider-000','complete',true)`,
-			company.CompanyID, emailThreadID, actor.UserID, subject+"@example.test"); err != nil {
-			t.Fatal(err)
-		}
-		for index := 0; index < 65; index++ {
-			providerID := fmt.Sprintf("provider-%03d", index)
-			if _, err := db.Exec(`insert into communications_email_messages(
+		company.CompanyID, emailThreadID, actor.UserID, subject+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 65; index++ {
+		providerID := fmt.Sprintf("provider-%03d", index)
+		if _, err := db.Exec(`insert into communications_email_messages(
 company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,message_timestamp,
 rich_html_body,text_fallback,snippet)
 values($1::uuid,$2::uuid,$3::uuid,$4,$5,'Stable email cursor',1700000000,'<p>body</p>','body','body')`,
-				company.CompanyID, newUUIDv7String(), emailThreadID, providerID, index/3); err != nil {
-				t.Fatal(err)
-			}
+			company.CompanyID, newUUIDv7String(), emailThreadID, providerID, index/3); err != nil {
+			t.Fatal(err)
 		}
-		if _, err := db.Exec(`insert into communications_node_email_threads(
+	}
+	if _, err := db.Exec(`insert into communications_node_email_threads(
 company_id,node_id,information_id,email_thread_id,selected_provider_message_id,created_by_user_id)
 values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'provider-000',$5::uuid)`,
-			company.CompanyID, node.NodeID, newUUIDv7String(), emailThreadID, actor.UserID); err != nil {
-			t.Fatal(err)
+		company.CompanyID, node.NodeID, newUUIDv7String(), emailThreadID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	emailSeen := map[string]bool{}
+	var emailCursor *NodeV2Cursor
+	for {
+		page, pageErr := repo.ListNodeV2EmailMessages(NodeV2EmailMessageQuery{CompanyID: company.CompanyID, NodeID: node.NodeID, EmailThreadID: emailThreadID, Limit: 7, Cursor: emailCursor, IncludeBody: true})
+		if pageErr != nil {
+			t.Fatal(pageErr)
 		}
-		emailSeen := map[string]bool{}
-		var emailCursor *NodeV2Cursor
-		for {
-			page, pageErr := repo.ListNodeV2EmailMessages(NodeV2EmailMessageQuery{CompanyID: company.CompanyID, NodeID: node.NodeID, EmailThreadID: emailThreadID, Limit: 7, Cursor: emailCursor, IncludeBody: true})
-			if pageErr != nil {
-				t.Fatal(pageErr)
+		for _, message := range page.Items {
+			if emailSeen[message.ProviderMessageID] {
+				t.Fatalf("duplicate tied-order email %s", message.ProviderMessageID)
 			}
-			for _, message := range page.Items {
-				if emailSeen[message.ProviderMessageID] {
-					t.Fatalf("duplicate tied-order email %s", message.ProviderMessageID)
-				}
-				emailSeen[message.ProviderMessageID] = true
-			}
-			if page.NextCursor == nil {
-				break
-			}
-			emailCursor = page.NextCursor
+			emailSeen[message.ProviderMessageID] = true
 		}
-		if len(emailSeen) != 65 {
-			t.Fatalf("paged email messages=%d want=65", len(emailSeen))
+		if page.NextCursor == nil {
+			break
 		}
-		commentInput := NodeV2CreateCommentThreadInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, ActorUserID: actor.UserID, IdempotencyKey: "business-comment", BodyText: "Atomic business comment"}
-		firstComment, err := repo.CreateNodeV2CommentThread(commentInput)
-		if err != nil {
-			t.Fatal(err)
-		}
-		retriedComment, err := repo.CreateNodeV2CommentThread(commentInput)
-		if err != nil || retriedComment.ThreadID != firstComment.ThreadID {
-			t.Fatalf("comment retry=%+v err=%v", retriedComment, err)
-		}
+		emailCursor = page.NextCursor
+	}
+	if len(emailSeen) != 65 {
+		t.Fatalf("paged email messages=%d want=65", len(emailSeen))
+	}
+	commentInput := NodeV2CreateCommentThreadInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, ActorUserID: actor.UserID, IdempotencyKey: "business-comment", BodyText: "Atomic business comment"}
+	firstComment, err := repo.CreateNodeV2CommentThread(commentInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriedComment, err := repo.CreateNodeV2CommentThread(commentInput)
+	if err != nil || retriedComment.ThreadID != firstComment.ThreadID {
+		t.Fatalf("comment retry=%+v err=%v", retriedComment, err)
+	}
 
-		attachmentID := newUUIDv7String()
-		if _, err := db.Exec(`insert into attachments(
+	attachmentID := newUUIDv7String()
+	if _, err := db.Exec(`insert into attachments(
 attachment_id,company_id,uploaded_by_user_id,original_filename,mime_type,byte_size,sha256,
 storage_bucket,storage_key,source_kind)
 values($1::uuid,$2::uuid,$3::uuid,'audit.txt','text/plain',1,$4,'disposable','audit/'||$1,'user_upload')`,
-			attachmentID, company.CompanyID, actor.UserID, strings.Repeat("0", 64)); err != nil {
-			t.Fatal(err)
-		}
-		attachmentInput := NodeV2AttachmentLinkInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, AttachmentID: attachmentID, RelationshipKind: "file_attachment", ActorUserID: actor.UserID, IdempotencyKey: "business-attachment"}
-		firstAttachment, err := repo.SetNodeV2AttachmentLink(attachmentInput)
-		if err != nil {
-			t.Fatal(err)
-		}
-		retriedAttachment, err := repo.SetNodeV2AttachmentLink(attachmentInput)
-		if err != nil || retriedAttachment.AttachmentLinkID != firstAttachment.AttachmentLinkID {
-			t.Fatalf("attachment retry=%+v err=%v", retriedAttachment, err)
-		}
+		attachmentID, company.CompanyID, actor.UserID, strings.Repeat("0", 64)); err != nil {
+		t.Fatal(err)
+	}
+	attachmentInput := NodeV2AttachmentLinkInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, AttachmentID: attachmentID, RelationshipKind: "file_attachment", ActorUserID: actor.UserID, IdempotencyKey: "business-attachment"}
+	firstAttachment, err := repo.SetNodeV2AttachmentLink(attachmentInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriedAttachment, err := repo.SetNodeV2AttachmentLink(attachmentInput)
+	if err != nil || retriedAttachment.AttachmentLinkID != firstAttachment.AttachmentLinkID {
+		t.Fatalf("attachment retry=%+v err=%v", retriedAttachment, err)
+	}
 
-		emailInput := NodeV2EmailLinkInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, EmailThreadID: emailThreadID, ActorUserID: actor.UserID, IdempotencyKey: "business-email"}
-		if err := repo.SetNodeV2EmailLink(emailInput); err != nil {
-			t.Fatal(err)
+	emailInput := NodeV2EmailLinkInput{CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, EmailThreadID: emailThreadID, ActorUserID: actor.UserID, IdempotencyKey: "business-email"}
+	if err := repo.SetNodeV2EmailLink(emailInput); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetNodeV2EmailLink(emailInput); err != nil {
+		t.Fatalf("email retry: %v", err)
+	}
+	for _, event := range []struct {
+		eventType string
+		key       string
+	}{
+		{"node.comment.created", "node-v2-comment:business-comment"},
+		{"node.attachment.linked", "node-v2-attachment:business-attachment"},
+		{"node.email.linked", "node-v2-email:business-email"},
+	} {
+		if got := countPostgresRows(t, db, `select count(*) from domain_events where company_id=$1::uuid and event_type=$2 and idempotency_key=$3`, company.CompanyID, event.eventType, event.key); got != 1 {
+			t.Fatalf("%s domain events=%d want=1", event.eventType, got)
 		}
-		if err := repo.SetNodeV2EmailLink(emailInput); err != nil {
-			t.Fatalf("email retry: %v", err)
+		if got := countPostgresRows(t, db, `select count(*) from realtime_outbox where company_id=$1::uuid and event_type=$2`, company.CompanyID, event.eventType); got != 1 {
+			t.Fatalf("%s outbox rows=%d want=1", event.eventType, got)
 		}
-		for _, event := range []struct {
-			eventType string
-			key       string
-		}{
-			{"node.comment.created", "node-v2-comment:business-comment"},
-			{"node.attachment.linked", "node-v2-attachment:business-attachment"},
-			{"node.email.linked", "node-v2-email:business-email"},
-		} {
-			if got := countPostgresRows(t, db, `select count(*) from domain_events where company_id=$1::uuid and event_type=$2 and idempotency_key=$3`, company.CompanyID, event.eventType, event.key); got != 1 {
-				t.Fatalf("%s domain events=%d want=1", event.eventType, got)
-			}
-			if got := countPostgresRows(t, db, `select count(*) from realtime_outbox where company_id=$1::uuid and event_type=$2`, company.CompanyID, event.eventType); got != 1 {
-				t.Fatalf("%s outbox rows=%d want=1", event.eventType, got)
-			}
-		}
-
-		t.Fatalf("tied timeline items=%d want=145", len(timelineSeen))
 	}
 
 	forceRealtimeOutboxEvent(t, db, "node.textbox.archived", true)

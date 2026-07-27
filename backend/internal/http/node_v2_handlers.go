@@ -44,7 +44,7 @@ func nodeV2Limit(r *http.Request) int {
 	return value
 }
 
-func (s *Server) nodeV2RequestActor(w http.ResponseWriter, r *http.Request, nodeID string, edit bool) (string, string, bool) {
+func (s *Server) nodeV2RequestActor(w http.ResponseWriter, r *http.Request, nodeID string, edit, requireActive bool) (string, string, bool) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -67,6 +67,17 @@ func (s *Server) nodeV2RequestActor(w http.ResponseWriter, r *http.Request, node
 	}
 	if !allowed {
 		return "", "", false
+	}
+	if requireActive {
+		availability, err := s.repo.GetNodeV2Availability(companyID, nodeID)
+		if err != nil {
+			writeNodeV2StoreError(w, err)
+			return "", "", false
+		}
+		if !availability.Active {
+			writeNodeV2StoreError(w, store.ErrNodeV2Inactive)
+			return "", "", false
+		}
 	}
 	return companyID, strings.TrimSpace(actor.User.UserID), true
 }
@@ -154,7 +165,7 @@ func (s *Server) handleNodeV2Availability(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, false)
 	if !ok {
 		return
 	}
@@ -171,7 +182,7 @@ func (s *Server) handleNodeV2Workspace(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}
@@ -193,7 +204,7 @@ func (s *Server) handleNodeV2Timeline(w http.ResponseWriter, r *http.Request, no
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}
@@ -216,7 +227,7 @@ type nodeV2CreateTextboxRequest struct {
 
 func (s *Server) handleNodeV2Textboxes(w http.ResponseWriter, r *http.Request, nodeID string) {
 	if r.Method == http.MethodGet {
-		companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+		companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 		if !ok {
 			return
 		}
@@ -242,7 +253,7 @@ func (s *Server) handleNodeV2Textboxes(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -272,7 +283,7 @@ func (s *Server) handleNodeV2TextboxMove(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -296,7 +307,7 @@ type nodeV2ArchiveRequest struct {
 }
 
 func (s *Server) handleNodeV2Textbox(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, r.Method != http.MethodGet)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, r.Method != http.MethodGet, true)
 	if !ok {
 		return
 	}
@@ -332,7 +343,7 @@ func (s *Server) handleNodeV2TextboxSync(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}
@@ -358,7 +369,7 @@ func (s *Server) handleNodeV2TextboxUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -396,7 +407,7 @@ func (s *Server) handleNodeV2TextboxCheckpoint(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if _, _, ok := s.nodeV2RequestActor(w, r, nodeID, true); !ok {
+	if _, _, ok := s.nodeV2RequestActor(w, r, nodeID, true, true); !ok {
 		return
 	}
 	writeError(w, http.StatusForbidden, "node_v2_checkpoint_service_only")
@@ -416,7 +427,7 @@ type nodeV2CommentRequest struct {
 }
 
 func (s *Server) handleNodeV2Comments(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, r.Method != http.MethodGet)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, r.Method != http.MethodGet, true)
 	if !ok {
 		return
 	}
@@ -463,7 +474,7 @@ func (s *Server) handleNodeV2CommentReply(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -493,7 +504,7 @@ func (s *Server) handleNodeV2TextboxAttachment(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -516,7 +527,7 @@ func (s *Server) handleNodeV2Attachments(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}
@@ -545,7 +556,7 @@ func (s *Server) handleNodeV2TextboxEmailLink(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
@@ -568,7 +579,7 @@ func (s *Server) handleNodeV2Emails(w http.ResponseWriter, r *http.Request, node
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}
@@ -590,7 +601,7 @@ func (s *Server) handleNodeV2EmailMessages(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false)
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, false, true)
 	if !ok {
 		return
 	}

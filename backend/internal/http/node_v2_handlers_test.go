@@ -16,6 +16,14 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+type inactiveNodeV2Repository struct {
+	store.Repository
+}
+
+func (inactiveNodeV2Repository) GetNodeV2Availability(_, _ string) (store.NodeV2Availability, error) {
+	return store.NodeV2Availability{Active: false, Reason: "workspace_not_converted"}, nil
+}
+
 func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "73737373-7373-4737-8737-737373737373"
@@ -113,7 +121,7 @@ func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 	}
 	var thread domain.NodeV2CommentThread
 	_ = json.Unmarshal(comment.Body.Bytes(), &thread)
-	if thread.AnchorFormat != "yjs_relative_position_v1" || len(thread.Comments) != 1 || len(thread.Comments[0].Mentions) != 1 {
+	if thread.AnchorFormat != "yjs_relative_v1" || len(thread.Comments) != 1 || len(thread.Comments[0].Mentions) != 1 {
 		t.Fatalf("comment thread=%+v", thread)
 	}
 	reply := request(http.MethodPost, root+"/textboxes/"+created.Textbox.TextboxID+"/comments/"+thread.ThreadID+"/replies"+companyQuery, map[string]any{"idempotency_key": "api-reply-1", "body_text": "Reply", "parent_comment_id": thread.Comments[0].CommentID})
@@ -170,5 +178,44 @@ func TestNodeV2APIRequiresAuthenticatedCompanyMembership(t *testing.T) {
 	NewServer(repo).Routes().ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestNodeV2APIRejectsReadsAndWritesUntilWorkspaceIsActive(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "75757575-7575-4757-8757-757575757575"
+	repo.EnsureCompany(companyID, "Node v2 inactive gate")
+	actor, err := repo.UpsertAuthUser("node-v2-inactive", "inactive@example.com", "Inactive Gate Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Inactive Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServer(inactiveNodeV2Repository{Repository: repo}).Routes()
+	request := func(method, suffix string, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/v1/nodes/"+node.NodeID+"/v2"+suffix+"?company_id="+companyID, strings.NewReader(body))
+		req = requestWithActorForTest(req, actor, companyID)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	availability := request(http.MethodGet, "/availability", "")
+	if availability.Code != http.StatusOK || !strings.Contains(availability.Body.String(), "workspace_not_converted") {
+		t.Fatalf("availability status=%d body=%s", availability.Code, availability.Body.String())
+	}
+	workspace := request(http.MethodGet, "/workspace", "")
+	if workspace.Code != http.StatusConflict || !strings.Contains(workspace.Body.String(), "node_v2_workspace_inactive") {
+		t.Fatalf("workspace status=%d body=%s", workspace.Code, workspace.Body.String())
+	}
+	create := request(http.MethodPost, "/textboxes", `{"idempotency_key":"must-not-write"}`)
+	if create.Code != http.StatusConflict || !strings.Contains(create.Body.String(), "node_v2_workspace_inactive") {
+		t.Fatalf("create status=%d body=%s", create.Code, create.Body.String())
+	}
+	page, err := repo.ListNodeV2TextBoxes(store.NodeV2TextBoxPageQuery{CompanyID: companyID, NodeID: node.NodeID})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("inactive gate wrote textboxes=%d err=%v", len(page.Items), err)
 	}
 }
