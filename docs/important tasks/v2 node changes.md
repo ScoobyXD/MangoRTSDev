@@ -50,7 +50,7 @@ Remaining foundation work:
 - [ ] Complete the human-controlled live dev schema and `schema_migrations` reconciliation before applying another migration. The read-only audit proved 168 repository files versus 87 ledger rows while many unledgered objects already exist; blindly running the missing files is unsafe.
 - [x] Finish the authoritative/derived/transitional/operational lifecycle map for every affected existing table.
 - [x] Finalize DDL-level names, columns, composite foreign keys, deletion behavior, indexes, and retention rules for the inactive Node foundation.
-- [ ] Finish the Yjs provider decision with PostgreSQL durability/acknowledgement and compute measurements. A six-client Hocuspocus v4/Yjs 13.6.8 proof now passes concurrent, offline, reordered/idempotent, and restart recovery and fixes the candidate layout/cadence/retention.
+- [x] Finish the Yjs provider decision with PostgreSQL durability/acknowledgement and compute measurements. The repository-owned Hocuspocus v4/Yjs 13.6.8 extension now commits deduplicated updates before a separate state-vector/checksum acknowledgement, restores checkpoint plus tail after restart, quarantines failed document sessions, compacts atomically, and reports bounded disposable-PostgreSQL measurements at the live p50, p95, and maximum text-box sizes.
 - [x] Define the Node workspace API, cursor contracts, batch hydration, idempotent mutations, transaction boundaries, collaboration tickets, durable state-vector acknowledgements, and realtime boundaries.
 - [x] Implement additive Node-text-box, normalized comment, email-link, attachment-link, movement, verification, three-type timeline, Yjs update/checkpoint, and migration-ledger table foundations behind inactive gates.
 - [ ] Implement the shared Tiptap schema and Mango migration wrapper around Tiptap's HTML-to-JSON utility.
@@ -61,8 +61,8 @@ Remaining foundation work:
 - `docs/backend/node-v2-phase1-foundation.md` records the forced-read-only development audit, complete affected-table lifecycle map, exact API/cursor/transaction contracts, Hocuspocus/Yjs measurements, compaction and retention policy, and conversion/rollback rules.
 - `backend/db/migrations/20260726_node_v2_phase1_foundation.sql` and the marked block in `backend/db/schema.sql` create only additive inactive storage. They do not backfill, enable a workspace gate, redirect a reader, delete a legacy row, convert email HTML, or impose a document-size constraint.
 - `backend/internal/store/node_v2_foundation_schema_test.go` keeps migration and canonical schema definitions identical and rejects destructive/cutover/content-boundary regressions.
-- `frontend/scripts/node-v2-yjs-hocuspocus-poc.mjs` uses generated inputs at the live p50, p95, and maximum text-box byte sizes. It does not read or print document content.
-- The migration-ledger blocker, real PostgreSQL collaboration persistence/acknowledgement proof, shared converter, dry-run/shadow tooling, and post-cutover rollback exporter remain open. Therefore Phase 1 as a whole is not complete.
+- `frontend/scripts/node-v2-yjs-postgres-store.mjs` and `frontend/scripts/node-v2-yjs-postgres-poc.mjs` implement and verify the repository-owned PostgreSQL persistence/acknowledgement path with generated inputs at the live p50, p95, and maximum text-box byte sizes. The proof creates only a disposable local PostgreSQL cluster and does not read or print live document content.
+- The migration-ledger blocker, shared Tiptap schema/converter, dry-run/shadow tooling, and post-cutover edit-preserving rollback exporter remain open. Therefore Phase 1 as a whole is not complete.
 
 Phase 1 completion gate: reviewed DDL and APIs exist; representative legacy content converts and validates in dry-run/shadow mode; old HTML remains recoverable; and no unresolved ownership rule or unexplained live-table lifecycle remains.
 
@@ -1363,21 +1363,16 @@ Do not begin Phase 2 UI cutover until the Phase 1 gate is reviewed. Do not combi
 - The arbitrary two-MiB Tiptap application limit is not an acceptable final product rule.
 - Full-document serialization and full-snapshot persistence on every ordinary save do not meet the target scale.
 - Multiple tabs and users must not silently overwrite each other.
-- Yjs is the selected collaboration direction for Node v2; the provider, durable update/checkpoint layout, compaction, retention, and rollout remain implementation decisions requiring a measured proof of concept.
+- Yjs with self-hosted Hocuspocus is the selected collaboration direction for Node v2. The PostgreSQL update/checkpoint layout, commit-only acknowledgement, 512-update/512-KiB compaction triggers, and initial retention are now measured Phase 1 decisions; production sizing, observability, authorization integration, and rollout remain later implementation gates.
 - Database and API decisions should prioritize lower compute, lower latency, and efficient API usage.
 - Search should use a derived search projection rather than dictate one generic authoritative content table.
 
 ## Open decisions
 
-- Self-hosted Hocuspocus, another Yjs provider, or a custom provider, plus the measured deployment and operating model.
-- Exact permanent table and column names.
-- Whether collaboration updates are stored in three owner-specific tables or one physically partitioned operational table.
-- Where compacted Yjs state lives for each domain-specific document row.
-- How frequently automatic compaction occurs.
-- How long acknowledged updates and automatic checkpoints remain.
+- Production collaboration-service topology, capacity, observability thresholds, and staged rollout gates.
+- The exact shared Tiptap extension/attribute list and converter-version policy, including deterministic block IDs.
 - Whether users receive editor version history beyond intentional Node snapshots.
-- Final SQL names/types for normalized comment threads, comments, mentions, attachments, and anchors; relative-position encoding depends on the collaboration choice.
-- Exact SQL constraint names and detach/delete lifecycle for the confirmed Node-email and optional text-box/message association pattern.
+- Final conversion behavior for legacy unanchored comments and exact Yjs relative-position encoding in the shared Tiptap schema.
 - How large Logic Gate documents are internally segmented if benchmarks require it.
 - Whether `domain_events` becomes the deliberate permanent lightweight event log or is reduced/replaced; the Node timeline itself remains a typed read index over authoritative facts.
 - Search technology and indexing cadence.
@@ -1393,7 +1388,7 @@ Do not:
 - convert live data;
 - delete old tables;
 - remove the two-MiB limit in isolation;
-- introduce Yjs/Hocuspocus as an unreviewed dependency;
+- route product traffic through Yjs/Hocuspocus before production ticket authorization, observability, capacity, and rollout gates are reviewed;
 - replace Node timeline behavior;
 - merge comment records into editor JSON;
 - convert email HTML to Tiptap;

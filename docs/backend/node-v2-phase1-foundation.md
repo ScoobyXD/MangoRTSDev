@@ -12,10 +12,10 @@ This milestone turns the settled Node v2 ownership rules into:
 - an affected-table lifecycle map tied to current readers and writers;
 - an exact owner-specific PostgreSQL model in `20260726_node_v2_phase1_foundation.sql` and the canonical schema;
 - exact Node workspace, cursor, mutation, transaction, and collaboration contracts;
-- a repeatable Yjs/Hocuspocus v4 proof of concept based on measured live text-box sizes; and
+- a repeatable PostgreSQL-backed Yjs/Hocuspocus v4 durability proof based on measured live text-box sizes; and
 - schema contract tests that keep the forward migration and canonical schema identical and inactive.
 
-This is not the complete Phase 1 gate. The live migration ledger still needs human reconciliation, the collaboration service still needs its PostgreSQL persistence/acknowledgement adapter and database compute measurements, and conversion/shadow/rollback tooling is not yet implemented.
+This is not the complete Phase 1 gate. The live migration ledger still needs human reconciliation, and the shared Tiptap schema, additive converter, dry-run/shadow comparison, and post-cutover edit-preserving rollback tooling are not yet implemented. The PostgreSQL collaboration persistence/acknowledgement proof described below is complete, but it is not a production service rollout.
 
 ## Read-only development evidence
 
@@ -193,60 +193,77 @@ Moving a Node commits the current assignment update, immutable movement, `node_m
 
 Yjs updates use a separate high-frequency transaction owned by the collaboration service: authorize the exact document, insert the deduplicated update, advance only the small text-box sequence metadata, and commit before a durable state-vector acknowledgement is emitted. They do not append `domain_events`, `realtime_outbox`, saved versions, or timeline items.
 
-## Collaboration provider decision and proof
+## Collaboration provider decision and PostgreSQL proof
 
-Selected direction for the next implementation milestone: self-hosted Hocuspocus v4 with Yjs 13.6.8, using Tiptap's collaboration extension in the browser and a repository-owned PostgreSQL persistence/acknowledgement extension. The provider is an independently deployed collaboration channel; Mango's Go API remains authoritative for tickets, permissions, Node business commands, attachments, and materialized workspace reads.
+The selected direction is self-hosted Hocuspocus v4 with Yjs 13.6.8, using Tiptap's collaboration extension in the browser and a repository-owned PostgreSQL persistence/acknowledgement extension. The provider is an independently deployed collaboration channel; Mango's Go API remains authoritative for tickets, permissions, Node business commands, attachments, and materialized workspace reads.
 
-Hocuspocus was selected over a custom Yjs wire protocol because its official v4 server/provider already supplies the Yjs sync protocol, reconnect behavior, authentication hook, load/store hooks, multi-client fan-out, and a documented PostgreSQL-compatible binary persistence boundary. The built-in generic `Database` extension is suitable for the restart proof but is not the final write path: storing the full Yjs state on every debounce would restore write amplification and does not by itself prove Mango's `Saved` acknowledgement.
+Hocuspocus was selected over a custom Yjs wire protocol because its official v4 server/provider supplies the Yjs sync protocol, reconnect behavior, authentication hook, load hooks, multi-client fan-out, and a binary persistence boundary. Its generic full-state `Database` extension is not Mango's write path because persisting the full document on every debounce would restore write amplification and would not prove when a user's exact update became durable.
 
-The final service must therefore add a custom persistence extension:
+`frontend/scripts/node-v2-yjs-postgres-store.mjs` now supplies the repository-owned proof adapter and extension:
 
-- exact document names are `node-textbox:{company_id}:{node_id}:{textbox_id}`;
-- a short-lived ticket is issued by the Go API only after current Node edit authorization;
-- Hocuspocus authenticates the ticket and rechecks revocation/expiry before accepting later writes;
-- each raw Yjs update is SHA-256 deduplicated and appended before the server emits a durable acknowledgement;
-- the acknowledgement contains the collaboration epoch, durable update sequence, and durable Yjs state vector;
-- the browser clears only pending updates fully covered by that state vector;
-- reconnect loads the latest valid checkpoint plus the un-compacted tail; and
-- authorization revocation closes or downgrades active connections promptly.
+- exact document names are `node-textbox:{company_id}:{node_id}:{textbox_id}` and every database query uses that composite owner identity;
+- a cold load uses one repeatable-read transaction to read the current collaboration epoch, latest valid checkpoint, and ordered uncompacted tail;
+- an update transaction locks the exact `node_textboxes` row, deduplicates by update ID and SHA-256, appends the binary update, advances only the small durable head, and commits before acknowledgement;
+- the separate stateless acknowledgement contains the collaboration epoch, committed update/head sequences, exact update ID and checksum, and durable Yjs state vector;
+- the exact checksum/sequence acknowledges update shapes, including deletion-only changes, that a state vector cannot identify by itself; clients must not clear pending work from transport receipt alone;
+- the process-local Yjs document is only a cache. A database head/epoch mismatch forces checkpoint-plus-tail reconstruction, and the cache is mutated only after commit;
+- if persistence fails after Hocuspocus has integrated or broadcast an update, the extension quarantines that exact in-memory Y.Doc, drops later dependent updates from the failed session, and closes all connections for a clean durable reload; and
+- compaction locks the same text-box row and atomically writes the checkpoint/state vector, materialized JSON/plain text, covered-update timestamps, and materialized sequence.
+
+The production collaboration service still must replace the proof token with a short-lived Go-API ticket, validate current Node edit authority, and recheck expiry/revocation before later writes. Authorization revocation must close or downgrade active connections promptly. Those production integration and rollout gates are not implied by this Phase 1 proof.
 
 ### Measured proof
 
-`npm run test:node-v2-yjs-poc` is repeatable and fails on a convergence, offline, or restart error. Its 2026-07-26 run used generated text at the live median, 95th percentile, and maximum byte sizes; no live document body was read.
+`npm run test:node-v2-yjs-poc` initializes the canonical schema in a disposable PostgreSQL 18 cluster with `synchronous_commit=on`. It uses generated text at the live median, 95th-percentile, and maximum byte sizes; no live document body is read. A verified 2026-07-26 run produced:
 
-| Scenario | Result |
+| Provider scenario | Result |
 | --- | ---: |
-| Six-client initial p95 sync | 52.440 ms |
-| Two-client concurrent convergence across all six clients | 15.732 ms |
-| Offline edit plus online edit, reconnect, and convergence | 17.843 ms |
-| Fresh server restore from persisted binary state | 18.216 ms |
-| Client messages / bytes across the provider scenario | 44 / 5,142 |
-| Final p95 persisted checkpoint | 5,928 bytes |
+| Six-client p95 initial sync from PostgreSQL | 21.748 ms |
+| Two concurrent edits: durable acknowledgement and six-client convergence | 23.074 ms |
+| Offline plus online edits: reconnect, durable acknowledgement, and convergence | 16.152 ms |
+| Fresh Hocuspocus server restore from PostgreSQL checkpoint plus tail | 16.675 ms |
+| Durable provider updates / payload bytes | 5 / 168 B |
+| Client messages / bytes across the provider scenario | 44 / 5,150 B |
+| Lost-ack retry | Deduplicated to the original durable sequence |
 
-Direct Yjs codec evidence:
+The proof forces an update insert failure and asserts no durable acknowledgement and no update row. It also forces checkpoint insertion to fail after compaction begins, proves checkpoint/materialization/coverage changes all roll back, and then completes a recovery compaction. The failure path closes the affected document session so already-broadcast nondurable state cannot be treated as saved.
+
+Bounded PostgreSQL load evidence follows. The p50/p95/max labels describe source-document sizes, not statistically representative latency percentiles. The acknowledged samples are deliberately small (4, 8, and 2 updates); the p95 case adds a 512-update bulk-generated tail to exercise the 520-row replay and compaction boundary.
+
+| Generated source | Ack sample / total durable tail | Append transaction p50 / p95 / max | WAL bytes | Replay query | Compaction transaction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 205 B (live p50) | 4 / 4 | 2.424 / 4.260 / 4.260 ms | 4,648 | 0.034 ms, index scan | 3.745 ms |
+| 5,716 B (live p95) | 8 / 520 | 1.385 / 2.419 / 2.419 ms | 543,680 | 0.186 ms, index scan | 20.029 ms |
+| 1,870,652 B (live max) | 2 / 2 | 7.143 / 7.476 / 7.476 ms | 4,440 | 0.047 ms, index scan | 136.968 ms |
+
+All 520 p95 updates were covered by one atomic checkpoint and marked with seven-day retention. The final test relation footprints were 802,816 B for updates, 335,872 B for checkpoints, and 237,568 B for text boxes; these include PostgreSQL table/index/TOAST allocation and are diagnostic proof values, not capacity forecasts.
+
+Direct Yjs codec evidence from the same run:
 
 | Generated source | Initial checkpoint | 600 single-character updates | Merged update tail | Compacted checkpoint | Checkpoint encode |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 205 bytes (live p50) | 226 B | 12,000 B | 6,011 B | 826 B | 1.825 ms initial / 0.154 ms compacted |
-| 5,716 bytes (live p95) | 5,737 B | 12,000 B | 6,011 B | 6,337 B | 0.219 ms / 0.105 ms |
-| 1,870,652 bytes (live max) | 1,870,674 B | 13,200 B | 6,612 B | 1,871,274 B | 5.034 ms / 5.272 ms |
+| 205 B (live p50) | 226 B | 12,000 B | 6,011 B | 826 B | 0.290 ms initial / 0.167 ms compacted |
+| 5,716 B (live p95) | 5,737 B | 12,000 B | 6,011 B | 6,337 B | 0.171 ms / 0.058 ms |
+| 1,870,652 B (live max) | 1,870,674 B | 13,200 B | 6,612 B | 1,871,274 B | 2.631 ms / 2.243 ms |
 
-The test also applies the 600 updates in reverse order and twice; every case converges exactly. These are local Windows/Node measurements of Yjs text and Hocuspocus transport, not a claim about full structured Tiptap browser memory or PostgreSQL CPU.
+The codec test applies all 600 updates in reverse order and twice and asserts exact convergence. These are local Windows/Node/PostgreSQL measurements of generated Yjs text, not a production capacity claim or a substitute for full structured-Tiptap browser profiling.
 
 ### Compaction and retention contract
 
-The initial policy for implementation is exact and intentionally conservative:
+The initial policy is exact and intentionally conservative:
 
-- compact after 512 durable updates, 512 KiB of un-compacted update bytes, or 15 minutes idle, whichever comes first;
+- compact after 512 durable updates, 512 KiB of uncompacted update bytes, or 15 minutes idle, whichever comes first;
 - perform compaction outside the character-input acknowledgement path;
 - write checkpoint, materialized JSON/plain text, text-box materialization sequence, and update `checkpointed_timestamp` values atomically;
 - retain covered update rows for seven days after the covering checkpoint;
 - retain automatic checkpoints for 14 days and never delete the newest two valid checkpoints for a document/epoch;
-- retain an uncheckpointed update indefinitely until it is safely covered or explicitly quarantined;
-- never remove a checkpoint/update belonging to the current collaboration epoch during cleanup; and
+- retain an uncompacted update indefinitely until it is safely covered or explicitly quarantined;
+- never remove the final recoverable checkpoint/update chain for the current collaboration epoch; and
 - start a new epoch only through an explicit schema migration or recovered-document reset with audit evidence.
 
-The 512-update threshold keeps the measured raw tail around 11 KiB for ordinary single-character edits, while the byte threshold catches large pastes. These values must be load-tested with the real Tiptap schema and PostgreSQL adapter before the provider checklist is marked complete. There is no database document-size constraint. Operational WebSocket/frame, memory, and timeout protection must be based on the structured-document/browser/load evidence gathered next, with chunking rather than silent refusal for large edits.
+The extension implements and measures the update-count and byte triggers; a production scheduler must invoke the idle trigger. The proof marks retention deadlines but does not run destructive garbage collection. Cleanup remains a later reviewed worker that must preserve the newest valid recovery chain.
+
+The real PostgreSQL proof closes the Phase 1 provider-decision item, not production capacity or rollout. The shared structured Tiptap schema, browser memory/frame protections, production authorization, deployment sizing, telemetry thresholds, and failure drills remain later gates. There is no database document-size constraint, and large updates must use measured operational protection or chunking rather than silent refusal.
 
 ## Conversion, shadow read, and rollback contract
 
@@ -273,7 +290,7 @@ The focused checks for this milestone are:
 
 - Go schema-contract tests compare the marked migration block byte-for-byte with the canonical schema after transaction wrappers are removed.
 - The contract rejects destructive SQL, workspace-gate activation, a JSON document-size constraint, email HTML storage, or legacy canonical HTML inside the Node v2 block.
-- The Yjs/Hocuspocus proof runs twice and asserts six-client sync, concurrent convergence, offline replay, idempotent/reordered updates, and persisted restart restore.
+- The PostgreSQL-backed Yjs/Hocuspocus proof initializes a disposable canonical schema and asserts commit-only state-vector/checksum acknowledgements, six-client convergence, offline replay, lost-ack deduplication, failed-write rejection, atomic compaction rollback/recovery, 520-row compaction, and restart restore.
 - The full repository gate must apply clean schema and forward migrations to disposable PostgreSQL and pass all backend/frontend tests before commit.
 
 No migration in this milestone may be applied to development until the migration-ledger blocker above is reconciled by a human.

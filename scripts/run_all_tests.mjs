@@ -17,6 +17,7 @@ function run(step, command, cwd) {
 }
 
 run("Frontend relationship semantics tests", "npm run test:node-relationships", resolve(repoRoot, "frontend"));
+run("Node v2 PostgreSQL-backed Yjs durability proof", "npm run test:node-v2-yjs-poc", resolve(repoRoot, "frontend"));
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Backend Go tests", "go test ./...", resolve(repoRoot, "backend"));
 run("Realtime production-path PostgreSQL and browser tests", "node scripts/run_realtime_production_path_tests.mjs", repoRoot);
