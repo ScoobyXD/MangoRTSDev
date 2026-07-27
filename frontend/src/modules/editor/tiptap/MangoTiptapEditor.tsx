@@ -1011,7 +1011,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   useEffect(() => () => {
     if (formattingControllerRef) formattingControllerRef.current = null;
-    void syncRef.current?.shutdown();
+    const sync = syncRef.current;
+    syncRef.current = null;
+    syncStartedRef.current = false;
+    syncPreparationRef.current = null;
+    void sync?.shutdown();
   }, [formattingControllerRef]);
 
   useEffect(() => {
