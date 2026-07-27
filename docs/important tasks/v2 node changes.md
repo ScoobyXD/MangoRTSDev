@@ -1132,9 +1132,9 @@ The generated SQL inserts one shadow row in `editor_json_documents`, verifies th
 
 A representative development textbox dry run passed with 3,359 normalized visible characters, 15 bullet lists, 36 list items, one mention, one permanent attachment image, 12 linked chat/comment records, and six uniquely mapped selection highlights. This proves the one-document converter path, not the full backfill, migration ledger, all-document validation, or company cutover.
 
-### Active one-textbox browser experiment (2026-07-27)
+### Completed one-textbox browser experiment (2026-07-27)
 
-This section records the exact local experiment in progress so another agent can reproduce it without reconstructing context from chat history. It is a deliberately incomplete one-document cutover for visual testing, not an approved company migration.
+This section records the exact local experiment and its result so another agent can reproduce it without reconstructing context from chat history. It was a deliberately incomplete one-document cutover for visual testing, not an approved company migration.
 
 The test identity is:
 
@@ -1196,7 +1196,17 @@ The remaining comparison was presentation parity rather than lost rich text. A l
 
 The second frontend parity correction sets JSON editors to a 14px default font, an exact 20px line height, and 12px top/13px side padding; restores the bright legacy yellow chat/comment gradient; and uses the legacy four-level unordered-list marker sequence: solid circle, hollow circle, solid square, hollow square. Tests cover both sleeping and active editor selectors and four nested list levels.
 
-The first trial row had already stored `07/20/26` and bold `HR / EA, Sammie Lee` in one paragraph because the legacy source represented their separation as visible root-level newline text. The existing row now gets a narrowly guarded display compatibility break, so it does not need a database rewrite. Future conversions replace visible root text newlines with real Tiptap `hardBreak` nodes before calling Tiptap's official `generateJSON`, with focused converter coverage. The second parity correction still requires a final user browser retest after merge.
+The first trial row had already stored `07/20/26` and bold `HR / EA, Sammie Lee` in one paragraph because the legacy source represented their separation as visible root-level newline text. The existing row now gets a narrowly guarded display compatibility break, so it does not need a database rewrite. Future conversions replace visible root text newlines with real Tiptap `hardBreak` nodes before calling Tiptap's official `generateJSON`, with focused converter coverage.
+
+The final browser comparison passed the intended visual trial. The user confirmed that the converted text box retained its complete visible text, bold text, nested list indentation and marker progression, permanent inline image, mention, right-side chat, and six bright-yellow comment selections. The corrected JSON view also matches the requested 14px font size, 20px line height, and legacy content padding. The paragraph separation between `07/20/26` and `HR / EA, Sammie Lee` is restored. These presentation corrections did not require rewriting the converted database row.
+
+This success proves that one representative Node text box can be read from authoritative `editor_collaboration_documents.canonical_html`, converted with Tiptap's official HTML-to-JSON function, inserted additively, and displayed with its important rich-text structure intact. It does **not** prove complete Node/Project/Logic Gate discovery, batch conversion, production collaboration durability, all-document validation, workspace cutover, post-cutover rollback, or legacy cleanup. The experiment also exposed separate activation, save, scroll, caret-surface, and inline-image interaction problems. Corrections exist for several of those paths, but the next worker must exercise the real browser/API/database path again and close Phase 2 acceptance instead of treating this visual conversion as proof that editing is complete.
+
+Agreed continuation after this experiment:
+
+1. Finish every reopened Phase 2 acceptance item and implement all Phase 3 code, services, migration tooling, automated verification, observability, and safe rollout controls behind inactive gates.
+2. Do not perform a mass live HTML-to-JSON conversion or live workspace cutover in that implementation worker. After its automated verification passes, the user will manually test the completed behavior.
+3. Run the real mass conversion as a separate, explicitly reviewed operation after manual approval, preserving the source HTML, migration ledger, checksums, warning report, and immediate rollback path.
 
 No database or schema change is part of either frontend correction.
 
