@@ -2627,10 +2627,13 @@ func TestCommunicationsFoldersWebhookInvalidationFencesInFlightProviderResult(t 
 	}()
 	<-started
 
+	joinedFlight := make(chan struct{})
+	joinedContext := &doneObservingContext{Context: context.Background(), observed: joinedFlight}
 	go func() {
-		folders, err := server.communicationsFolders(context.Background(), connection, false)
+		folders, err := server.communicationsFolders(joinedContext, connection, false)
 		results <- folderResult{folders: folders, err: err}
 	}()
+	<-joinedFlight
 	generationKey := communicationsAccountScopedCacheKey(connection.UserID, cacheScope)
 	waitForCommunicationsCacheGenerationOwners(t, server.commCache, "folder", generationKey, 2)
 
