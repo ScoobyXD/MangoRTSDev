@@ -388,9 +388,11 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     );
 
     editorRoot.scrollTop = 287;
+    const activationEvent = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 });
     await act(async () => {
-      editorRoot.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 }));
+      editorRoot.dispatchEvent(activationEvent);
     });
+    assert.equal(activationEvent.defaultPrevented, true, "activation must suppress native focus on the static renderer that is about to be replaced");
     await waitFor(() => controllerRef.current !== null, "a normal pointer click should activate a visible ProseMirror editor");
     await flushAsyncWork(2);
     assert.equal(editorRoot.scrollTop, 287, "activating a scrolled JSON document must keep its exact text-box scroll position");
