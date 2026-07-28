@@ -21,6 +21,13 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 - Full test runner: `scripts/run_all_tests.mjs`.
 - Cloud-integrated local backend helper: `scripts/start_local_cognito_backend.ps1`.
 
+## Windows execution and sandbox defaults
+
+- On Jonat's Windows machine, Windows Application Control routinely blocks newly built unsigned Go executables, and the restricted sandbox frequently cannot enforce the worktree's split writable roots.
+- For Go commands on Windows, default to `go run ...` instead of building a temporary `.exe` and launching it directly. Keep CI and Linux production-binary paths unchanged unless the task specifically requires otherwise.
+- When an in-scope command fails because the Windows sandbox cannot start or Application Control blocks a freshly built executable, use the approved unsandboxed execution path and the trusted Go toolchain instead of repeatedly retrying the blocked executable.
+- Do not disable Windows Security, weaken App Control, or add broad allow rules unless Jonat explicitly requests it.
+
 ## App worktree task creation, completion, and integration
 
 ### Required model, reasoning, and speed settings
