@@ -1473,3 +1473,8 @@ Expected:
 Automated coverage:
 - `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`
 - `tests/frontend/modules/editor/editorProjection.test.ts`
+## Node v2 Phase 3 production-path coverage (2026-07-28)
+
+The Node v2 final gate is no longer a test-only polling/checkpoint simulation. The production-path harness builds and starts the production collaboration service, uses its short-lived API ticket, drives the real React/Tiptap surface in Chromium, and checks committed PostgreSQL materialization. It also runs disposable PostgreSQL store tests for owner-specific Project/Logic Gate JSON cutover routing, exact verification retention pins, a 1,002-comment reply-heavy thread, and ordered company purge.
+
+The separate PostgreSQL proof covers six isolated clients, offline replay, lost acknowledgement, delete-set durability, failed-write quarantine, compaction races, service restart, three-owner conversion, activation, stale rollback rejection, and restoration of post-cutover edits, creates, and deletes. All real gates remain inactive.

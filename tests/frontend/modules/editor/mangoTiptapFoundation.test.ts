@@ -776,11 +776,11 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
     devDependencies?: Record<string, string>;
   };
   const runtimeDependencies = JSON.stringify(packageJSON.dependencies ?? {}).toLowerCase();
-  assert.doesNotMatch(runtimeDependencies, /hocuspocus|tiptap-cloud/);
+  assert.match(runtimeDependencies, /"@hocuspocus\/provider"/);
+  assert.match(runtimeDependencies, /"@hocuspocus\/server"/);
   assert.match(runtimeDependencies, /"yjs"/);
   assert.match(runtimeDependencies, /"y-indexeddb"/);
   assert.match(runtimeDependencies, /"@tiptap\/extension-collaboration"/);
-  assert.match(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /@hocuspocus\/server/);
   assert.doesNotMatch(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /"y-indexeddb"/);
   for (const runtimePath of [
     "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
@@ -790,10 +790,12 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
   ]) {
     assert.doesNotMatch(read(runtimePath).toLowerCase(), /hocuspocus|from ["']yjs["']|tiptap-cloud/);
   }
-  const nodeV2Sync = read("frontend/src/modules/editor/nodeV2/nodeV2Sync.ts");
+  const nodeV2Sync = read("frontend/src/modules/editor/nodeV2/nodeV2ProviderSync.ts");
   assert.match(nodeV2Sync, /from ["']yjs["']/);
   assert.match(nodeV2Sync, /IndexeddbPersistence/);
-  assert.doesNotMatch(nodeV2Sync.toLowerCase(), /hocuspocus|tiptap-cloud/);
+  assert.match(nodeV2Sync, /HocuspocusProvider/);
+  assert.match(nodeV2Sync, /durable_snapshot_base64/);
+  assert.match(nodeV2Sync, /equalSnapshots/);
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
   assert.match(sync, /store\.get\(storage_key\)/);
   assert.doesNotMatch(sync, /getAll\(/);

@@ -514,7 +514,7 @@ func (r *MemoryRepo) ListNodeV2Comments(query NodeV2CommentQuery) (NodeV2Comment
 		if !nodeV2CursorBefore(thread.CreatedTimestamp, thread.ThreadID, query.Cursor) {
 			continue
 		}
-		page.Threads = append(page.Threads, cloneNodeV2Thread(thread))
+		page.Threads = append(page.Threads, boundNodeV2ThreadComments(cloneNodeV2Thread(thread), NodeV2DefaultPageLimit))
 		if len(page.Threads) == limit+1 {
 			break
 		}
@@ -527,6 +527,68 @@ func (r *MemoryRepo) ListNodeV2Comments(query NodeV2CommentQuery) (NodeV2Comment
 	return page, nil
 }
 
+func boundNodeV2ThreadComments(thread domain.NodeV2CommentThread, limit int) domain.NodeV2CommentThread {
+	thread.CommentCount = len(thread.Comments)
+	if len(thread.Comments) <= limit {
+		return thread
+	}
+	start := len(thread.Comments) - limit
+	oldest := thread.Comments[start]
+	thread.Comments = append([]domain.NodeV2Comment(nil), thread.Comments[start:]...)
+	thread.CommentsNextCursor = &domain.NodeV2CommentCursor{
+		Version: 1, Kind: "node_v2_comment_replies", Timestamp: oldest.CreatedTimestamp, ID: oldest.CommentID,
+	}
+	return thread
+}
+
+func (r *MemoryRepo) ListNodeV2CommentReplies(query NodeV2CommentReplyQuery) (NodeV2CommentReplyPage, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if query.Cursor != nil && (query.Cursor.Version != 1 || query.Cursor.Kind != "node_v2_comment_replies" || query.Cursor.Timestamp.IsZero() || query.Cursor.ID == "") {
+		return NodeV2CommentReplyPage{}, ErrInvalid
+	}
+	textbox, ok := r.nodeV2.textboxes[memoryNodeV2TextboxKey(query.CompanyID, query.TextboxID)]
+	if !ok || textbox.NodeID != query.NodeID {
+		return NodeV2CommentReplyPage{}, ErrNotFound
+	}
+	var comments []domain.NodeV2Comment
+	for _, thread := range r.nodeV2.threads[memoryNodeV2TextboxKey(query.CompanyID, query.TextboxID)] {
+		if thread.ThreadID == query.ThreadID {
+			comments = cloneNodeV2Thread(thread).Comments
+			break
+		}
+	}
+	if comments == nil {
+		return NodeV2CommentReplyPage{}, ErrNotFound
+	}
+	sort.Slice(comments, func(i, j int) bool {
+		if !comments[i].CreatedTimestamp.Equal(comments[j].CreatedTimestamp) {
+			return comments[i].CreatedTimestamp.After(comments[j].CreatedTimestamp)
+		}
+		return comments[i].CommentID > comments[j].CommentID
+	})
+	limit := normalizeNodeV2Limit(query.Limit, NodeV2MaxPageLimit)
+	page := NodeV2CommentReplyPage{Items: []domain.NodeV2Comment{}}
+	for _, comment := range comments {
+		if query.Cursor != nil && (comment.CreatedTimestamp.After(query.Cursor.Timestamp) ||
+			(comment.CreatedTimestamp.Equal(query.Cursor.Timestamp) && comment.CommentID >= query.Cursor.ID)) {
+			continue
+		}
+		page.Items = append(page.Items, comment)
+		if len(page.Items) == limit+1 {
+			break
+		}
+	}
+	if len(page.Items) > limit {
+		oldest := page.Items[limit-1]
+		page.Items = page.Items[:limit]
+		page.NextCursor = &NodeV2Cursor{Version: 1, Kind: "node_v2_comment_replies", Timestamp: oldest.CreatedTimestamp, ID: oldest.CommentID}
+	}
+	for left, right := 0, len(page.Items)-1; left < right; left, right = left+1, right-1 {
+		page.Items[left], page.Items[right] = page.Items[right], page.Items[left]
+	}
+	return page, nil
+}
 func (r *MemoryRepo) CreateNodeV2CommentThread(input NodeV2CreateCommentThreadInput) (domain.NodeV2CommentThread, error) {
 	if strings.TrimSpace(input.BodyText) == "" || input.IdempotencyKey == "" {
 		return domain.NodeV2CommentThread{}, ErrInvalid

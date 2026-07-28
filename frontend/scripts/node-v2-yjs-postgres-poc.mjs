@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer as createNetworkServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ import { Server } from "@hocuspocus/server";
 import pg from "pg";
 import WebSocket from "ws";
 import * as Y from "yjs";
+import { yDocToProsemirrorJSON } from "@tiptap/y-tiptap";
 
 import {
   NODE_V2_YJS_DURABLE_ACK_TYPE,
@@ -21,6 +22,7 @@ import {
   formatNodeTextboxDocumentName,
   isUpdateCoveredByStateVector,
 } from "./node-v2-yjs-postgres-store.mjs";
+import { createNodeV2CollaborationServer, mangoProsemirrorJSONToYDoc } from "../dist-services/node-v2-collaboration-server.mjs";
 
 const { Pool } = pg;
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +43,7 @@ const ACTOR_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TEXTBOX_IDS = Object.freeze({
   provider: "33333333-3333-4333-8333-333333333333",
   p50: "44444444-4444-4444-8444-444444444444",
+  production: "99999999-9999-4999-8999-999999999999",
   p95: "55555555-5555-4555-8555-555555555555",
   max: "66666666-6666-4666-8666-666666666666",
   failedUpdate: "77777777-7777-4777-8777-777777777777",
@@ -48,6 +51,15 @@ const TEXTBOX_IDS = Object.freeze({
 });
 const LIVE_TEXTBOX_BYTES = Object.freeze({ p50: 205, p95: 5_716, max: 1_870_652 });
 const AUTH_TOKEN_PREFIX = "node-v2-poc:";
+const MIGRATION_COMPANY_ID = "12121212-1212-4121-8121-121212121212";
+const MIGRATION_NODE_ID = "23232323-2323-4232-8232-232323232323";
+const MIGRATION_PROJECT_ID = "34343434-3434-4343-8343-343434343434";
+const MIGRATION_LOGIC_GATE_ID = "45454545-4545-4454-8454-454545454545";
+const MIGRATION_DOCUMENT_IDS = Object.freeze({
+  node: "56565656-5656-4565-8565-565656565656",
+  project: "67676767-6767-4676-8676-676767676767",
+  logic_gate: "78787878-7878-4787-8787-787878787878",
+});
 
 function makeRepresentativeText(targetBytes) {
   const paragraph = "Mango Node text box with lists, mentions, links, tables, comments, and attachment references.\n";
@@ -138,12 +150,16 @@ function transactAndCapture(document, origin, mutate) {
   return captured;
 }
 
-function assertDurableAcknowledgement(acknowledgement, update) {
+function assertDurableAcknowledgement(acknowledgement, update, { requireStateVectorCoverage = true } = {}) {
   assert.equal(acknowledgement.type, NODE_V2_YJS_DURABLE_ACK_TYPE);
   assert.equal(acknowledgement.update_sha256, sha256Hex(update));
   assert.ok(acknowledgement.durable_update_sequence > 0);
   const stateVector = Buffer.from(acknowledgement.state_vector_base64, "base64");
-  assert.equal(isUpdateCoveredByStateVector(update, stateVector), true, "acknowledgement vector must cover the pending update");
+  if (requireStateVectorCoverage) {
+    assert.equal(isUpdateCoveredByStateVector(update, stateVector), true, "acknowledgement vector must cover pending structs");
+  }
+  const snapshot = Y.decodeSnapshot(Buffer.from(acknowledgement.durable_snapshot_base64, "base64"));
+  assert.equal(Y.snapshotContainsUpdate(snapshot, update), true, "acknowledgement snapshot must cover structs and delete sets");
 }
 
 function benchmarkYjsCodec(label, sourceBytes) {
@@ -231,12 +247,12 @@ async function seedFoundation(pool, textboxId, sourceBytes) {
     client.release();
   }
 }
-function createProvider(url, documentName, clientId, document, acknowledgements, networkMetrics) {
+function createProvider(url, documentName, clientId, document, acknowledgements, networkMetrics, token = `${AUTH_TOKEN_PREFIX}${clientId}`) {
   return new HocuspocusProvider({
     url,
     name: documentName,
     document,
-    token: `${AUTH_TOKEN_PREFIX}${clientId}`,
+    token,
     WebSocketPolyfill: WebSocket,
     onOutgoingMessage({ message }) {
       networkMetrics.messages += 1;
@@ -277,6 +293,155 @@ function createHocuspocusServer(store, errors) {
   });
   return { server, extension };
 }
+
+function base64URL(value) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function mintProductionTicket(secret, documentName, clientId) {
+  const [, companyId, nodeId, textboxId] = documentName.split(":");
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const body = base64URL(JSON.stringify({
+    v: 1,
+    type: "node-v2-collaboration",
+    company_id: companyId,
+    node_id: nodeId,
+    textbox_id: textboxId,
+    user_id: ACTOR_ID,
+    client_id: clientId,
+    issued_at: issuedAt,
+    expires_at: issuedAt + 120,
+  }));
+  return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+}
+
+async function seedProductionRuntime(pool) {
+  const runId = randomUUID();
+  await pool.query("insert into company_memberships(company_id,user_id,role) values($1,$2,'company_admin') on conflict do nothing", [COMPANY_ID, ACTOR_ID]);
+  await pool.query(
+    `insert into editor_conversion_runs(conversion_run_id,company_id,owner_type,mode,status,batch_size,source_snapshot_timestamp,backup_reference,expected_count,started_timestamp,completed_timestamp)
+     values($1,$2,'all','shadow_validate','completed',100,clock_timestamp(),'disposable-proof',0,clock_timestamp(),clock_timestamp())`,
+    [runId, COMPANY_ID],
+  );
+  for (const owner of ["node", "project", "logic_gate"]) {
+    await pool.query(
+      `insert into editor_rollout_gates(company_id,owner_type,rollout_state,expected_count,converted_count,failed_count,shadow_mismatch_count,validation_run_id,validated_timestamp,activated_timestamp)
+       values($1,$2,'active',0,0,0,0,$3,clock_timestamp(),clock_timestamp())`,
+      [COMPANY_ID, owner, runId],
+    );
+  }
+  await pool.query(
+    `insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp)
+     values($1,'tiptap_json','ready',0,0,clock_timestamp(),clock_timestamp())`,
+    [COMPANY_ID],
+  );
+
+  const documentJson = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Production seed" }] }] };
+  const document = mangoProsemirrorJSONToYDoc(documentJson, "default");
+  const checkpoint = Y.encodeStateAsUpdate(document);
+  const stateVector = Y.encodeStateVector(document);
+  const epoch = randomUUID();
+  await pool.query(
+    `insert into node_textboxes(company_id,node_id,textbox_id,document_json,plain_text,collaboration_epoch,created_by_user_id,updated_by_user_id)
+     values($1,$2,$3,$4::jsonb,'Production seed',$5,$6,$6)`,
+    [COMPANY_ID, NODE_ID, TEXTBOX_IDS.production, JSON.stringify({ format: "mango-tiptap-json", schema_version: 1, document: documentJson }), epoch, ACTOR_ID],
+  );
+  await pool.query(
+    `insert into node_textbox_yjs_checkpoints(company_id,node_id,textbox_id,checkpoint_id,collaboration_epoch,through_update_sequence,checkpoint_payload,state_vector,document_json,plain_text,checkpoint_reason,retain_until)
+     values($1,$2,$3,$4,$5,0,$6,$7,$8::jsonb,'Production seed','migration_seed',clock_timestamp()+interval '14 days')`,
+    [COMPANY_ID, NODE_ID, TEXTBOX_IDS.production, randomUUID(), epoch, Buffer.from(checkpoint), Buffer.from(stateVector), JSON.stringify({ format: "mango-tiptap-json", schema_version: 1, document: documentJson })],
+  );
+  document.destroy();
+}
+
+async function runProductionRuntimeProof(pool) {
+  await seedProductionRuntime(pool);
+  const secret = "node-v2-production-proof-secret-32-bytes";
+  const documentName = formatNodeTextboxDocumentName({ companyId: COMPANY_ID, nodeId: NODE_ID, textboxId: TEXTBOX_IDS.production });
+  let runtime = createNodeV2CollaborationServer({ pool, ticketSecret: secret, address: "127.0.0.1", port: 0, quiet: true });
+  await runtime.listen();
+  const document = new Y.Doc();
+  const acknowledgements = [];
+  const network = { messages: 0, bytes: 0 };
+  const provider = createProvider(`ws://127.0.0.1:${runtime.server.address.port}`, documentName, "production-client", document, acknowledgements, network, mintProductionTicket(secret, documentName, "production-client"));
+  await waitFor(() => provider.synced && JSON.stringify(yDocToProsemirrorJSON(document, "default")).includes("Production seed"), "production collaboration initial sync");
+
+  let durableUpdate;
+  const onUpdate = (update, origin) => { if (origin === "production-proof") durableUpdate = new Uint8Array(update); };
+  document.on("update", onUpdate);
+  document.transact(() => {
+    const paragraph = new Y.XmlElement("paragraph");
+    const text = new Y.XmlText();
+    text.insert(0, "Production runtime edit");
+    paragraph.insert(0, [text]);
+    document.getXmlFragment("default").insert(document.getXmlFragment("default").length, [paragraph]);
+  }, "production-proof");
+  document.off("update", onUpdate);
+  assert.ok(durableUpdate?.byteLength > 0);
+  await waitFor(() => acknowledgements.some((ack) => ack.update_sha256 === sha256Hex(durableUpdate)), "production durable acknowledgement");
+  assertDurableAcknowledgement(acknowledgements.find((ack) => ack.update_sha256 === sha256Hex(durableUpdate)), durableUpdate);
+
+  const deleteProof = document.getMap("durable-delete-proof");
+  const deleteSeedUpdate = transactAndCapture(document, "production-delete-seed", () => deleteProof.set("pending", "remove me"));
+  await waitFor(() => acknowledgements.some((ack) => ack.update_sha256 === sha256Hex(deleteSeedUpdate)), "production delete seed acknowledgement");
+  assertDurableAcknowledgement(acknowledgements.find((ack) => ack.update_sha256 === sha256Hex(deleteSeedUpdate)), deleteSeedUpdate);
+  const deleteUpdate = transactAndCapture(document, "production-delete", () => deleteProof.delete("pending"));
+  await waitFor(() => acknowledgements.some((ack) => ack.update_sha256 === sha256Hex(deleteUpdate)), "production delete acknowledgement");
+  assertDurableAcknowledgement(
+    acknowledgements.find((ack) => ack.update_sha256 === sha256Hex(deleteUpdate)),
+    deleteUpdate,
+    { requireStateVectorCoverage: false },
+  );
+  assert.equal(
+    isUpdateCoveredByStateVector(
+      deleteUpdate,
+      Buffer.from(acknowledgements.find((ack) => ack.update_sha256 === sha256Hex(deleteUpdate)).state_vector_base64, "base64"),
+    ),
+    false,
+    "the proof must exercise the delete-set gap that state vectors cannot acknowledge",
+  );
+  await runtime.persistence.flush();
+  const materialized = await pool.query("select document_json,plain_text,latest_update_sequence,materialized_through_sequence from node_textboxes where company_id=$1 and node_id=$2 and textbox_id=$3", [COMPANY_ID, NODE_ID, TEXTBOX_IDS.production]);
+  assert.match(JSON.stringify(materialized.rows[0].document_json), /Production runtime edit/);
+  assert.match(materialized.rows[0].plain_text, /Production runtime edit/);
+  assert.equal(Number(materialized.rows[0].latest_update_sequence), Number(materialized.rows[0].materialized_through_sequence));
+  const metricsResponse = await fetch(`http://127.0.0.1:${runtime.server.address.port}/metrics`);
+  assert.equal(metricsResponse.status, 200);
+  const firstMetrics = await metricsResponse.json();
+  assert.ok(firstMetrics.durable_updates >= 1);
+  provider.destroy();
+  document.destroy();
+  await runtime.destroy();
+
+  runtime = createNodeV2CollaborationServer({ pool, ticketSecret: secret, address: "127.0.0.1", port: 0, quiet: true });
+  await runtime.listen();
+  const restored = new Y.Doc();
+  const restoredProvider = createProvider(`ws://127.0.0.1:${runtime.server.address.port}`, documentName, "restart-production-client", restored, [], { messages: 0, bytes: 0 }, mintProductionTicket(secret, documentName, "restart-production-client"));
+  const restartRestoreMs = await waitFor(() => restoredProvider.synced && JSON.stringify(yDocToProsemirrorJSON(restored, "default")).includes("Production runtime edit"), "production restart restore");
+  restoredProvider.destroy();
+  restored.destroy();
+
+  await pool.query("update editor_rollout_gates set rollout_state='inactive',updated_timestamp=clock_timestamp() where company_id=$1 and owner_type='node'", [COMPANY_ID]);
+  const rejected = new Y.Doc();
+  const rejectedProvider = createProvider(`ws://127.0.0.1:${runtime.server.address.port}`, documentName, "inactive-gate-client", rejected, [], { messages: 0, bytes: 0 }, mintProductionTicket(secret, documentName, "inactive-gate-client"));
+  await waitFor(() => runtime.metrics.connections_rejected > 0, "inactive owner gate rejection");
+  assert.equal(rejectedProvider.synced, false);
+  rejectedProvider.destroy();
+  rejected.destroy();
+  const metrics = { ...runtime.metrics };
+  await runtime.destroy();
+  return {
+    materialized_plain_text: materialized.rows[0].plain_text,
+    durable_update_sequence: Number(materialized.rows[0].latest_update_sequence),
+    restart_restore_ms: Number(restartRestoreMs.toFixed(3)),
+    inactive_gate_rejected: metrics.connections_rejected > 0,
+    durable_update_bytes: firstMetrics.durable_update_bytes,
+    network,
+  };
+}
+
+// createHocuspocusServer closes before the production-runtime proof helpers.
+
 
 async function runProviderProof(pool, store) {
   const documentName = formatNodeTextboxDocumentName({ companyId: COMPANY_ID, nodeId: NODE_ID, textboxId: TEXTBOX_IDS.provider });
@@ -650,7 +815,144 @@ async function proveCompactionRollback(pool, store) {
   return { forced_failure_rolled_back_atomically: true, recovered_checkpoint_sequence: recovered.through_update_sequence };
 }
 
-async function runProof(pool) {
+function runMigrationTool(port, database, arguments_, expectFailure = false, failurePattern = /current_rollback_export_does_not_cover_all_documents/) {
+  const environment = {
+    ...process.env,
+    MANGORTS_MIGRATION_DATABASE_URL: `postgresql://postgres@127.0.0.1:${port}/${database}`,
+  };
+  try {
+    const output = execFileSync(process.execPath, [resolve(frontendDir, "dist-services", "mango-editor-migration.mjs"), ...arguments_], {
+      cwd: frontendDir,
+      env: environment,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", expectFailure ? "pipe" : "inherit"],
+    });
+    if (expectFailure) throw new Error("migration command unexpectedly succeeded");
+    return output;
+  } catch (error) {
+    if (!expectFailure) throw error;
+    const stderr = String(error?.stderr || error?.message || "");
+    assert.match(stderr, failurePattern);
+    return stderr;
+  }
+}
+
+async function seedMigrationWorkflow(pool) {
+  await pool.query("insert into companies(company_id,name) values($1,'Migration proof company')", [MIGRATION_COMPANY_ID]);
+  await pool.query("insert into nodes(company_id,node_id,name,created_timestamp) values($1,$2,'Migration proof Node',clock_timestamp())", [MIGRATION_COMPANY_ID, MIGRATION_NODE_ID]);
+  await pool.query("insert into projects(company_id,project_id,name) values($1,$2,'Migration proof Project')", [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID]);
+  await pool.query("insert into logic_gates(company_id,logic_gate_id,header,created_timestamp) values($1,$2,'Migration proof Logic Gate',clock_timestamp())", [MIGRATION_COMPANY_ID, MIGRATION_LOGIC_GATE_ID]);
+  const fixtures = [
+    ["node", MIGRATION_NODE_ID, MIGRATION_DOCUMENT_IDS.node, '<h2>Node source</h2><p>Exact <strong>rich text</strong> with <a href="https://example.com">link</a>.</p>'],
+    ["project", MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project, '<p>Project source</p><ul><li>One</li><li>Two</li></ul>'],
+    ["logic_gate", MIGRATION_LOGIC_GATE_ID, MIGRATION_DOCUMENT_IDS.logic_gate, '<p>Logic Gate source</p><blockquote>Decision</blockquote>'],
+  ];
+  for (const fixture of fixtures) {
+    await pool.query(
+      "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,canonical_html) values($1,$2,$3,$4,$5)",
+      [MIGRATION_COMPANY_ID, ...fixture],
+    );
+  }
+}
+
+async function runMigrationWorkflowProof(pool, port, database) {
+  await seedMigrationWorkflow(pool);
+  const conversionRun = "89898989-8989-4898-8989-898989898989";
+  const common = ["--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", conversionRun];
+  const dryRunOutput = runMigrationTool(port, database, ["--mode", "dry-run", ...common]);
+  assert.match(dryRunOutput, /"processed":3/);
+  const before = await pool.query("select count(*)::integer as count from node_textboxes where company_id=$1", [MIGRATION_COMPANY_ID]);
+  assert.equal(before.rows[0].count, 0, "dry-run must not write targets");
+
+  const writeSafety = ["--allow-write", "--backup-reference", "disposable-proof"];
+  runMigrationTool(port, database, ["--mode", "backfill", ...common, ...writeSafety, "--confirm", `BACKFILL ${MIGRATION_COMPANY_ID}`]);
+  runMigrationTool(port, database, ["--mode", "backfill", ...common, ...writeSafety, "--confirm", `BACKFILL ${MIGRATION_COMPANY_ID}`]);
+  const ledger = await pool.query(
+    "select count(*)::integer as items,min(retry_count)::integer as min_retries,count(*) filter(where source_html_snapshot <> '')::integer as snapshots from editor_conversion_items where conversion_run_id=$1",
+    [conversionRun],
+  );
+  assert.deepEqual(ledger.rows[0], { items: 3, min_retries: 1, snapshots: 3 });
+
+  runMigrationTool(port, database, ["--mode", "shadow", ...common, ...writeSafety, "--confirm", `SHADOW ${MIGRATION_COMPANY_ID}`]);
+  const comparisons = await pool.query("select count(*)::integer as count,count(*) filter(where equivalent)::integer as equivalent from editor_shadow_comparisons where conversion_run_id=$1", [conversionRun]);
+  assert.deepEqual(comparisons.rows[0], { count: 3, equivalent: 3 });
+  runMigrationTool(port, database, ["--mode", "readiness", ...common, "--allow-write", "--confirm", `VALIDATE ${MIGRATION_COMPANY_ID}`]);
+  await pool.query(
+    "update editor_collaboration_documents set canonical_html=canonical_html || '<p>drift</p>' where company_id=$1 and resource_type='project' and resource_id=$2 and document_id=$3",
+    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
+  );
+  runMigrationTool(
+    port,
+    database,
+    ["--mode", "activate", ...common, ...writeSafety, "--confirm", "ACTIVATE " + MIGRATION_COMPANY_ID],
+    true,
+    /legacy_source_changed_after_validation/,
+  );
+  await pool.query(
+    "update editor_collaboration_documents set canonical_html=$1 where company_id=$2 and resource_type='project' and resource_id=$3 and document_id=$4",
+    ['<p>Project source</p><ul><li>One</li><li>Two</li></ul>', MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
+  );
+  runMigrationTool(port, database, ["--mode", "activate", ...common, ...writeSafety, "--confirm", "ACTIVATE " + MIGRATION_COMPANY_ID]);
+  const active = await pool.query("select editor_format,migration_state,(select count(*) from editor_rollout_gates where company_id=$1 and rollout_state='active')::integer as active_gates from workspace_editor_formats where company_id=$1", [MIGRATION_COMPANY_ID]);
+  assert.deepEqual(active.rows[0], { editor_format: "tiptap_json", migration_state: "ready", active_gates: 3 });
+
+  const nativeDocumentID = "79797979-7979-4797-8797-797979797979";
+  const nativeDocument = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Created after cutover" }] }] } };
+  await pool.query(
+    "insert into project_editor_documents(company_id,project_id,document_id,document_schema_version,revision,document_json,plain_text) values($1,$2,$3,1,1,$4::jsonb,$5)",
+    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, nativeDocumentID, JSON.stringify(nativeDocument), "Created after cutover"],
+  );
+  await pool.query(
+    "update logic_gate_editor_documents set is_deleted=true,revision=revision+1,updated_timestamp=clock_timestamp() where company_id=$1 and logic_gate_id=$2 and document_id=$3",
+    [MIGRATION_COMPANY_ID, MIGRATION_LOGIC_GATE_ID, MIGRATION_DOCUMENT_IDS.logic_gate],
+  );
+
+
+  const updateProject = async (text) => {
+    const document = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] } };
+    await pool.query("update project_editor_documents set document_json=$1::jsonb,plain_text=$2,revision=revision+1,updated_timestamp=clock_timestamp() where company_id=$3 and project_id=$4 and document_id=$5", [JSON.stringify(document), text, MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project]);
+  };
+  await updateProject("First post-cutover edit");
+  const firstExportRun = "90909090-9090-4909-8909-909090909090";
+  runMigrationTool(port, database, ["--mode", "rollback-export", "--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", firstExportRun, ...writeSafety, "--confirm", `EXPORT ${MIGRATION_COMPANY_ID}`]);
+  await updateProject("Newest post-cutover edit survives rollback");
+  runMigrationTool(port, database, ["--mode", "rollback", "--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", firstExportRun, ...writeSafety, "--confirm", `ROLLBACK ${MIGRATION_COMPANY_ID}`], true);
+
+  const secondExportRun = "91919191-9191-4919-8919-919191919191";
+  runMigrationTool(port, database, ["--mode", "rollback-export", "--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", secondExportRun, ...writeSafety, "--confirm", `EXPORT ${MIGRATION_COMPANY_ID}`]);
+  runMigrationTool(port, database, ["--mode", "rollback", "--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", secondExportRun, ...writeSafety, "--confirm", `ROLLBACK ${MIGRATION_COMPANY_ID}`]);
+  const rolledBack = await pool.query(
+    "select format.editor_format,format.migration_state,legacy.canonical_html,(select count(*) from editor_rollout_gates where company_id=$1 and rollout_state='rolled_back')::integer as rolled_back_gates from workspace_editor_formats format join editor_collaboration_documents legacy on legacy.company_id=format.company_id and legacy.resource_type='project' and legacy.resource_id=$2 and legacy.document_id=$3 where format.company_id=$1",
+    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
+  );
+  assert.equal(rolledBack.rows[0].editor_format, "legacy_html");
+  assert.equal(rolledBack.rows[0].migration_state, "validated");
+  assert.equal(rolledBack.rows[0].rolled_back_gates, 3);
+  assert.match(rolledBack.rows[0].canonical_html, /Newest post-cutover edit survives rollback/);
+  const nativeRollback = await pool.query(
+    "select canonical_html,is_deleted from editor_collaboration_documents where company_id=$1 and resource_type='project' and resource_id=$2 and document_id=$3",
+    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, nativeDocumentID],
+  );
+  assert.equal(nativeRollback.rowCount, 1);
+  assert.match(nativeRollback.rows[0].canonical_html, /Created after cutover/);
+  assert.equal(nativeRollback.rows[0].is_deleted, false);
+  const deletedRollback = await pool.query(
+    "select is_deleted from editor_collaboration_documents where company_id=$1 and resource_type='logic_gate' and resource_id=$2 and document_id=$3",
+    [MIGRATION_COMPANY_ID, MIGRATION_LOGIC_GATE_ID, MIGRATION_DOCUMENT_IDS.logic_gate],
+  );
+  assert.equal(deletedRollback.rows[0].is_deleted, true);
+  return {
+    converted_documents: 3,
+    resumable_retry_count: ledger.rows[0].min_retries,
+    shadow_matches: comparisons.rows[0].equivalent,
+    activation_gates: active.rows[0].active_gates,
+    activation_source_drift_rejected: true,
+    stale_export_rejected: true,
+    newest_edit_preserved_in_legacy_html: true,
+    post_cutover_create_and_delete_preserved: true,
+  };
+}
+async function runProof(pool, port, database) {
   await pool.query(
     `insert into users (user_id,cognito_subject,email,display_name)
      values ($1,'node-v2-poc','node-v2-poc@example.invalid','Node v2 PoC')`,
@@ -673,6 +975,11 @@ async function runProof(pool) {
     seedFoundation(pool, TEXTBOX_IDS.failedUpdate, LIVE_TEXTBOX_BYTES.p50),
     seedFoundation(pool, TEXTBOX_IDS.failedCompaction, LIVE_TEXTBOX_BYTES.p50),
   ]);
+  process.stderr.write("node-v2-proof stage=production-runtime\n");
+  const productionRuntime = await runProductionRuntimeProof(pool);
+  process.stderr.write("node-v2-proof stage=migration-workflow\n");
+  const migrationWorkflow = await runMigrationWorkflowProof(pool, port, database);
+
   const store = new NodeV2YjsPostgresStore({ pool, materializeDocument: materializeProofDocument });
   process.stderr.write("node-v2-proof stage=provider\n");
   const provider = await runProviderProof(pool, store);
@@ -697,6 +1004,8 @@ async function runProof(pool) {
   return {
     provider,
     failed_update: failedUpdate,
+    production_runtime: productionRuntime,
+    migration_workflow: migrationWorkflow,
     failed_compaction: failedCompaction,
     load,
     relation_bytes: Object.fromEntries(relationSizes.rows.map((row) => [row.relname, Number(row.bytes)])),
@@ -752,7 +1061,7 @@ async function main() {
       benchmarkYjsCodec("live-p95", LIVE_TEXTBOX_BYTES.p95),
       benchmarkYjsCodec("live-max", LIVE_TEXTBOX_BYTES.max),
     ];
-    const postgres = await runProof(pool);
+    const postgres = await runProof(pool, port, database);
     process.stdout.write(`${JSON.stringify({
       measured_at: new Date().toISOString(),
       postgresql: "disposable PostgreSQL 18 with synchronous_commit=on",

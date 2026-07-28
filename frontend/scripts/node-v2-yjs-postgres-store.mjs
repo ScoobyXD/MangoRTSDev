@@ -6,6 +6,7 @@ const DOCUMENT_PREFIX = "node-textbox";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACK_TYPE = "node-v2-yjs.durable-ack.v1";
 const ERROR_TYPE = "node-v2-yjs.durability-error.v1";
+const DEFAULT_MAX_UPDATE_BYTES = 8 * 1024 * 1024;
 const EMPTY_UPDATE = (() => {
   const document = new Y.Doc();
   const update = Y.encodeStateAsUpdate(document);
@@ -30,6 +31,10 @@ function numericSequence(value, label) {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result < 0) throw new Error(`invalid_${label}`);
   return result;
+}
+
+function encodeDurableSnapshot(document) {
+  return Buffer.from(Y.encodeSnapshot(Y.snapshot(document))).toString("base64");
 }
 
 export function formatNodeTextboxDocumentName({ companyId, nodeId, textboxId }) {
@@ -68,12 +73,15 @@ export class NodeV2YjsPostgresStore {
   constructor({
     pool,
     materializeDocument = null,
+    maxUpdateBytes = DEFAULT_MAX_UPDATE_BYTES,
     coveredUpdateRetentionDays = 7,
     automaticCheckpointRetentionDays = 14,
   }) {
     if (!pool || typeof pool.connect !== "function") throw new Error("node_v2_yjs_pool_required");
+    if (!Number.isSafeInteger(maxUpdateBytes) || maxUpdateBytes <= 0) throw new Error("invalid_node_v2_yjs_max_update_bytes");
     this.pool = pool;
     this.materializeDocument = materializeDocument;
+    this.maxUpdateBytes = maxUpdateBytes;
     this.coveredUpdateRetentionDays = coveredUpdateRetentionDays;
     this.automaticCheckpointRetentionDays = automaticCheckpointRetentionDays;
     this.durableStateCache = new Map();
@@ -161,10 +169,57 @@ export class NodeV2YjsPostgresStore {
     }
   }
 
+  async durabilityStatus(documentName) {
+    const identity = parseNodeTextboxDocumentName(documentName);
+    const client = await this.pool.connect();
+    let document;
+    try {
+      await client.query("begin isolation level repeatable read read only");
+      const textboxResult = await client.query(
+        `select collaboration_epoch, latest_update_sequence
+           from node_textboxes
+          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null`,
+        [identity.companyId, identity.nodeId, identity.textboxId],
+      );
+      if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
+      const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
+      const latestUpdateSequence = numericSequence(textboxResult.rows[0].latest_update_sequence, "latest_update_sequence");
+      const durable = await this.#loadDurableState(client, identity, collaborationEpoch, latestUpdateSequence);
+      document = new Y.Doc();
+      Y.applyUpdate(document, durable.mergedUpdate);
+      await client.query("commit");
+      return {
+        type: ACK_TYPE,
+        document_name: documentName,
+        collaboration_epoch: collaborationEpoch,
+        durable_head_sequence: latestUpdateSequence,
+        state_vector_base64: Buffer.from(Y.encodeStateVector(document)).toString("base64"),
+        durable_snapshot_base64: encodeDurableSnapshot(document),
+        status_only: true,
+      };
+    } catch (error) {
+      await rollbackQuietly(client);
+      throw error;
+    } finally {
+      document?.destroy();
+      client.release();
+    }
+  }
+
   async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null } = {}) {
     const identity = parseNodeTextboxDocumentName(documentName);
     const payload = asUint8Array(update);
     if (payload.byteLength === 0) throw new Error("node_v2_yjs_empty_update");
+    if (payload.byteLength > this.maxUpdateBytes) throw new Error("node_v2_yjs_update_too_large");
+    // Decode before opening a transaction. Hocuspocus normally supplies a
+    // valid Yjs update, but this keeps every direct/internal caller from ever
+    // committing malformed bytes that would poison checkpoint-plus-tail replay.
+    const validationDocument = new Y.Doc();
+    try {
+      Y.applyUpdate(validationDocument, payload);
+    } finally {
+      validationDocument.destroy();
+    }
     assertUuid(updateId, "update_id");
     if (!clientId || Buffer.byteLength(clientId, "utf8") > 160) throw new Error("invalid_client_id");
     if (actorUserId !== null) assertUuid(actorUserId, "actor_user_id");
@@ -280,7 +335,9 @@ export class NodeV2YjsPostgresStore {
         update_id: updateId,
         update_sha256: checksum,
         state_vector_base64: Buffer.from(durableStateVector).toString("base64"),
+        durable_snapshot_base64: encodeDurableSnapshot(durableDocument),
         duplicate,
+        update_bytes: payload.byteLength,
         uncheckpointed_update_count: tailStatsResult.rows[0].update_count,
         uncheckpointed_update_bytes: Number(tailStatsResult.rows[0].update_bytes),
         database_transaction_ms: Number((performance.now() - started).toFixed(3)),
@@ -432,6 +489,10 @@ export class NodeV2YjsPostgresExtension {
     store,
     operationCountThreshold = 512,
     updateBytesThreshold = 512 * 1024,
+    materializationDelayMs = 1_500,
+    authorizeUpdate = async () => {},
+    validateDocument = async () => {},
+    onAcknowledgement = async () => {},
     onPersistenceError = () => {},
     onCompactionError = () => {},
   }) {
@@ -439,10 +500,15 @@ export class NodeV2YjsPostgresExtension {
     this.store = store;
     this.operationCountThreshold = operationCountThreshold;
     this.updateBytesThreshold = updateBytesThreshold;
+    this.materializationDelayMs = materializationDelayMs;
+    this.authorizeUpdate = authorizeUpdate;
+    this.validateDocument = validateDocument;
+    this.onAcknowledgement = onAcknowledgement;
     this.onPersistenceError = onPersistenceError;
     this.onCompactionError = onCompactionError;
     this.updateQueues = new Map();
     this.compactions = new Map();
+    this.materializationTimers = new Map();
     this.failedDocumentInstances = new WeakSet();
   }
 
@@ -451,8 +517,20 @@ export class NodeV2YjsPostgresExtension {
     Y.applyUpdate(document, durable.mergedUpdate);
   }
 
-  afterUnloadDocument({ documentName }) {
-    this.store.evictDocument(documentName);
+  async afterUnloadDocument({ documentName }) {
+    const timer = this.materializationTimers.get(documentName);
+    if (timer) {
+      clearTimeout(timer);
+      this.materializationTimers.delete(documentName);
+    }
+    try {
+      await this.updateQueues.get(documentName);
+      await this.store.compactDocument(documentName, "idle");
+    } catch (error) {
+      await this.onCompactionError(error, { documentName, reason: "idle" });
+    } finally {
+      this.store.evictDocument(documentName);
+    }
   }
 
   onChange(payload) {
@@ -464,11 +542,14 @@ export class NodeV2YjsPostgresExtension {
         // non-durable structs. Drop that old session and let reconnect replay from PostgreSQL.
         if (this.failedDocumentInstances.has(payload.document)) return;
         try {
+          await this.authorizeUpdate(payload);
+          await this.validateDocument(payload.document, payload);
           const acknowledgement = await this.store.appendUpdate(payload.documentName, payload.update, {
             clientId: payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`,
             actorUserId: payload.context?.actorUserId ?? null,
           });
           payload.connection?.sendStateless(JSON.stringify(acknowledgement));
+          await this.onAcknowledgement(acknowledgement, payload);
           if (
             acknowledgement.uncheckpointed_update_count >= this.operationCountThreshold ||
             acknowledgement.uncheckpointed_update_bytes >= this.updateBytesThreshold
@@ -477,6 +558,8 @@ export class NodeV2YjsPostgresExtension {
               ? "operation_count"
               : "update_bytes";
             this.#scheduleCompaction(payload.documentName, reason);
+          } else {
+            this.#scheduleMaterialization(payload.documentName);
           }
         } catch (error) {
           if (payload.document && typeof payload.document === "object") {
@@ -504,7 +587,21 @@ export class NodeV2YjsPostgresExtension {
     return current;
   }
 
+  #scheduleMaterialization(documentName) {
+    if (this.materializationTimers.has(documentName)) return;
+    const timer = setTimeout(() => {
+      this.materializationTimers.delete(documentName);
+      this.#scheduleCompaction(documentName, "idle");
+    }, this.materializationDelayMs);
+    this.materializationTimers.set(documentName, timer);
+  }
+
   #scheduleCompaction(documentName, reason) {
+    const timer = this.materializationTimers.get(documentName);
+    if (timer) {
+      clearTimeout(timer);
+      this.materializationTimers.delete(documentName);
+    }
     if (this.compactions.has(documentName)) return;
     const work = new Promise((resolve) => setTimeout(resolve, 0))
       .then(() => this.updateQueues.get(documentName))
@@ -523,6 +620,11 @@ export class NodeV2YjsPostgresExtension {
   }
 
   async flush() {
+    for (const [documentName, timer] of this.materializationTimers) {
+      clearTimeout(timer);
+      this.materializationTimers.delete(documentName);
+      this.#scheduleCompaction(documentName, "idle");
+    }
     while (this.updateQueues.size > 0 || this.compactions.size > 0) {
       await Promise.allSettled([...this.updateQueues.values(), ...this.compactions.values()]);
     }

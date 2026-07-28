@@ -4,12 +4,12 @@ import Collaboration from "@tiptap/extension-collaboration";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { absolutePositionToRelativePosition, relativePositionToAbsolutePosition, yUndoPluginKey } from "@tiptap/y-tiptap";
 import * as Y from "yjs";
-import { fetchMangoAttachmentBlob } from "../../attachments/attachmentApi.js";
+import { downloadMangoAttachment, fetchMangoAttachmentBlob } from "../../attachments/attachmentApi.js";
 import type { MentionableCompanyUser } from "../editorMentions.js";
 import { MangoTiptapAnnotations, navigateMangoTiptapTarget, updateMangoTiptapAnnotations } from "../tiptap/mangoTiptapAnnotations.js";
 import { createMangoTiptapExtensions, MangoAttachmentImage, type MangoAttachmentImageAttributes } from "../tiptap/mangoTiptapExtensions.js";
 import type { NodeV2Client } from "./nodeV2Api.js";
-import { NodeV2SyncController, type NodeV2SaveState } from "./nodeV2Sync.js";
+import { NodeV2ProviderSyncController, type NodeV2SaveState } from "./nodeV2ProviderSync.js";
 import type { NodeV2CommentThread, NodeV2TextBox } from "./nodeV2Types.js";
 
 export type NodeV2SelectionAnchor = {
@@ -81,9 +81,10 @@ export function resolveNodeV2CommentAnchors(editor: Editor, document: Y.Doc, com
     }
   });
 }
-function authenticatedImageExtension(apiBase: string, companyID: string) {
-  const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected }) => {
+function authenticatedImageExtension(apiBase: string, companyID: string, onError: (message: string) => void) {
+  const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, deleteNode, editor, getPos, updateAttributes }) => {
     const [objectURL, setObjectURL] = useState("");
+    const [previewOpen, setPreviewOpen] = useState(false);
     useEffect(() => {
       const controller = new AbortController();
       let created = "";
@@ -92,10 +93,30 @@ function authenticatedImageExtension(apiBase: string, companyID: string) {
         .catch(() => setObjectURL(""));
       return () => { controller.abort(); if (created) URL.revokeObjectURL(created); };
     }, [node.attrs.attachmentId]);
+    const attachmentID = String(node.attrs.attachmentId || "");
+    const filename = String(node.attrs.filename || "inline-image");
+    const selectImage = () => {
+      const position = typeof getPos === "function" ? getPos() : getPos;
+      if (typeof position === "number") editor.commands.setNodeSelection(position);
+    };
     return <NodeViewWrapper className={`node-v2-inline-image${selected ? " is-selected" : ""}`}>
-      {objectURL
-        ? <img src={objectURL} alt={String(node.attrs.alt || node.attrs.filename || "Inline attachment")} draggable={false} />
-        : <span role="status">Loading image preview…</span>}
+      <button type="button" className="node-v2-inline-image-select" aria-label={`Select image ${filename}`} onMouseDown={(event) => { event.preventDefault(); selectImage(); }}>
+        {objectURL
+          ? <img src={objectURL} alt={String(node.attrs.alt || filename || "Inline attachment")} draggable={false} />
+          : <span role="status">Loading image preview…</span>}
+      </button>
+      {selected && <div className="node-v2-inline-image-actions" contentEditable={false}>
+        <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>
+        <button type="button" onClick={() => void downloadMangoAttachment({ apiBase, companyID, attachmentID, filename }).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to download image"))}>Download</button>
+        <button type="button" onClick={() => updateAttributes({ alignment: "left" })}>Align left</button>
+        <button type="button" onClick={() => updateAttributes({ alignment: "center" })}>Align center</button>
+        <button type="button" onClick={() => updateAttributes({ alignment: "right" })}>Align right</button>
+        <button type="button" onClick={deleteNode}>Remove image</button>
+      </div>}
+      {previewOpen && objectURL && <div className="node-v2-inline-image-dialog" role="dialog" aria-modal="true" aria-label={`Image preview: ${filename}`} contentEditable={false}>
+        <button type="button" aria-label="Close image preview" onClick={() => setPreviewOpen(false)}>×</button>
+        <img src={objectURL} alt={String(node.attrs.alt || filename)} />
+      </div>}
     </NodeViewWrapper>;
   };
   return MangoAttachmentImage.extend({
@@ -104,7 +125,6 @@ function authenticatedImageExtension(apiBase: string, companyID: string) {
     },
   });
 }
-
 function collaborationMapping(editor: Editor): { mapping: unknown } | null {
   for (const plugin of editor.state.plugins) {
     const state = plugin.getState(editor.state) as { binding?: { mapping?: unknown } } | undefined;
@@ -128,13 +148,13 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
   onError,
 }, forwardedRef) {
   const [editor, setEditor] = useState<Editor | null>(null);
-  const controllerRef = useRef<NodeV2SyncController | null>(null);
+  const controllerRef = useRef<NodeV2ProviderSyncController | null>(null);
   const editorRef = useRef<Editor | null>(null);
-  const imageExtension = useMemo(() => authenticatedImageExtension(apiBase, companyID), [apiBase, companyID]);
+  const imageExtension = useMemo(() => authenticatedImageExtension(apiBase, companyID, onError), [apiBase, companyID, onError]);
 
   useEffect(() => {
     let disposed = false;
-    const controller = new NodeV2SyncController({
+    const controller = new NodeV2ProviderSyncController({
       client,
       textboxID: textbox.textbox_id,
       companyID,

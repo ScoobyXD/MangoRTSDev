@@ -481,6 +481,7 @@ async function main() {
   const apiPorts = [await freePort(), await freePort()];
   const frontendPort = await freePort();
   const s3Port = await freePort();
+  const collaborationPort = await freePort();
   mkdirSync(pgData, { recursive: true });
   mkdirSync(migrationDir, { recursive: true });
   mkdirSync(legacyMigrationDir, { recursive: true });
@@ -507,6 +508,7 @@ async function main() {
 
   run("Build migration runner", "go", ["build", "-o", migrateExe, "./cmd/miraeopus-migrate"], { cwd: backend });
   run("Build production API", "go", ["build", "-o", apiExe, "./cmd/miraeopus-api"], { cwd: backend });
+  run("Build Node V2 collaboration service", process.execPath, [resolve(frontend, "node_modules", "esbuild", "bin", "esbuild"), "scripts/node-v2-collaboration-server.ts", "--bundle", "--packages=external", "--platform=node", "--target=node22", "--format=esm", "--outfile=dist-services/node-v2-collaboration-server.mjs"], { cwd: frontend });
   for (const name of ["20260715_unified_realtime_collaboration.sql", "20260715_zz_edit_or_no_access.sql"]) {
     copyFileSync(resolve(backend, "db", "migrations", name), resolve(migrationDir, name));
     copyFileSync(resolve(backend, "db", "migrations", name), resolve(legacyMigrationDir, name));
@@ -641,6 +643,16 @@ async function main() {
   const s3Record = startProcess("node-v2-s3", process.execPath, [
     resolve(frontend, "scripts", "node-v2-s3-mock.mjs"),
   ], { cwd: frontend, env: { ...process.env, MANGORTS_NODE_V2_S3_PORT: String(s3Port) } });
+  const collaborationRecord = startProcess("node-v2-collaboration", process.execPath, [
+    resolve(frontend, "dist-services", "node-v2-collaboration-server.mjs"),
+  ], { cwd: frontend, env: {
+    ...process.env,
+    DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${pgPort}/mangorts_realtime_test`,
+    MANGORTS_REALTIME_TICKET_SECRET: "mangorts-realtime-browser-ticket-secret-32-bytes",
+    NODE_V2_COLLAB_ADDRESS: "127.0.0.1",
+    NODE_V2_COLLAB_PORT: String(collaborationPort),
+    NODE_V2_COLLAB_MATERIALIZE_MS: "100",
+  } });
   let apiRecords = apiPorts.map((port, index) =>
     startProcess("api-" + (index + 1), apiExe, [], apiProcessOptions(port)));
   const restartAPI = async (index) => {
@@ -651,10 +663,11 @@ async function main() {
   const viteRecord = startProcess("vite", process.execPath, [
     resolve(frontend, "node_modules", "vite", "bin", "vite.js"),
     "--host", "127.0.0.1", "--port", String(frontendPort), "--strictPort",
-  ], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: "http://127.0.0.1:" + apiPorts[0], VITE_COMPANY_ID: COMPANY_A, VITE_AUTH_MODE: "disabled", VITE_NODE_V2_PHASE2: "true" } });
+  ], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: "http://127.0.0.1:" + apiPorts[0], VITE_COMPANY_ID: COMPANY_A, VITE_AUTH_MODE: "disabled", VITE_NODE_V2_PHASE2: "true", VITE_NODE_V2_COLLAB_URL: "ws://127.0.0.1:" + collaborationPort } });
   try {
     await Promise.all(apiPorts.map((port) => waitForURL("http://127.0.0.1:" + port + "/healthz")));
     await waitForURL("http://127.0.0.1:" + s3Port + "/healthz");
+    await waitForURL("http://127.0.0.1:" + collaborationPort + "/healthz");
     for (const port of apiPorts) {
       const response = await fetch("http://127.0.0.1:" + port + "/v1/me", {
         headers: { "X-Mango-Test-Subject": "browser-user-a" },
@@ -671,7 +684,11 @@ async function main() {
     await waitForURL("http://127.0.0.1:" + frontendPort + "/editor-textbox-sync-e2e.html");
     try {
       await browserMatrix(frontendPort, apiPorts, pgPort, restartAPI);
-      psql(pgPort, "mangorts_realtime_test", "insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp) values('" + COMPANY_A + "','tiptap_json','ready',0,0,now(),now());");
+      psql(pgPort, "mangorts_realtime_test", [
+        "insert into editor_conversion_runs(conversion_run_id,company_id,owner_type,mode,status,batch_size,source_snapshot_timestamp,backup_reference,completed_timestamp) values('33333333-3333-4333-8333-333333333301','" + COMPANY_A + "','all','shadow_validate','completed',100,now(),'disposable browser proof',now());",
+        "insert into editor_rollout_gates(company_id,owner_type,rollout_state,validation_run_id,validated_timestamp,activated_timestamp) select '" + COMPANY_A + "',owner_type,'active','33333333-3333-4333-8333-333333333301',now(),now() from unnest(array['node','project','logic_gate']) owner_type;",
+        "insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp) values('" + COMPANY_A + "','tiptap_json','ready',0,0,now(),now());",
+      ].join("\n"));
       for (let index = 0; index < 35; index++) {
         const response = await fetch("http://127.0.0.1:" + apiPorts[0] + "/v1/nodes/" + NODE_A + "/v2/textboxes?company_id=" + COMPANY_A, {
           method: "POST",
@@ -694,6 +711,7 @@ async function main() {
 
     } catch (cause) {
       process.stderr.write("\nBrowser matrix backend logs:\n" + apiRecords.map((item) => item.label + ":\n" + item.logs.join("")).join("\n"));
+      process.stderr.write("\nNode V2 collaboration logs:\n" + collaborationRecord.logs.join(""));
       throw cause;
     }
   } finally {
@@ -701,6 +719,7 @@ async function main() {
     await browser?.close().catch(() => {});
     await stopProcess(viteRecord);
     for (const record of apiRecords) await stopProcess(record);
+    await stopProcess(collaborationRecord);
     await stopProcess(s3Record);
   }
   process.stdout.write("\nProduction-path realtime collaboration tests passed.\n");

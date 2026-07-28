@@ -5,7 +5,7 @@ import { MangoTiptapStaticRenderer } from "../tiptap/MangoTiptapStaticRenderer.j
 import type { MentionableCompanyUser, NodeWorkspaceSaveController, RequestJSON } from "../NodeWorkspaceSurfaceShared.js";
 import { createNodeV2Client } from "./nodeV2Api.js";
 import { NodeV2Editor, type NodeV2EditorHandle, type NodeV2InlineImage } from "./NodeV2Editor.js";
-import type { NodeV2SaveState } from "./nodeV2Sync.js";
+import type { NodeV2SaveState } from "./nodeV2ProviderSync.js";
 import type { NodeV2AttachmentLink, NodeV2CommentThread, NodeV2Cursor, NodeV2EmailMessage, NodeV2TextBox, NodeV2TextBoxSummary, NodeV2TimelineItem, NodeV2Workspace } from "./nodeV2Types.js";
 import "./nodeV2.css";
 
@@ -150,7 +150,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [activeTextboxID, setActiveTextboxID] = useState("");
   const [saveState, setSaveState] = useState<NodeV2SaveState>("loading");
-  const [panel, setPanel] = useState<"comments" | "files" | "emails" | "timeline">("comments");
+  const [panel, setPanel] = useState<"comments" | "files" | "timeline">("comments");
   const [comments, setComments] = useState<NodeV2CommentThread[]>([]);
   const [commentCursor, setCommentCursor] = useState<NodeV2Cursor>();
   const [commentBody, setCommentBody] = useState("");
@@ -231,8 +231,27 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     }
   };
 
+  const createTextboxFromEmail = async (threadID: string, messageID: string) => {
+    if (!canEdit || busy) return;
+    setBusy(true);
+    try {
+      await editorRef.current?.flush("create_email_textbox");
+      const result = await client.createTextbox(randomID());
+      await client.linkEmail(result.textbox.textbox_id, threadID, randomID(), messageID);
+      setDocuments((current) => ({ ...current, [result.textbox.textbox_id]: result.textbox }));
+      await reload();
+      setActiveTextboxID(result.textbox.textbox_id);
+      setPanel("comments");
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Unable to create a text box for this email");
+    } finally {
+      setBusy(false);
+    }
+  };
   const archiveTextbox = async (textbox: NodeV2TextBoxSummary, archived: boolean) => {
     setBusy(true);
+
+
     try {
       if (textbox.textbox_id === activeTextboxID) await editorRef.current?.flush("archive");
       const updated = await client.archiveTextbox(textbox.textbox_id, archived, randomID());
@@ -384,11 +403,24 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     </header>
 
     <div className="node-v2-layout">
+      <aside className="node-v2-email-column" aria-label="Node email column">
+        <h3>Email</h3>
+        {workspace.email_thread_summaries.length === 0 && <p>No email is attached to this Node.</p>}
+        {workspace.email_thread_summaries.map((thread) => <article className="node-v2-email" key={thread.email_thread_id}>
+          <strong>{thread.subject || "No subject"}</strong><p>{thread.snippet}</p><small>{thread.message_count} messages · {thread.account_email}</small>
+          <div>{activeTextbox && <button type="button" disabled={!canEdit || thread.linked_textbox_ids.includes(activeTextbox.textbox_id)} onClick={() => void client.linkEmail(activeTextbox.textbox_id, thread.email_thread_id, randomID()).then(reload).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to link email"))}>Link to this text box</button>}<button type="button" onClick={() => void loadEmail(thread.email_thread_id)}>Load message bodies</button></div>
+          {emailMessages[thread.email_thread_id]?.items.map((message) => <div className="node-v2-email-message" data-provider-message-id={message.provider_message_id} key={message.email_message_id}><header><strong>{message.from.map((address) => address.name || address.email).join(", ")}</strong><button type="button" disabled={!canEdit || busy} aria-label="Create text box for this email" title="Create text box for this email" onClick={() => void createTextboxFromEmail(thread.email_thread_id, message.email_message_id)}>Create text box</button></header><div dangerouslySetInnerHTML={{ __html: sanitizeEditorDocumentHTML(message.body_html ?? "") }} /></div>)}
+          {emailMessages[thread.email_thread_id]?.nextCursor && <button type="button" onClick={() => void loadMoreEmailMessages(thread.email_thread_id)}>Load more messages</button>}
+        </article>)}
+        {workspace.email_next_cursor && <button type="button" onClick={() => void client.emails(workspace.email_next_cursor).then((page) => setWorkspace((current) => current ? { ...current, email_thread_summaries: [...current.email_thread_summaries, ...page.items], email_next_cursor: page.next_cursor } : current)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load more email"))}>Load more email</button>}
+      </aside>
+
       <main className="node-v2-textboxes" aria-label="Node text boxes">
         {workspace.textboxes.length === 0 && <div className="node-v2-empty"><p>This Node has no text boxes.</p>{canEdit && <button type="button" onClick={() => void createTextbox()}>Create the first text box</button>}</div>}
         {workspace.textboxes.map((textbox, index) => {
           const active = textbox.textbox_id === activeTextboxID;
-          return <article className={`node-v2-textbox-card${active ? " is-active" : ""}`} key={textbox.textbox_id} data-node-v2-textbox-id={textbox.textbox_id}>
+          const linkedEmailThread = workspace.email_thread_summaries.find((thread) => thread.linked_textbox_ids.includes(textbox.textbox_id));
+          return <article className={`node-v2-textbox-card${active ? " is-active" : ""}${linkedEmailThread ? " is-email-linked" : ""}`} key={textbox.textbox_id} data-node-v2-textbox-id={textbox.textbox_id} data-linked-email-thread-id={linkedEmailThread?.email_thread_id}>
             <header>
               <button type="button" className="node-v2-textbox-title" onClick={() => void activate(textbox.textbox_id)} aria-current={active ? "true" : undefined}>Text box {index + 1}</button>
               <span>{textbox.comment_count} comments · {textbox.attachment_count} files</span>
@@ -429,13 +461,13 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
 
       <aside className="node-v2-sidebar">
         <nav className="node-v2-tabs" aria-label="Node v2 details">
-          {(["comments", "files", "emails", "timeline"] as const).map((item) => <button key={item} type="button" onClick={() => setPanel(item)} aria-pressed={panel === item}>{item[0].toUpperCase() + item.slice(1)}</button>)}
+          {(["comments", "files", "timeline"] as const).map((item) => <button key={item} type="button" onClick={() => setPanel(item)} aria-pressed={panel === item}>{item === "comments" ? "Chat" : item[0].toUpperCase() + item.slice(1)}</button>)}
         </nav>
 
-        {panel === "comments" && <section aria-label="Text box comments">
+        {panel === "comments" && <section aria-label="Text box chat">
           {!activeTextbox && <p>Select a text box to see its comments.</p>}
           {activeTextbox && <>
-            <label className="node-v2-field">Comment on this text box or the current selection<textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} disabled={!canEdit} /></label>
+            <label className="node-v2-field">Chat about this text box or the current selection<textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} disabled={!canEdit} /></label>
             <label className="node-v2-field">Mention<select value={mentionUserID} onChange={(event) => setMentionUserID(event.target.value)} disabled={!canEdit}><option value="">No mention</option>{companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name || user.email}</option>)}</select></label>
             <button type="button" onClick={() => void createComment()} disabled={!canEdit || busy || !commentBody.trim()}>Add comment</button>
             <div className="node-v2-comment-list">
@@ -443,6 +475,14 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
                 {thread.selected_quote && <button type="button" className="node-v2-comment-anchor" onClick={() => editorRef.current?.focusComment(thread.thread_id)} disabled={thread.anchor_format !== "yjs_relative_v1"}><q>{thread.selected_quote}</q></button>}
                 {thread.anchor_status !== "anchored" && thread.anchor_status !== "uniquely_recovered" && <p className="node-v2-anchor-fallback">{thread.anchor_format === "none" || thread.anchor_format === "legacy_offsets_v1" ? "Legacy comment without a durable highlight." : thread.anchor_status === "ambiguous" ? "This quote matches more than one place." : "The selected range was deleted; showing the saved quote."}</p>}
                 {thread.comments.map((comment) => <div key={comment.comment_id} className="node-v2-comment"><strong>{comment.author_display_name}</strong><p>{comment.body_text}</p>{comment.mentions.length > 0 && <small>Mentioned: {comment.mentions.map((mention) => mention.principal_display_name).join(", ")}</small>}</div>)}
+                {thread.comments_next_cursor && <button type="button" onClick={() => {
+                  const requestedCursor = thread.comments_next_cursor;
+                  void client.commentReplies(activeTextboxID, thread.thread_id, requestedCursor).then((page) => {
+                    setComments((current) => current.map((item) => item.thread_id === thread.thread_id
+                      ? { ...item, comments: [...page.items, ...item.comments], comments_next_cursor: page.next_cursor }
+                      : item));
+                  }).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load older replies"));
+                }}>Load older replies ({Math.max(0, thread.comment_count - thread.comments.length)})</button>}
                 <ThreadReply disabled={!canEdit} onReply={(body) => reply(thread, body)} />
               </article>)}
               {commentCursor && <button type="button" onClick={() => {
@@ -464,16 +504,6 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
           </div>
           <div className="node-v2-attachment-grid">{workspace.attachment_summaries.map((link: NodeV2AttachmentLink) => <article key={link.attachment_link_id}><AttachmentPreview apiBase={apiBase} companyID={companyID} attachment={link.attachment} /><strong>{link.attachment.original_filename}</strong><span>{readableBytes(link.attachment.byte_size)} · Text box {workspace.textboxes.findIndex((item) => item.textbox_id === link.textbox_id) + 1}</span></article>)}</div>
           {workspace.attachment_next_cursor && <button type="button" onClick={() => void client.attachments(workspace.attachment_next_cursor).then((page) => setWorkspace((current) => current ? { ...current, attachment_summaries: [...current.attachment_summaries, ...page.items], attachment_next_cursor: page.next_cursor } : current)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load more attachments"))}>Load more attachments</button>}
-        </section>}
-
-        {panel === "emails" && <section aria-label="Node email">
-          {workspace.email_thread_summaries.map((thread) => <article className="node-v2-email" key={thread.email_thread_id}>
-            <strong>{thread.subject || "No subject"}</strong><p>{thread.snippet}</p><small>{thread.message_count} messages · {thread.account_email}</small>
-            <div>{activeTextbox && <button type="button" disabled={!canEdit || thread.linked_textbox_ids.includes(activeTextbox.textbox_id)} onClick={() => void client.linkEmail(activeTextbox.textbox_id, thread.email_thread_id, randomID()).then(reload).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to link email"))}>Link to this text box</button>}<button type="button" onClick={() => void loadEmail(thread.email_thread_id)}>Load message bodies</button></div>
-            {emailMessages[thread.email_thread_id]?.items.map((message) => <div className="node-v2-email-message" data-provider-message-id={message.provider_message_id} key={message.email_message_id}><strong>{message.from.map((address) => address.name || address.email).join(", ")}</strong><div dangerouslySetInnerHTML={{ __html: sanitizeEditorDocumentHTML(message.body_html ?? "") }} /></div>)}
-            {emailMessages[thread.email_thread_id]?.nextCursor && <button type="button" onClick={() => void loadMoreEmailMessages(thread.email_thread_id)}>Load more messages</button>}
-          </article>)}
-          {workspace.email_next_cursor && <button type="button" onClick={() => void client.emails(workspace.email_next_cursor).then((page) => setWorkspace((current) => current ? { ...current, email_thread_summaries: [...current.email_thread_summaries, ...page.items], email_next_cursor: page.next_cursor } : current)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load more email"))}>Load more email</button>}
         </section>}
 
         {panel === "timeline" && <section aria-label="Node timeline"><ol className="node-v2-timeline">{workspace.timeline.items.map((item) => <li key={item.timeline_item_id}><strong>{timelineLabel(item)}</strong><time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time></li>)}</ol>{workspace.timeline.next_cursor && <button type="button" onClick={() => void loadMoreTimeline()}>Load more timeline</button>}</section>}

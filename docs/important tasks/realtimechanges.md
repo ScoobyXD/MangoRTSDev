@@ -1227,3 +1227,6 @@ This charter is implemented only when all of the following are true:
 Every approved live change must follow one coherent rule:
 
 > Commit canonical state once, record publication durably in the same transaction, distribute through one shared cross-instance realtime spine, deliver only to exact authorized connections, recover through canonical reads, and never sacrifice a user's unacknowledged work.
+## 2026-07-28 Node v2 collaboration boundary
+
+Node v2 typing uses its dedicated authorized Hocuspocus/Yjs channel rather than the general business realtime outbox. PostgreSQL commit-only acknowledgements and exact durability snapshots govern document save state; the general outbox remains responsible for business commands such as textbox creation, archive/restore, comments, attachments, email links, movements, and verification. See docs/backend/node-v2-phase3-engineering.md for the production service and rollback boundary. No live gate was enabled.

@@ -130,6 +130,8 @@ func (s *Server) handleNodeV2(w http.ResponseWriter, r *http.Request, nodeID str
 			s.handleNodeV2TextboxSync(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "updates":
 			s.handleNodeV2TextboxUpdate(w, r, nodeID, textboxID)
+		case len(parts) == 3 && parts[2] == "collaboration-ticket":
+			s.handleNodeV2CollaborationTicket(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "checkpoints":
 			s.handleNodeV2TextboxCheckpoint(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "comments":
@@ -369,26 +371,50 @@ func (s *Server) handleNodeV2TextboxUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
+	_, _, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
 	if !ok {
 		return
 	}
-	var request nodeV2UpdateRequest
+	// Browsers must speak the Yjs protocol to the trusted collaboration
+	// authority. Accepting opaque bytes here would let a valid user durably
+	// poison replay for every later session.
+	writeError(w, http.StatusForbidden, "node_v2_collaboration_service_only")
+}
+
+type nodeV2CollaborationTicketRequest struct {
+	ClientID string `json:"client_id"`
+}
+
+func (s *Server) handleNodeV2CollaborationTicket(w http.ResponseWriter, r *http.Request, nodeID, textboxID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID, _, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
+	if !ok {
+		return
+	}
+	var request nodeV2CollaborationTicketRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	payload, err := base64.StdEncoding.DecodeString(request.PayloadBase64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_update_payload")
+	actor, authenticated := authenticatedActor(r)
+	if !authenticated {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	item, err := s.repo.AppendNodeV2YjsUpdate(store.NodeV2YjsUpdateInput{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, ActorUserID: actorID, CollaborationEpoch: request.CollaborationEpoch, UpdateID: request.UpdateID, UpdateSHA256: request.UpdateSHA256, ClientID: request.ClientID, Payload: payload})
+	ticket, expiresAt, err := s.realtimeTickets.mintNodeV2Collaboration(actor, companyID, nodeID, textboxID, request.ClientID)
 	if err != nil {
-		writeNodeV2StoreError(w, err)
+		log.Printf("node_v2_collaboration_ticket_rejected company_id=%s node_id=%s textbox_id=%s error=%v", companyID, nodeID, textboxID, err)
+		writeError(w, http.StatusServiceUnavailable, "node_v2_collaboration_unavailable")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token":         ticket,
+		"expires_at":    expiresAt,
+		"document_name": strings.Join([]string{"node-textbox", strings.ToLower(companyID), strings.ToLower(nodeID), strings.ToLower(textboxID)}, ":"),
+	})
 }
 
 type nodeV2CheckpointRequest struct {
@@ -470,12 +496,26 @@ func (s *Server) handleNodeV2Comments(w http.ResponseWriter, r *http.Request, no
 }
 
 func (s *Server) handleNodeV2CommentReply(w http.ResponseWriter, r *http.Request, nodeID, textboxID, threadID string) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, true, true)
+	companyID, actorID, ok := s.nodeV2RequestActor(w, r, nodeID, r.Method != http.MethodGet, true)
 	if !ok {
+		return
+	}
+	if r.Method == http.MethodGet {
+		cursor, err := decodeNodeV2CursorFor(r.URL.Query().Get("cursor"), "node_v2_comment_replies")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_cursor")
+			return
+		}
+		page, err := s.repo.ListNodeV2CommentReplies(store.NodeV2CommentReplyQuery{CompanyID: companyID, NodeID: nodeID, TextboxID: textboxID, ThreadID: threadID, Limit: nodeV2Limit(r), Cursor: cursor})
+		if err != nil {
+			writeNodeV2StoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
 		return
 	}
 	var request nodeV2CommentRequest

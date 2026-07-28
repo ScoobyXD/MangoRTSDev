@@ -74,6 +74,11 @@ func (r *PostgresRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJ
 	if err != nil {
 		return EditorJSONSnapshot{}, err
 	}
+	if active, activeErr := r.postgresEditorDomainActive(ref); activeErr != nil {
+		return EditorJSONSnapshot{}, activeErr
+	} else if active {
+		return getPostgresEditorDomainSnapshot(r, ref)
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
@@ -173,6 +178,11 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 	input.Document, err = normalizePostgresEditorJSONRef(input.Document)
 	if err != nil {
 		return EditorJSONCommit{}, err
+	}
+	if active, activeErr := r.postgresEditorDomainActive(input.Document); activeErr != nil {
+		return EditorJSONCommit{}, activeErr
+	} else if active {
+		return commitPostgresEditorDomainDocument(r, input)
 	}
 	annotationsRaw, err := json.Marshal(input.Annotations)
 	if err != nil {
@@ -301,6 +311,11 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 	if input.OperationID == "" || input.ClientID == "" || input.BaseRevision < 0 {
 		return EditorJSONCommit{}, ErrInvalid
 	}
+	if active, activeErr := r.postgresEditorDomainActive(input.Document); activeErr != nil {
+		return EditorJSONCommit{}, activeErr
+	} else if active {
+		return deletePostgresEditorDomainDocument(r, input)
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -422,6 +437,11 @@ func (r *PostgresRepo) ListEditorJSONVersions(ref EditorJSONDocumentRef, limit i
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	if active, activeErr := r.postgresEditorDomainActive(ref); activeErr != nil {
+		return nil, activeErr
+	} else if active {
+		return listPostgresEditorDomainVersions(r, ref, limit)
 	}
 	rows, err := r.db.Query(`
 		select revision,document_schema_version,canonical_document,canonical_annotations,operation_id,

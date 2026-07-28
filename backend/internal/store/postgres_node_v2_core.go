@@ -277,6 +277,7 @@ func (r *PostgresRepo) GetNodeV2Availability(companyID, nodeID string) (NodeV2Av
 	if err := r.db.QueryRowContext(ctx, `select
   to_regclass('public.node_textboxes') is not null
   and to_regclass('public.node_timeline_items') is not null
+  and to_regclass('public.editor_rollout_gates') is not null
   and to_regclass('public.workspace_editor_formats') is not null`).Scan(&foundationReady); err != nil {
 		return NodeV2Availability{}, err
 	}
@@ -285,9 +286,16 @@ func (r *PostgresRepo) GetNodeV2Availability(companyID, nodeID string) (NodeV2Av
 	}
 	var active bool
 	if err := r.db.QueryRowContext(ctx, `select exists(
-  select 1 from workspace_editor_formats
-  where company_id=$1::uuid and editor_format='tiptap_json' and migration_state='ready'
-    and expected_document_count=converted_document_count
+  select 1
+    from workspace_editor_formats workspace_gate
+    join editor_rollout_gates owner_gate
+      on owner_gate.company_id=workspace_gate.company_id and owner_gate.owner_type='node'
+   where workspace_gate.company_id=$1::uuid
+     and workspace_gate.editor_format='tiptap_json' and workspace_gate.migration_state='ready'
+     and workspace_gate.expected_document_count=workspace_gate.converted_document_count
+     and owner_gate.rollout_state='active'
+     and owner_gate.expected_count=owner_gate.converted_count
+     and owner_gate.failed_count=0 and owner_gate.shadow_mismatch_count=0
 )`, companyID).Scan(&active); err != nil {
 		return NodeV2Availability{}, err
 	}
