@@ -324,7 +324,11 @@ test("# entity menu selects its top result with Tab and the entity participates 
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
     assert.deepEqual(queries, [""]);
-    assert.ok(dom.window.document.querySelector('[data-mango-tiptap-entity-menu="true"] [role="option"]'));
+    const entityMenu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-entity-menu="true"]');
+    assert.equal(entityMenu?.dataset.side, "bottom");
+    assert.equal(entityMenu?.classList.contains("mango-tiptap-suggestion-menu--entity"), true);
+    assert.equal(entityMenu?.querySelector('[role="option"]')?.classList.contains("mango-tiptap-suggestion-option--entity"), true);
+    assert.ok(entityMenu?.querySelector(".mango-tiptap-suggestion-product-icon"));
     editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
     const inserted = editor.getJSON().content?.[0]?.content?.find((node) => node.type === "mangoEntityLink") as { attrs?: Record<string, unknown> } | undefined;
     assert.equal(inserted?.attrs?.entityType, "project");
@@ -351,6 +355,62 @@ test("# entity menu selects its top result with Tab and the entity participates 
     assert.match(editor.state.doc.textContent, /Most recent project/);
     assert.equal(editor.commands.undo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
+  } finally {
+    editor.destroy();
+    dom.window.close();
+    for (const name of names) {
+      const value = previous.get(name);
+      if (value === undefined) delete (globalThis as unknown as Record<string, unknown>)[name];
+      else Object.defineProperty(globalThis, name, { configurable: true, value });
+    }
+    if (previousRAF === undefined) delete (globalThis as unknown as Record<string, unknown>).requestAnimationFrame;
+    else Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: previousRAF });
+    if (previousCancelRAF === undefined) delete (globalThis as unknown as Record<string, unknown>).cancelAnimationFrame;
+    else Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: previousCancelRAF });
+  }
+});
+test("@ mention menu reads people loaded after editor creation and inserts an atomic colorful chip", async () => {
+  const dom = new JSDOM("<!doctype html><div id=\"editor\"></div>", { url: "https://mango.test/" });
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const names = ["window", "document", "Node", "Element", "HTMLElement", "MutationObserver", "KeyboardEvent"] as const;
+  const previous = new Map<string, unknown>();
+  for (const name of names) {
+    previous.set(name, (globalThis as unknown as Record<string, unknown>)[name]);
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? dom.window : name === "document" ? dom.window.document : (domGlobals as unknown as Record<string, unknown>)[name] });
+  }
+  const previousRAF = globalThis.requestAnimationFrame;
+  const previousCancelRAF = globalThis.cancelAnimationFrame;
+  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: (handle: number) => clearTimeout(handle) });
+  if (!domGlobals.Range.prototype.getClientRects) domGlobals.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  if (!domGlobals.Range.prototype.getBoundingClientRect) domGlobals.Range.prototype.getBoundingClientRect = () => new domGlobals.DOMRect(40, 30, 0, 20);
+  let people: ReadonlyArray<{ userID: string; name: string; email?: string }> = [];
+  const editor = new MangoTiptapEditorEngine({
+    element: dom.window.document.querySelector<HTMLElement>("#editor"),
+    extensions: createMangoTiptapExtensions({ editable: true, getMentionUsers: () => people }),
+    content: { type: "doc", content: [{ type: "paragraph" }] },
+  });
+  try {
+    people = [{ userID: "user-1", name: "Christina Phan", email: "christina.phan@example.com" }];
+    editor.commands.focus();
+    editor.commands.insertContent("@");
+    for (let index = 0; index < 50 && !dom.window.document.querySelector('[data-mango-tiptap-mention-menu="true"] [role="option"]'); index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    const menu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-mention-menu="true"]');
+    const option = menu?.querySelector<HTMLElement>('[role="option"]');
+    assert.equal(menu?.dataset.side, "bottom");
+    assert.equal(menu?.classList.contains("mango-tiptap-suggestion-menu"), true);
+    assert.equal(option?.classList.contains("mango-tiptap-suggestion-option--person"), true);
+    assert.equal(option?.querySelector(".mango-tiptap-suggestion-label")?.textContent, "Christina Phan");
+    assert.equal(option?.querySelector(".mango-tiptap-suggestion-meta")?.textContent, "christina.phan@example.com");
+    assert.equal(option?.querySelector(".mango-tiptap-suggestion-avatar")?.textContent, "CP");
+    editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    const inserted = editor.getJSON().content?.[0]?.content?.find((node) => node.type === "mention") as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(inserted?.attrs?.userId, "user-1");
+    assert.equal(inserted?.attrs?.label, "Christina Phan");
+    assert.equal(inserted?.attrs?.kind, "normal");
+    assert.match(editor.getHTML(), /mango-tiptap-mention--normal/);
   } finally {
     editor.destroy();
     dom.window.close();

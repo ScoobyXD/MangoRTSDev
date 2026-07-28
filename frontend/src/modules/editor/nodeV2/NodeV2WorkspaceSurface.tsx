@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchMangoAttachmentBlob, uploadMangoAttachment, type AttachmentRequestJSON, type MangoAttachment } from "../../attachments/attachmentApi.js";
-import { sanitizeEditorDocumentHTML } from "../richTextEditing.js";
+import { createEditorImageFrame } from "../editorImages.js";
+import { sanitizeEditorDocumentHTML, serializeEditorDocumentHTML } from "../richTextEditing.js";
+import type { MangoTiptapImageAction } from "../tiptap/MangoTiptapEditor.js";
+import { serializeMangoTiptapDocument } from "../tiptap/mangoTiptapDocument.js";
 import { MangoTiptapStaticRenderer } from "../tiptap/MangoTiptapStaticRenderer.js";
-import type { MentionableCompanyUser, NodeWorkspaceSaveController, RequestJSON } from "../NodeWorkspaceSurfaceShared.js";
+import type { MentionableCompanyUser, NodeImageNodeRequest, NodeWorkspaceSaveController, RequestJSON } from "../NodeWorkspaceSurfaceShared.js";
 import { createNodeV2Client } from "./nodeV2Api.js";
 import { NodeV2Editor, type NodeV2EditorHandle, type NodeV2InlineImage } from "./NodeV2Editor.js";
 import type { NodeV2SaveState } from "./nodeV2ProviderSync.js";
@@ -20,6 +23,7 @@ type Props = {
   topPx: number;
   requestJSON: RequestJSON;
   onRegisterSaveController?: (controller: NodeWorkspaceSaveController | null) => void;
+  onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onError: (message: string) => void;
 };
 
@@ -27,6 +31,18 @@ function randomID(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+
+function blobAsDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string" && reader.result.startsWith("data:")) resolve(reader.result);
+      else reject(new Error("failed_to_read_image_attachment"));
+    }, { once: true });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("failed_to_read_image_attachment")), { once: true });
+    reader.readAsDataURL(blob);
+  });
+}
 function cursorKey(cursor?: NodeV2Cursor): string {
   return cursor ? `${cursor.timestamp}:${cursor.id}:${cursor.sequence ?? 0}` : "";
 }
@@ -140,12 +156,14 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   topPx,
   requestJSON,
   onRegisterSaveController,
+  onCreateNodeFromImage,
   onError,
 }) => {
   const client = useMemo(() => createNodeV2Client(requestJSON, companyID, nodeID), [requestJSON, companyID, nodeID]);
   const editorRef = useRef<NodeV2EditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const commentComposerRef = useRef<HTMLTextAreaElement>(null);
   const [workspace, setWorkspace] = useState<NodeV2Workspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTextboxID, setActiveTextboxID] = useState("");
@@ -307,6 +325,67 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
     return images;
   };
 
+
+  const openImageChat = useCallback((_image: MangoTiptapImageAction) => {
+    setPanel("comments");
+    window.requestAnimationFrame(() => commentComposerRef.current?.focus());
+  }, []);
+
+  const createNodeFromInlineImage = useCallback(async (image: MangoTiptapImageAction) => {
+    if (!canEdit || !image.attributes.attachmentId) return;
+    try {
+      const sourceBlob = await fetchMangoAttachmentBlob(apiBase, companyID, image.attributes.attachmentId, "original");
+      const dataURL = await blobAsDataURL(sourceBlob);
+      const ownerDocument = globalThis.document;
+      if (!ownerDocument) throw new Error("image_node_document_unavailable");
+      const container = ownerDocument.createElement("div");
+      container.appendChild(createEditorImageFrame(ownerDocument, {
+        src: dataURL,
+        width: Math.max(48, image.width),
+        height: Math.max(36, image.height),
+        floatSide: "left",
+        marginLeft: 0,
+        marginTop: 4,
+      }));
+      const legacyDocument = serializeEditorDocumentHTML(container);
+      const tiptapDocument = serializeMangoTiptapDocument({
+        format: "mango-tiptap-json",
+        schema_version: 1,
+        document: {
+          type: "doc",
+          content: [{
+            type: "mangoAttachmentImage",
+            attrs: {
+              attachmentId: image.attributes.attachmentId,
+              filename: image.attributes.filename,
+              mimeType: image.attributes.mimeType || sourceBlob.type || "application/octet-stream",
+              width: image.attributes.width ?? image.width,
+              height: image.attributes.height ?? image.height,
+              displayWidth: image.width,
+              displayHeight: image.height,
+              alignment: image.attributes.alignment || "center",
+              position: image.attributes.position || "break",
+              layout: image.attributes.layout || "content",
+              alt: image.attributes.alt || image.attributes.filename,
+              title: image.attributes.title || image.attributes.filename,
+              linkHref: image.attributes.linkHref || "",
+              linkTarget: image.attributes.linkTarget || "",
+              linkRel: image.attributes.linkRel || "",
+              linkTitle: image.attributes.linkTitle || "",
+            },
+          }, {
+            type: "paragraph",
+            attrs: { blockId: randomID(), textAlign: null, indentLevel: 0 },
+          }],
+        },
+      });
+      const title = image.attributes.filename?.trim() || "Image";
+      await onCreateNodeFromImage({ title: title === "Image" ? title : `Image - ${title}`, document: legacyDocument, tiptapDocument, attachmentID: image.attributes.attachmentId });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_create_image_node");
+    }
+  }, [apiBase, canEdit, companyID, onCreateNodeFromImage, onError]);
+
   const createComment = async () => {
     if (!activeTextboxID || !commentBody.trim()) return;
     const anchor = editorRef.current?.selectionAnchor();
@@ -443,8 +522,11 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
                 canEdit={canEdit}
                 comments={comments}
                 mentionUsers={companyUsers}
+                requestJSON={requestJSON}
                 onSaveState={setSaveState}
                 onUploadInlineImages={(files) => uploadFiles(files, true)}
+                onImageChatRequest={openImageChat}
+                onImageNodeRequest={(image) => { void createNodeFromInlineImage(image); }}
                 onError={onError}
               />
               : active ? <div className="node-v2-editor-loading" role="status">Loading this text box…</div> : <VirtualStaticTextbox apiBase={apiBase} companyID={companyID} textbox={textbox} client={client} onActivate={() => void activate(textbox.textbox_id)} />}
@@ -467,7 +549,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
         {panel === "comments" && <section aria-label="Text box chat">
           {!activeTextbox && <p>Select a text box to see its comments.</p>}
           {activeTextbox && <>
-            <label className="node-v2-field">Chat about this text box or the current selection<textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} disabled={!canEdit} /></label>
+            <label className="node-v2-field">Chat about this text box or the current selection<textarea ref={commentComposerRef} value={commentBody} onChange={(event) => setCommentBody(event.target.value)} disabled={!canEdit} /></label>
             <label className="node-v2-field">Mention<select value={mentionUserID} onChange={(event) => setMentionUserID(event.target.value)} disabled={!canEdit}><option value="">No mention</option>{companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name || user.email}</option>)}</select></label>
             <button type="button" onClick={() => void createComment()} disabled={!canEdit || busy || !commentBody.trim()}>Add comment</button>
             <div className="node-v2-comment-list">

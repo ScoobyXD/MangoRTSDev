@@ -23,7 +23,7 @@ import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipPr
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
-import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
+import { linkMangoResourceAttachment, loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -55,6 +55,7 @@ import {
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
   type NodeWorkspaceSaveController,
+  type NodeImageNodeRequest,
 } from "./NodeWorkspaceSurfaceShared";
 import {
   deserializeEditorDocumentHTML,
@@ -1394,7 +1395,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
-  const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string; blockTitle?: string }) => {
+  const createNodeFromImageDocument = useCallback(async (input: NodeImageNodeRequest) => {
     if (!linkedEntityCanEdit) return;
     if (!companyID || linkedEntityKind !== "node") return;
     const title = input.title.trim() || "Image";
@@ -1436,8 +1437,20 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!node) throw new Error("image_node_batch_create_missing_node");
     const informationID = generateStableInformationID();
     const operationID = generateStableInformationID();
+    const attachmentID = input.attachmentID?.trim();
+    if (attachmentID) {
+      await linkMangoResourceAttachment(requestJSON, {
+        companyID,
+        resourceType: "node",
+        resourceID: node.node_id,
+        attachmentID,
+        relationshipKind: "inline_image",
+        informationID,
+        editorSurface: "node_text_block",
+      });
+    }
     if (editorDataFormat.gate?.editor_format === "tiptap_json") {
-      const parsed = parseMangoTiptapDocument(document);
+      const parsed = parseMangoTiptapDocument(input.tiptapDocument ?? document);
       if (!parsed.valid) throw new Error(`invalid_image_node_tiptap_document: ${parsed.error}`);
       const path = `/v1/editor-json/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`;
       await requestJSON<unknown>(path, {
@@ -2934,6 +2947,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             hidden={documentIsolation.visibility === "hidden"}
             topPx={documentTopPx}
             requestJSON={requestJSON}
+            onCreateNodeFromImage={createNodeFromImageDocument}
             onRegisterSaveController={(controller) => { nodeWorkspaceSaveControllerRef.current = controller; }}
             onError={setError}
           />

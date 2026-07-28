@@ -1570,3 +1570,35 @@ test("canceling selected-text chat clears both temporary annotation and editor s
   assert.match(nodeSurface, /if \(chatPaneIsVisible\) \{\s*clearSelectionAnchor\(\);/);
   assert.match(nodeParts, /aria-label="Clear selected text"[\s\S]{0,260}onClick=\{onClearSelectionAnchor\}/);
 });
+
+test("node text-block metadata mutations honor the active editor format and remove deleted boxes optimistically", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+
+  assert.match(nodeSurface, /useMangoEditorDataFormat\(apiBase, companyID, requestJSON\)/);
+  assert.match(nodeSurface, /format === "tiptap_json" \? "editor-json" : "editor-collaboration"/);
+  assert.match(nodeSurface, /format === "tiptap_json"\s*\? \{ title: content\.title, attachments: content\.attachments \?\? \[\] \}\s*: buildEditorTextBlockMetadataPayload\(content\)/);
+  assert.match(nodeSurface, /await flushMangoTiptapDocument\(\{ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID \}\)/);
+  assert.match(nodeSurface, /const baseRevision = format === "tiptap_json"[\s\S]{0,520}base_revision: baseRevision/);
+
+  const optimisticRemoval = nodeSurface.indexOf("setBlocks((current) => current.filter((block) => block.id !== blockID));", nodeSurface.indexOf("const deleteTextBlock"));
+  const deleteRequest = nodeSurface.indexOf('method: "DELETE"', optimisticRemoval);
+  assert.ok(optimisticRemoval >= 0 && deleteRequest > optimisticRemoval, "the deleted node text box must disappear before the server request completes");
+  assert.match(nodeSurface, /catch \(cause\) \{[\s\S]{0,520}previousBlockIndex[\s\S]{0,260}onProjectionMutation\(\);\s*return/);
+  assert.match(nodeSurface, /const tiptapDocument = image\.attachmentID \? serializeMangoTiptapDocument/);
+  assert.match(nodeSurface, /attachmentID: image\.attachmentID/);
+});
+
+test("Node V2 wires live mentions, entity search, and the shared movable image controls", () => {
+  const nodeV2 = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/nodeV2/NodeV2Editor.tsx"), "utf8");
+  const tiptap = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+
+  assert.match(nodeV2, /getMentionUsers: \(\) => mentionUsersRef\.current/);
+  assert.match(nodeV2, /searchEntityLinks: \(query\) => searchEditorEntityLinks\(\{ companyID, requestJSON \}, query\)/);
+  assert.match(nodeV2, /<MangoAuthenticatedImage/);
+  assert.match(tiptap, /data-drag-handle=\{editable \? "true" : undefined\}/);
+  assert.match(tiptap, /data-mango-tiptap-image-actions="true"/);
+  assert.match(tiptap, /transform: "translateY\(-100%\)"/);
+  assert.match(editorContent, /linkMangoResourceAttachment\(requestJSON/);
+  assert.match(editorContent, /relationshipKind: "inline_image"[\s\S]{0,120}informationID/);
+});

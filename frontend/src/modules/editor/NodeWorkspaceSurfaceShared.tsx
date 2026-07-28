@@ -69,7 +69,9 @@ export type NodeWorkspaceSurfaceProps = {
 
 export type NodeImageNodeRequest = {
   title: string;
+  attachmentID?: string;
   document: string;
+  tiptapDocument?: string;
   blockTitle?: string;
 };
 

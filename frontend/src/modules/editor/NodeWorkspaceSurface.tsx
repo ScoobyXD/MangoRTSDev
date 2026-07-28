@@ -76,6 +76,9 @@ import { serializeEditorDocumentHTML } from "./richTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
 import { openEditorEntityLink } from "./editorEntityLinks";
+import { useMangoEditorDataFormat } from "./editorDataFormat";
+import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
+import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import { groupNodeTimelineEventsByTextBlock } from "./nodeTimelineOrdering";
 
 import {
@@ -504,6 +507,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onError,
 }) => {
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
+  const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const timelineCreateMenuRef = useRef<HTMLDivElement | null>(null);
@@ -603,7 +607,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [timelineCreateMenuOpen, setTimelineCreateMenuOpen] = useState(false);
   const [verificationRequestPending, setVerificationRequestPending] = useState(false);
   const [verificationCompletionPendingID, setVerificationCompletionPendingID] = useState("");
-  const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID);
+  const editorTextCanEdit = canEdit && projectionsLoaded && Boolean(author.userID) && Boolean(editorDataFormat.gate);
   const formattingControllerAvailable = editorTextCanEdit && blocks.some((block) => block.id === focusedTextBlockID);
   useEffect(() => {
     onFormattingControllerAvailabilityChange?.(formattingControllerAvailable);
@@ -1361,18 +1365,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
     if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block_metadata");
+    const format = editorDataFormat.gate?.editor_format;
+    if (!format) throw new Error("editor_data_format_not_ready");
     const response = await requestJSON<{ projection_revision?: number }>(
-      `/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+      `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
         method: "PATCH",
-        body: JSON.stringify(buildEditorTextBlockMetadataPayload(content)),
+        body: JSON.stringify(format === "tiptap_json"
+          ? { title: content.title, attachments: content.attachments ?? [] }
+          : buildEditorTextBlockMetadataPayload(content)),
       },
     );
     const revision = response?.projection_revision ?? 0;
     if (!Number.isInteger(revision) || revision <= baseRevision) throw new Error("invalid_projection_revision_ack");
     onProjectionMutation();
     return { revision };
-  }, [author.userID, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+  }, [author.userID, canEdit, companyID, editorDataFormat.gate?.editor_format, nodeID, onProjectionMutation, requestJSON]);
 
   const setTextBlockSaveInProgress = useCallback((blockID: string, saveInProgress: boolean) => {
     setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: saveInProgress } : block));
@@ -1681,6 +1689,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
+    const format = editorDataFormat.gate?.editor_format;
+    if (!format) {
+      onError("editor_data_format_not_ready");
+      return;
+    }
     const timer = saveTimersRef.current.get(blockID);
     if (timer !== undefined) {
       window.clearTimeout(timer);
@@ -1688,20 +1701,35 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     let snapshot;
     try {
+      if (format === "tiptap_json") {
+        await flushMangoTiptapDocument({ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID });
+      }
       snapshot = await textBlockProjectionSaveController.waitForInProgressSave(blockID);
-    } catch {
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_save_text_block_before_deletion");
       return;
     }
     if (!snapshot) return;
+    const previousBlockIndex = blocks.findIndex((block) => block.id === blockID);
+    const previousBlock = previousBlockIndex >= 0 ? blocks[previousBlockIndex] : undefined;
+    setBlocks((current) => current.filter((block) => block.id !== blockID));
     // Attached-email projections and resource attachment links are node-owned and intentionally retained.
     const deletedInformationIDs = projectionIDsForTextBlockDeletion(blockID, chatMessages);
     try {
       for (const informationID of deletedInformationIDs) {
         try {
           if (informationID === blockID) {
-            await requestJSON<unknown>(`/v1/editor-collaboration/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`, {
+            const editorPath = `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
+            const baseRevision = format === "tiptap_json"
+              ? (await requestJSON<{ revision: number }>(editorPath)).revision
+              : undefined;
+            await requestJSON<unknown>(editorPath, {
               method: "DELETE",
-              body: JSON.stringify({ operation_id: generateStableInformationID(), client_id: `node-delete:${author.userID}` }),
+              body: JSON.stringify({
+                operation_id: generateStableInformationID(),
+                client_id: `node-delete:${author.userID}`,
+                ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+              }),
             });
           } else {
             await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
@@ -1712,7 +1740,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         }
       }
     } catch (cause) {
+      if (previousBlock) {
+        setBlocks((current) => {
+          if (current.some((block) => block.id === blockID)) return current;
+          const next = [...current];
+          next.splice(Math.min(previousBlockIndex, next.length), 0, previousBlock);
+          return next;
+        });
+      }
       onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
+      onProjectionMutation();
       return;
     }
     textBlockProjectionSaveController.removeBlock(blockID);
@@ -1771,7 +1808,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setActiveChatBlockID((current) => current === blockID ? "" : current);
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
     onProjectionMutation();
-  }, [author.userID, canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
+  }, [author.userID, blocks, canEdit, chatMessages, companyID, editorDataFormat.gate?.editor_format, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
 
   const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
@@ -2153,10 +2190,39 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }));
     const imageDocument = serializeEditorDocumentHTML(container);
     if (!imageDocument) return;
+    const tiptapDocument = image.attachmentID ? serializeMangoTiptapDocument({
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: {
+        type: "doc",
+        content: [{
+          type: "mangoAttachmentImage",
+          attrs: {
+            attachmentId: image.attachmentID,
+            filename: image.filename || "image",
+            mimeType: image.mimeType || "application/octet-stream",
+            width,
+            height,
+            displayWidth: width,
+            displayHeight: height,
+            alignment: "left",
+            position: "break",
+            layout: "content",
+            alt: image.filename || "Image",
+            title: image.filename || "Image",
+          },
+        }, {
+          type: "paragraph",
+          attrs: { blockId: generateStableInformationID(), textAlign: null, indentLevel: 0 },
+        }],
+      },
+    }) : undefined;
     try {
       await onCreateNodeFromImage({
         title: sourceTitle === "Image" ? "Image" : `Image - ${sourceTitle}`,
         document: imageDocument,
+        tiptapDocument,
+        attachmentID: image.attachmentID,
       });
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_create_image_node");

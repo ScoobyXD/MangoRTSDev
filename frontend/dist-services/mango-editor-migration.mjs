@@ -31,6 +31,44 @@ var MAX_STORED_IMAGE_BYTES = 8 * 1024 * 1024;
 var MIN_STORED_IMAGE_BYTES = 512 * 1024;
 var TARGET_EDITOR_DOCUMENT_HTML_BYTES = 12 * 1024 * 1024;
 
+// src/modules/editor/editorMentions.ts
+var MENTION_USER_PROFILE_COLORS = [
+  { background: "#1D4ED8", foreground: "#FFFFFF", border: "#1E3A8A" },
+  { background: "#0F766E", foreground: "#FFFFFF", border: "#115E59" },
+  { background: "#7E22CE", foreground: "#FFFFFF", border: "#581C87" },
+  { background: "#BE123C", foreground: "#FFFFFF", border: "#881337" },
+  { background: "#A16207", foreground: "#FFFFFF", border: "#713F12" },
+  { background: "#047857", foreground: "#FFFFFF", border: "#065F46" },
+  { background: "#B91C1C", foreground: "#FFFFFF", border: "#7F1D1D" },
+  { background: "#4338CA", foreground: "#FFFFFF", border: "#312E81" },
+  { background: "#C2410C", foreground: "#FFFFFF", border: "#9A3412" },
+  { background: "#0369A1", foreground: "#FFFFFF", border: "#0C4A6E" },
+  { background: "#6D28D9", foreground: "#FFFFFF", border: "#4C1D95" },
+  { background: "#4D7C0F", foreground: "#FFFFFF", border: "#3F6212" }
+];
+function normalizedMentionColorIdentity(value) {
+  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function mentionUserColorIdentity(user) {
+  const userID = normalizedMentionColorIdentity(user.user_id ?? "");
+  if (userID) return `user:${userID}`;
+  const email = normalizedMentionColorIdentity(user.email ?? "");
+  if (email) return `email:${email}`;
+  const displayName = normalizedMentionColorIdentity(user.display_name ?? "");
+  return displayName ? `name:${displayName}` : "unknown-user";
+}
+function stableMentionColorIndex(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % MENTION_USER_PROFILE_COLORS.length;
+}
+function mentionUserProfileColor(user) {
+  return MENTION_USER_PROFILE_COLORS[stableMentionColorIndex(mentionUserColorIdentity(user))] ?? MENTION_USER_PROFILE_COLORS[0];
+}
+
 // src/modules/company-explorer/CompanyExplorerEntityIcon.tsx
 import React from "react";
 import { jsx } from "react/jsx-runtime";
@@ -347,6 +385,33 @@ var MangoBlockIdentity = Extension.create({
     })];
   }
 });
+function mentionInitials(label) {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length === 1 ? words[0].slice(0, 2) : `${words[0][0]}${words[words.length - 1][0]}`).toUpperCase();
+}
+function positionSuggestionMenu(menu, clientRect) {
+  const rect = clientRect?.();
+  if (!rect) return;
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const menuWidth = Math.max(menu.offsetWidth, 280);
+  const left = Math.max(8, Math.min(rect.left, viewportWidth - menuWidth - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(rect.bottom + 7)}px`;
+  menu.style.maxHeight = `${Math.max(88, viewportHeight - rect.bottom - 16)}px`;
+  menu.dataset.side = "bottom";
+}
+function createSuggestionMenu(label, dataAttribute) {
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", label);
+  menu.setAttribute(dataAttribute, "true");
+  menu.className = "mango-tiptap-suggestion-menu";
+  menu.style.position = "fixed";
+  menu.style.zIndex = "2100";
+  return menu;
+}
 function createMangoTiptapExtensions(options) {
   const extensions = [
     StarterKit.configure({
@@ -411,7 +476,8 @@ function createMangoTiptapExtensions(options) {
         char: kind === "urgent" ? "!" : "@",
         items: ({ query }) => {
           const normalized = query.trim().toLowerCase();
-          return (options.mentionUsers ?? []).filter((user) => !normalized || user.name.toLowerCase().includes(normalized) || user.email?.toLowerCase().includes(normalized)).slice(0, 20).map((user) => ({ id: user.userID, userId: user.userID, label: user.name }));
+          const users = options.getMentionUsers?.() ?? options.mentionUsers ?? [];
+          return users.filter((user) => !normalized || user.name.toLowerCase().includes(normalized) || user.email?.toLowerCase().includes(normalized)).slice(0, 20).map((user) => ({ id: user.userID, userId: user.userID, label: user.name, email: user.email }));
         },
         command: ({ editor, range, props }) => {
           const value = props;
@@ -439,50 +505,44 @@ function createMangoTiptapExtensions(options) {
               button.type = "button";
               button.setAttribute("role", "option");
               button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
-              button.textContent = item.label || item.userId || "User";
-              Object.assign(button.style, {
-                display: "block",
-                width: "100%",
-                border: "0",
-                borderRadius: "5px",
-                padding: "6px 8px",
-                textAlign: "left",
-                cursor: "pointer",
-                background: index === selectedIndex ? "#e0f2fe" : "#ffffff"
+              button.className = "mango-tiptap-suggestion-option mango-tiptap-suggestion-option--person";
+              button.dataset.mangoMentionKind = kind;
+              const color = mentionUserProfileColor({
+                user_id: item.userId,
+                display_name: item.label,
+                email: item.email
               });
+              const avatar = document.createElement("span");
+              avatar.className = "mango-tiptap-suggestion-avatar";
+              avatar.textContent = mentionInitials(item.label);
+              avatar.style.background = color.background;
+              avatar.style.color = color.foreground;
+              avatar.style.borderColor = color.border;
+              const details = document.createElement("span");
+              details.className = "mango-tiptap-suggestion-copy";
+              const label = document.createElement("span");
+              label.className = "mango-tiptap-suggestion-label";
+              label.textContent = item.label;
+              const email = document.createElement("span");
+              email.className = "mango-tiptap-suggestion-meta";
+              email.textContent = item.email || (kind === "urgent" ? "Urgent mention" : "Mention");
+              details.append(label, email);
+              button.append(avatar, details);
               button.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 current?.command(item);
               });
               menu?.appendChild(button);
             });
-            const rect = current.clientRect?.();
-            if (rect) {
-              menu.style.left = `${Math.round(rect.left)}px`;
-              menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-            }
+            positionSuggestionMenu(menu, current.clientRect);
           };
           return {
             onStart: (props) => {
               if (typeof document === "undefined") return;
               close();
               current = props;
-              menu = document.createElement("div");
-              menu.setAttribute("role", "listbox");
-              menu.setAttribute("aria-label", kind === "urgent" ? "Urgently mention people" : "Mention people");
-              menu.setAttribute("data-mango-tiptap-mention-menu", "true");
-              Object.assign(menu.style, {
-                position: "fixed",
-                zIndex: "2100",
-                minWidth: "180px",
-                maxHeight: "240px",
-                overflowY: "auto",
-                padding: "4px",
-                border: "1px solid #cbd5e1",
-                borderRadius: "8px",
-                background: "#ffffff",
-                boxShadow: "0 8px 24px rgba(15,23,42,.18)"
-              });
+              menu = createSuggestionMenu(kind === "urgent" ? "Urgently mention people" : "Mention people", "data-mango-tiptap-mention-menu");
+              menu.classList.add(`mango-tiptap-suggestion-menu--${kind}`);
               document.body.appendChild(menu);
               paint();
             },
@@ -624,62 +684,34 @@ function createMangoTiptapExtensions(options) {
               button.setAttribute("role", "option");
               button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
               button.dataset.mangoEditorEntityType = item.entityType;
-              Object.assign(button.style, {
-                display: "grid",
-                gridTemplateColumns: "18px minmax(0,1fr) auto",
-                alignItems: "center",
-                gap: "7px",
-                width: "100%",
-                border: "0",
-                borderRadius: "6px",
-                padding: "7px 8px",
-                textAlign: "left",
-                cursor: "pointer",
-                background: index === selectedIndex ? "#e0f2fe" : "#ffffff",
-                color: "#0f172a"
-              });
+              button.className = "mango-tiptap-suggestion-option mango-tiptap-suggestion-option--entity";
               const icon = createEditorEntityIconElement(document, item.entityType);
+              icon.classList.add("mango-tiptap-suggestion-product-icon");
+              const details = document.createElement("span");
+              details.className = "mango-tiptap-suggestion-copy";
               const label = document.createElement("span");
+              label.className = "mango-tiptap-suggestion-label";
               label.textContent = item.label;
-              label.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750";
               const type = document.createElement("span");
+              type.className = "mango-tiptap-suggestion-meta";
               type.textContent = editorEntityTypeLabel(item.entityType);
-              type.style.cssText = "font-size:10px;color:#64748b;font-weight:700";
-              button.append(icon, label, type);
+              details.append(label, type);
+              button.append(icon, details);
               button.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 current?.command(item);
               });
               menu?.appendChild(button);
             });
-            const rect = current.clientRect?.();
-            if (rect) {
-              menu.style.left = `${Math.round(rect.left)}px`;
-              menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-            }
+            positionSuggestionMenu(menu, current.clientRect);
           };
           return {
             onStart: (props) => {
               if (typeof document === "undefined") return;
               close();
               current = props;
-              menu = document.createElement("div");
-              menu.setAttribute("role", "listbox");
-              menu.setAttribute("aria-label", "Link a Node, Logic Gate, or Project");
-              menu.setAttribute("data-mango-tiptap-entity-menu", "true");
-              Object.assign(menu.style, {
-                position: "fixed",
-                zIndex: "2100",
-                minWidth: "280px",
-                maxWidth: "min(420px, calc(100vw - 16px))",
-                maxHeight: "280px",
-                overflowY: "auto",
-                padding: "4px",
-                border: "1px solid #cbd5e1",
-                borderRadius: "8px",
-                background: "#ffffff",
-                boxShadow: "0 8px 24px rgba(15,23,42,.18)"
-              });
+              menu = createSuggestionMenu("Link a Node, Logic Gate, or Project", "data-mango-tiptap-entity-menu");
+              menu.classList.add("mango-tiptap-suggestion-menu--entity");
               document.body.appendChild(menu);
               paint();
             },

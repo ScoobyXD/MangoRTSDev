@@ -4,13 +4,18 @@ import Collaboration from "@tiptap/extension-collaboration";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { absolutePositionToRelativePosition, relativePositionToAbsolutePosition, yUndoPluginKey } from "@tiptap/y-tiptap";
 import * as Y from "yjs";
-import { downloadMangoAttachment, fetchMangoAttachmentBlob } from "../../attachments/attachmentApi.js";
 import type { MentionableCompanyUser } from "../editorMentions.js";
+import { openEditorEntityLink, searchEditorEntityLinks, type EditorEntityLink } from "../editorEntityLinks.js";
+import type { RequestJSON } from "../NodeWorkspaceSurfaceShared.js";
+import type { EditorImageAttachmentContext } from "../useEditorDocumentSurfaceHandlers.js";
+import { MangoAuthenticatedImage, type MangoTiptapImageAction } from "../tiptap/MangoTiptapEditor.js";
+import type { MangoStaticAttachmentImageProps } from "../tiptap/MangoTiptapStaticRenderer.js";
 import { MangoTiptapAnnotations, navigateMangoTiptapTarget, updateMangoTiptapAnnotations } from "../tiptap/mangoTiptapAnnotations.js";
 import { createMangoTiptapExtensions, MangoAttachmentImage, type MangoAttachmentImageAttributes } from "../tiptap/mangoTiptapExtensions.js";
 import type { NodeV2Client } from "./nodeV2Api.js";
 import { NodeV2ProviderSyncController, type NodeV2SaveState } from "./nodeV2ProviderSync.js";
 import type { NodeV2CommentThread, NodeV2TextBox } from "./nodeV2Types.js";
+import "../tiptap/mangoTiptap.css";
 
 export type NodeV2SelectionAnchor = {
   selectedQuote: string;
@@ -41,8 +46,11 @@ type Props = {
   canEdit: boolean;
   comments: NodeV2CommentThread[];
   mentionUsers: MentionableCompanyUser[];
+  requestJSON: RequestJSON;
   onSaveState: (state: NodeV2SaveState) => void;
   onUploadInlineImages: (files: File[]) => Promise<NodeV2InlineImage[]>;
+  onImageChatRequest: (image: MangoTiptapImageAction) => void;
+  onImageNodeRequest: (image: MangoTiptapImageAction) => void;
   onError: (message: string) => void;
 };
 
@@ -81,43 +89,34 @@ export function resolveNodeV2CommentAnchors(editor: Editor, document: Y.Doc, com
     }
   });
 }
-function authenticatedImageExtension(apiBase: string, companyID: string, onError: (message: string) => void) {
-  const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, deleteNode, editor, getPos, updateAttributes }) => {
-    const [objectURL, setObjectURL] = useState("");
-    const [previewOpen, setPreviewOpen] = useState(false);
-    useEffect(() => {
-      const controller = new AbortController();
-      let created = "";
-      void fetchMangoAttachmentBlob(apiBase, companyID, String(node.attrs.attachmentId), "display", { signal: controller.signal })
-        .then((blob) => { created = URL.createObjectURL(blob); setObjectURL(created); })
-        .catch(() => setObjectURL(""));
-      return () => { controller.abort(); if (created) URL.revokeObjectURL(created); };
-    }, [node.attrs.attachmentId]);
-    const attachmentID = String(node.attrs.attachmentId || "");
-    const filename = String(node.attrs.filename || "inline-image");
+function authenticatedImageExtension(
+  attachmentContext: EditorImageAttachmentContext,
+  actions: {
+    onImageChatRequest: (image: MangoTiptapImageAction) => void;
+    onImageNodeRequest: (image: MangoTiptapImageAction) => void;
+  },
+) {
+  const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, editor, getPos, updateAttributes }) => {
     const selectImage = () => {
       const position = typeof getPos === "function" ? getPos() : getPos;
-      if (typeof position === "number") editor.commands.setNodeSelection(position);
+      if (typeof position !== "number") return;
+      (editor.view.dom as HTMLElement).focus({ preventScroll: true });
+      editor.commands.setNodeSelection(position);
     };
-    return <NodeViewWrapper className={`node-v2-inline-image${selected ? " is-selected" : ""}`}>
-      <button type="button" className="node-v2-inline-image-select" aria-label={`Select image ${filename}`} onMouseDown={(event) => { event.preventDefault(); selectImage(); }}>
-        {objectURL
-          ? <img src={objectURL} alt={String(node.attrs.alt || filename || "Inline attachment")} draggable={false} />
-          : <span role="status">Loading image preview…</span>}
-      </button>
-      {selected && <div className="node-v2-inline-image-actions" contentEditable={false}>
-        <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>
-        <button type="button" onClick={() => void downloadMangoAttachment({ apiBase, companyID, attachmentID, filename }).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to download image"))}>Download</button>
-        <button type="button" onClick={() => updateAttributes({ alignment: "left" })}>Align left</button>
-        <button type="button" onClick={() => updateAttributes({ alignment: "center" })}>Align center</button>
-        <button type="button" onClick={() => updateAttributes({ alignment: "right" })}>Align right</button>
-        <button type="button" onClick={deleteNode}>Remove image</button>
-      </div>}
-      {previewOpen && objectURL && <div className="node-v2-inline-image-dialog" role="dialog" aria-modal="true" aria-label={`Image preview: ${filename}`} contentEditable={false}>
-        <button type="button" aria-label="Close image preview" onClick={() => setPreviewOpen(false)}>×</button>
-        <img src={objectURL} alt={String(node.attrs.alt || filename)} />
-      </div>}
-    </NodeViewWrapper>;
+    return (
+      <NodeViewWrapper className={`node-v2-inline-image${selected ? " is-selected" : ""}`}>
+        <MangoAuthenticatedImage
+          attributes={node.attrs as MangoStaticAttachmentImageProps}
+          attachmentContext={attachmentContext}
+          selected={selected}
+          editable={editor.isEditable}
+          updateAttributes={updateAttributes}
+          onSelect={selectImage}
+          onImageChatRequest={actions.onImageChatRequest}
+          onImageNodeRequest={actions.onImageNodeRequest}
+        />
+      </NodeViewWrapper>
+    );
   };
   return MangoAttachmentImage.extend({
     addNodeView() {
@@ -143,14 +142,39 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
   canEdit,
   comments,
   mentionUsers,
+  requestJSON,
   onSaveState,
   onUploadInlineImages,
+  onImageChatRequest,
+  onImageNodeRequest,
   onError,
 }, forwardedRef) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const controllerRef = useRef<NodeV2ProviderSyncController | null>(null);
   const editorRef = useRef<Editor | null>(null);
-  const imageExtension = useMemo(() => authenticatedImageExtension(apiBase, companyID, onError), [apiBase, companyID, onError]);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const imageActionsRef = useRef({ onImageChatRequest, onImageNodeRequest });
+  imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
+  const imageExtension = useMemo(() => authenticatedImageExtension({
+    requestJSON: requestJSON as EditorImageAttachmentContext["requestJSON"],
+    apiBase,
+    companyID,
+    resourceType: "node",
+    resourceID: nodeID,
+    informationID: textbox.textbox_id,
+    editorSurface: "node_v2_textbox",
+    onError: (message) => onErrorRef.current(message),
+  }, {
+    onImageChatRequest: (image) => imageActionsRef.current.onImageChatRequest(image),
+    onImageNodeRequest: (image) => imageActionsRef.current.onImageNodeRequest(image),
+  }), [apiBase, companyID, nodeID, requestJSON, textbox.textbox_id]);
+  const mentionUsersRef = useRef<ReadonlyArray<{ userID: string; name: string; email?: string }>>([]);
+  mentionUsersRef.current = mentionUsers.flatMap((user) => user.user_id
+    ? [{ userID: user.user_id, name: user.display_name || user.email || "User", email: user.email }]
+    : []);
+  const uploadInlineImagesRef = useRef(onUploadInlineImages);
+  uploadInlineImagesRef.current = onUploadInlineImages;
 
   useEffect(() => {
     let disposed = false;
@@ -166,14 +190,15 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
     controllerRef.current = controller;
     void controller.start().then(() => {
       if (disposed) return;
-      const normalizedUsers = mentionUsers.flatMap((user) => user.user_id ? [{ userID: user.user_id, name: user.display_name || user.email || "User", email: user.email }] : []);
       const extensions = createMangoTiptapExtensions({
         editable: canEdit,
         collaboration: true,
         attachmentImageExtension: imageExtension,
-        mentionUsers: normalizedUsers,
+        getMentionUsers: () => mentionUsersRef.current,
+        searchEntityLinks: (query) => searchEditorEntityLinks({ companyID, requestJSON }, query),
+        onEntityLinkSearchError: (message) => onError(message),
         onImageFiles: canEdit ? (files, position) => {
-          void onUploadInlineImages(files).then((images) => {
+          void uploadInlineImagesRef.current(files).then((images) => {
             editorRef.current?.chain().focus().insertContentAt(position ?? editorRef.current.state.selection.to, images.map((image) => ({ type: "mangoAttachmentImage", attrs: { ...image, displayWidth: null, displayHeight: null, alignment: "center", position: "break", layout: "content", alt: image.filename, title: image.filename } }))).run();
           }).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to upload inline image"));
         } : undefined,
@@ -199,6 +224,27 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
             "aria-label": "Node text box",
             "aria-multiline": "true",
           },
+          handleKeyDown: (_view, event) => {
+            const entityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
+            if (!entityElement || (event.key !== "Enter" && event.key !== " ")) return false;
+            const entityType = entityElement.dataset.mangoEntityType;
+            const entityID = entityElement.dataset.mangoEntityId?.trim() ?? "";
+            const label = entityElement.dataset.mangoEntityLabel?.trim() ?? "";
+            if ((entityType !== "node" && entityType !== "logic_gate" && entityType !== "project") || !entityID || !label) return false;
+            event.preventDefault();
+            openEditorEntityLink({ entityType, entityID, label });
+            return true;
+          },
+          handleClickOn: (_view, _pos, node, _nodePos, event) => {
+            if (node.type.name !== "mangoEntityLink") return false;
+            const entityType = node.attrs.entityType;
+            const entityID = typeof node.attrs.entityId === "string" ? node.attrs.entityId.trim() : "";
+            const label = typeof node.attrs.label === "string" ? node.attrs.label.trim() : "";
+            if ((entityType !== "node" && entityType !== "logic_gate" && entityType !== "project") || !entityID || !label) return false;
+            event.preventDefault();
+            openEditorEntityLink({ entityType, entityID, label } as EditorEntityLink);
+            return true;
+          },
         },
       });
       nextEditor.registerPlugin(MangoTiptapAnnotations);
@@ -215,7 +261,7 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
       controllerRef.current = null;
       if (activeController) void activeController.stop();
     };
-  }, [client, textbox.textbox_id, companyID, nodeID, userID, canEdit, imageExtension]);
+  }, [client, textbox.textbox_id, companyID, nodeID, userID, canEdit, imageExtension, requestJSON]);
 
   useEffect(() => {
     const controller = controllerRef.current;
