@@ -804,6 +804,13 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
   assert.doesNotMatch(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /MangoTiptapEditor|useMangoEditorDataFormat|tiptap_json/);
   assert.match(read("frontend/src/modules/editor/EditorContent.tsx"), /useMangoEditorDataFormat/);
+  const editorContent = read("frontend/src/modules/editor/EditorContent.tsx");
+  const legacyPersistence = read("frontend/src/modules/editor/useEditorDocumentPersistence.ts");
+  assert.match(editorContent, /editorFormat: editorDataFormat\.gate\?\.editor_format \?\? ""/);
+  assert.match(editorContent, /editorDataFormat\.gate\?\.editor_format === "legacy_html"[\s\S]*applyLoadedDocument\("logic_gate"/);
+  assert.match(editorContent, /documentInformationIDRef\.current = informationID;[\s\S]*documentDraftRef\.current = "";[\s\S]*persistedDocumentRef\.current = "";/);
+  assert.match(legacyPersistence, /enabled: editorFormat === "legacy_html" && Boolean/);
+  assert.match(legacyPersistence, /if \(editorFormat !== "legacy_html"\) return null;/);
   const packageJSON = JSON.parse(read("frontend/package.json")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
