@@ -343,15 +343,16 @@ test("read-on-open rollback and draft scope stay wired through shared Home paths
   assert.ok(drafts.includes("draft.accountEmail.trim().toLowerCase()"));
 });
 
-test("node list context menus unlink attachments and remove attached emails", () => {
+test("node list context menus permanently delete files and only unlink attached emails", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const attachmentAPI = source("frontend/src/modules/attachments/attachmentApi.ts");
 
   assert.match(nodeParts, /aria-label="Attached email actions"/);
   assert.match(nodeParts, /aria-label="Attachment actions"/);
-  assert.ok((nodeParts.match(/Remove from node/g) ?? []).length >= 3);
-  assert.match(nodeSurface, /unlinkMangoResourceAttachment/);
+  assert.ok((nodeParts.match(/Remove from node/g) ?? []).length >= 2);
+  assert.match(nodeParts, /Delete permanently/);
+  assert.match(nodeSurface, /deleteMangoAttachmentPermanently/);
   assert.match(attachmentAPI, /method: "DELETE"/);
 });
 

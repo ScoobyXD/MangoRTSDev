@@ -116,6 +116,8 @@ export type UnlinkMangoResourceAttachmentInput = ListMangoResourceAttachmentsInp
   attachmentID: string;
 };
 
+export type DeleteMangoAttachmentInput = UnlinkMangoResourceAttachmentInput;
+
 export type LinkMangoResourceAttachmentInput = UnlinkMangoResourceAttachmentInput & {
   relationshipKind: MangoAttachmentRelationshipKind;
   informationID?: string;
@@ -263,9 +265,9 @@ export async function listMangoResourceAttachments(
   return cloneResourceAttachmentList(value);
 }
 
-export async function unlinkMangoResourceAttachment(
+export async function deleteMangoAttachmentPermanently(
   request: AttachmentRequestJSON,
-  input: UnlinkMangoResourceAttachmentInput,
+  input: DeleteMangoAttachmentInput,
 ): Promise<void> {
   const companyID = input.companyID.trim();
   const resourceID = input.resourceID.trim();

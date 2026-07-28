@@ -51,6 +51,84 @@ func (r *MemoryRepo) GetAttachment(companyID, attachmentID string) (domain.Attac
 	return cloneAttachment(attachment), nil
 }
 
+func (r *MemoryRepo) PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := attachmentKey(companyID, attachmentID)
+	attachment, ok := r.attachments[key]
+	if !ok {
+		return AttachmentDeletionPlan{}, ErrNotFound
+	}
+	matchingLink := false
+	for _, link := range r.resourceAttachments {
+		if link.CompanyID != companyID || link.AttachmentID != attachmentID {
+			continue
+		}
+		if link.ResourceType == resourceType && link.ResourceID == resourceID && link.RelationshipKind == AttachmentRelationshipFileAttachment {
+			matchingLink = true
+		} else if link.DeletedTimestamp == nil {
+			return AttachmentDeletionPlan{}, ErrAttachmentShared
+		}
+	}
+	if !matchingLink {
+		return AttachmentDeletionPlan{}, ErrNotFound
+	}
+	keys := []string{attachment.StorageKey}
+	for _, variant := range r.attachmentVariants {
+		if variant.AttachmentID == attachmentID {
+			keys = append(keys, variant.StorageKey)
+		}
+	}
+	now := time.Now().UTC()
+	attachment.DeletedTimestamp = &now
+	r.attachments[key] = attachment
+	for linkID, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+			link.DeletedTimestamp = &now
+			r.resourceAttachments[linkID] = link
+		}
+	}
+	for linkID, link := range r.nodeV2.attachmentLinks {
+		if link.Attachment.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+			link.DeletedTimestamp = &now
+			r.nodeV2.attachmentLinks[linkID] = link
+		}
+	}
+	return AttachmentDeletionPlan{StorageKeys: keys}, nil
+}
+
+func (r *MemoryRepo) FinalizePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := attachmentKey(companyID, attachmentID)
+	if _, ok := r.attachments[key]; !ok {
+		return ErrNotFound
+	}
+	delete(r.attachments, key)
+	for variantKey, variant := range r.attachmentVariants {
+		if variant.AttachmentID == attachmentID {
+			delete(r.attachmentVariants, variantKey)
+		}
+	}
+	for linkID, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.AttachmentID == attachmentID {
+			delete(r.resourceAttachments, linkID)
+		}
+	}
+	for linkID, link := range r.nodeV2.attachmentLinks {
+		if link.Attachment.AttachmentID == attachmentID {
+			delete(r.nodeV2.attachmentLinks, linkID)
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.AttachmentVariant{}, err

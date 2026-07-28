@@ -54,7 +54,7 @@ ATT19 - A text-box attachment list contains only active node `file_attachment` l
 ATT20 - Node attachment lists use the backend resource-link list as canonical data and display attachment metadata returned with each link. A text-box title may label or group a node-wide row when its `information_id` resolves to a current block; an unresolved block must not make an otherwise active node `file_attachment` disappear from the node-wide list.
 ATT21 - User downloads request the `original` attachment variant through Mango's authenticated content endpoint, which rechecks resource authorization before reading private S3 bytes. The browser download uses `original_filename`; clients must not expose or navigate directly to `storage_bucket` or `storage_key`.
 ATT22 - Edit access to the owning node permits listing, previewing, downloading, and creating its attachments. A no-access user receives no attachment metadata or controls.
-ATT23 - Right-clicking an attachment row in a node-wide or text-box attachment list exposes a red `Remove from node` action only when the viewer can edit that node. The action menu mounts in the shared app overlay above clipping and stacking contexts, prefers a visible position beside the attachment list, and clamps inside the viewport when neither side fits. The action removes the active node resource link; it does not delete shared attachment metadata, private S3 bytes, or links owned by another resource.
+ATT23 - Right-clicking an attachment row in a node-wide or text-box attachment list exposes a red `Delete permanently` action only when the viewer can edit that Node. The action menu mounts in the shared app overlay above clipping and stacking contexts, prefers a visible position beside the attachment list, and clamps inside the viewport when neither side fits. After confirmation, Mango deletes the original object, generated variants, attachment metadata, and Node links. Deletion is rejected if the attachment is still actively linked to another resource.
 ATT24 - An inline image in an incoming email body can be selected with one click to expose an authenticated download action and opened in fullscreen preview with a double-click. Inline `cid:` sources must resolve through an authorized Mango or provider attachment endpoint rather than exposing a public object URL.
 ATT25 - Selecting an inline image in a unified rich editor preserves its visual selection/resize handles and establishes a collapsed document caret immediately before the image frame. Text or spaces typed at that caret appear before the image, and image resizing remains available in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.
 ATT26 - Browser-selected file bytes go directly to private S3 through short-lived presigned requests. Mango API remains the authoritative control plane for authentication, authorization, upload intents, IDs, object keys, limits, signing, completion/abort, S3 verification, metadata, and durable resource linking; browser bytes never traverse Mango API.
@@ -306,10 +306,10 @@ Given:
 - One user has edit access to the node and another user has no access.
 
 Expected:
-- Right-clicking the row as the editor shows `Remove from node` in red, visibly beside the attachment list and above the list's clipping/stacking context.
-- Choosing the action unlinks the attachment from the node and refreshes the text-box and node-wide counts/lists.
-- The operation does not delete attachment metadata, private S3 bytes, or a link owned by another resource.
-- The edit-authorized user can list, preview, download, and remove the node link; the no-access user receives neither the list nor its actions.
+- Right-clicking the row as the editor shows `Delete permanently` in red, visibly beside the attachment list and above the list's clipping/stacking context, and asks for confirmation.
+- Choosing the action deletes the original object, generated variants, attachment metadata, and Node links, then refreshes the text-box and node-wide counts/lists.
+- If another resource still has an active link, the delete is rejected and its metadata and private S3 bytes remain intact.
+- The edit-authorized user can list, preview, download, and permanently delete an unshared Node file; the no-access user receives neither the list nor its actions.
 
 ### Scenario ATT-S10: Incoming Email And Unified Editor Image Actions
 

@@ -34,15 +34,23 @@ func (r *PostgresRepo) postgresEditorDomainActive(ref EditorJSONDocumentRef) (bo
 	}
 	var active bool
 	err := r.db.QueryRow(`select exists(select 1 from editor_rollout_gates
-		where company_id=$1::uuid and owner_type=$2 and rollout_state='active')`, ref.CompanyID, ref.ResourceType).Scan(&active)
+		where company_id=$1::uuid and owner_type=$2 and rollout_state='active'
+		  and expected_count=converted_count and failed_count=0 and shadow_mismatch_count=0
+		  and validated_timestamp is not null)`, ref.CompanyID, ref.ResourceType).Scan(&active)
 	return active, err
 }
 
-func requirePostgresEditorDomainActiveTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
-	var state string
-	err := tx.QueryRowContext(ctx, `select rollout_state from editor_rollout_gates
-		where company_id=$1::uuid and owner_type=$2 for share`, ref.CompanyID, ref.ResourceType).Scan(&state)
-	if errors.Is(err, sql.ErrNoRows) || state != "active" {
+func requirePostgresEditorDomainActiveTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef, lock bool) error {
+	var active bool
+	lockClause := ""
+	if lock {
+		lockClause = " for share"
+	}
+	err := tx.QueryRowContext(ctx, `select exists(select 1 from editor_rollout_gates
+		where company_id=$1::uuid and owner_type=$2 and rollout_state='active'
+		  and expected_count=converted_count and failed_count=0 and shadow_mismatch_count=0
+		  and validated_timestamp is not null`+lockClause+`)`, ref.CompanyID, ref.ResourceType).Scan(&active)
+	if err == nil && !active {
 		return ErrVersionConflict
 	}
 	return err
@@ -96,18 +104,14 @@ func getPostgresEditorDomainSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef)
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, ref.CompanyID); err != nil {
 		return EditorJSONSnapshot{}, err
 	}
-	var active bool
-	if err := tx.QueryRowContext(ctx, `select exists(select 1 from editor_rollout_gates where company_id=$1::uuid and owner_type=$2 and rollout_state='active')`, ref.CompanyID, ref.ResourceType).Scan(&active); err != nil {
+	if err := requirePostgresEditorDomainActiveTx(ctx, tx, ref, false); err != nil {
 		return EditorJSONSnapshot{}, err
-	}
-	if !active {
-		return EditorJSONSnapshot{}, ErrVersionConflict
 	}
 	snapshot := EditorJSONSnapshot{Document: ref, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...), UpdatedTimestamp: time.Now().UTC()}
 	var raw, annotationsRaw []byte
-	query := fmt.Sprintf(`select revision,document_schema_version,document_json,canonical_annotations,is_deleted,updated_timestamp
+	query := fmt.Sprintf(`select revision,document_schema_version,collaboration_epoch::text,document_json,canonical_annotations,is_deleted,updated_timestamp
 		from %s where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
-	err = tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &raw, &annotationsRaw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
+	err = tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &snapshot.CollaborationEpoch, &raw, &annotationsRaw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EditorJSONSnapshot{}, err
 	}
@@ -125,6 +129,46 @@ func getPostgresEditorDomainSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef)
 		return EditorJSONSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func ensurePostgresEditorDomainCollaborationDocument(r *PostgresRepo, ref EditorJSONDocumentRef) (EditorJSONSnapshot, error) {
+	storage, ok := postgresEditorDomainStorageFor(ref)
+	if !ok {
+		return EditorJSONSnapshot{}, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	defer tx.Rollback()
+	if err := requirePostgresEditorJSONFormatTx(ctx, tx, ref.CompanyID); err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	if err := requirePostgresEditorDomainActiveTx(ctx, tx, ref, true); err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	exists, err := postgresEditorResourceExistsTx(ctx, tx, EditorDocumentRef{
+		CompanyID: ref.CompanyID, ResourceType: ref.ResourceType, ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,
+	})
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	if !exists {
+		return EditorJSONSnapshot{}, ErrNotFound
+	}
+	query := fmt.Sprintf(`insert into %s(
+		company_id,%s,document_id,document_schema_version,revision,document_json,plain_text,canonical_annotations,is_deleted,
+		created_timestamp,updated_timestamp
+	) values($1::uuid,$2::uuid,$3,1,0,$4::jsonb,'','[]'::jsonb,false,clock_timestamp(),clock_timestamp())
+	  on conflict(company_id,%s,document_id) do nothing`, storage.currentTable, storage.ownerColumn, storage.ownerColumn)
+	if _, err := tx.ExecContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID, emptyMangoTiptapDocument); err != nil {
+		return EditorJSONSnapshot{}, mapEditorOwnerTextLimitError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	return getPostgresEditorDomainSnapshot(r, ref)
 }
 
 func loadPostgresEditorDomainOperationTx(ctx context.Context, tx *sql.Tx, storage postgresEditorDomainStorage, ref EditorJSONDocumentRef, operationID string) (postgresEditorJSONOperation, bool, error) {
@@ -166,7 +210,7 @@ func commitPostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONCommitI
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := requirePostgresEditorDomainActiveTx(ctx, tx, input.Document); err != nil {
+	if err := requirePostgresEditorDomainActiveTx(ctx, tx, input.Document, true); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	insertCurrent := fmt.Sprintf(`insert into %s(company_id,%s,document_id,document_schema_version,revision,document_json,plain_text,canonical_annotations,is_deleted,created_timestamp,updated_timestamp)
@@ -246,7 +290,7 @@ func deletePostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONDeleteI
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := requirePostgresEditorDomainActiveTx(ctx, tx, input.Document); err != nil {
+	if err := requirePostgresEditorDomainActiveTx(ctx, tx, input.Document, true); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if operation, exists, loadErr := loadPostgresEditorDomainOperationTx(ctx, tx, storage, input.Document, input.OperationID); loadErr != nil {
@@ -298,7 +342,7 @@ func deletePostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONDeleteI
 	if _, err := tx.ExecContext(ctx, insertVersion, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, nextRevision, raw, annotationsRaw, input.OperationID, input.ActorUserID, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	updateCurrent := fmt.Sprintf(`update %s set revision=$4,is_deleted=true,updated_timestamp=$5 where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
+	updateCurrent := fmt.Sprintf(`update %s set revision=$4,is_deleted=true,collaboration_epoch=gen_random_uuid(),latest_update_sequence=0,materialized_through_sequence=0,updated_timestamp=$5 where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
 	if _, err := tx.ExecContext(ctx, updateCurrent, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -247,7 +248,7 @@ func (s *Server) handleResourceAttachments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if len(parts) == 4 && parts[2] == "attachments" && r.Method == http.MethodDelete {
-		s.handleResourceAttachmentUnlink(w, r, resourceType, resourceID, parts[3])
+		s.handleResourceAttachmentDelete(w, r, resourceType, resourceID, parts[3])
 		return
 	}
 	writeError(w, http.StatusNotFound, "not_found")
@@ -323,7 +324,7 @@ func (s *Server) handleResourceAttachmentLink(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, map[string]any{"resource_attachment": link})
 }
 
-func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.Request, resourceType, resourceID, attachmentID string) {
+func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.Request, resourceType, resourceID, attachmentID string) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -332,25 +333,69 @@ func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.R
 	if !s.requireAttachmentResourceEdit(w, r, companyID, resourceType, resourceID) {
 		return
 	}
-	err := s.repo.SoftDeleteResourceAttachment(store.ResourceAttachmentDeleteInput{
-		CompanyID:    companyID,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		AttachmentID: attachmentID,
+	if store.NormalizeAttachmentResourceType(resourceType) != store.EntityTypeNode {
+		err := s.repo.SoftDeleteResourceAttachment(store.ResourceAttachmentDeleteInput{
+			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, AttachmentID: attachmentID,
+		})
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_attachment_link")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "attachment_link_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_unlink_attachment")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "unlinked"})
+		return
+	}
+	storage, ok := s.attachmentStorage.(interface {
+		DeleteObject(context.Context, string) error
 	})
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
+		return
+	}
+	plan, err := s.repo.PreparePermanentAttachmentDeletion(r.Context(), companyID, attachmentID, resourceType, resourceID)
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_attachment_link")
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return
+	}
+	if errors.Is(err, store.ErrAttachmentShared) {
+		writeError(w, http.StatusConflict, "attachment_linked_to_another_resource")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "attachment_link_not_found")
+		writeError(w, http.StatusNotFound, "attachment_not_found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_unlink_attachment")
+		writeError(w, http.StatusInternalServerError, "failed_to_prepare_attachment_deletion")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "unlinked"})
+	deleted := map[string]struct{}{}
+	for _, key := range plan.StorageKeys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, duplicate := deleted[key]; duplicate {
+			continue
+		}
+		if err := storage.DeleteObject(r.Context(), key); err != nil {
+			writeAttachmentStorageError(w, err)
+			return
+		}
+		deleted[key] = struct{}{}
+	}
+	if err := s.repo.FinalizePermanentAttachmentDeletion(r.Context(), companyID, attachmentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_finalize_attachment_deletion")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {

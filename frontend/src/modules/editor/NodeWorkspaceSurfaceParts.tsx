@@ -4389,7 +4389,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             }}
             style={{ minHeight: 30, border: "1px solid transparent", borderRadius: 7, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
           >
-            Remove from node
+            Delete permanently
           </button>
         </div>,
         portalTarget,

@@ -22,3 +22,4 @@
 .node-v2-inline-image-dialog { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 48px; background: rgba(8, 16, 28, .82); }
 .node-v2-inline-image-dialog > button { position: absolute; top: 18px; right: 24px; }
 .node-v2-inline-image-dialog img { max-width: 92vw; max-height: 86vh; margin: 0; object-fit: contain; }
+.node-v2-workspace .node-v2-delete-attachment { border-color: #dc2626; color: #b91c1c; }

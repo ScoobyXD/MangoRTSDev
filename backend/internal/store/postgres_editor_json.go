@@ -117,6 +117,17 @@ func (r *PostgresRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJ
 	return snapshot, nil
 }
 
+func (r *PostgresRepo) EnsureEditorJSONCollaborationDocument(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error) {
+	ref, err := normalizePostgresEditorJSONRef(ref)
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	if ref.ResourceType != EntityTypeProject && ref.ResourceType != EntityTypeLogicGate {
+		return EditorJSONSnapshot{}, ErrInvalid
+	}
+	return ensurePostgresEditorDomainCollaborationDocument(r, ref)
+}
+
 type postgresEditorJSONOperation struct {
 	OperationID   string
 	ClientID      string

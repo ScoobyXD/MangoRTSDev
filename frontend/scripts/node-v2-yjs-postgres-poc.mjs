@@ -22,7 +22,8 @@ import {
   formatNodeTextboxDocumentName,
   isUpdateCoveredByStateVector,
 } from "./node-v2-yjs-postgres-store.mjs";
-import { createNodeV2CollaborationServer, mangoProsemirrorJSONToYDoc } from "../dist-services/node-v2-collaboration-server.mjs";
+import { EditorOwnerYjsPostgresStore, formatEditorOwnerDocumentName } from "./editor-owner-yjs-postgres-store.mjs";
+import { createNodeV2CollaborationServer, mangoProsemirrorJSONToYDoc, materializeNodeV2Document } from "../dist-services/node-v2-collaboration-server.mjs";
 
 const { Pool } = pg;
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -302,7 +303,7 @@ function base64URL(value) {
 }
 
 function mintProductionTicket(secret, documentName, clientId) {
-  const [, companyId, nodeId, textboxId] = documentName.split(":");
+  const [, companyId, nodeId, textboxId, collaborationEpoch] = documentName.split(":");
   const issuedAt = Math.floor(Date.now() / 1000);
   const body = base64URL(JSON.stringify({
     v: 1,
@@ -310,12 +311,27 @@ function mintProductionTicket(secret, documentName, clientId) {
     company_id: companyId,
     node_id: nodeId,
     textbox_id: textboxId,
+    collaboration_epoch: collaborationEpoch,
     user_id: ACTOR_ID,
     client_id: clientId,
     issued_at: issuedAt,
     expires_at: issuedAt + 120,
   }));
   return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+}
+
+async function documentNameForTextbox(pool, textboxId) {
+  const result = await pool.query(
+    "select collaboration_epoch::text from node_textboxes where company_id=$1 and node_id=$2 and textbox_id=$3",
+    [COMPANY_ID, NODE_ID, textboxId],
+  );
+  if (result.rowCount !== 1) throw new Error("node_v2_poc_textbox_not_found");
+  return formatNodeTextboxDocumentName({
+    companyId: COMPANY_ID,
+    nodeId: NODE_ID,
+    textboxId,
+    collaborationEpoch: result.rows[0].collaboration_epoch,
+  });
 }
 
 async function seedProductionRuntime(pool) {
@@ -360,7 +376,7 @@ async function seedProductionRuntime(pool) {
 async function runProductionRuntimeProof(pool) {
   await seedProductionRuntime(pool);
   const secret = "node-v2-production-proof-secret-32-bytes";
-  const documentName = formatNodeTextboxDocumentName({ companyId: COMPANY_ID, nodeId: NODE_ID, textboxId: TEXTBOX_IDS.production });
+  const documentName = await documentNameForTextbox(pool, TEXTBOX_IDS.production);
   let runtime = createNodeV2CollaborationServer({ pool, ticketSecret: secret, address: "127.0.0.1", port: 0, quiet: true });
   await runtime.listen();
   const document = new Y.Doc();
@@ -447,7 +463,7 @@ async function runProductionRuntimeProof(pool) {
 
 
 async function runProviderProof(pool, store) {
-  const documentName = formatNodeTextboxDocumentName({ companyId: COMPANY_ID, nodeId: NODE_ID, textboxId: TEXTBOX_IDS.provider });
+  const documentName = await documentNameForTextbox(pool, TEXTBOX_IDS.provider);
   const errors = { persistence: [], compaction: [] };
   let runtime = createHocuspocusServer(store, errors);
   await runtime.server.listen();
@@ -638,7 +654,7 @@ async function appendCompactionTail(pool, store, documentName, document, textbox
 }
 
 async function runLoadProfile(pool, store, label, textboxId, sourceBytes, acknowledgedUpdateCount, totalUpdateCount) {
-  const documentName = formatNodeTextboxDocumentName({ companyId: COMPANY_ID, nodeId: NODE_ID, textboxId });
+  const documentName = await documentNameForTextbox(pool, textboxId);
   const document = new Y.Doc();
   const durableAtStart = await store.loadDocument(documentName);
   Y.applyUpdate(document, durableAtStart.mergedUpdate);
@@ -713,11 +729,7 @@ async function runLoadProfile(pool, store, label, textboxId, sourceBytes, acknow
 }
 
 async function proveFailedUpdateIsNotAcknowledged(pool, store) {
-  const documentName = formatNodeTextboxDocumentName({
-    companyId: COMPANY_ID,
-    nodeId: NODE_ID,
-    textboxId: TEXTBOX_IDS.failedUpdate,
-  });
+  const documentName = await documentNameForTextbox(pool, TEXTBOX_IDS.failedUpdate);
   await pool.query(`
     create or replace function reject_node_v2_poc_update() returns trigger language plpgsql as $$
     begin
@@ -761,11 +773,7 @@ async function proveFailedUpdateIsNotAcknowledged(pool, store) {
 }
 
 async function proveCompactionRollback(pool, store) {
-  const documentName = formatNodeTextboxDocumentName({
-    companyId: COMPANY_ID,
-    nodeId: NODE_ID,
-    textboxId: TEXTBOX_IDS.failedCompaction,
-  });
+  const documentName = await documentNameForTextbox(pool, TEXTBOX_IDS.failedCompaction);
   const document = new Y.Doc();
   const durableAtStart = await store.loadDocument(documentName);
   Y.applyUpdate(document, durableAtStart.mergedUpdate);
@@ -916,6 +924,67 @@ async function seedMigrationWorkflow(pool) {
   );
 }
 
+async function runEditorOwnerDeltaProof(pool) {
+  const seedDocument = (documentJSON, annotations) => {
+    const document = mangoProsemirrorJSONToYDoc(documentJSON.document, "default");
+    document.getMap("mango-metadata").set("annotations", JSON.stringify(Array.isArray(annotations) ? annotations : []));
+    return document;
+  };
+  const materializeDocument = (document) => {
+    const materialized = materializeNodeV2Document(document);
+    const annotationsRaw = document.getMap("mango-metadata").get("annotations");
+    const annotations = annotationsRaw === undefined ? [] : JSON.parse(String(annotationsRaw));
+    return { ...materialized, annotations };
+  };
+  const store = new EditorOwnerYjsPostgresStore({ pool, seedDocument, materializeDocument });
+  const cases = [
+    { ownerType: "project", ownerId: MIGRATION_PROJECT_ID, documentId: MIGRATION_DOCUMENT_IDS.project, table: "project_editor_documents", ownerColumn: "project_id" },
+    { ownerType: "logic_gate", ownerId: MIGRATION_LOGIC_GATE_ID, documentId: MIGRATION_DOCUMENT_IDS.logic_gate, table: "logic_gate_editor_documents", ownerColumn: "logic_gate_id" },
+  ];
+  const result = {};
+  for (const item of cases) {
+    const current = await pool.query(
+      `select collaboration_epoch::text from ${item.table} where company_id=$1 and ${item.ownerColumn}=$2 and document_id=$3`,
+      [MIGRATION_COMPANY_ID, item.ownerId, item.documentId],
+    );
+    const documentName = formatEditorOwnerDocumentName({
+      companyId: MIGRATION_COMPANY_ID,
+      ownerType: item.ownerType,
+      ownerId: item.ownerId,
+      documentId: item.documentId,
+      collaborationEpoch: current.rows[0].collaboration_epoch,
+    });
+    const durable = await store.loadDocument(documentName);
+    const local = new Y.Doc();
+    Y.applyUpdate(local, durable.mergedUpdate);
+    const addition = mangoProsemirrorJSONToYDoc({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: `${item.ownerType} delta proof` }] }],
+    }, "default");
+    const update = Y.encodeStateAsUpdate(addition, Y.encodeStateVector(local));
+    Y.applyUpdate(local, update);
+    const acknowledgement = await store.appendUpdate(documentName, update, { clientId: `poc-${item.ownerType}`, actorUserId: ACTOR_ID });
+    assert.equal(acknowledgement.update_bytes, update.byteLength);
+    assert.equal(acknowledgement.durable_head_sequence, acknowledgement.durable_update_sequence);
+    const compacted = await store.compactDocument(documentName, "manual_recovery");
+    assert.equal(compacted.compacted, true);
+    const stored = await pool.query(
+      `select latest_update_sequence,materialized_through_sequence,document_json::text as document_json,
+              (select count(*)::integer from editor_owner_yjs_updates
+                where company_id=$1 and owner_type=$4 and owner_id=$2 and document_id=$3) as update_count
+         from ${item.table} where company_id=$1 and ${item.ownerColumn}=$2 and document_id=$3`,
+      [MIGRATION_COMPANY_ID, item.ownerId, item.documentId, item.ownerType],
+    );
+    assert.equal(stored.rows[0].latest_update_sequence, stored.rows[0].materialized_through_sequence);
+    assert.equal(stored.rows[0].update_count, 1);
+    assert.match(stored.rows[0].document_json, new RegExp(`${item.ownerType} delta proof`));
+    result[item.ownerType] = { update_bytes: update.byteLength, durable_sequence: Number(stored.rows[0].latest_update_sequence) };
+    addition.destroy();
+    local.destroy();
+  }
+  return result;
+}
+
 async function runMigrationWorkflowProof(pool, port, database) {
   await seedMigrationWorkflow(pool);
   const conversionRun = "89898989-8989-4898-8989-898989898989";
@@ -1027,6 +1096,7 @@ async function runMigrationWorkflowProof(pool, port, database) {
   runMigrationTool(port, database, ["--mode", "activate", ...common, ...writeSafety, "--confirm", "ACTIVATE " + MIGRATION_COMPANY_ID]);
   const active = await pool.query("select editor_format,migration_state,(select count(*) from editor_rollout_gates where company_id=$1 and rollout_state='active')::integer as active_gates from workspace_editor_formats where company_id=$1", [MIGRATION_COMPANY_ID]);
   assert.deepEqual(active.rows[0], { editor_format: "tiptap_json", migration_state: "ready", active_gates: 3 });
+  const ownerDeltas = await runEditorOwnerDeltaProof(pool);
 
   const nativeDocumentID = "79797979-7979-4797-8797-797979797979";
   const nativeDocument = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Created after cutover" }] }] } };
@@ -1078,6 +1148,7 @@ async function runMigrationWorkflowProof(pool, port, database) {
     resumable_retry_count: ledger.rows[0].min_retries,
     shadow_matches: comparisons.rows[0].equivalent,
     activation_gates: active.rows[0].active_gates,
+    project_and_logic_gate_deltas: ownerDeltas,
     activation_source_drift_rejected: true,
     stale_export_rejected: true,
     newest_edit_preserved_in_legacy_html: true,

@@ -16,6 +16,7 @@ type NodeV2ProviderSyncControllerOptions = {
   companyID: string;
   nodeID: string;
   userID: string;
+  collaborationEpoch: string;
   collaborationURL?: string;
   onSaveState: (state: NodeV2SaveState) => void;
   onError: (message: string) => void;
@@ -67,7 +68,7 @@ export class NodeV2ProviderSyncController {
 
   constructor(options: NodeV2ProviderSyncControllerOptions) {
     this.options = options;
-    this.storageKey = ["node-v2", options.userID, options.companyID, options.nodeID, options.textboxID].join(":");
+    this.storageKey = ["node-v2", options.userID, options.companyID, options.nodeID, options.textboxID, options.collaborationEpoch].join(":");
     this.persistence = new IndexeddbPersistence(this.storageKey, this.document);
   }
 
@@ -78,16 +79,10 @@ export class NodeV2ProviderSyncController {
     window.addEventListener("offline", this.handleOffline);
     await this.persistence.whenSynced;
     if (this.stopped) return;
-    const recoveryState = await this.persistence.get(RECOVERY_STATE_KEY);
-    if (recoveryState instanceof Uint8Array) {
-      Y.applyUpdate(this.document, recoveryState, this.persistence);
-    } else if (recoveryState instanceof ArrayBuffer) {
-      Y.applyUpdate(this.document, new Uint8Array(recoveryState), this.persistence);
-    }
-    // A browser crash loses in-memory dirty state but not IndexedDB. Treat every
-    // recovered document as pending until an exact PostgreSQL snapshot proves it
-    // durable; a normal clean mount receives the same status immediately.
-    this.localDirty = true;
+    // y-indexeddb already persists each Yjs update incrementally. This value is
+    // only a tiny dirty marker; never serialize a second whole-document recovery
+    // snapshot on the typing path.
+    this.localDirty = Boolean(await this.persistence.get(RECOVERY_STATE_KEY));
 
     const url = configuredCollaborationURL(this.options.collaborationURL);
     await new Promise<void>((resolve, reject) => {
@@ -105,7 +100,7 @@ export class NodeV2ProviderSyncController {
       };
       this.provider = new HocuspocusProvider({
         url,
-        name: ["node-textbox", this.options.companyID.toLowerCase(), this.options.nodeID.toLowerCase(), this.options.textboxID.toLowerCase()].join(":"),
+        name: ["node-textbox", this.options.companyID.toLowerCase(), this.options.nodeID.toLowerCase(), this.options.textboxID.toLowerCase(), this.options.collaborationEpoch.toLowerCase()].join(":"),
         document: this.document,
         token: async () => (await this.options.client.collaborationTicket(this.options.textboxID, this.clientID)).token,
         onSynced: ({ state }) => {
@@ -137,9 +132,8 @@ export class NodeV2ProviderSyncController {
     if (origin !== this.persistence && transaction.local) {
       this.localDirty = true;
       this.options.onSaveState("saving");
-      const recoveryState = Y.encodeStateAsUpdate(this.document);
       this.recoveryPersistence = this.recoveryPersistence
-        .then(() => this.persistence.set(RECOVERY_STATE_KEY, recoveryState))
+        .then(() => this.persistence.set(RECOVERY_STATE_KEY, 1))
         .then(() => {
           if (!navigator.onLine && this.localDirty && !this.stopped) this.options.onSaveState("offline");
         })

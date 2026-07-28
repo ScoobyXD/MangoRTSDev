@@ -553,6 +553,16 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           converted_document_count: 3,
         } as T;
       }
+      if (path.endsWith("/collaboration-ticket")) {
+        const prefix = path.slice(0, -"/collaboration-ticket".length);
+        const documentID = decodeURIComponent(prefix.split("/documents/")[1] ?? "");
+        const resourceParts = prefix.slice("/v1/editor-json/".length).split("/");
+        return {
+          token: "page-host-collaboration-token",
+          document_name: `editor-owner:${resourceParts[0]}:company-hosts:${resourceParts[1]}:${Buffer.from(documentID).toString("base64url")}:00000000-0000-4000-8000-000000000001`,
+          collaboration_epoch: "00000000-0000-4000-8000-000000000001",
+        } as T;
+      }
       if (init?.method === "POST") {
         const body = init.json as { document: MangoTiptapDocument; annotations?: typeof canonicalAnnotations };
         return { revision: 1, schema_version: 1, document: body.document, annotations: body.annotations ?? [] } as T;
@@ -624,7 +634,14 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       () => pageHostPaths.some((path) => path.includes("/v1/editor-json/node/node-host/documents/node-document"))
         && pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document"))
         && pageHostPaths.some((path) => path.includes("/v1/editor-json/logic_gate/logic-gate-host/documents/logic-gate-document")),
-      "each production host adapter should address its own JSON resource type",
+      "each production host should load its canonical JSON snapshot",
+    );
+    assert.equal(pageHostPaths.some((path) => path.includes("/collaboration-ticket")), false, "offscreen Project and Logic Gate hosts should not request collaboration identity");
+    for (const observer of observers.filter((observer) => observer.rootMargin === "0px").slice(-3)) observer.trigger(true);
+    await waitFor(
+      () => pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document/collaboration-ticket"))
+        && pageHostPaths.some((path) => path.includes("/v1/editor-json/logic_gate/logic-gate-host/documents/logic-gate-document/collaboration-ticket")),
+      "visible Project and Logic Gate hosts should address their delta collaboration resources",
     );
     await act(async () => pageRoot.unmount());
     pageHostRoot = null;

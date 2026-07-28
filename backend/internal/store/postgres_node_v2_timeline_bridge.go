@@ -26,6 +26,30 @@ func nodeV2TimelineBridgeAvailableTx(ctx context.Context, tx *sql.Tx) (bool, err
 	return available, err
 }
 
+func nodeV2TimelineBridgeActiveTx(ctx context.Context, tx *sql.Tx, companyID string) (bool, error) {
+	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
+	if err != nil || !available {
+		return false, err
+	}
+	var active bool
+	err = tx.QueryRowContext(ctx, `select exists(
+		select 1
+		from workspace_editor_formats workspace_gate
+		join editor_rollout_gates owner_gate
+		  on owner_gate.company_id=workspace_gate.company_id and owner_gate.owner_type='node'
+		where workspace_gate.company_id=$1::uuid
+		  and workspace_gate.editor_format='tiptap_json'
+		  and workspace_gate.migration_state='ready'
+		  and workspace_gate.expected_document_count=workspace_gate.converted_document_count
+		  and owner_gate.rollout_state='active'
+		  and owner_gate.expected_count=owner_gate.converted_count
+		  and owner_gate.failed_count=0
+		  and owner_gate.shadow_mismatch_count=0
+		  and owner_gate.validated_timestamp is not null
+	)`, companyID).Scan(&active)
+	return active, err
+}
+
 func insertNodeV2MovementForLegacyTimelineTx(ctx context.Context, tx *sql.Tx, item domain.NodeTimelineEvent) error {
 	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
 	if err != nil || !available {
@@ -45,8 +69,8 @@ func insertNodeV2MovementForLegacyTimelineTx(ctx context.Context, tx *sql.Tx, it
 }
 
 func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationRequestInput, item domain.NodeTimelineEvent) error {
-	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
-	if err != nil || !available {
+	active, err := nodeV2TimelineBridgeActiveTx(ctx, tx, input.CompanyID)
+	if err != nil || !active {
 		return err
 	}
 	type verificationContentSnapshot struct {
@@ -131,8 +155,12 @@ func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx,
 }
 
 func insertNodeV2VerificationStampForLegacyTx(ctx context.Context, tx *sql.Tx, input NodeVerificationCompletionInput, item domain.NodeTimelineEvent) error {
-	available, err := nodeV2TimelineBridgeAvailableTx(ctx, tx)
-	if err != nil || !available {
+	active, err := nodeV2TimelineBridgeActiveTx(ctx, tx, input.CompanyID)
+	if err != nil || !active {
+		return err
+	}
+	var requestExists bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from node_verification_requests where company_id=$1::uuid and node_id=$2::uuid and verification_request_id=$3::uuid)`, input.CompanyID, input.NodeID, input.EventID).Scan(&requestExists); err != nil || !requestExists {
 		return err
 	}
 	idempotencyKey := "approved:" + input.UserID

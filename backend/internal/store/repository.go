@@ -38,6 +38,7 @@ var (
 	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
 	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
 	ErrUploadPayloadConflict         = errors.New("attachment upload idempotency payload conflict")
+	ErrAttachmentShared              = errors.New("attachment is linked to another resource")
 	ErrProjectionRevisionRequired    = errors.New("projection revision required")
 	ErrNoVerificationRecipients      = errors.New("no verification recipients")
 )
@@ -221,6 +222,8 @@ type AttachmentRepository interface {
 	ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error)
 	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
 	SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error
+	PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error)
+	FinalizePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID string) error
 	GetAttachmentUploadIntentByClientRequest(companyID, actorUserID, clientRequestID string) (domain.AttachmentUploadIntent, error)
 	CreateAttachmentUploadIntent(input AttachmentUploadIntentCreateInput) (domain.AttachmentUploadIntent, bool, error)
 	GetAttachmentUploadIntent(companyID, actorUserID, uploadIntentID string) (domain.AttachmentUploadIntent, error)
@@ -234,6 +237,10 @@ type AttachmentRepository interface {
 	AbortAttachmentUploadIntent(input AttachmentUploadTransitionInput) (domain.AttachmentUploadIntent, error)
 	ListExpiredAttachmentUploadIntents(now time.Time, limit int) ([]domain.AttachmentUploadIntent, error)
 	ExpireAttachmentUploadIntent(uploadIntentID string, now time.Time) (domain.AttachmentUploadIntent, error)
+}
+
+type AttachmentDeletionPlan struct {
+	StorageKeys []string
 }
 
 type AttachmentCreateInput struct {
@@ -1018,6 +1025,7 @@ type EditorCollaborationRepository interface {
 type EditorJSONRepository interface {
 	GetEditorDataFormat(companyID string) (EditorDataFormatGate, error)
 	GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error)
+	EnsureEditorJSONCollaborationDocument(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error)
 	CommitEditorJSONDocument(input EditorJSONCommitInput) (EditorJSONCommit, error)
 	DeleteEditorJSONDocument(input EditorJSONDeleteInput) (EditorJSONCommit, error)
 	ListEditorJSONVersions(ref EditorJSONDocumentRef, limit int) ([]EditorJSONVersion, error)

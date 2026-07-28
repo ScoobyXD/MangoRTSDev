@@ -28,7 +28,7 @@ import {
   groupMangoResourceAttachmentsByInformationID,
   invalidateMangoResourceAttachmentsCache,
   listMangoResourceAttachments,
-  unlinkMangoResourceAttachment,
+  deleteMangoAttachmentPermanently,
   type MangoAttachmentUploadProgress,
   type MangoResourceAttachment,
 } from "../attachments/attachmentApi";
@@ -835,15 +835,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setNodeAttachmentsRefreshKey((key) => key + 1);
   }, [apiBase, companyID, nodeID, requestJSON]);
 
-  const removeNodeAttachment = useCallback(async (resourceAttachment: MangoResourceAttachment) => {
+  const deleteNodeAttachment = useCallback(async (resourceAttachment: MangoResourceAttachment) => {
     if (!canEdit) return;
     const attachmentID = resourceAttachment.attachment_id?.trim();
     if (!attachmentID) {
       onError("attachment_metadata_unavailable");
       return;
     }
+    if (!window.confirm(`Permanently delete ${resourceAttachment.attachment?.original_filename || "this file"}? This removes the stored file and cannot be undone.`)) return;
     try {
-      await unlinkMangoResourceAttachment(requestJSON, {
+      await deleteMangoAttachmentPermanently(requestJSON, {
         companyID,
         resourceType: "node",
         resourceID: nodeID,
@@ -3331,7 +3332,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             loading={nodeAttachmentsLoading}
             loadError={nodeAttachmentsLoadError}
             onRetry={refreshNodeAttachments}
-            onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
+            onRemove={canEdit ? (item) => { void deleteNodeAttachment(item.resourceAttachment); } : undefined}
             onCancelUpload={cancelNodeAttachmentUpload}
             onRetryUpload={retryNodeAttachmentUpload}
             onError={onError}
@@ -3816,7 +3817,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           loadError={nodeAttachmentsLoadError}
                           onRetry={refreshNodeAttachments}
                           onAddFiles={canEdit ? (files) => addTextBlockAttachments(block.id, files) : undefined}
-                          onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
+                          onRemove={canEdit ? (item) => { void deleteNodeAttachment(item.resourceAttachment); } : undefined}
                           onError={onError}
                         />
                         {canEdit && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}

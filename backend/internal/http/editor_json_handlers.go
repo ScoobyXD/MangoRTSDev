@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"html"
@@ -14,9 +15,9 @@ import (
 const editorJSONRoutePrefix = "/v1/editor-json/"
 
 type mangoTiptapMentionOccurrence struct {
-	UserID string
-	Label  string
-	Kind   string
+	UserID string `json:"user_id"`
+	Label  string `json:"label"`
+	Kind   string `json:"kind"`
 }
 
 func mangoTiptapMentionOccurrences(raw json.RawMessage) []mangoTiptapMentionOccurrence {
@@ -122,6 +123,32 @@ func editorJSONDocumentFromPath(companyID, path string) (store.EditorJSONDocumen
 	return ref, versions, true
 }
 
+func editorJSONCollaborationDocumentFromPath(companyID, path string) (store.EditorJSONDocumentRef, bool) {
+	path = strings.TrimPrefix(strings.TrimSpace(path), editorJSONRoutePrefix)
+	parts := strings.Split(path, "/")
+	if len(parts) != 5 || parts[2] != "documents" || parts[4] != "collaboration-ticket" {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	ref := store.EditorJSONDocumentRef{CompanyID: companyID, ResourceType: parts[0], ResourceID: parts[1], DocumentID: parts[3]}
+	if _, err := store.NormalizeEditorJSONDocumentRef(ref); err != nil {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	return ref, true
+}
+
+func editorJSONMentionDocumentFromPath(companyID, path string) (store.EditorJSONDocumentRef, bool) {
+	path = strings.TrimPrefix(strings.TrimSpace(path), editorJSONRoutePrefix)
+	parts := strings.Split(path, "/")
+	if len(parts) != 5 || parts[2] != "documents" || parts[4] != "mentions" {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	ref := store.EditorJSONDocumentRef{CompanyID: companyID, ResourceType: parts[0], ResourceID: parts[1], DocumentID: parts[3]}
+	if _, err := store.NormalizeEditorJSONDocumentRef(ref); err != nil {
+		return store.EditorJSONDocumentRef{}, false
+	}
+	return ref, true
+}
+
 func (s *Server) authorizeEditorJSON(w http.ResponseWriter, r *http.Request, actor ActorContext, ref store.EditorJSONDocumentRef) bool {
 	switch ref.ResourceType {
 	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject:
@@ -174,6 +201,14 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
+	if collaborationRef, collaborationRoute := editorJSONCollaborationDocumentFromPath(companyID, r.URL.Path); collaborationRoute {
+		s.handleEditorJSONCollaborationTicket(w, r, actor, collaborationRef)
+		return
+	}
+	if mentionRef, mentionRoute := editorJSONMentionDocumentFromPath(companyID, r.URL.Path); mentionRoute {
+		s.handleEditorJSONMentionDelta(w, r, mentionRef)
+		return
+	}
 	ref, versions, ok := editorJSONDocumentFromPath(companyID, r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "editor_document_route_not_found")
@@ -221,6 +256,10 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPost:
+		if ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate {
+			writeError(w, http.StatusMethodNotAllowed, "editor_document_updates_require_collaboration")
+			return
+		}
 		var request struct {
 			OperationID   string                       `json:"operation_id"`
 			ClientID      string                       `json:"client_id"`
@@ -313,6 +352,104 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) handleEditorJSONCollaborationTicket(w http.ResponseWriter, r *http.Request, actor ActorContext, ref store.EditorJSONDocumentRef) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	if ref.ResourceType != store.EntityTypeProject && ref.ResourceType != store.EntityTypeLogicGate {
+		writeError(w, http.StatusNotFound, "editor_document_route_not_found")
+		return
+	}
+	if !s.authorizeEditorJSON(w, r, actor, ref) {
+		return
+	}
+	var request struct {
+		ClientID string `json:"client_id"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.ClientID) == "" || len(strings.TrimSpace(request.ClientID)) > 160 {
+		writeError(w, http.StatusBadRequest, "invalid_collaboration_ticket_request")
+		return
+	}
+	snapshot, err := s.repo.EnsureEditorJSONCollaborationDocument(ref)
+	if err != nil {
+		writeEditorJSONStoreError(w, err)
+		return
+	}
+	if snapshot.Deleted || strings.TrimSpace(snapshot.CollaborationEpoch) == "" {
+		writeError(w, http.StatusNotFound, "editor_document_not_found")
+		return
+	}
+	ticket, expiresAt, err := s.realtimeTickets.mintEditorOwnerCollaboration(
+		actor, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, snapshot.CollaborationEpoch, request.ClientID,
+	)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "editor_collaboration_unavailable")
+		return
+	}
+	encodedDocumentID := base64.RawURLEncoding.EncodeToString([]byte(ref.DocumentID))
+	documentName := strings.Join([]string{"editor-owner", ref.ResourceType, strings.ToLower(ref.CompanyID), strings.ToLower(ref.ResourceID), encodedDocumentID, strings.ToLower(snapshot.CollaborationEpoch)}, ":")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": ticket, "expires_at": expiresAt, "document_name": documentName,
+		"collaboration_epoch": snapshot.CollaborationEpoch,
+	})
+}
+
+func (s *Server) handleEditorJSONMentionDelta(w http.ResponseWriter, r *http.Request, ref store.EditorJSONDocumentRef) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if ref.ResourceType != store.EntityTypeProject && ref.ResourceType != store.EntityTypeLogicGate {
+		writeError(w, http.StatusNotFound, "editor_document_route_not_found")
+		return
+	}
+	if !s.authorizeEditorJSON(w, r, actor, ref) {
+		return
+	}
+	var request struct {
+		OperationID string                         `json:"operation_id"`
+		Mentions    []mangoTiptapMentionOccurrence `json:"mentions"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.OperationID) == "" || len(request.OperationID) > 160 || len(request.Mentions) == 0 || len(request.Mentions) > 100 {
+		writeError(w, http.StatusBadRequest, "invalid_editor_mention_delta")
+		return
+	}
+	var information strings.Builder
+	for _, mention := range request.Mentions {
+		mention.UserID = strings.TrimSpace(mention.UserID)
+		mention.Label = strings.TrimSpace(mention.Label)
+		mention.Kind = strings.TrimSpace(mention.Kind)
+		if mention.Kind == "normal" {
+			mention.Kind = "regular"
+		}
+		if mention.UserID == "" || mention.Label == "" || len(mention.Label) > 500 || (mention.Kind != "regular" && mention.Kind != "urgent") {
+			writeError(w, http.StatusBadRequest, "invalid_editor_mention_delta")
+			return
+		}
+		information.WriteString(`<span data-mango-mention="true" data-mango-mention-user-id="`)
+		information.WriteString(html.EscapeString(mention.UserID))
+		information.WriteString(`" data-mango-mention-kind="`)
+		information.WriteString(html.EscapeString(mention.Kind))
+		information.WriteString(`">`)
+		information.WriteString(html.EscapeString(mention.Label))
+		information.WriteString(`</span>`)
+	}
+	s.recordMentionNotificationsWithIdempotencyScope(
+		r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", information.String(), "editor-yjs:"+strings.TrimSpace(request.OperationID),
+	)
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted"})
 }
 
 func writeEditorJSONStoreError(w http.ResponseWriter, err error) {

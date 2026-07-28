@@ -1218,6 +1218,19 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
       converted_document_count: 3,
     };
     if (pathname.startsWith("/v1/editor-json/")) {
+      if (pathname.endsWith("/collaboration-ticket")) {
+        ticketRequests += 1;
+        const prefix = pathname.slice(0, -"/collaboration-ticket".length);
+        const documentID = decodeURIComponent(prefix.split("/documents/")[1] ?? "");
+        const resourceParts = prefix.slice("/v1/editor-json/".length).split("/");
+        const ownerType = resourceParts[0];
+        const ownerID = resourceParts[1];
+        return {
+          token: "test-collaboration-token",
+          document_name: `editor-owner:${ownerType}:${hostCompanyID}:${ownerID}:${Buffer.from(documentID).toString("base64url")}:00000000-0000-4000-8000-000000000001`,
+          collaboration_epoch: "00000000-0000-4000-8000-000000000001",
+        };
+      }
       const documentID = decodeURIComponent(pathname.split("/documents/")[1] ?? "");
       const current = canonicalDocuments.get(documentID);
       assert.ok(current, `unexpected JSON document ${documentID}`);
@@ -1392,10 +1405,14 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     for (const observer of exactObservers) observer.trigger(true);
     await waitFor(
       () => ticketRequests > 0
-        && websocketScopes.some((scope) => scope === `editor-json:node:${hostNodeID}:${hostNodeDocumentID}`)
-        && websocketScopes.some((scope) => scope === `editor-json:project:${hostProjectID}:${hostProjectDocumentID}`)
-        && websocketScopes.some((scope) => scope === `editor-json:logic_gate:${hostLogicGateID}:${hostLogicDocumentID}`),
-      "only exact visible page-host editors should subscribe to their JSON scopes",
+        && websocketScopes.some((scope) => scope === `editor-json:node:${hostNodeID}:${hostNodeDocumentID}`),
+      "only exact visible page-host editors should request their realtime connections",
+    );
+    assert.equal(
+      websocketScopes.some((scope) => scope === `editor-json:project:${hostProjectID}:${hostProjectDocumentID}`
+        || scope === `editor-json:logic_gate:${hostLogicGateID}:${hostLogicDocumentID}`),
+      false,
+      "Project and Logic Gate deltas use their collaboration provider instead of the legacy full-document realtime scopes",
     );
     assert.equal(nodeEditor.dataset.mangoEditorState, "sleeping", "visibility alone keeps the page-host editor static until focus");
 

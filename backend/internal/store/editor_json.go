@@ -109,13 +109,14 @@ func NormalizeEditorJSONDocumentRef(ref EditorJSONDocumentRef) (EditorJSONDocume
 }
 
 type EditorJSONSnapshot struct {
-	Document         EditorJSONDocumentRef  `json:"document_ref"`
-	Revision         int64                  `json:"revision"`
-	SchemaVersion    int                    `json:"schema_version"`
-	JSONDocument     json.RawMessage        `json:"document"`
-	Annotations      []EditorJSONAnnotation `json:"annotations"`
-	Deleted          bool                   `json:"deleted,omitempty"`
-	UpdatedTimestamp time.Time              `json:"updated_timestamp"`
+	Document           EditorJSONDocumentRef  `json:"document_ref"`
+	Revision           int64                  `json:"revision"`
+	SchemaVersion      int                    `json:"schema_version"`
+	CollaborationEpoch string                 `json:"collaboration_epoch,omitempty"`
+	JSONDocument       json.RawMessage        `json:"document"`
+	Annotations        []EditorJSONAnnotation `json:"annotations"`
+	Deleted            bool                   `json:"deleted,omitempty"`
+	UpdatedTimestamp   time.Time              `json:"updated_timestamp"`
 }
 
 type EditorJSONAnnotation struct {

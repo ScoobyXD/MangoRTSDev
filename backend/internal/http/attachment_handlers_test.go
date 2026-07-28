@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,6 +89,11 @@ func (s *fakeAttachmentObjectStorage) GetObject(ctx context.Context, input Attac
 		ContentLength: length,
 		Body:          io.NopCloser(bytes.NewReader(object.body)),
 	}, nil
+}
+
+func (s *fakeAttachmentObjectStorage) DeleteObject(_ context.Context, key string) error {
+	delete(s.objects, key)
+	return nil
 }
 
 func TestAttachmentContentRejectsStorageLengthMismatchBeforeStreaming(t *testing.T) {
@@ -230,10 +236,17 @@ func TestAttachmentMetadataDoesNotExposeStorageCoordinates(t *testing.T) {
 	}
 }
 
-func TestAttachmentUnlinkSoftDeletesResourceAccess(t *testing.T) {
+func TestNodeAttachmentDeletePermanentlyDeletesMetadataAndObject(t *testing.T) {
 	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
 	handler := server.Routes()
 	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	attachment, err := repo.GetAttachment(companyID, attachmentID)
+	if err != nil {
+		t.Fatalf("GetAttachment before delete: %v", err)
+	}
+	if _, exists := storage.objects[attachment.StorageKey]; !exists {
+		t.Fatalf("seeded storage object %q is missing", attachment.StorageKey)
+	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/resources/node/"+node.NodeID+"/attachments/"+attachmentID+"?company_id="+companyID, nil)
 	deleteReq = attachmentRequestWithActor(deleteReq, allowed, companyID, domain.RoleCompanyUser)
@@ -265,7 +278,49 @@ func TestAttachmentUnlinkSoftDeletesResourceAccess(t *testing.T) {
 	contentRec := httptest.NewRecorder()
 	handler.ServeHTTP(contentRec, contentReq)
 	if contentRec.Code != http.StatusNotFound {
-		t.Fatalf("content after unlink status = %d body=%s", contentRec.Code, contentRec.Body.String())
+		t.Fatalf("content after permanent delete status = %d body=%s", contentRec.Code, contentRec.Body.String())
+	}
+	if _, err := repo.GetAttachment(companyID, attachmentID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetAttachment after permanent delete error = %v, want ErrNotFound", err)
+	}
+	if _, exists := storage.objects[attachment.StorageKey]; exists {
+		t.Fatalf("permanent delete left storage object %q behind", attachment.StorageKey)
+	}
+}
+
+func TestNodeAttachmentDeleteRejectsSharedFileAndPreservesBytes(t *testing.T) {
+	repo, server, storage, companyID, allowed, _, sourceNode := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, sourceNode.NodeID, allowed)
+	attachment, err := repo.GetAttachment(companyID, attachmentID)
+	if err != nil {
+		t.Fatalf("GetAttachment before shared delete: %v", err)
+	}
+	targetNode, err := repo.CreateNode(companyID, "Shared attachment target")
+	if err != nil {
+		t.Fatalf("CreateNode target: %v", err)
+	}
+	if _, err := repo.LinkResourceAttachment(store.ResourceAttachmentInput{
+		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: targetNode.NodeID,
+		AttachmentID: attachmentID, RelationshipKind: store.AttachmentRelationshipFileAttachment,
+		CreatedByUserID: allowed.UserID,
+	}); err != nil {
+		t.Fatalf("LinkResourceAttachment target: %v", err)
+	}
+
+	request := attachmentRequestWithActor(
+		httptest.NewRequest(http.MethodDelete, "/v1/resources/node/"+sourceNode.NodeID+"/attachments/"+attachmentID+"?company_id="+companyID, nil),
+		allowed, companyID, domain.RoleCompanyUser,
+	)
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "attachment_linked_to_another_resource") {
+		t.Fatalf("shared permanent delete status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := repo.GetAttachment(companyID, attachmentID); err != nil {
+		t.Fatalf("shared delete removed metadata: %v", err)
+	}
+	if _, exists := storage.objects[attachment.StorageKey]; !exists {
+		t.Fatalf("shared delete removed storage object %q", attachment.StorageKey)
 	}
 }
 

@@ -38,12 +38,13 @@ function encodeDurableSnapshot(document2) {
   return Buffer.from(Y.encodeSnapshot(Y.snapshot(document2))).toString("base64");
 }
 function parseNodeTextboxDocumentName(documentName) {
-  const [prefix, companyId, nodeId, textboxId, ...extra] = String(documentName).split(":");
+  const [prefix, companyId, nodeId, textboxId, collaborationEpoch, ...extra] = String(documentName).split(":");
   if (prefix !== DOCUMENT_PREFIX || extra.length > 0) throw new Error("invalid_node_textbox_document_name");
   return {
     companyId: assertUuid(companyId, "company_id"),
     nodeId: assertUuid(nodeId, "node_id"),
-    textboxId: assertUuid(textboxId, "textbox_id")
+    textboxId: assertUuid(textboxId, "textbox_id"),
+    collaborationEpoch: assertUuid(collaborationEpoch, "collaboration_epoch")
   };
 }
 async function rollbackQuietly(client) {
@@ -129,8 +130,9 @@ var NodeV2YjsPostgresStore = class {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null`,
-        [identity.companyId, identity.nodeId, identity.textboxId]
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null`,
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch]
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -155,8 +157,9 @@ var NodeV2YjsPostgresStore = class {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null`,
-        [identity.companyId, identity.nodeId, identity.textboxId]
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null`,
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch]
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -182,7 +185,7 @@ var NodeV2YjsPostgresStore = class {
       client.release();
     }
   }
-  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null, documentJson = null } = {}) {
+  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null } = {}) {
     const identity = parseNodeTextboxDocumentName(documentName);
     const payload = asUint8Array(update);
     if (payload.byteLength === 0) throw new Error("node_v2_yjs_empty_update");
@@ -204,26 +207,12 @@ var NodeV2YjsPostgresStore = class {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null
           for update`,
-        [identity.companyId, identity.nodeId, identity.textboxId]
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch]
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
-      if (documentJson) {
-        await client.query(
-          "select pg_advisory_xact_lock(hashtextextended('editor-owner-text:' || $1 || ':node:' || $2, 0))",
-          [identity.companyId, identity.nodeId]
-        );
-        const limitResult = await client.query(
-          `select coalesce(sum(octet_length(document_json::text)) filter (
-                   where deleted_timestamp is null and textbox_id <> $3), 0)
-                  + octet_length($4::jsonb::text) <= 1073741824 as within_limit
-             from node_textboxes
-            where company_id = $1 and node_id = $2`,
-          [identity.companyId, identity.nodeId, identity.textboxId, JSON.stringify(documentJson)]
-        );
-        if (limitResult.rows[0]?.within_limit !== true) throw new Error("editor_owner_text_limit_exceeded");
-      }
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
       const durableHeadBefore = numericSequence(textboxResult.rows[0].latest_update_sequence, "latest_update_sequence");
       let latestUpdateSequence = durableHeadBefore;
@@ -342,9 +331,10 @@ var NodeV2YjsPostgresStore = class {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence, materialized_through_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null
           for update`,
-        [identity.companyId, identity.nodeId, identity.textboxId]
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch]
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -465,38 +455,45 @@ var NodeV2YjsPostgresExtension = class {
     store,
     operationCountThreshold = 512,
     updateBytesThreshold = 512 * 1024,
-    materializationDelayMs = 1500,
+    materializationDelayMs = 3e4,
+    changeBatchDelayMs = 75,
     authorizeUpdate = async () => {
-    },
-    validateDocument = async () => {
     },
     onAcknowledgement = async () => {
     },
     onPersistenceError = () => {
     },
     onCompactionError = () => {
-    }
+    },
+    acceptsDocument = () => true
   }) {
-    if (!(store instanceof NodeV2YjsPostgresStore)) throw new Error("node_v2_yjs_store_required");
+    if (!store || typeof store.loadDocument !== "function" || typeof store.appendUpdate !== "function" || typeof store.compactDocument !== "function") {
+      throw new Error("yjs_store_required");
+    }
     this.store = store;
     this.operationCountThreshold = operationCountThreshold;
     this.updateBytesThreshold = updateBytesThreshold;
     this.materializationDelayMs = materializationDelayMs;
+    this.changeBatchDelayMs = changeBatchDelayMs;
     this.authorizeUpdate = authorizeUpdate;
-    this.validateDocument = validateDocument;
     this.onAcknowledgement = onAcknowledgement;
     this.onPersistenceError = onPersistenceError;
     this.onCompactionError = onCompactionError;
+    this.acceptsDocument = acceptsDocument;
     this.updateQueues = /* @__PURE__ */ new Map();
     this.compactions = /* @__PURE__ */ new Map();
     this.materializationTimers = /* @__PURE__ */ new Map();
+    this.pendingChangeBatches = /* @__PURE__ */ new Map();
     this.failedDocumentInstances = /* @__PURE__ */ new WeakSet();
   }
   async onLoadDocument({ document: document2, documentName }) {
+    if (!this.acceptsDocument(documentName)) return;
     const durable = await this.store.loadDocument(documentName);
     Y.applyUpdate(document2, durable.mergedUpdate);
   }
   async afterUnloadDocument({ documentName }) {
+    if (!this.acceptsDocument(documentName)) return;
+    this.#flushChangeBatch(documentName);
     const timer = this.materializationTimers.get(documentName);
     if (timer) {
       clearTimeout(timer);
@@ -512,45 +509,82 @@ var NodeV2YjsPostgresExtension = class {
     }
   }
   onChange(payload) {
-    const prior = this.updateQueues.get(payload.documentName) ?? Promise.resolve();
+    if (!this.acceptsDocument(payload.documentName)) return;
+    return new Promise((resolve) => {
+      const clientId = payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`;
+      const actorUserId = payload.context?.actorUserId ?? null;
+      const groupKey = `${clientId}:${actorUserId ?? "anonymous"}`;
+      const existing = this.pendingChangeBatches.get(payload.documentName);
+      if (existing && existing.groupKey !== groupKey) this.#flushChangeBatch(payload.documentName);
+      let batch = this.pendingChangeBatches.get(payload.documentName);
+      if (!batch) {
+        batch = {
+          groupKey,
+          clientId,
+          actorUserId,
+          entries: [],
+          bytes: 0,
+          timer: setTimeout(() => this.#flushChangeBatch(payload.documentName), this.changeBatchDelayMs)
+        };
+        this.pendingChangeBatches.set(payload.documentName, batch);
+      }
+      batch.entries.push({ payload, resolve });
+      batch.bytes += payload.update.byteLength;
+      if (batch.bytes >= this.updateBytesThreshold) this.#flushChangeBatch(payload.documentName);
+    });
+  }
+  #flushChangeBatch(documentName) {
+    const batch = this.pendingChangeBatches.get(documentName);
+    if (!batch) return this.updateQueues.get(documentName) ?? Promise.resolve();
+    clearTimeout(batch.timer);
+    this.pendingChangeBatches.delete(documentName);
+    const representative = batch.entries[batch.entries.length - 1].payload;
+    const mergedUpdate = batch.entries.length === 1 ? batch.entries[0].payload.update : Y.mergeUpdates(batch.entries.map((entry) => entry.payload.update));
+    const prior = this.updateQueues.get(documentName) ?? Promise.resolve();
     const current = prior.catch(() => {
     }).then(async () => {
-      if (this.failedDocumentInstances.has(payload.document)) return;
+      if (this.failedDocumentInstances.has(representative.document)) return;
       try {
-        await this.authorizeUpdate(payload);
-        const materialized = await this.validateDocument(payload.document, payload);
-        const acknowledgement = await this.store.appendUpdate(payload.documentName, payload.update, {
-          clientId: payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`,
-          actorUserId: payload.context?.actorUserId ?? null,
-          documentJson: materialized?.documentJson ?? null
+        await this.authorizeUpdate(representative);
+        const acknowledgement = await this.store.appendUpdate(documentName, mergedUpdate, {
+          clientId: batch.clientId,
+          actorUserId: batch.actorUserId
         });
-        payload.connection?.sendStateless(JSON.stringify(acknowledgement));
-        await this.onAcknowledgement(acknowledgement, payload);
+        const acknowledgementJSON = JSON.stringify(acknowledgement);
+        for (const connection of new Set(batch.entries.map((entry) => entry.payload.connection).filter(Boolean))) {
+          connection.sendStateless(acknowledgementJSON);
+        }
+        await this.onAcknowledgement(acknowledgement, representative);
         if (acknowledgement.uncheckpointed_update_count >= this.operationCountThreshold || acknowledgement.uncheckpointed_update_bytes >= this.updateBytesThreshold) {
           const reason = acknowledgement.uncheckpointed_update_count >= this.operationCountThreshold ? "operation_count" : "update_bytes";
-          this.#scheduleCompaction(payload.documentName, reason);
+          this.#scheduleCompaction(documentName, reason);
         } else {
-          this.#scheduleMaterialization(payload.documentName);
+          this.#scheduleMaterialization(documentName);
         }
       } catch (error) {
-        if (payload.document && typeof payload.document === "object") {
-          this.failedDocumentInstances.add(payload.document);
+        if (representative.document && typeof representative.document === "object") {
+          this.failedDocumentInstances.add(representative.document);
         }
         try {
-          await this.onPersistenceError(error, payload);
+          await this.onPersistenceError(error, representative);
         } catch {
         }
         try {
           const code = error instanceof Error && error.message.includes("editor_owner_text_limit_exceeded") ? "editor_owner_text_limit_exceeded" : "durable_commit_failed";
-          payload.connection?.sendStateless(JSON.stringify({ type: ERROR_TYPE, code }));
+          const errorJSON = JSON.stringify({ type: ERROR_TYPE, code });
+          for (const connection of new Set(batch.entries.map((entry) => entry.payload.connection).filter(Boolean))) {
+            connection.sendStateless(errorJSON);
+          }
         } catch {
         }
-        payload.instance.closeConnections(payload.documentName);
+        representative.instance.closeConnections(documentName);
       }
+    }).finally(() => {
+      for (const entry of batch.entries) entry.resolve();
     });
-    this.updateQueues.set(payload.documentName, current);
+    this.updateQueues.set(documentName, current);
     current.finally(() => {
-      if (this.updateQueues.get(payload.documentName) === current) this.updateQueues.delete(payload.documentName);
+      if (this.updateQueues.get(documentName) === current) this.updateQueues.delete(documentName);
     });
     return current;
   }
@@ -581,6 +615,7 @@ var NodeV2YjsPostgresExtension = class {
     });
   }
   async flush() {
+    for (const documentName of [...this.pendingChangeBatches.keys()]) this.#flushChangeBatch(documentName);
     for (const [documentName, timer] of this.materializationTimers) {
       clearTimeout(timer);
       this.materializationTimers.delete(documentName);
@@ -588,6 +623,400 @@ var NodeV2YjsPostgresExtension = class {
     }
     while (this.updateQueues.size > 0 || this.compactions.size > 0) {
       await Promise.allSettled([...this.updateQueues.values(), ...this.compactions.values()]);
+    }
+  }
+};
+
+// scripts/editor-owner-yjs-postgres-store.mjs
+import { createHash as createHash2, randomUUID as randomUUID2 } from "node:crypto";
+import * as Y2 from "yjs";
+var DOCUMENT_PREFIX2 = "editor-owner";
+var UUID_PATTERN2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+var ACK_TYPE2 = "node-v2-yjs.durable-ack.v1";
+var DEFAULT_MAX_UPDATE_BYTES2 = 8 * 1024 * 1024;
+var OWNER_STORAGE = Object.freeze({
+  project: { table: "project_editor_documents", ownerColumn: "project_id" },
+  logic_gate: { table: "logic_gate_editor_documents", ownerColumn: "logic_gate_id" }
+});
+function asUint8Array2(value) {
+  return value instanceof Uint8Array ? new Uint8Array(value) : new Uint8Array(Buffer.from(value));
+}
+function sha256Hex2(value) {
+  return createHash2("sha256").update(value).digest("hex");
+}
+function assertUuid2(value, label) {
+  if (!UUID_PATTERN2.test(String(value))) throw new Error(`invalid_${label}`);
+  return String(value).toLowerCase();
+}
+function numericSequence2(value, label) {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 0) throw new Error(`invalid_${label}`);
+  return result;
+}
+function encodeDocumentID(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized || normalized.length > 500) throw new Error("invalid_document_id");
+  return Buffer.from(normalized, "utf8").toString("base64url");
+}
+function decodeDocumentID(value) {
+  let result;
+  try {
+    result = Buffer.from(String(value), "base64url").toString("utf8");
+  } catch {
+    throw new Error("invalid_document_id");
+  }
+  if (!result || result.length > 500 || encodeDocumentID(result) !== value) throw new Error("invalid_document_id");
+  return result;
+}
+function ownerStorage(ownerType) {
+  const storage = OWNER_STORAGE[ownerType];
+  if (!storage) throw new Error("invalid_editor_owner_type");
+  return storage;
+}
+function encodeDurableSnapshot2(document2) {
+  return Buffer.from(Y2.encodeSnapshot(Y2.snapshot(document2))).toString("base64");
+}
+async function rollbackQuietly2(client) {
+  try {
+    await client.query("rollback");
+  } catch {
+  }
+}
+function parseEditorOwnerDocumentName(documentName) {
+  const [prefix, ownerType, companyId, ownerId, encodedDocumentId, collaborationEpoch, ...extra] = String(documentName).split(":");
+  if (prefix !== DOCUMENT_PREFIX2 || extra.length > 0) throw new Error("invalid_editor_owner_document_name");
+  ownerStorage(ownerType);
+  return {
+    ownerType,
+    companyId: assertUuid2(companyId, "company_id"),
+    ownerId: assertUuid2(ownerId, "owner_id"),
+    documentId: decodeDocumentID(encodedDocumentId),
+    collaborationEpoch: assertUuid2(collaborationEpoch, "collaboration_epoch")
+  };
+}
+var EditorOwnerYjsPostgresStore = class {
+  constructor({ pool, seedDocument, materializeDocument, maxUpdateBytes = DEFAULT_MAX_UPDATE_BYTES2, coveredUpdateRetentionDays = 7, automaticCheckpointRetentionDays = 14 }) {
+    if (!pool || typeof pool.connect !== "function") throw new Error("editor_owner_yjs_pool_required");
+    if (typeof seedDocument !== "function") throw new Error("editor_owner_yjs_seed_required");
+    if (typeof materializeDocument !== "function") throw new Error("editor_owner_yjs_materializer_required");
+    this.pool = pool;
+    this.seedDocument = seedDocument;
+    this.materializeDocument = materializeDocument;
+    this.maxUpdateBytes = maxUpdateBytes;
+    this.coveredUpdateRetentionDays = coveredUpdateRetentionDays;
+    this.automaticCheckpointRetentionDays = automaticCheckpointRetentionDays;
+    this.durableStateCache = /* @__PURE__ */ new Map();
+  }
+  #replaceCache(documentName, collaborationEpoch, headSequence, mergedUpdate) {
+    const document2 = new Y2.Doc();
+    Y2.applyUpdate(document2, mergedUpdate);
+    this.durableStateCache.get(documentName)?.document.destroy();
+    this.durableStateCache.set(documentName, { collaborationEpoch, headSequence, document: document2 });
+    return document2;
+  }
+  evictDocument(documentName) {
+    this.durableStateCache.get(documentName)?.document.destroy();
+    this.durableStateCache.delete(documentName);
+  }
+  async #currentRow(client, identity, lock = false) {
+    const storage = ownerStorage(identity.ownerType);
+    const result = await client.query(
+      `select collaboration_epoch,latest_update_sequence,materialized_through_sequence,document_json,plain_text,canonical_annotations
+         from ${storage.table}
+        where company_id=$1::uuid and ${storage.ownerColumn}=$2::uuid and document_id=$3
+          and collaboration_epoch=$4::uuid and is_deleted=false${lock ? " for update" : ""}`,
+      [identity.companyId, identity.ownerId, identity.documentId, identity.collaborationEpoch]
+    );
+    if (result.rowCount !== 1) throw new Error("editor_owner_yjs_document_not_found");
+    return result.rows[0];
+  }
+  async #ensureSeedCheckpoint(client, identity, row) {
+    const existing = await client.query(
+      `select 1 from editor_owner_yjs_checkpoints
+        where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+          and collaboration_epoch=$5::uuid limit 1`,
+      [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch]
+    );
+    if (existing.rowCount > 0) return;
+    if (numericSequence2(row.latest_update_sequence, "latest_update_sequence") !== 0) throw new Error("editor_owner_yjs_checkpoint_missing");
+    const document2 = await this.seedDocument(row.document_json, row.canonical_annotations ?? []);
+    try {
+      const checkpointPayload = Y2.encodeStateAsUpdate(document2);
+      const stateVector = Y2.encodeStateVector(document2);
+      await client.query(
+        `insert into editor_owner_yjs_checkpoints(
+           company_id,owner_type,owner_id,document_id,checkpoint_id,collaboration_epoch,
+           through_update_sequence,checkpoint_payload,state_vector,document_json,plain_text,
+           canonical_annotations,checkpoint_reason,retain_until
+         ) values($1::uuid,$2,$3::uuid,$4,$5::uuid,$6::uuid,0,$7,$8,$9::jsonb,$10,$11::jsonb,'migration_seed',clock_timestamp()+interval '14 days')
+         on conflict(company_id,owner_type,owner_id,document_id,collaboration_epoch,through_update_sequence) do nothing`,
+        [
+          identity.companyId,
+          identity.ownerType,
+          identity.ownerId,
+          identity.documentId,
+          randomUUID2(),
+          identity.collaborationEpoch,
+          Buffer.from(checkpointPayload),
+          Buffer.from(stateVector),
+          JSON.stringify(row.document_json),
+          String(row.plain_text ?? ""),
+          JSON.stringify(row.canonical_annotations ?? [])
+        ]
+      );
+    } finally {
+      document2.destroy();
+    }
+  }
+  async #loadDurableState(client, identity, latestUpdateSequence) {
+    const checkpointResult = await client.query(
+      `select checkpoint_id,through_update_sequence,checkpoint_payload,state_vector
+         from editor_owner_yjs_checkpoints
+        where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+          and collaboration_epoch=$5::uuid and through_update_sequence <= $6
+        order by through_update_sequence desc,checkpoint_id desc limit 1`,
+      [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch, latestUpdateSequence]
+    );
+    if (checkpointResult.rowCount !== 1) throw new Error("editor_owner_yjs_checkpoint_missing");
+    const checkpoint = checkpointResult.rows[0];
+    const checkpointSequence = numericSequence2(checkpoint.through_update_sequence, "checkpoint_sequence");
+    const tailResult = await client.query(
+      `select update_sequence,update_payload from editor_owner_yjs_updates
+        where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+          and collaboration_epoch=$5::uuid and update_sequence>$6 and update_sequence<=$7 order by update_sequence`,
+      [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch, checkpointSequence, latestUpdateSequence]
+    );
+    const parts = [asUint8Array2(checkpoint.checkpoint_payload), ...tailResult.rows.map((item) => asUint8Array2(item.update_payload))];
+    const mergedUpdate = parts.length === 1 ? parts[0] : Y2.mergeUpdates(parts);
+    return {
+      checkpointSequence,
+      mergedUpdate,
+      stateVector: Y2.encodeStateVectorFromUpdate(mergedUpdate),
+      tailCount: tailResult.rowCount,
+      tailBytes: tailResult.rows.reduce((sum, item) => sum + item.update_payload.byteLength, 0)
+    };
+  }
+  async loadDocument(documentName) {
+    const identity = parseEditorOwnerDocumentName(documentName);
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const row = await this.#currentRow(client, identity, true);
+      await this.#ensureSeedCheckpoint(client, identity, row);
+      const latestUpdateSequence = numericSequence2(row.latest_update_sequence, "latest_update_sequence");
+      const durable = await this.#loadDurableState(client, identity, latestUpdateSequence);
+      await client.query("commit");
+      this.#replaceCache(documentName, identity.collaborationEpoch, latestUpdateSequence, durable.mergedUpdate);
+      return { identity, collaborationEpoch: identity.collaborationEpoch, latestUpdateSequence, ...durable };
+    } catch (error) {
+      await rollbackQuietly2(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async durabilityStatus(documentName) {
+    const durable = await this.loadDocument(documentName);
+    const document2 = new Y2.Doc();
+    try {
+      Y2.applyUpdate(document2, durable.mergedUpdate);
+      return {
+        type: ACK_TYPE2,
+        document_name: documentName,
+        collaboration_epoch: durable.collaborationEpoch,
+        durable_head_sequence: durable.latestUpdateSequence,
+        state_vector_base64: Buffer.from(Y2.encodeStateVector(document2)).toString("base64"),
+        durable_snapshot_base64: encodeDurableSnapshot2(document2),
+        status_only: true
+      };
+    } finally {
+      document2.destroy();
+    }
+  }
+  async appendUpdate(documentName, update, { updateId = randomUUID2(), clientId, actorUserId = null } = {}) {
+    const identity = parseEditorOwnerDocumentName(documentName);
+    const payload = asUint8Array2(update);
+    if (payload.byteLength === 0 || payload.byteLength > this.maxUpdateBytes) throw new Error("editor_owner_yjs_update_size_invalid");
+    const validationDocument = new Y2.Doc();
+    try {
+      Y2.applyUpdate(validationDocument, payload);
+    } finally {
+      validationDocument.destroy();
+    }
+    assertUuid2(updateId, "update_id");
+    if (!clientId || Buffer.byteLength(clientId, "utf8") > 160) throw new Error("invalid_client_id");
+    if (actorUserId !== null) assertUuid2(actorUserId, "actor_user_id");
+    const checksum = sha256Hex2(payload);
+    const started = performance.now();
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const row = await this.#currentRow(client, identity, true);
+      await this.#ensureSeedCheckpoint(client, identity, row);
+      const durableHeadBefore = numericSequence2(row.latest_update_sequence, "latest_update_sequence");
+      let latestUpdateSequence = durableHeadBefore;
+      const cached = this.durableStateCache.get(documentName);
+      const cacheMatches = cached?.collaborationEpoch === identity.collaborationEpoch && cached.headSequence === durableHeadBefore;
+      const duplicateResult = await client.query(
+        `select update_sequence,update_id,update_sha256,update_payload from editor_owner_yjs_updates
+          where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+            and collaboration_epoch=$5::uuid and (update_id=$6::uuid or update_sha256=$7) order by update_sequence`,
+        [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch, updateId, checksum]
+      );
+      if (duplicateResult.rowCount > 1) throw new Error("editor_owner_yjs_deduplication_conflict");
+      let updateSequence;
+      let duplicate = false;
+      if (duplicateResult.rowCount === 1) {
+        const existing = duplicateResult.rows[0];
+        if (existing.update_id === updateId && existing.update_sha256 !== checksum) throw new Error("editor_owner_yjs_update_id_payload_mismatch");
+        if (!Buffer.from(existing.update_payload).equals(Buffer.from(payload))) throw new Error("editor_owner_yjs_checksum_collision");
+        updateSequence = numericSequence2(existing.update_sequence, "update_sequence");
+        duplicate = true;
+      } else {
+        const inserted = await client.query(
+          `insert into editor_owner_yjs_updates(
+             company_id,owner_type,owner_id,document_id,update_id,update_sha256,collaboration_epoch,client_id,actor_user_id,update_payload
+           ) values($1::uuid,$2,$3::uuid,$4,$5::uuid,$6,$7::uuid,$8,nullif($9,'')::uuid,$10) returning update_sequence`,
+          [
+            identity.companyId,
+            identity.ownerType,
+            identity.ownerId,
+            identity.documentId,
+            updateId,
+            checksum,
+            identity.collaborationEpoch,
+            clientId,
+            actorUserId ?? "",
+            Buffer.from(payload)
+          ]
+        );
+        updateSequence = numericSequence2(inserted.rows[0].update_sequence, "update_sequence");
+        latestUpdateSequence = updateSequence;
+        const storage = ownerStorage(identity.ownerType);
+        await client.query(
+          `update ${storage.table} set latest_update_sequence=$4,updated_timestamp=clock_timestamp()
+            where company_id=$1::uuid and ${storage.ownerColumn}=$2::uuid and document_id=$3 and collaboration_epoch=$5::uuid`,
+          [identity.companyId, identity.ownerId, identity.documentId, updateSequence, identity.collaborationEpoch]
+        );
+      }
+      const durableReload = cacheMatches ? null : await this.#loadDurableState(client, identity, latestUpdateSequence);
+      const tailStats = await client.query(
+        `select count(*)::integer as update_count,coalesce(sum(octet_length(update_payload)),0)::bigint as update_bytes
+           from editor_owner_yjs_updates where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+            and collaboration_epoch=$5::uuid and update_sequence>coalesce((
+              select max(through_update_sequence) from editor_owner_yjs_checkpoints
+               where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4 and collaboration_epoch=$5::uuid
+            ),0) and update_sequence<=$6`,
+        [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch, latestUpdateSequence]
+      );
+      await client.query("commit");
+      let durableDocument;
+      if (durableReload) durableDocument = this.#replaceCache(documentName, identity.collaborationEpoch, latestUpdateSequence, durableReload.mergedUpdate);
+      else {
+        durableDocument = cached.document;
+        if (!duplicate) Y2.applyUpdate(durableDocument, payload);
+        cached.headSequence = latestUpdateSequence;
+      }
+      return {
+        type: ACK_TYPE2,
+        document_name: documentName,
+        collaboration_epoch: identity.collaborationEpoch,
+        durable_update_sequence: updateSequence,
+        durable_head_sequence: latestUpdateSequence,
+        update_id: updateId,
+        update_sha256: checksum,
+        state_vector_base64: Buffer.from(Y2.encodeStateVector(durableDocument)).toString("base64"),
+        durable_snapshot_base64: encodeDurableSnapshot2(durableDocument),
+        duplicate,
+        update_bytes: payload.byteLength,
+        uncheckpointed_update_count: tailStats.rows[0].update_count,
+        uncheckpointed_update_bytes: Number(tailStats.rows[0].update_bytes),
+        database_transaction_ms: Number((performance.now() - started).toFixed(3))
+      };
+    } catch (error) {
+      await rollbackQuietly2(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async compactDocument(documentName, reason) {
+    if (!["operation_count", "update_bytes", "idle", "manual_recovery"].includes(reason)) throw new Error("invalid_editor_owner_yjs_checkpoint_reason");
+    const identity = parseEditorOwnerDocumentName(documentName);
+    const storage = ownerStorage(identity.ownerType);
+    const client = await this.pool.connect();
+    let document2;
+    try {
+      await client.query("begin");
+      const row = await this.#currentRow(client, identity, true);
+      await this.#ensureSeedCheckpoint(client, identity, row);
+      const latest = numericSequence2(row.latest_update_sequence, "latest_update_sequence");
+      const materializedThrough = numericSequence2(row.materialized_through_sequence, "materialized_through_sequence");
+      const durable = await this.#loadDurableState(client, identity, latest);
+      if (latest === durable.checkpointSequence && latest === materializedThrough) {
+        await client.query("commit");
+        return { document_name: documentName, through_update_sequence: latest, compacted: false };
+      }
+      document2 = new Y2.Doc();
+      Y2.applyUpdate(document2, durable.mergedUpdate);
+      const materialized = await this.materializeDocument(document2, { identity, throughUpdateSequence: latest });
+      if (!materialized?.documentJson || typeof materialized.plainText !== "string" || !Array.isArray(materialized.annotations)) throw new Error("invalid_editor_owner_yjs_materialization");
+      const checkpointId = randomUUID2();
+      const inserted = await client.query(
+        `insert into editor_owner_yjs_checkpoints(
+          company_id,owner_type,owner_id,document_id,checkpoint_id,collaboration_epoch,through_update_sequence,
+          checkpoint_payload,state_vector,document_json,plain_text,canonical_annotations,checkpoint_reason,retain_until
+        ) values($1::uuid,$2,$3::uuid,$4,$5::uuid,$6::uuid,$7,$8,$9,$10::jsonb,$11,$12::jsonb,$13,
+          clock_timestamp()+($14::integer*interval '1 day'))
+        on conflict(company_id,owner_type,owner_id,document_id,collaboration_epoch,through_update_sequence) do nothing
+        returning checkpoint_id`,
+        [
+          identity.companyId,
+          identity.ownerType,
+          identity.ownerId,
+          identity.documentId,
+          checkpointId,
+          identity.collaborationEpoch,
+          latest,
+          Buffer.from(durable.mergedUpdate),
+          Buffer.from(durable.stateVector),
+          JSON.stringify(materialized.documentJson),
+          materialized.plainText,
+          JSON.stringify(materialized.annotations),
+          reason,
+          this.automaticCheckpointRetentionDays
+        ]
+      );
+      await client.query(
+        `update editor_owner_yjs_updates set checkpointed_timestamp=coalesce(checkpointed_timestamp,clock_timestamp()),
+          retain_until=coalesce(retain_until,clock_timestamp()+($7::integer*interval '1 day'))
+          where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+            and collaboration_epoch=$5::uuid and update_sequence<=$6`,
+        [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, identity.collaborationEpoch, latest, this.coveredUpdateRetentionDays]
+      );
+      await client.query(
+        `update ${storage.table} set document_schema_version=1,document_json=$4::jsonb,plain_text=$5,
+          canonical_annotations=$6::jsonb,revision=revision+1,materialized_through_sequence=$7,updated_timestamp=clock_timestamp()
+          where company_id=$1::uuid and ${storage.ownerColumn}=$2::uuid and document_id=$3 and collaboration_epoch=$8::uuid`,
+        [
+          identity.companyId,
+          identity.ownerId,
+          identity.documentId,
+          JSON.stringify(materialized.documentJson),
+          materialized.plainText,
+          JSON.stringify(materialized.annotations),
+          latest,
+          identity.collaborationEpoch
+        ]
+      );
+      await client.query("commit");
+      return { document_name: documentName, checkpoint_id: inserted.rows[0]?.checkpoint_id ?? checkpointId, through_update_sequence: latest, compacted: inserted.rowCount === 1 };
+    } catch (error) {
+      await rollbackQuietly2(client);
+      throw error;
+    } finally {
+      document2?.destroy();
+      client.release();
     }
   }
 };
@@ -1543,9 +1972,26 @@ function verifyNodeV2CollaborationTicket(token, secret, documentName, now = /* @
   }
   const identity = parseNodeTextboxDocumentName(documentName);
   const nowSeconds = Math.floor(now.getTime() / 1e3);
-  if (payload.v !== 1 || payload.type !== "node-v2-collaboration" || payload.company_id !== identity.companyId || payload.node_id !== identity.nodeId || payload.textbox_id !== identity.textboxId || !payload.user_id || !payload.client_id || Buffer.byteLength(payload.client_id, "utf8") > 160 || !Number.isSafeInteger(payload.issued_at) || !Number.isSafeInteger(payload.expires_at) || payload.issued_at > nowSeconds + 60 || payload.expires_at < nowSeconds || payload.expires_at - payload.issued_at > 180) {
+  if (payload.v !== 1 || payload.type !== "node-v2-collaboration" || payload.company_id !== identity.companyId || payload.node_id !== identity.nodeId || payload.textbox_id !== identity.textboxId || payload.collaboration_epoch !== identity.collaborationEpoch || !payload.user_id || !payload.client_id || Buffer.byteLength(payload.client_id, "utf8") > 160 || !Number.isSafeInteger(payload.issued_at) || !Number.isSafeInteger(payload.expires_at) || payload.issued_at > nowSeconds + 60 || payload.expires_at < nowSeconds || payload.expires_at - payload.issued_at > 180) {
     throw new Error("node_v2_collaboration_ticket_invalid");
   }
+  return payload;
+}
+function verifyEditorOwnerCollaborationTicket(token, secret, documentName, now = /* @__PURE__ */ new Date()) {
+  const [body, signature, ...extra] = String(token).split(".");
+  if (!body || !signature || extra.length > 0) throw new Error("editor_owner_collaboration_ticket_invalid");
+  const expected = createHmac("sha256", required(secret, "collaboration_ticket_secret")).update(body).digest();
+  const supplied = decodeBase64URL(signature);
+  if (expected.byteLength !== supplied.byteLength || !timingSafeEqual(expected, supplied)) throw new Error("editor_owner_collaboration_ticket_invalid");
+  let payload;
+  try {
+    payload = JSON.parse(decodeBase64URL(body).toString("utf8"));
+  } catch {
+    throw new Error("editor_owner_collaboration_ticket_invalid");
+  }
+  const identity = parseEditorOwnerDocumentName(documentName);
+  const nowSeconds = Math.floor(now.getTime() / 1e3);
+  if (payload.v !== 1 || payload.type !== "editor-owner-collaboration" || payload.company_id !== identity.companyId || payload.owner_type !== identity.ownerType || payload.owner_id !== identity.ownerId || payload.document_id !== identity.documentId || payload.collaboration_epoch !== identity.collaborationEpoch || !payload.user_id || !payload.client_id || Buffer.byteLength(payload.client_id, "utf8") > 160 || !Number.isSafeInteger(payload.issued_at) || !Number.isSafeInteger(payload.expires_at) || payload.issued_at > nowSeconds + 60 || payload.expires_at < nowSeconds || payload.expires_at - payload.issued_at > 180) throw new Error("editor_owner_collaboration_ticket_invalid");
   return payload;
 }
 function jsonText(node) {
@@ -1574,8 +2020,33 @@ function materializeNodeV2Document(document2) {
   return {
     documentJson: validation.value,
     documentSchemaVersion: MANGO_TIPTAP_SCHEMA_VERSION,
-    plainText: jsonText(validation.value.document).trimEnd()
+    plainText: jsonText(validation.value.document).trimEnd(),
+    documentByteSize: Buffer.byteLength(JSON.stringify(validation.value), "utf8")
   };
+}
+function editorOwnerAnnotations(document2) {
+  const raw = document2.getMap("mango-metadata").get("annotations");
+  if (raw === void 0) return [];
+  let value;
+  try {
+    value = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    throw new Error("editor_owner_yjs_annotations_invalid");
+  }
+  if (!Array.isArray(value) || value.length > 1e4) throw new Error("editor_owner_yjs_annotations_invalid");
+  return value;
+}
+function seedEditorOwnerDocument(documentJSON, annotations) {
+  const validation = validateMangoTiptapDocument(documentJSON);
+  if (!validation.valid) throw new Error(`editor_owner_yjs_seed_invalid:${validation.error}`);
+  const document2 = mangoProsemirrorJSONToYDoc(validation.value.document, "default");
+  const normalizedAnnotations = Array.isArray(annotations) ? annotations : [];
+  if (normalizedAnnotations.length > 1e4) throw new Error("editor_owner_yjs_annotations_invalid");
+  document2.getMap("mango-metadata").set("annotations", JSON.stringify(normalizedAnnotations));
+  return document2;
+}
+function materializeEditorOwnerDocument(document2) {
+  return { ...materializeNodeV2Document(document2), annotations: editorOwnerAnnotations(document2) };
 }
 async function isAuthorized(pool, documentName, userID) {
   const identity = parseNodeTextboxDocumentName(documentName);
@@ -1589,6 +2060,7 @@ async function isAuthorized(pool, documentName, userID) {
         where textbox.company_id=$1::uuid
           and textbox.node_id=$2::uuid
           and textbox.textbox_id=$3::uuid
+          and textbox.collaboration_epoch=$5::uuid
           and textbox.deleted_timestamp is null
           and gate.editor_format='tiptap_json'
           and gate.migration_state='ready'
@@ -1601,7 +2073,27 @@ async function isAuthorized(pool, documentName, userID) {
           and owner_gate.shadow_mismatch_count=0
           and owner_gate.validated_timestamp is not null
      ) as allowed`,
-    [identity.companyId, identity.nodeId, identity.textboxId, userID]
+    [identity.companyId, identity.nodeId, identity.textboxId, userID, identity.collaborationEpoch]
+  );
+  return result.rows[0]?.allowed === true;
+}
+async function isEditorOwnerAuthorized(pool, documentName, userID) {
+  const identity = parseEditorOwnerDocumentName(documentName);
+  const storage = identity.ownerType === "project" ? { table: "project_editor_documents", ownerColumn: "project_id" } : { table: "logic_gate_editor_documents", ownerColumn: "logic_gate_id" };
+  const result = await pool.query(
+    `select exists(
+       select 1 from ${storage.table} document
+       join editor_rollout_gates owner_gate on owner_gate.company_id=document.company_id and owner_gate.owner_type=$2
+       join workspace_editor_formats gate on gate.company_id=document.company_id
+       where document.company_id=$1::uuid and document.${storage.ownerColumn}=$3::uuid and document.document_id=$4
+         and document.collaboration_epoch=$6::uuid and document.is_deleted=false
+         and gate.editor_format='tiptap_json' and gate.migration_state='ready'
+         and gate.expected_document_count=gate.converted_document_count
+         and owner_gate.rollout_state='active' and owner_gate.expected_count=owner_gate.converted_count
+         and owner_gate.failed_count=0 and owner_gate.shadow_mismatch_count=0 and owner_gate.validated_timestamp is not null
+         and mangorts_user_can_access_resource($1::uuid,$2,$3::uuid,$5::uuid,'edit')
+     ) as allowed`,
+    [identity.companyId, identity.ownerType, identity.ownerId, identity.documentId, userID, identity.collaborationEpoch]
   );
   return result.rows[0]?.allowed === true;
 }
@@ -1637,17 +2129,44 @@ function createNodeV2CollaborationServer(options = {}) {
     materializeDocument: materializeNodeV2Document,
     maxUpdateBytes: Number(process.env.NODE_V2_COLLAB_MAX_UPDATE_BYTES || 8 * 1024 * 1024)
   });
+  const editorOwnerStore = new EditorOwnerYjsPostgresStore({
+    pool,
+    seedDocument: seedEditorOwnerDocument,
+    materializeDocument: materializeEditorOwnerDocument,
+    maxUpdateBytes: Number(process.env.NODE_V2_COLLAB_MAX_UPDATE_BYTES || 8 * 1024 * 1024)
+  });
   const persistence = new NodeV2YjsPostgresExtension({
     store,
-    materializationDelayMs: Number(process.env.NODE_V2_COLLAB_MATERIALIZE_MS || 1500),
+    materializationDelayMs: Number(process.env.NODE_V2_COLLAB_MATERIALIZE_MS || 3e4),
+    acceptsDocument: (documentName) => documentName.startsWith("node-textbox:"),
     async authorizeUpdate(payload) {
       const userID = payload.context?.actorUserId ?? "";
       if (!userID || !await isAuthorized(pool, payload.documentName, userID)) {
         throw new Error("node_v2_collaboration_write_revoked");
       }
     },
-    async validateDocument(document2) {
-      return materializeNodeV2Document(document2);
+    async onAcknowledgement(acknowledgement) {
+      metrics2.durable_updates += 1;
+      metrics2.durable_update_bytes += Number(acknowledgement.update_bytes || 0);
+      metrics2.last_ack_transaction_ms = Number(acknowledgement.database_transaction_ms || 0);
+      if (acknowledgement.duplicate) metrics2.duplicate_updates += 1;
+    },
+    async onPersistenceError(error, payload) {
+      metrics2.persistence_failures += 1;
+      safeLog("durability_quarantine", { document_name: payload.documentName, error: error instanceof Error ? error.message : "unknown" });
+    },
+    async onCompactionError(error, payload) {
+      metrics2.compaction_failures += 1;
+      safeLog("compaction_failed", { document_name: payload.documentName, reason: payload.reason, error: error instanceof Error ? error.message : "unknown" });
+    }
+  });
+  const editorOwnerPersistence = new NodeV2YjsPostgresExtension({
+    store: editorOwnerStore,
+    materializationDelayMs: Number(process.env.NODE_V2_COLLAB_MATERIALIZE_MS || 3e4),
+    acceptsDocument: (documentName) => documentName.startsWith("editor-owner:"),
+    async authorizeUpdate(payload) {
+      const userID = payload.context?.actorUserId ?? "";
+      if (!userID || !await isEditorOwnerAuthorized(pool, payload.documentName, userID)) throw new Error("editor_owner_collaboration_write_revoked");
     },
     async onAcknowledgement(acknowledgement) {
       metrics2.durable_updates += 1;
@@ -1672,11 +2191,13 @@ function createNodeV2CollaborationServer(options = {}) {
     debounce: 120,
     maxDebounce: 1e3,
     timeout: 6e4,
-    extensions: [persistence],
+    extensions: [persistence, editorOwnerPersistence],
     async onAuthenticate({ documentName, token }) {
       try {
-        const ticket = verifyNodeV2CollaborationTicket(token, secret, documentName);
-        if (!await isAuthorized(pool, documentName, ticket.user_id)) throw new Error("node_v2_collaboration_forbidden");
+        const editorOwner = documentName.startsWith("editor-owner:");
+        const ticket = editorOwner ? verifyEditorOwnerCollaborationTicket(token, secret, documentName) : verifyNodeV2CollaborationTicket(token, secret, documentName);
+        const authorized = editorOwner ? await isEditorOwnerAuthorized(pool, documentName, ticket.user_id) : await isAuthorized(pool, documentName, ticket.user_id);
+        if (!authorized) throw new Error("collaboration_forbidden");
         metrics2.connections_accepted += 1;
         metrics2.active_connections += 1;
         return { actorUserId: ticket.user_id, clientId: ticket.client_id, expiresAt: ticket.expires_at };
@@ -1686,7 +2207,8 @@ function createNodeV2CollaborationServer(options = {}) {
       }
     },
     async connected({ documentName, connection }) {
-      connection.sendStateless(JSON.stringify(await store.durabilityStatus(documentName)));
+      const status = documentName.startsWith("editor-owner:") ? await editorOwnerStore.durabilityStatus(documentName) : await store.durabilityStatus(documentName);
+      connection.sendStateless(JSON.stringify(status));
     },
     async onAwarenessUpdate({ states, documentName, instance }) {
       const encodedBytes = Buffer.byteLength(JSON.stringify(states), "utf8");
@@ -1722,7 +2244,9 @@ function createNodeV2CollaborationServer(options = {}) {
     server,
     pool,
     store,
+    editorOwnerStore,
     persistence,
+    editorOwnerPersistence,
     metrics: metrics2,
     async listen() {
       await server.listen();
@@ -1733,6 +2257,7 @@ function createNodeV2CollaborationServer(options = {}) {
       if (stopped) return;
       stopped = true;
       await persistence.flush();
+      await editorOwnerPersistence.flush();
       await server.destroy();
       if (!options.pool) await pool.end();
       safeLog("stopped");
@@ -1759,5 +2284,6 @@ export {
   createNodeV2CollaborationServer,
   mangoProsemirrorJSONToYDoc,
   materializeNodeV2Document,
+  verifyEditorOwnerCollaborationTicket,
   verifyNodeV2CollaborationTicket
 };
