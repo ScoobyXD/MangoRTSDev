@@ -13,6 +13,7 @@ import {
 import { useEditorTextboxSync } from "./useEditorTextboxSync.js";
 
 type UseEditorDocumentPersistenceInput = {
+  editorFormat: "" | "legacy_html" | "tiptap_json";
   apiBase: string;
   companyID: string;
   currentUserID: string;
@@ -58,7 +59,7 @@ export function editorTextboxSyncUserMessage(cause: unknown): string {
 
 export function useEditorDocumentPersistence(input: UseEditorDocumentPersistenceInput) {
   const {
-    apiBase, companyID, currentUserID, linkedEntityKind, linkedEntityID, documentInformationID,
+    editorFormat, apiBase, companyID, currentUserID, linkedEntityKind, linkedEntityID, documentInformationID,
     editorDocumentRef, attachmentHydrationCleanupRef, documentDraftRef, persistedDocumentRef, documentInformationIDRef,
     documentRevisionRef, currentDocumentTargetKeyRef, persistedDocumentTargetKeyRef,
     pendingSaveRef, queuedSaveRef, saveInFlightRef, setDocumentInformationID, setError,
@@ -101,7 +102,7 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
   }, [apiBase, attachmentHydrationCleanupRef, companyID, currentDocumentTargetKeyRef, documentDraftRef, documentInformationIDRef, editorDocumentRef, invalidateDocumentTargetCaches, linkedEntityID, linkedEntityKind, persistedDocumentRef, persistedDocumentTargetKeyRef]);
 
   const { scheduleDocumentSave: scheduleSyncedSave, flushPendingDocumentSave: flushSyncedSave, recoverDocument } = useEditorTextboxSync({
-    enabled: Boolean(currentUserID && companyID && linkedEntityID && documentInformationID && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate")),
+    enabled: editorFormat === "legacy_html" && Boolean(currentUserID && companyID && linkedEntityID && documentInformationID && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate")),
     apiBase,
     companyID,
     currentUserID,
@@ -139,14 +140,16 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
   }, [pendingSaveRef, queuedSaveRef, saveInFlightRef]);
 
   const buildDocumentSaveRequest = useCallback((nextText: string): DocumentSaveRequest | null => {
+    if (editorFormat !== "legacy_html") return null;
     if (!currentUserID || !linkedEntityID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return null;
     if (!documentInformationIDRef.current && nextText.trim().length === 0) return null;
     const target = { entityKind: linkedEntityKind, entityID: linkedEntityID, informationID: ensureDocumentInformationID() };
     currentDocumentTargetKeyRef.current = documentTargetKey(target);
     return { target, text: nextText, baseRevision: documentRevisionRef.current };
-  }, [currentDocumentTargetKeyRef, currentUserID, documentInformationIDRef, documentRevisionRef, ensureDocumentInformationID, linkedEntityID, linkedEntityKind]);
+  }, [currentDocumentTargetKeyRef, currentUserID, documentInformationIDRef, documentRevisionRef, editorFormat, ensureDocumentInformationID, linkedEntityID, linkedEntityKind]);
 
   const scheduleDocumentSave = useCallback((nextText: string, immediate = false) => {
+    if (editorFormat !== "legacy_html") return;
     documentDraftRef.current = nextText;
     const request = buildDocumentSaveRequest(nextText);
     pendingSaveRef.current = request;
@@ -155,19 +158,21 @@ export function useEditorDocumentPersistence(input: UseEditorDocumentPersistence
     invalidateDocumentTargetCaches(request.target);
     scheduleSyncedSave(nextText, immediate);
     if (immediate) pendingSaveRef.current = null;
-  }, [buildDocumentSaveRequest, documentDraftRef, invalidateDocumentTargetCaches, pendingSaveRef, scheduleSyncedSave, setError]);
+  }, [buildDocumentSaveRequest, documentDraftRef, editorFormat, invalidateDocumentTargetCaches, pendingSaveRef, scheduleSyncedSave, setError]);
 
   const flushPendingDocumentSave = useCallback((fallbackText?: string) => {
+    if (editorFormat !== "legacy_html") return;
     const next = typeof fallbackText === "string" ? fallbackText : documentDraftRef.current;
     if (next !== documentDraftRef.current || pendingSaveRef.current) scheduleDocumentSave(next, true);
     pendingSaveRef.current = null;
     void flushSyncedSave().catch((cause) => setError(cause instanceof Error ? cause.message : "failed_to_sync_editor_operations"));
-  }, [documentDraftRef, flushSyncedSave, pendingSaveRef, scheduleDocumentSave, setError]);
+  }, [documentDraftRef, editorFormat, flushSyncedSave, pendingSaveRef, scheduleDocumentSave, setError]);
 
   const saveDocumentNow = useCallback(async (nextText: string) => {
+    if (editorFormat !== "legacy_html") return;
     scheduleDocumentSave(nextText, true);
     await flushSyncedSave();
-  }, [flushSyncedSave, scheduleDocumentSave]);
+  }, [editorFormat, flushSyncedSave, scheduleDocumentSave]);
 
   return {
     buildDocumentSaveRequest,

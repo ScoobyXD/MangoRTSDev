@@ -858,6 +858,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, companyID]);
 
   const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow } = useEditorDocumentPersistence({
+    editorFormat: editorDataFormat.gate?.editor_format ?? "",
     apiBase,
     currentUserID,
     companyID,
@@ -2472,8 +2473,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ? projections.find((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === cleanFocusInformationID)
             : undefined;
           const currentTextBox = focusedTextBox ?? selectCurrentEditorTextProjection(projections);
-          const initialDocument = currentTextBox?.information ?? "";
-          applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument, currentTextBox?.revision ?? 0);
+          if (editorDataFormat.gate?.editor_format === "legacy_html") {
+            applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
+          } else {
+            const informationID = currentTextBox?.information_id ?? "";
+            setDocumentInformationID(informationID);
+            documentInformationIDRef.current = informationID;
+            documentRevisionRef.current = 0;
+            documentDraftRef.current = "";
+            persistedDocumentRef.current = "";
+          }
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
@@ -2549,7 +2558,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, editorDataFormat.gate?.editor_format, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
