@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -36,8 +36,11 @@ const pgData = join(tempRoot, "postgres");
 const pgLog = join(tempRoot, "postgres.log");
 const migrationDir = join(tempRoot, "migrations");
 const legacyMigrationDir = join(tempRoot, "legacy-migrations");
-const migrateExe = join(tempRoot, "miraeopus-migrate" + exeSuffix);
-const apiExe = join(tempRoot, "miraeopus-api" + exeSuffix);
+const goBuildParent = join(backend, "go-build-cache");
+mkdirSync(goBuildParent, { recursive: true });
+const goBuildRoot = mkdtempSync(join(goBuildParent, "realtime-production-path-"));
+const migrateExe = join(goBuildRoot, "miraeopus-migrate" + exeSuffix);
+const apiExe = join(goBuildRoot, "miraeopus-api" + exeSuffix);
 const collaborationBuildRoot = mkdtempSync(join(frontend, ".mangorts-realtime-production-path-"));
 const collaborationService = join(collaborationBuildRoot, "node-v2-collaboration-server.mjs");
 const password = "mangorts-disposable-test-only";
@@ -48,13 +51,29 @@ let stopping = false;
 
 function run(label, file, args, options = {}) {
   process.stdout.write("\n--- " + label + " ---\n");
-  return execFileSync(file, args, {
-    cwd: options.cwd || root,
-    env: options.env || process.env,
-    input: options.input,
-    encoding: "utf8",
-    stdio: options.stdio || ["pipe", "inherit", "inherit"],
-  });
+  const resolvedFile = typeof file === "string" ? resolve(file) : "";
+  const disposableWindowsExecutable = windows
+    && typeof file === "string"
+    && [tempRoot, goBuildRoot].some((parent) => resolvedFile.startsWith(resolve(parent) + sep))
+    && file.toLowerCase().endsWith(".exe");
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return execFileSync(file, args, {
+        cwd: options.cwd || root,
+        env: options.env || process.env,
+        input: options.input,
+        encoding: "utf8",
+        stdio: options.stdio || ["pipe", "inherit", "inherit"],
+      });
+    } catch (cause) {
+      const transientLaunchBlock = disposableWindowsExecutable
+        && cause?.status === null
+        && (cause?.code === "UNKNOWN" || cause?.code === "EPERM" || cause?.code === "EBUSY");
+      if (!transientLaunchBlock || attempt >= 19) throw cause;
+      if (attempt === 0) process.stderr.write("Windows temporarily blocked the disposable test executable; retrying.\n");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
 }
 
 function capture(file, args, options = {}) {
@@ -767,6 +786,15 @@ try {
     throw new Error("Refusing to remove unrecognized integration path: " + resolved);
   }
   rmSync(resolved, { recursive: true, force: true });
+  const resolvedGoBuildRoot = resolve(goBuildRoot);
+  const resolvedGoBuildParent = resolve(goBuildParent);
+  if (!(resolvedGoBuildRoot.startsWith(resolvedGoBuildParent + "\\") || resolvedGoBuildRoot.startsWith(resolvedGoBuildParent + "/"))) {
+    throw new Error("Refusing to remove unexpected Go build path: " + resolvedGoBuildRoot);
+  }
+  if (!resolvedGoBuildRoot.includes("realtime-production-path-")) {
+    throw new Error("Refusing to remove unrecognized Go build path: " + resolvedGoBuildRoot);
+  }
+  rmSync(resolvedGoBuildRoot, { recursive: true, force: true });
   const resolvedCollaborationBuildRoot = resolve(collaborationBuildRoot);
   const collaborationBuildParent = resolve(frontend);
   if (!(resolvedCollaborationBuildRoot.startsWith(collaborationBuildParent + "\\") || resolvedCollaborationBuildRoot.startsWith(collaborationBuildParent + "/"))) {
