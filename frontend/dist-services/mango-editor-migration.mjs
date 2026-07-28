@@ -1584,16 +1584,16 @@ function stableJSON(value) {
   }
   return JSON.stringify(value);
 }
-function nodeProjectionDocument(information) {
+function projectionDocument(information, owner) {
   if (!information.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return information;
   let payload;
   try {
     payload = JSON.parse(information.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
   } catch {
-    throw new Error("node_textbox_projection_envelope_is_invalid_json");
+    throw new Error(`${owner}_textbox_projection_envelope_is_invalid_json`);
   }
   if (!payload || typeof payload !== "object" || typeof payload.document !== "string") {
-    throw new Error("node_textbox_projection_envelope_has_no_document");
+    throw new Error(`${owner}_textbox_projection_envelope_has_no_document`);
   }
   return payload.document;
 }
@@ -1704,20 +1704,60 @@ async function listSources(client, companyID, owner, after, limit) {
     );
     return result2.rows.map(({ source_information, ...row }) => ({
       ...row,
-      canonical_html: nodeProjectionDocument(source_information)
+      canonical_html: projectionDocument(source_information, owner)
     }));
   }
+  const table = owner === "project" ? "project_projection_table" : "logic_gate_projection_table";
+  const ownerColumn = owner === "project" ? "project_id" : "logic_gate_id";
+  const revisionExpression = owner === "project" ? "0::text" : "projection.revision::text";
+  const deletedExpression = owner === "project" ? "false" : "projection.is_deleted";
   const result = await client.query(
-    `select company_id::text,resource_type,resource_id::text,document_id::text,revision::text,canonical_html,
-            is_deleted,created_timestamp,updated_timestamp,'0'::text as display_order,'[]'::jsonb as attachment_metadata
-       from editor_collaboration_documents
-      where company_id=$1::uuid and resource_type=$2 and not is_deleted
-        and ($3::uuid is null or (resource_id,document_id)>($3::uuid,$4::uuid))
-      order by resource_id,document_id
+    `select projection.company_id::text,
+            $2::text as resource_type,
+            projection.${ownerColumn}::text as resource_id,
+            projection.information_id::text as document_id,
+            ${revisionExpression} as revision,
+            projection.information as source_information,
+            ${deletedExpression} as is_deleted,
+            projection.created_timestamp,
+            projection.updated_timestamp,
+            '0'::text as display_order,
+            coalesce((
+              select jsonb_agg(jsonb_build_object(
+                'attachmentId',attachment.attachment_id::text,
+                'sourceResourceAttachmentId',link.resource_attachment_id::text,
+                'filename',attachment.original_filename,
+                'mimeType',attachment.mime_type,
+                'byteSize',attachment.byte_size,
+                'sha256',attachment.sha256,
+                'width',attachment.original_width,
+                'height',attachment.original_height,
+                'relationshipKind',link.relationship_kind
+              ) order by
+                case link.relationship_kind when 'inline_image' then 0 when 'migrated_inline_image' then 1 when 'file_attachment' then 2 else 3 end,
+                attachment.attachment_id,link.resource_attachment_id)
+              from resource_attachments link
+              join attachments attachment
+                on attachment.company_id=link.company_id and attachment.attachment_id=link.attachment_id
+              where link.company_id=projection.company_id
+                and link.resource_type=$2
+                and link.resource_id=projection.${ownerColumn}::text
+                and link.information_id=projection.information_id
+                and link.deleted_timestamp is null
+                and attachment.deleted_timestamp is null
+            ),'[]'::jsonb) as attachment_metadata
+       from ${table} projection
+      where projection.company_id=$1::uuid
+        and projection.type='Text box'::information_type
+        and ($3::uuid is null or (projection.${ownerColumn},projection.information_id)>($3::uuid,$4::uuid))
+      order by projection.${ownerColumn},projection.information_id
       limit $5`,
     [companyID, owner, after?.resourceID ?? null, after?.documentID ?? null, limit]
   );
-  return result.rows;
+  return result.rows.map(({ source_information, ...row }) => ({
+    ...row,
+    canonical_html: projectionDocument(source_information, owner)
+  }));
 }
 async function sourceInventory(client, companyID, owner) {
   const result = owner === "node" ? await client.query(
@@ -1736,16 +1776,32 @@ async function sourceInventory(client, companyID, owner) {
          from node_projection_table
         where company_id=$1::uuid and type='Text box'::information_type`,
     [companyID]
+  ) : owner === "project" ? await client.query(
+    `select count(*)::integer as total_count,
+                count(*)::integer as active_count,
+                0::integer as deleted_count,
+                count(distinct project_id)::integer as owner_count,
+                coalesce(sum(octet_length(case
+                  when information like '<!-- mango-node-text-block-v1 -->%'
+                    then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+                  else information end)),0)::bigint as source_bytes,
+                coalesce(max(octet_length(case
+                  when information like '<!-- mango-node-text-block-v1 -->%'
+                    then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+                  else information end)),0)::integer as largest_source_bytes
+           from project_projection_table
+          where company_id=$1::uuid and type='Text box'::information_type`,
+    [companyID]
   ) : await client.query(
     `select count(*)::integer as total_count,
-              count(*)::integer as active_count,
-              0::integer as deleted_count,
-              count(distinct resource_id)::integer as owner_count,
-              coalesce(sum(octet_length(canonical_html)),0)::bigint as source_bytes,
-              coalesce(max(octet_length(canonical_html)),0)::integer as largest_source_bytes
-         from editor_collaboration_documents
-        where company_id=$1::uuid and resource_type=$2 and not is_deleted`,
-    [companyID, owner]
+                count(*) filter(where not is_deleted)::integer as active_count,
+                count(*) filter(where is_deleted)::integer as deleted_count,
+                count(distinct logic_gate_id)::integer as owner_count,
+                coalesce(sum(octet_length(information)),0)::bigint as source_bytes,
+                coalesce(max(octet_length(information)),0)::integer as largest_source_bytes
+           from logic_gate_projection_table
+          where company_id=$1::uuid and type='Text box'::information_type`,
+    [companyID]
   );
   const row = result.rows[0];
   return {
@@ -2006,17 +2062,32 @@ async function writeOwnedTarget(client, source, document2, plainText, sourceSHA,
   await client.query(
     `insert into ${table}(
        company_id,${ownerColumn},document_id,source_document_id,document_schema_version,revision,document_json,
-       plain_text,source_html,source_html_sha256,target_json_sha256,conversion_run_id
-     ) values($1::uuid,$2::uuid,$3, $3,1,0,$4::jsonb,$5,$6,$7,$8,$9::uuid)
+       plain_text,source_html,source_html_sha256,target_json_sha256,conversion_run_id,is_deleted,
+       created_timestamp,updated_timestamp
+     ) values($1::uuid,$2::uuid,$3,$3,1,0,$4::jsonb,$5,$6,$7,$8,$9::uuid,$10,$11,$12)
      on conflict(company_id,${ownerColumn},document_id) do nothing`,
-    [source.company_id, source.resource_id, source.document_id, JSON.stringify(document2), plainText, source.canonical_html, sourceSHA, targetSHA, runID]
+    [
+      source.company_id,
+      source.resource_id,
+      source.document_id,
+      JSON.stringify(document2),
+      plainText,
+      source.canonical_html,
+      sourceSHA,
+      targetSHA,
+      runID,
+      source.is_deleted,
+      source.created_timestamp,
+      source.updated_timestamp
+    ]
   );
   const target = await client.query(
-    `select source_html_sha256,target_json_sha256 from ${table}
+    `select revision,document_json,plain_text,source_html,source_html_sha256,target_json_sha256,is_deleted
+       from ${table}
       where company_id=$1::uuid and ${ownerColumn}=$2::uuid and document_id=$3`,
     [source.company_id, source.resource_id, source.document_id]
   );
-  if (target.rowCount !== 1 || target.rows[0].source_html_sha256 !== sourceSHA || target.rows[0].target_json_sha256 !== targetSHA) {
+  if (target.rowCount !== 1 || Number(target.rows[0].revision) !== 0 || stableJSON(target.rows[0].document_json) !== stableJSON(document2) || String(target.rows[0].plain_text) !== plainText || String(target.rows[0].source_html) !== source.canonical_html || target.rows[0].source_html_sha256 !== sourceSHA || target.rows[0].target_json_sha256 !== targetSHA || Boolean(target.rows[0].is_deleted) !== source.is_deleted) {
     throw new Error(`${source.resource_type}_target_identity_conflict`);
   }
 }
@@ -2028,15 +2099,23 @@ async function assertSourceCurrent(client, source) {
           and type='Text box'::information_type
         for share`,
     [source.company_id, source.resource_id, source.document_id]
+  ) : source.resource_type === "project" ? await client.query(
+    `select '0'::text as revision,information as source_information,false as is_deleted
+           from project_projection_table
+          where company_id=$1::uuid and project_id=$2::uuid and information_id=$3::uuid
+            and type='Text box'::information_type
+          for share`,
+    [source.company_id, source.resource_id, source.document_id]
   ) : await client.query(
-    `select revision::text,canonical_html,is_deleted
-         from editor_collaboration_documents
-        where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid and document_id=$4::uuid
-        for share`,
-    [source.company_id, source.resource_type, source.resource_id, source.document_id]
+    `select revision::text,information as source_information,is_deleted
+           from logic_gate_projection_table
+          where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid
+            and type='Text box'::information_type
+          for share`,
+    [source.company_id, source.resource_id, source.document_id]
   );
   const current = result.rows[0];
-  const currentHTML = source.resource_type === "node" && current ? nodeProjectionDocument(String(current.source_information)) : String(current?.canonical_html ?? "");
+  const currentHTML = current ? projectionDocument(String(current.source_information), source.resource_type) : "";
   if (result.rowCount !== 1 || String(current.revision) !== source.revision || currentHTML !== source.canonical_html || Boolean(current.is_deleted) !== source.is_deleted) {
     throw new Error("legacy_source_changed_during_conversion");
   }
@@ -2330,10 +2409,25 @@ async function shadowValidate(client, args) {
       } else {
         const table = owner === "project" ? "project_editor_documents" : "logic_gate_editor_documents";
         const column = owner === "project" ? "project_id" : "logic_gate_id";
-        const target = await client.query(`select document_json from ${table} where company_id=$1::uuid and ${column}=$2::uuid and document_id=$3`, [args.companyID, source.resource_id, source.document_id]);
+        const target = await client.query(
+          `select document_json,plain_text,source_html,source_html_sha256,target_json_sha256,is_deleted
+             from ${table}
+            where company_id=$1::uuid and ${column}=$2::uuid and document_id=$3`,
+          [args.companyID, source.resource_id, source.document_id]
+        );
         actualSHA = target.rowCount === 1 ? sha2562(stableJSON(target.rows[0].document_json)) : sha2562("");
-        equivalent = expectedSHA === actualSHA;
-        differences = equivalent ? [] : [{ kind: "json_checksum", expected_sha256: expectedSHA, actual_sha256: actualSHA }];
+        if (target.rowCount !== 1) {
+          differences = [{ kind: "missing_owned_target" }];
+        } else {
+          const row = target.rows[0];
+          if (expectedSHA !== actualSHA) differences.push({ kind: "json_checksum", expected_sha256: expectedSHA, actual_sha256: actualSHA });
+          if (String(row.plain_text) !== converted.normalizedText) differences.push({ kind: "plain_text" });
+          if (String(row.source_html) !== source.canonical_html) differences.push({ kind: "source_html" });
+          if (String(row.source_html_sha256) !== sha2562(source.canonical_html)) differences.push({ kind: "source_html_checksum" });
+          if (String(row.target_json_sha256) !== expectedSHA) differences.push({ kind: "stored_target_json_checksum" });
+          if (Boolean(row.is_deleted) !== source.is_deleted) differences.push({ kind: "deleted_state" });
+        }
+        equivalent = differences.length === 0;
       }
       if (!equivalent) mismatches += 1;
       if (args.allowWrite) {
@@ -2434,10 +2528,25 @@ async function validateReadiness(client, args) {
       );
       checkpointTotal = Number(checkpointResult.rows[0].count);
     } else {
-      const targetQuery = owner === "project" ? "select count(*)::bigint as count from project_editor_documents where company_id=$1::uuid" : "select count(*)::bigint as count from logic_gate_editor_documents where company_id=$1::uuid";
-      const targetResult = await client.query(targetQuery, [args.companyID]);
-      convertedTotal = Number(targetResult.rows[0].count);
-      convertedActive = convertedTotal;
+      const sourceTable = owner === "project" ? "project_projection_table" : "logic_gate_projection_table";
+      const targetTable = owner === "project" ? "project_editor_documents" : "logic_gate_editor_documents";
+      const ownerColumn = owner === "project" ? "project_id" : "logic_gate_id";
+      const targetResult = await client.query(
+        `select count(*)::bigint as total,
+                count(*) filter(where not target.is_deleted)::bigint as active,
+                count(*) filter(where target.is_deleted)::bigint as deleted
+           from ${sourceTable} source
+           join ${targetTable} target
+             on target.company_id=source.company_id
+            and target.${ownerColumn}=source.${ownerColumn}
+            and target.document_id=source.information_id::text
+            and target.source_document_id=source.information_id::text
+          where source.company_id=$1::uuid and source.type='Text box'::information_type`,
+        [args.companyID]
+      );
+      convertedTotal = Number(targetResult.rows[0].total);
+      convertedActive = Number(targetResult.rows[0].active);
+      convertedDeleted = Number(targetResult.rows[0].deleted);
     }
     const failureResult = await client.query("select count(*)::bigint as count from editor_conversion_items where conversion_run_id=$1::uuid and owner_type=$2 and status='failed'", [args.runID, owner]);
     const comparisonResult = await client.query(
@@ -2479,7 +2588,7 @@ async function activate(client, args) {
   if (args.owners.length !== 3) throw new Error("activation is company-wide and requires --owner all");
   await client.query("begin");
   try {
-    await client.query("lock table node_projection_table,editor_collaboration_documents in share mode");
+    await client.query("lock table node_projection_table,logic_gate_projection_table,project_projection_table in share mode");
     const sourceRows = await client.query(
       `with source as (
          select company_id,'node'::text as resource_type,node_id as resource_id,
@@ -2487,9 +2596,13 @@ async function activate(client, args) {
            from node_projection_table
           where company_id=$1::uuid and type='Text box'::information_type and not is_deleted
          union all
-         select company_id,resource_type,resource_id,document_id::text,revision,canonical_html as source_information
-           from editor_collaboration_documents
-          where company_id=$1::uuid and resource_type in ('project','logic_gate') and not is_deleted
+         select company_id,'logic_gate'::text,logic_gate_id,information_id::text,revision,information
+           from logic_gate_projection_table
+          where company_id=$1::uuid and type='Text box'::information_type and not is_deleted
+         union all
+         select company_id,'project'::text,project_id,information_id::text,0::bigint,information
+           from project_projection_table
+          where company_id=$1::uuid and type='Text box'::information_type
        )
        select source.resource_type,source.revision::bigint as current_revision,source.source_information,
               item.source_revision::bigint as converted_revision,item.source_html_sha256
@@ -2509,7 +2622,7 @@ async function activate(client, args) {
       [args.companyID, OWNER_TYPES]
     );
     const sourceDrift = sourceRows.rows.some((row) => {
-      const currentHTML = row.resource_type === "node" ? nodeProjectionDocument(String(row.source_information)) : String(row.source_information);
+      const currentHTML = projectionDocument(String(row.source_information), row.resource_type);
       return row.converted_revision === null || Number(row.current_revision) !== Number(row.converted_revision) || sha2562(currentHTML) !== row.source_html_sha256;
     });
     if (sourceRows.rowCount !== Number(expectedRows.rows[0].expected_count) || sourceDrift) {
