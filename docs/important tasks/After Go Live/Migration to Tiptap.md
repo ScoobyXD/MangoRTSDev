@@ -188,7 +188,7 @@ Tiptap runs in the user's browser and ProseMirror owns the current JSON and tran
 
 ## Backend implementation decision
 
-The Go backend does not reimplement ProseMirror step algorithms. It validates a strict, versioned Mango JSON document, limits it to two MiB, stores one canonical JSONB snapshot per accepted batch, records immutable operations/versions, and uses exact optimistic revisions. This is safe without a JavaScript document server because automatic simultaneous-edit merging is shelved. The browser still avoids per-character snapshots through transaction batching.
+The Go backend does not reimplement ProseMirror step algorithms. It validates a strict, versioned Mango JSON document without an editor-specific byte cap, stores one canonical JSONB snapshot per accepted batch, records immutable operations/versions, and uses exact optimistic revisions. The general API request-body ceiling remains separate. This is safe without a JavaScript document server because automatic simultaneous-edit merging is shelved. The browser still avoids per-character snapshots through transaction batching.
 
 ## Images and attachments
 

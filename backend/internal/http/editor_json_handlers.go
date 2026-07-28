@@ -317,8 +317,6 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 
 func writeEditorJSONStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrEditorDocumentTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "editor_json_document_too_large")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_editor_json_document")
 	case errors.Is(err, store.ErrVersionConflict):

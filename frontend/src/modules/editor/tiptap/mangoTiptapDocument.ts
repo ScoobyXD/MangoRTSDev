@@ -3,7 +3,6 @@ import type { JSONContent } from "@tiptap/core";
 
 export const MANGO_TIPTAP_FORMAT = "mango-tiptap-json" as const;
 export const MANGO_TIPTAP_SCHEMA_VERSION = 1 as const;
-export const MANGO_TIPTAP_MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 
 export type MangoTiptapDocument = {
   format: typeof MANGO_TIPTAP_FORMAT;
@@ -243,13 +242,7 @@ function validateMangoTiptapDocumentStructure(value: unknown): MangoTiptapValida
 }
 
 export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidationResult {
-  const result = validateMangoTiptapDocumentStructure(value);
-  if (!result.valid) return result;
-  const encoded = JSON.stringify(result.value);
-  if (new TextEncoder().encode(encoded).byteLength > MANGO_TIPTAP_MAX_DOCUMENT_BYTES) {
-    return { valid: false, error: "document exceeds the two MiB limit" };
-  }
-  return result;
+  return validateMangoTiptapDocumentStructure(value);
 }
 
 export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidationResult {
@@ -266,9 +259,6 @@ export function serializeMangoTiptapDocument(value: MangoTiptapDocument): string
   const result = validateMangoTiptapDocumentStructure(value);
   if (!result.valid) throw new Error(result.error);
   const serialized = JSON.stringify(result.value);
-  if (new TextEncoder().encode(serialized).byteLength > MANGO_TIPTAP_MAX_DOCUMENT_BYTES) {
-    throw new Error("document exceeds the two MiB limit");
-  }
   return serialized;
 }
 

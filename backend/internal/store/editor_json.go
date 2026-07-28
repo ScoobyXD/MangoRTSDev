@@ -21,7 +21,6 @@ const (
 	MangoTiptapSchemaVersion     = 1
 	EditorJSONSnapshotEventType  = "editor.snapshot.required"
 	EditorJSONDeletedEventType   = "editor.document.deleted"
-	EditorJSONDocumentMaxBytes   = 2 * 1024 * 1024
 	EditorJSONOperationMaxIDSize = 160
 )
 
@@ -186,7 +185,7 @@ func NormalizeEditorJSONAnnotations(input []EditorJSONAnnotation) ([]EditorJSONA
 	for _, annotation := range input {
 		annotation.ID = strings.TrimSpace(annotation.ID)
 		annotation.Kind = strings.TrimSpace(annotation.Kind)
-		if annotation.ID == "" || len(annotation.ID) > 500 || annotation.From < 0 || annotation.To <= annotation.From || annotation.To > EditorJSONDocumentMaxBytes {
+		if annotation.ID == "" || len(annotation.ID) > 500 || annotation.From < 0 || annotation.To <= annotation.From {
 			return nil, ErrInvalid
 		}
 		switch annotation.Kind {
@@ -230,10 +229,7 @@ var editorJSONMarkAttrs = map[string]map[string]bool{
 }
 
 func ValidateMangoTiptapJSON(raw json.RawMessage) (json.RawMessage, error) {
-	if len(raw) == 0 || len(raw) > EditorJSONDocumentMaxBytes || editorBytesContainSensitiveContent(raw) {
-		if len(raw) > EditorJSONDocumentMaxBytes {
-			return nil, ErrEditorDocumentTooLarge
-		}
+	if len(raw) == 0 || editorBytesContainSensitiveContent(raw) {
 		return nil, ErrInvalid
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -263,7 +259,7 @@ func ValidateMangoTiptapJSON(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	canonical, err := json.Marshal(envelope)
-	if err != nil || len(canonical) > EditorJSONDocumentMaxBytes {
+	if err != nil {
 		return nil, ErrInvalid
 	}
 	return canonical, nil

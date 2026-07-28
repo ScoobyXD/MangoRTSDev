@@ -9,6 +9,7 @@ import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/ed
 import {
   createEmptyMangoTiptapDocument,
   parseMangoTiptapDocument,
+  serializeMangoTiptapDocument,
   validateMangoTiptapDocument,
   type MangoTiptapDocument,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
@@ -132,6 +133,14 @@ test("strict Mango Tiptap contract covers rich features and fails closed", () =>
   const oversizedImageNode = oversizedImage.document.content?.[2];
   if (oversizedImageNode?.attrs) oversizedImageNode.attrs.displayWidth = 1_000_000;
   assert.equal(validateMangoTiptapDocument(oversizedImage).valid, false);
+});
+
+test("Tiptap validation and serialization accept documents beyond the former two MiB cap", () => {
+  const document = richDocument("x".repeat(2 * 1024 * 1024 + 4096));
+  const serialized = JSON.stringify(document);
+  assert.ok(new TextEncoder().encode(serialized).byteLength > 2 * 1024 * 1024);
+  assert.equal(validateMangoTiptapDocument(document).valid, true);
+  assert.equal(serializeMangoTiptapDocument(document), serialized);
 });
 
 test("Tiptap owns commands, history, tables, positions, and annotation mapping", () => {
