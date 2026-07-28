@@ -5,7 +5,8 @@ import * as Y from "yjs";
 
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import { MANGO_TIPTAP_FORMAT, MANGO_TIPTAP_SCHEMA_VERSION, validateMangoTiptapDocument, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
-import type { MangoTiptapRequest, MangoTiptapResourceType } from "./mangoTiptapSync.js";
+import { clearExactMangoTiptapPending, mangoTiptapPendingStorageKey, readExactMangoTiptapPending, type MangoTiptapRequest, type MangoTiptapResourceType } from "./mangoTiptapSync.js";
+import { mangoProsemirrorJSONToYDoc } from "./mangoTiptapYjs.js";
 
 const DURABLE_ACK_TYPE = "node-v2-yjs.durable-ack.v1";
 const DURABILITY_ERROR_TYPE = "node-v2-yjs.durability-error.v1";
@@ -18,6 +19,7 @@ type CollaborationTicket = {
 };
 
 type EditorOwnerSnapshot = {
+  revision: number;
   document: MangoTiptapDocument;
   annotations?: MangoTiptapPersistedAnnotation[];
 };
@@ -84,6 +86,7 @@ export class MangoTiptapProviderSync {
   private persistence?: IndexeddbPersistence;
   private provider?: HocuspocusProvider;
   private documentName = "";
+  private canonicalRevision = 0;
   private started = false;
   private stopped = false;
   private hydrated = false;
@@ -95,6 +98,14 @@ export class MangoTiptapProviderSync {
   private durableWaiters = new Set<() => void>();
   private recoveryPersistence: Promise<unknown> = Promise.resolve();
   private mentionDrain?: Promise<void>;
+  private legacyPendingRecovery?: {
+    storageKey: string;
+    baseRevision: number;
+    document: MangoTiptapDocument;
+    annotations: MangoTiptapPersistedAnnotation[];
+  };
+  private legacyRecoveryImported = false;
+  private legacyRecoveryCleanupQueued = false;
 
   constructor(private readonly options: MangoTiptapProviderSyncOptions) {}
 
@@ -117,6 +128,7 @@ export class MangoTiptapProviderSync {
     if (this.started) return;
     const snapshot = await this.options.requestJSON<EditorOwnerSnapshot>(this.documentPath());
     const validation = validateMangoTiptapDocument(snapshot.document);
+    this.canonicalRevision = snapshot.revision;
     if (!validation.valid) throw new Error(`invalid_collaboration_document:${validation.error}`);
     this.options.onDocument?.(validation.value);
     this.options.onAnnotations?.(Array.isArray(snapshot.annotations) ? snapshot.annotations : []);
@@ -135,7 +147,29 @@ export class MangoTiptapProviderSync {
     window.addEventListener("offline", this.handleOffline);
     try {
       await this.persistence.whenSynced;
-      this.localDirty = Boolean(await this.persistence.get(RECOVERY_STATE_KEY));
+      const yjsRecoveryPending = Boolean(await this.persistence.get(RECOVERY_STATE_KEY));
+      const legacyStorageKey = mangoTiptapPendingStorageKey(this.options);
+      try {
+        const legacyRecord = await readExactMangoTiptapPending(legacyStorageKey);
+        const recovered = legacyRecord?.commits[legacyRecord.commits.length - 1];
+        if (recovered && !yjsRecoveryPending) {
+          if (recovered.base_revision !== this.canonicalRevision) {
+            this.options.onError?.(new Error(
+              "This browser has an unsaved pre-collaboration copy, but the server document changed. Copy the local text before resolving the conflict.",
+            ));
+          } else {
+            this.legacyPendingRecovery = {
+              storageKey: legacyStorageKey,
+              baseRevision: recovered.base_revision,
+              document: recovered.document,
+              annotations: recovered.annotations ?? [],
+            };
+          }
+        }
+      } catch (cause) {
+        this.options.onRecoveryStorageError?.(cause instanceof Error ? cause.message : "The pre-collaboration browser recovery copy could not be read.");
+      }
+      this.localDirty = yjsRecoveryPending || Boolean(this.legacyPendingRecovery);
       this.options.onPendingChange?.(this.localDirty ? 1 : 0);
       if (this.document.getXmlFragment("default").length > 0) {
         this.hydrated = true;
@@ -144,6 +178,32 @@ export class MangoTiptapProviderSync {
     } catch (cause) {
       this.options.onError?.(cause);
       throw cause;
+    }
+  }
+
+  private importLegacyPendingRecovery(): void {
+    const recovery = this.legacyPendingRecovery;
+    if (!recovery || this.legacyRecoveryImported) return;
+    const recoveredDocument = mangoProsemirrorJSONToYDoc(recovery.document.document);
+    try {
+      const source = recoveredDocument.getXmlFragment("default");
+      const target = this.document.getXmlFragment("default");
+      const children = source.toArray().map((child) => child.clone()) as Array<Y.XmlElement | Y.XmlText>;
+      this.document.transact(() => {
+        if (target.length > 0) target.delete(0, target.length);
+        if (children.length > 0) target.insert(0, children);
+        this.document.getMap("mango-metadata").set(
+          "annotations",
+          JSON.stringify(recovery.annotations),
+        );
+      }, "legacy-revisioned-json-recovery");
+      this.legacyRecoveryImported = true;
+      this.localDirty = true;
+      this.hydrated = true;
+      this.options.onPendingChange?.(1);
+      this.publishMaterialized();
+    } finally {
+      recoveredDocument.destroy();
     }
   }
 
@@ -176,6 +236,7 @@ export class MangoTiptapProviderSync {
             token: async () => (await this.collaborationTicket()).token,
             onSynced: ({ state }) => {
               if (!state) return;
+              this.importLegacyPendingRecovery();
               this.synced = true;
               this.hydrated = true;
               finish();
@@ -276,6 +337,19 @@ export class MangoTiptapProviderSync {
     if (!this.localDirty || !this.durableSnapshot || !Y.equalSnapshots(Y.snapshot(this.document), this.durableSnapshot)) return;
     this.localDirty = false;
     this.recoveryPersistence = this.recoveryPersistence.then(() => this.persistence?.del(RECOVERY_STATE_KEY)).catch(() => undefined);
+    const legacyRecovery = this.legacyPendingRecovery;
+    if (legacyRecovery && this.legacyRecoveryImported && !this.legacyRecoveryCleanupQueued) {
+      this.legacyRecoveryCleanupQueued = true;
+      this.recoveryPersistence = this.recoveryPersistence.then(async () => {
+        await clearExactMangoTiptapPending(legacyRecovery.storageKey);
+        if (this.legacyPendingRecovery?.storageKey === legacyRecovery.storageKey) {
+          this.legacyPendingRecovery = undefined;
+        }
+      }).catch((cause) => {
+        this.legacyRecoveryCleanupQueued = false;
+        this.options.onRecoveryStorageError?.(cause instanceof Error ? cause.message : "The pre-collaboration browser recovery copy could not be cleared.");
+      });
+    }
     this.options.onPendingChange?.(0);
     for (const resolve of this.durableWaiters) resolve();
     this.durableWaiters.clear();
