@@ -617,21 +617,15 @@ Expected behavior is normally origin-aware:
 
 If Yjs is used, use the collaboration-aware history/UndoManager path instead of enabling an independent ordinary ProseMirror history stack on the same document.
 
-## No arbitrary two-MiB Tiptap product limit
+## One-GiB current editor-text limit per owner
 
-The clarified product requirement is that Mango should not impose an arbitrary user-facing two-MiB Tiptap document limit.
+The former arbitrary two-MiB Tiptap document cap has been removed. The product rule selected on 2026-07-27 is now one aggregate 1 GiB (1,073,741,824-byte) ceiling for the current editor content belonging to each individual Node, each individual Project, and each individual Logic Gate.
 
-The current inactive foundation enforces exactly 2,097,152 UTF-8 bytes for one serialized Mango Tiptap JSON envelope in:
+This is specifically a text/editor-document limit. It sums the serialized current Tiptap JSON for all active text boxes or editor documents owned by that one entity. It does **not** count attachment file/object bytes, attachment thumbnails, email bodies, chats stored outside the editor document, immutable editor versions, or Yjs update/checkpoint history. Small permanent attachment-reference nodes inside the Tiptap document remain ordinary JSON and therefore contribute only their tiny metadata size; the actual uploaded file remains separate.
 
-- frontend serialization and validation;
-- backend validation;
-- database constraints on current document, operation, and version JSONB values.
+Database triggers enforce the rule on the generic transition table and the permanent Node, Project, and Logic Gate current-document tables. Owner-scoped advisory locks serialize simultaneous writes so two text boxes cannot race past the aggregate limit. Node V2 also checks the materialized document before acknowledging a Yjs update as durable. When the limit is exceeded the user sees: "Mango gives each Node, Project, and Logic Gate a 1 GB editor-text limit. This counts only text and text-box document data. Attachments are separate and do not count toward the 1 GB."
 
-That limit is Mango-specific, not a Tiptap or ProseMirror limit.
-
-The limit does not include image bytes, email bodies, chats, other text boxes, or the entire Node. It applies to one serialized Tiptap document.
-
-Do not simply remove the constant while retaining full-document saves and unbounded full-snapshot history. That would turn the current cap into excessive API bandwidth, database growth, and browser memory pressure.
+Historical rows do not count because otherwise normal editing would eventually consume the limit without increasing the current visible content. The general HTTP request-body ceiling, per-update Yjs limit, structural validation, browser memory, and PostgreSQL physical limits remain separate technical boundaries.
 
 The desired requirement is:
 
@@ -1232,7 +1226,24 @@ The next real-data operation is deliberately narrower than the complete migratio
 
 At this timestamp the development `workspace_editor_formats` row is already `tiptap_json`/`ready` with the original one-document trial counts (`1/1`), while `editor_rollout_gates` has no rows. The batch operation must replace those temporary trial counts with truthful textbox conversion counts without activating the full Node v2 workspace. The current Phase 3 migration command cannot yet perform this exact operation because its Node inventory reads `editor_collaboration_documents` instead of the 937 authoritative projection rows; update that inventory and transitional dual-write behavior before generating or applying the batch.
 
-The old Mango-specific 2 MiB Tiptap JSON document restriction is being removed as part of this continuation because the real largest source is already approximately 1.87 MiB. Structural validation remains required. The separate general API request-body ceiling remains a platform safety boundary rather than an editor-document rule.
+The old Mango-specific 2 MiB Tiptap JSON document restriction has been removed because the real largest source is already approximately 1.87 MiB and JSON conversion can expand it. It is replaced by the aggregate one-GiB current editor-text limit per Node, Project, or Logic Gate described above. Attachments are separate and excluded. Structural validation and the platform request-body ceiling remain separate boundaries.
+
+### How the 937 Node textboxes will actually be converted (2026-07-27 21:16 PDT)
+
+Do not generate and paste 937 independent SQL statements. Use one reviewed, resumable migration program. The existing `frontend/scripts/mango-editor-migration.ts` already supplies most of the required machinery: official Tiptap conversion, batches, one transaction per item, source/target checksums, a conversion ledger, retry counts, warning/failure reports, shadow comparison, and resume by stable run ID.
+
+The program is **not ready to run against these 937 rows yet**. Its Node source reader still inventories `editor_collaboration_documents`, while the agreed authoritative inventory for this batch is the 937 `node_projection_table` rows whose type is `Text box`. It also writes only the final `node_textboxes` target, while this narrow trial requires the same validated JSON in the transitional `editor_json_documents` table so the current non-Node-v2 shell can display it. Those two gaps must be corrected and tested before any writer credential is used.
+
+The operational sequence is:
+
+1. Update the migration program to read the authoritative current projection rows, use `information_id` as the stable textbox ID, preserve active/deleted state, and dual-write the transitional JSON row plus final Node textbox/Yjs seed checkpoint. Leave all `Text block chat` rows untouched.
+2. Run `inventory` and `dry-run` with the database-enforced read-only credential. The report must show the expected 937 rows, every source checksum, converted JSON checksum, text/structure comparisons, warnings, and the per-Node aggregate byte total. No database rows are written in these modes.
+3. Review the report and take/verify the required development backup. Keep the source projection HTML unchanged as the immediate rollback source.
+4. Jonat starts a local terminal, places the development writer connection string only in the process environment as `MANGORTS_MIGRATION_DATABASE_URL`, and runs the reviewed `backfill` command with `--allow-write`, the exact company confirmation, backup reference, batch size, and stable run ID. The credential is never put in the repository, pasted into Codex, printed in logs, or granted permanently to an agent.
+5. The program commits one textbox at a time, records success/failure in the ledger, and can be rerun with the same run ID. A failure does not require starting over and does not partially write that textbox.
+6. Run shadow validation and verify 937 expected/converted rows, zero failures, and zero unexplained text/structure mismatches. Keep the Node v2 owner gate inactive and do not activate or clean up legacy data as part of this backfill.
+
+This is the appropriate form of one-time database write access: the human-controlled migration process receives the writer connection only for that command. Codex prepares and verifies the program but does not receive the password or execute the live write. A giant generated SQL file remains possible, but it is the worse option because it is harder to resume, report, verify, and safely rerun.
 
 Agreed continuation after this experiment:
 
@@ -1532,7 +1543,7 @@ Do not:
 - enable the Tiptap workspace gate;
 - convert live data;
 - delete old tables;
-- remove the two-MiB limit in isolation;
+- remove or weaken the one-GiB per-owner text limit, attachment separation, or structural limits without an explicit product change;
 - route product traffic through Yjs/Hocuspocus before production ticket authorization, observability, capacity, and rollout gates are reviewed;
 - replace Node timeline behavior;
 - merge comment records into editor JSON;

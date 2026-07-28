@@ -227,7 +227,7 @@ export function createNodeV2CollaborationServer(options: {
       }
     },
     async validateDocument(document: Y.Doc) {
-      materializeNodeV2Document(document);
+      return materializeNodeV2Document(document);
     },
     async onAcknowledgement(acknowledgement: Record<string, unknown>) {
       metrics.durable_updates += 1;

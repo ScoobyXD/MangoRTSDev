@@ -450,6 +450,16 @@ func (r *MemoryRepo) CheckpointNodeV2TextBox(input NodeV2CheckpointInput) (domai
 			return cloneNodeV2Textbox(textbox), nil
 		}
 	}
+	var otherCurrentBytes int64
+	for key, item := range r.nodeV2.textboxes {
+		if key == k || item.CompanyID != input.CompanyID || item.NodeID != input.NodeID || item.DeletedTimestamp != nil {
+			continue
+		}
+		otherCurrentBytes += int64(len(item.DocumentJSON))
+	}
+	if EditorOwnerTextLimitExceeded(otherCurrentBytes, int64(len(input.DocumentJSON))) {
+		return domain.NodeV2TextBox{}, ErrEditorOwnerTextLimit
+	}
 	now := time.Now().UTC()
 	cp := domain.NodeV2YjsCheckpoint{CheckpointID: input.CheckpointID, CollaborationEpoch: input.CollaborationEpoch, ThroughSequence: input.ThroughSequence, PayloadBase64: encodeBase64(input.CheckpointPayload), StateVectorBase64: encodeBase64(input.StateVector), CreatedTimestamp: now}
 	r.nodeV2.checkpoints[k] = append(r.nodeV2.checkpoints[k], cp)

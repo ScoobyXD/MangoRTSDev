@@ -34,6 +34,19 @@ func editorJSONMemoryKey(ref EditorJSONDocumentRef) string {
 	return ref.CompanyID + ":" + ref.ResourceType + ":" + ref.ResourceID + ":" + ref.DocumentID
 }
 
+func (r *MemoryRepo) editorJSONOwnerTextLimitExceededLocked(ref EditorJSONDocumentRef, nextDocumentBytes int64) bool {
+	var otherCurrentBytes int64
+	targetKey := editorJSONMemoryKey(ref)
+	for key, document := range r.editorJSONDocuments {
+		if key == targetKey || document.Deleted || document.Ref.CompanyID != ref.CompanyID ||
+			document.Ref.ResourceType != ref.ResourceType || document.Ref.ResourceID != ref.ResourceID {
+			continue
+		}
+		otherCurrentBytes += int64(len(document.JSONDocument))
+	}
+	return EditorOwnerTextLimitExceeded(otherCurrentBytes, nextDocumentBytes)
+}
+
 func (r *MemoryRepo) GetEditorDataFormat(companyID string) (EditorDataFormatGate, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
@@ -156,6 +169,9 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	}
 	if input.BaseRevision != document.Revision {
 		return EditorJSONCommit{}, ErrVersionConflict
+	}
+	if r.editorJSONOwnerTextLimitExceededLocked(input.Document, int64(len(input.JSONDocument))) {
+		return EditorJSONCommit{}, ErrEditorOwnerTextLimit
 	}
 	now := time.Now().UTC()
 	revision := document.Revision + 1

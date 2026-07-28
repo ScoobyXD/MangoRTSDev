@@ -317,6 +317,8 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 
 func writeEditorJSONStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrEditorOwnerTextLimit):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "editor_owner_text_limit_exceeded", "error": store.EditorOwnerTextLimitMessage})
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_editor_json_document")
 	case errors.Is(err, store.ErrVersionConflict):

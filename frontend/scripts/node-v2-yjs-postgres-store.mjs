@@ -206,7 +206,7 @@ export class NodeV2YjsPostgresStore {
     }
   }
 
-  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null } = {}) {
+  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null, documentJson = null } = {}) {
     const identity = parseNodeTextboxDocumentName(documentName);
     const payload = asUint8Array(update);
     if (payload.byteLength === 0) throw new Error("node_v2_yjs_empty_update");
@@ -236,6 +236,23 @@ export class NodeV2YjsPostgresStore {
         [identity.companyId, identity.nodeId, identity.textboxId],
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
+      if (documentJson) {
+        // Match the database trigger's row-lock-then-owner-lock order. Keeping
+        // this order prevents a durable append and compaction from deadlocking.
+        await client.query(
+          "select pg_advisory_xact_lock(hashtextextended('editor-owner-text:' || $1 || ':node:' || $2, 0))",
+          [identity.companyId, identity.nodeId],
+        );
+        const limitResult = await client.query(
+          `select coalesce(sum(octet_length(document_json::text)) filter (
+                   where deleted_timestamp is null and textbox_id <> $3), 0)
+                  + octet_length($4::jsonb::text) <= 1073741824 as within_limit
+             from node_textboxes
+            where company_id = $1 and node_id = $2`,
+          [identity.companyId, identity.nodeId, identity.textboxId, JSON.stringify(documentJson)],
+        );
+        if (limitResult.rows[0]?.within_limit !== true) throw new Error("editor_owner_text_limit_exceeded");
+      }
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
       const durableHeadBefore = numericSequence(textboxResult.rows[0].latest_update_sequence, "latest_update_sequence");
       let latestUpdateSequence = durableHeadBefore;
@@ -543,10 +560,11 @@ export class NodeV2YjsPostgresExtension {
         if (this.failedDocumentInstances.has(payload.document)) return;
         try {
           await this.authorizeUpdate(payload);
-          await this.validateDocument(payload.document, payload);
+          const materialized = await this.validateDocument(payload.document, payload);
           const acknowledgement = await this.store.appendUpdate(payload.documentName, payload.update, {
             clientId: payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`,
             actorUserId: payload.context?.actorUserId ?? null,
+            documentJson: materialized?.documentJson ?? null,
           });
           payload.connection?.sendStateless(JSON.stringify(acknowledgement));
           await this.onAcknowledgement(acknowledgement, payload);
@@ -571,7 +589,10 @@ export class NodeV2YjsPostgresExtension {
             // Observability hooks must not prevent the durability failure response and disconnect.
           }
           try {
-            payload.connection?.sendStateless(JSON.stringify({ type: ERROR_TYPE, code: "durable_commit_failed" }));
+            const code = error instanceof Error && error.message.includes("editor_owner_text_limit_exceeded")
+              ? "editor_owner_text_limit_exceeded"
+              : "durable_commit_failed";
+            payload.connection?.sendStateless(JSON.stringify({ type: ERROR_TYPE, code }));
           } catch {
             // A peer may already have closed while the database transaction was rolling back.
           }

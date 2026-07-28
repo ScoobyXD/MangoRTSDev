@@ -172,7 +172,7 @@ func commitPostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONCommitI
 	insertCurrent := fmt.Sprintf(`insert into %s(company_id,%s,document_id,document_schema_version,revision,document_json,plain_text,canonical_annotations,is_deleted,created_timestamp,updated_timestamp)
 		values($1::uuid,$2::uuid,$3,1,0,$4::jsonb,'','[]'::jsonb,false,now(),now()) on conflict(company_id,%s,document_id) do nothing`, storage.currentTable, storage.ownerColumn, storage.ownerColumn)
 	if _, err := tx.ExecContext(ctx, insertCurrent, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, emptyMangoTiptapDocument); err != nil {
-		return EditorJSONCommit{}, err
+		return EditorJSONCommit{}, mapEditorOwnerTextLimitError(err)
 	}
 	var revision int64
 	var deleted bool
@@ -221,7 +221,7 @@ func commitPostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONCommitI
 	updateCurrent := fmt.Sprintf(`update %s set revision=$4,document_schema_version=1,document_json=$5::jsonb,plain_text=$6,canonical_annotations=$7::jsonb,is_deleted=false,updated_timestamp=$8
 		where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
 	if _, err := tx.ExecContext(ctx, updateCurrent, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, nextRevision, input.JSONDocument, postgresEditorDomainPlainText(input.JSONDocument), annotationsRaw, now); err != nil {
-		return EditorJSONCommit{}, err
+		return EditorJSONCommit{}, mapEditorOwnerTextLimitError(err)
 	}
 	if err := insertRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{EventID: eventID, CompanyID: input.Document.CompanyID, Scope: scope, EventType: EditorJSONSnapshotEventType, ResourceType: input.Document.ResourceType, ResourceID: input.Document.ResourceID, Permission: EntityPermissionEdit, ResourceRevision: nextRevision, Payload: payload}); err != nil {
 		return EditorJSONCommit{}, err

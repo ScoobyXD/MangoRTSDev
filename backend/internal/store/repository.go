@@ -15,6 +15,7 @@ var (
 	ErrAlreadyExists                 = errors.New("already exists")
 	ErrVersionConflict               = errors.New("version conflict")
 	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
+	ErrEditorOwnerTextLimit          = errors.New("editor owner text limit exceeded")
 	ErrNodeV2Inactive                = errors.New("node v2 inactive")
 	ErrNodeV2UntrustedCheckpoint     = errors.New("node v2 checkpoint requires trusted service")
 	ErrSendInProgress                = errors.New("send in progress")

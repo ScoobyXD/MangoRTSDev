@@ -41,7 +41,7 @@ Default enforceable limits are:
 - 100 awareness clients and 16 KiB encoded awareness state per document;
 - 12 collaboration database connections and a 15-second statement timeout;
 - materialization scheduling after 1.5 seconds, with compaction at 512 tail updates or 512 KiB;
-- no editor-specific byte cap on a materialized Tiptap JSON document; structural validation, annotation-count validation, and the platform request-body ceiling still apply; and
+- one aggregate 1 GiB ceiling on the current editor JSON owned by each Node, Project, or Logic Gate; attachment object bytes, immutable versions, and Yjs update/checkpoint history are separate and excluded; and
 - seven-day covered-update and 14-day superseded-checkpoint retention, except exact verification pins.
 
 `GET /healthz` reports service/database readiness. `GET /metrics` reports active/accepted/rejected connections, durable update count/bytes, duplicate updates, acknowledgement transaction time, awareness rejections, persistence failures, and compaction failures. Initial deployment gates should stop activation on any persistence/compaction failure, repeated authorization anomalies, missing materialization, or sustained acknowledgement latency above the reviewed environment budget. Start with a 250 ms p95 warning threshold and revise it only from measured deployment data.
@@ -164,7 +164,7 @@ The user should perform this checklist against a disposable or explicitly approv
 
 - Physical multi-device networks, deployment topology, connection counts, TLS/proxy behavior, and production capacity still require environment-specific validation.
 - The development migration ledger remains unreconciled and blocks live migration application.
-- Very large Project/Logic Gate documents are no longer rejected by an editor-specific two-MiB rule; deployment monitoring must still account for the platform request ceiling and available browser, API, and database resources.
+- The former per-document two-MiB rule is gone. Current editor JSON is capped at an aggregate 1 GiB per Node, Project, or Logic Gate, excluding attachment object bytes and history. Deployment monitoring must still account for the platform request ceiling and available browser, API, and database resources.
 - Conversion warnings, attachment identity gaps, and comment-anchor ambiguity require item-level human review before readiness.
 - Alert routing and service deployment are not configured by repository code alone.
 - Legacy HTML, collaboration tables, generic JSON tables, Node projection paths, conversion evidence, rollback exports, and Yjs history must remain through the reviewed rollback window.
