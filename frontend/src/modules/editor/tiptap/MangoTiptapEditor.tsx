@@ -373,6 +373,7 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
       {selected && (
         <div contentEditable={false} style={{ position: "absolute", right: 4, top: 4, display: "flex", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "calc(100% - 8px)", gap: 4 }}>
           <button type="button" onClick={downloadImage}>Download</button>
+          {attributes.linkHref && <a href={attributes.linkHref} target={attributes.linkTarget || undefined} rel={attributes.linkRel || "noopener noreferrer nofollow"} title={attributes.linkTitle || undefined} onClick={(event) => event.stopPropagation()}>Open link</a>}
           {objectURL && <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>}
           {editable && onImageChatRequest && <button type="button" onClick={() => onImageChatRequest(imageAction())}>Comment</button>}
           {editable && onImageNodeRequest && <button type="button" onClick={() => onImageNodeRequest(imageAction())}>Create Node</button>}

@@ -55,6 +55,8 @@ const MIGRATION_COMPANY_ID = "12121212-1212-4121-8121-121212121212";
 const MIGRATION_NODE_ID = "23232323-2323-4232-8232-232323232323";
 const MIGRATION_PROJECT_ID = "34343434-3434-4343-8343-343434343434";
 const MIGRATION_LOGIC_GATE_ID = "45454545-4545-4454-8454-454545454545";
+const MIGRATION_ATTACHMENT_ID = "46464646-4646-4464-8464-464646464646";
+const MIGRATION_RESOURCE_ATTACHMENT_ID = "47474747-4747-4474-8474-474747474747";
 const MIGRATION_DOCUMENT_IDS = Object.freeze({
   node: "56565656-5656-4565-8565-565656565656",
   deletedNode: "57575757-5757-4575-8575-575757575757",
@@ -844,6 +846,23 @@ async function seedMigrationWorkflow(pool) {
   await pool.query("insert into projects(company_id,project_id,name) values($1,$2,'Migration proof Project')", [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID]);
   await pool.query("insert into logic_gates(company_id,logic_gate_id,header,created_timestamp) values($1,$2,'Migration proof Logic Gate',clock_timestamp())", [MIGRATION_COMPANY_ID, MIGRATION_LOGIC_GATE_ID]);
   await pool.query(
+    `insert into attachments(
+       attachment_id,company_id,original_filename,mime_type,byte_size,sha256,
+       storage_bucket,storage_key,original_width,original_height,source_kind
+     ) values($1,$2,'migration-proof.png','image/png',4,$3,'proof-bucket','proof-key',320,180,'editor_paste')`,
+    [MIGRATION_ATTACHMENT_ID, MIGRATION_COMPANY_ID, "a".repeat(64)],
+  );
+  await pool.query(
+    `insert into resource_attachments(
+       resource_attachment_id,company_id,resource_type,resource_id,attachment_id,information_id,
+       message_id,editor_surface,relationship_kind
+     ) values($1,$2,'node',$3,$4,$5,'legacy-chat','node_text_block','chat_attachment')`,
+    [MIGRATION_RESOURCE_ATTACHMENT_ID, MIGRATION_COMPANY_ID, MIGRATION_NODE_ID, MIGRATION_ATTACHMENT_ID, MIGRATION_DOCUMENT_IDS.node],
+  );
+  const nodeHTML = `<!-- mango-editor-html-v1 --><h2>Node source</h2><p>Exact <strong>rich text</strong> with <a href="https://example.com">link</a>.</p><span data-mango-editor-image="true" data-mango-editor-attachment-id="${MIGRATION_ATTACHMENT_ID}" data-mango-editor-filename="migration-proof.png" data-mango-editor-mime-type="image/png"><img src="mango-attachment:${MIGRATION_ATTACHMENT_ID}"></span>`;
+  const nodeProjection = `<!-- mango-node-text-block-v1 -->${JSON.stringify({ title: "Migration proof", document: nodeHTML, attachments: [] })}`;
+  const deletedNodeProjection = `<!-- mango-node-text-block-v1 -->${JSON.stringify({ title: "Deleted proof", document: "<p>Deleted Node source remains recoverable.</p>", attachments: [] })}`;
+  await pool.query(
     `insert into node_projection_table(
        company_id,node_id,information_id,type,information,is_deleted,revision,created_timestamp,updated_timestamp
      ) values
@@ -853,9 +872,9 @@ async function seedMigrationWorkflow(pool) {
       MIGRATION_COMPANY_ID,
       MIGRATION_NODE_ID,
       MIGRATION_DOCUMENT_IDS.node,
-      '<h2>Node source</h2><p>Exact <strong>rich text</strong> with <a href="https://example.com">link</a>.</p>',
+      nodeProjection,
       MIGRATION_DOCUMENT_IDS.deletedNode,
-      '<p>Deleted Node source remains recoverable.</p>',
+      deletedNodeProjection,
     ],
   );
   const trialDocument = {
@@ -951,7 +970,10 @@ async function runMigrationWorkflowProof(pool, port, database) {
        (select count(*)::integer from editor_json_documents where company_id=$1 and resource_type='node') as transitional,
        (select count(*) filter(where is_deleted)::integer from editor_json_documents where company_id=$1 and resource_type='node') as transitional_deleted,
        (select jsonb_array_length(canonical_annotations)::integer from editor_json_documents where company_id=$1 and resource_type='node' and document_id=$2) as preserved_annotations,
-       (select count(*)::integer from node_textbox_yjs_checkpoints where company_id=$1 and checkpoint_reason='migration_seed') as checkpoints`,
+       (select count(*)::integer from node_textbox_yjs_checkpoints where company_id=$1 and checkpoint_reason='migration_seed') as checkpoints,
+       (select count(*)::integer from node_textbox_attachment_links where company_id=$1 and textbox_id=$2::uuid and deleted_timestamp is null) as permanent_attachment_links,
+       (select count(*)::integer from resource_attachments where company_id=$1 and information_id=$2::uuid and relationship_kind='migrated_inline_image' and deleted_timestamp is null) as migrated_inline_links,
+       (select count(*)::integer from resource_attachments where company_id=$1 and information_id=$2::uuid and relationship_kind='chat_attachment' and deleted_timestamp is null) as untouched_chat_links`,
     [MIGRATION_COMPANY_ID, MIGRATION_DOCUMENT_IDS.node],
   );
   assert.deepEqual(nodeTargets.rows[0], {
@@ -961,6 +983,9 @@ async function runMigrationWorkflowProof(pool, port, database) {
     transitional_deleted: 1,
     preserved_annotations: 1,
     checkpoints: 2,
+    permanent_attachment_links: 1,
+    migrated_inline_links: 1,
+    untouched_chat_links: 1,
   });
   const legacyAfter = await pool.query(
     "select information_id::text,information,is_deleted from node_projection_table where company_id=$1 and type='Text box' order by information_id",

@@ -133,6 +133,30 @@ test("strict Mango Tiptap contract covers rich features and fails closed", () =>
   const oversizedImageNode = oversizedImage.document.content?.[2];
   if (oversizedImageNode?.attrs) oversizedImageNode.attrs.displayWidth = 1_000_000;
   assert.equal(validateMangoTiptapDocument(oversizedImage).valid, false);
+  const linkedImage = richDocument();
+  const linkedImageNode = linkedImage.document.content?.[2];
+  if (linkedImageNode?.attrs) {
+    linkedImageNode.attrs.linkHref = "https://example.com/image";
+    linkedImageNode.attrs.linkTarget = "_blank";
+    linkedImageNode.attrs.linkRel = "noopener noreferrer";
+    linkedImageNode.attrs.linkTitle = "Open source";
+  }
+  assert.equal(validateMangoTiptapDocument(linkedImage).valid, true);
+  if (linkedImageNode?.attrs) linkedImageNode.attrs.linkHref = "javascript:alert(1)";
+  assert.equal(validateMangoTiptapDocument(linkedImage).valid, false);
+  const typedOrderedList = richDocument();
+  typedOrderedList.document.content = [{
+    type: "orderedList",
+    attrs: { blockId: "ordered-list", start: 1, type: "A" },
+    content: [{
+      type: "listItem",
+      attrs: { blockId: "ordered-item" },
+      content: [{ type: "paragraph", attrs: { blockId: "ordered-paragraph", textAlign: null, indentLevel: 0 }, content: [{ type: "text", text: "Alpha" }] }],
+    }],
+  }];
+  assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, true);
+  if (typedOrderedList.document.content?.[0]?.attrs) typedOrderedList.document.content[0].attrs.type = "disc";
+  assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, false);
 });
 
 test("Tiptap validation and serialization accept documents beyond the former two MiB cap", () => {

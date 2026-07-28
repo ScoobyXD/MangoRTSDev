@@ -43,6 +43,10 @@ export type MangoAttachmentImageAttributes = {
   layout: "content" | "wide";
   alt: string;
   title: string;
+  linkHref: string;
+  linkTarget: string;
+  linkRel: string;
+  linkTitle: string;
 };
 
 export const MangoAttachmentImage = Node.create({
@@ -75,6 +79,10 @@ export const MangoAttachmentImage = Node.create({
       },
       alt: { default: "", parseHTML: (element) => element.getAttribute("aria-label") ?? "" },
       title: { default: "", parseHTML: (element) => element.getAttribute("title") ?? "" },
+      linkHref: { default: "", parseHTML: (element) => element.getAttribute("data-link-href") ?? "" },
+      linkTarget: { default: "", parseHTML: (element) => element.getAttribute("data-link-target") ?? "" },
+      linkRel: { default: "", parseHTML: (element) => element.getAttribute("data-link-rel") ?? "" },
+      linkTitle: { default: "", parseHTML: (element) => element.getAttribute("data-link-title") ?? "" },
     };
   },
 
@@ -83,7 +91,7 @@ export const MangoAttachmentImage = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    const { attachmentId, filename, mimeType, width, height, displayWidth, displayHeight, alignment, position, layout, alt, title } = HTMLAttributes;
+    const { attachmentId, filename, mimeType, width, height, displayWidth, displayHeight, alignment, position, layout, alt, title, linkHref, linkTarget, linkRel, linkTitle } = HTMLAttributes;
     return ["mango-attachment-image", mergeAttributes({
       "data-attachment-id": attachmentId,
       "data-filename": filename,
@@ -95,6 +103,10 @@ export const MangoAttachmentImage = Node.create({
       "data-alignment": alignment,
       "data-position": position,
       "data-layout": layout,
+      "data-link-href": linkHref,
+      "data-link-target": linkTarget,
+      "data-link-rel": linkRel,
+      "data-link-title": linkTitle,
       "aria-label": alt || filename || "Attached image",
       title,
     })];
@@ -397,6 +409,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         const type = String(node.attrs.entityType || "node");
         const entityType = type === "logic_gate" || type === "project" ? type : "node";
         const label = String(node.attrs.label || "Entity");
+        const ownerDocument = globalThis.document;
+        const icon = ownerDocument
+          ? createEditorEntityIconElement(ownerDocument, entityType)
+          : ["span", { "aria-hidden": "true", class: `mango-editor-entity-icon mango-editor-entity-icon--${entityType}` }];
         return ["span", mergeAttributes(HTMLAttributes, {
           "data-mango-entity-link": "true",
           "data-mango-entity-type": entityType,
@@ -406,7 +422,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           tabindex: "0",
           "aria-label": `Open ${editorEntityTypeLabel(entityType)} ${label}`,
           class: `mango-editor-entity-link mango-editor-entity-link--${entityType}`,
-        }), createEditorEntityIconElement(document, entityType), ["span", { class: "mango-editor-entity-label" }, label]];
+        }), icon, ["span", { class: "mango-editor-entity-label" }, label]];
       },
     }).configure({
       renderText: ({ node }) => String(node.attrs.label || "Entity"),

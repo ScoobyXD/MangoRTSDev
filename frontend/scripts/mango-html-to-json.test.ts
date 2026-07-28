@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import type { JSONContent } from "@tiptap/core";
 import { convertMangoLegacyHTML, mapMangoQuoteAnnotations } from "./mango-html-to-json-core.js";
@@ -90,4 +91,75 @@ test("conversion refuses images that do not have permanent attachment IDs", () =
     () => convertMangoLegacyHTML('<!-- mango-editor-html-v1 --><p>Unsafe</p><img src="data:image/png;base64,AA==">'),
     /without Mango attachment wrappers/,
   );
+});
+
+test("conversion repairs escaped legacy attribute quotes without changing visible escaped text", () => {
+  const escaped = String.raw`<!-- mango-editor-html-v1 -->
+<p><a href=\"https://example.com/path\">Escaped link</a> and visible \"quoted\" text.</p>
+<ol><li><p>Numbered item</p></li></ol>
+<ul data-mango-editor-list=\"bullet\"><li data-mango-editor-list-item=\"true\"><p>Outer bullet</p><ul data-mango-editor-list=\"bullet\"><li><p>Nested bullet</p></li></ul></li></ul>
+<span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"33333333-3333-4333-8333-333333333333\" data-mango-editor-filename=\"escaped.png\" data-mango-editor-mime-type=\"image/png\"><img src=\"mango-attachment:33333333-3333-4333-8333-333333333333\" alt=\"Escaped image\"></span>`;
+  const converted = convertMangoLegacyHTML(escaped);
+  assert.equal(converted.jsonCounts.links, 1);
+  assert.equal(converted.jsonCounts.orderedLists, 1);
+  assert.equal(converted.jsonCounts.bulletLists, 2);
+  assert.equal(converted.jsonCounts.attachmentImages, 1);
+  assert.match(converted.normalizedText, /visible \\"quoted\\" text/);
+  assert.equal(nodesOfType(converted.document.document, "orderedList")[0].attrs?.type, null);
+  assert.equal(nodesOfType(converted.document.document, "mangoAttachmentImage")[0].attrs?.attachmentId, "33333333-3333-4333-8333-333333333333");
+});
+
+test("conversion resolves escaped legacy image metadata and embedded bytes from permanent attachments", () => {
+  const bytes = Buffer.from("embedded-image", "utf8");
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const source = String.raw`<!-- mango-editor-html-v1 --><span data-mango-editor-image=\"true\" data-mango-editor-image-wrap=\"none\"><img src=\"data:image/png;base64,${bytes.toString("base64")}\"></span>`;
+  const converted = convertMangoLegacyHTML(source, { attachments: [
+    { attachmentId: "22222222-2222-4222-8222-222222222222", filename: "second.png", mimeType: "image/png", byteSize: bytes.length, sha256: sha, relationshipKind: "chat_attachment" },
+    { attachmentId: "11111111-1111-4111-8111-111111111111", filename: "first.png", mimeType: "image/png", byteSize: bytes.length, sha256: sha, relationshipKind: "chat_attachment" },
+  ] });
+  const image = nodesOfType(converted.document.document, "mangoAttachmentImage")[0];
+  assert.equal(image.attrs?.attachmentId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(image.attrs?.filename, "first.png");
+  assert.equal(image.attrs?.mimeType, "image/png");
+  assert.doesNotMatch(JSON.stringify(converted.document), /data:image/);
+
+  const metadataOnly = convertMangoLegacyHTML(String.raw`<!-- mango-editor-html-v1 --><span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"11111111-1111-4111-8111-111111111111\"><img src=\"\"></span>`, {
+    attachments: [{ attachmentId: "11111111-1111-4111-8111-111111111111", filename: "first.png", mimeType: "image/png", byteSize: bytes.length, sha256: sha }],
+  });
+  assert.equal(nodesOfType(metadataOnly.document.document, "mangoAttachmentImage")[0].attrs?.mimeType, "image/png");
+});
+
+test("conversion preserves root formatting around a nested block list", () => {
+  const source = String.raw`<!-- mango-editor-html-v1 --><b>Before<ul data-mango-editor-list=\"bullet\"><li data-mango-editor-list-item=\"true\"><p>List item</p></li></ul>After</b><span data-mango-editor-highlight=\"#fef08a\" style=\"background-color:#fef08a\">Highlighted</span>`;
+  const converted = convertMangoLegacyHTML(source);
+  assert.equal(converted.jsonCounts.bulletLists, 1);
+  assert.ok(converted.jsonCounts.bold >= 1);
+  assert.equal(converted.jsonCounts.highlights, 1);
+  assert.equal(converted.normalizedText, "Before List item AfterHighlighted");
+});
+
+test("conversion creates a valid empty document for an empty legacy textbox body", () => {
+  const converted = convertMangoLegacyHTML("");
+  assert.equal(converted.normalizedText, "");
+  assert.equal(converted.document.document.type, "doc");
+  assert.equal(converted.document.document.content?.[0]?.type, "paragraph");
+});
+
+test("conversion keeps block images inside list items without splitting lists and preserves image links", () => {
+  const source = `<!-- mango-editor-html-v1 --><ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet"><a href="https://example.com/image" target="_blank" rel="noopener"><span data-mango-editor-image="true" data-mango-editor-attachment-id="44444444-4444-4444-8444-444444444444" data-mango-editor-filename="linked.png" data-mango-editor-mime-type="image/png"><img src="mango-attachment:44444444-4444-4444-8444-444444444444"></span></a></li></ul>`;
+  const converted = convertMangoLegacyHTML(source);
+  assert.equal(converted.sourceCounts.bulletLists, 1);
+  assert.equal(converted.jsonCounts.bulletLists, 1);
+  assert.equal(converted.sourceCounts.links, 1);
+  assert.equal(converted.jsonCounts.links, 1);
+  const image = nodesOfType(converted.document.document, "mangoAttachmentImage")[0];
+  assert.equal(image.attrs?.linkHref, "https://example.com/image");
+  assert.equal(image.attrs?.linkTarget, "_blank");
+});
+
+test("entity links support server-side HTML round trips", () => {
+  const source = `<!-- mango-editor-html-v1 --><span data-mango-entity-link="true" data-mango-entity-type="project" data-mango-entity-id="project-1" data-mango-entity-label="Roadmap">Roadmap</span>`;
+  const converted = convertMangoLegacyHTML(source);
+  assert.equal(converted.jsonCounts.entityLinks, 1);
+  assert.match(converted.roundTripHTML, /data-mango-entity-id="project-1"/);
 });

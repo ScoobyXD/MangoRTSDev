@@ -24,7 +24,7 @@ const nodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
   text: new Set(),
   hardBreak: new Set(),
   bulletList: new Set(["blockId"]),
-  orderedList: new Set(["blockId", "start"]),
+  orderedList: new Set(["blockId", "start", "type"]),
   listItem: new Set(["blockId"]),
   taskList: new Set(["blockId"]),
   taskItem: new Set(["blockId", "checked"]),
@@ -37,6 +37,7 @@ const nodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
   mangoAttachmentImage: new Set([
     "attachmentId", "filename", "mimeType", "width", "height", "displayWidth",
     "displayHeight", "alignment", "position", "layout", "alt", "title",
+    "linkHref", "linkTarget", "linkRel", "linkTitle",
   ]),
 };
 
@@ -128,6 +129,9 @@ function validateAttributes(
   }
   if (kind === "heading" && !positiveInteger(attrs.level, 6)) return `${path}.attrs.level must be from 1 through 6`;
   if (kind === "orderedList" && attrs.start !== undefined && attrs.start !== null && !positiveInteger(attrs.start)) return `${path}.attrs.start is invalid`;
+  if (kind === "orderedList" && attrs.type !== undefined && attrs.type !== null && !["1", "a", "A", "i", "I"].includes(String(attrs.type))) {
+    return `${path}.attrs.type is invalid`;
+  }
   if (kind === "taskItem" && attrs.checked !== undefined && attrs.checked !== null && typeof attrs.checked !== "boolean") return `${path}.attrs.checked must be boolean`;
   if (kind === "table" && attrs.style !== undefined && attrs.style !== null && !["auto", "fixed"].includes(String(attrs.style))) return `${path}.attrs.style is invalid`;
   if (kind === "tableCell" || kind === "tableHeader") {
@@ -153,6 +157,12 @@ function validateAttributes(
     if (attrs.alignment !== undefined && attrs.alignment !== null && !["left", "center", "right"].includes(String(attrs.alignment))) return `${path}.attrs.alignment is invalid`;
     if (attrs.position !== undefined && attrs.position !== null && !["inline", "break"].includes(String(attrs.position))) return `${path}.attrs.position is invalid`;
     if (attrs.layout !== undefined && attrs.layout !== null && !["content", "wide"].includes(String(attrs.layout))) return `${path}.attrs.layout is invalid`;
+    if (attrs.linkHref !== undefined && attrs.linkHref !== null && attrs.linkHref !== "" && !/^(https?:|mailto:|tel:|\/|#)/i.test(String(attrs.linkHref))) {
+      return `${path}.attrs.linkHref uses an unsafe protocol`;
+    }
+    if (attrs.linkTarget !== undefined && attrs.linkTarget !== null && attrs.linkTarget !== "" && !["_blank", "_self"].includes(String(attrs.linkTarget))) {
+      return `${path}.attrs.linkTarget is invalid`;
+    }
   }
   return null;
 }

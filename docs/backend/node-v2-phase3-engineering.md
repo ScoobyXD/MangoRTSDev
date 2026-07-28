@@ -48,7 +48,7 @@ Default enforceable limits are:
 
 ## Owner-specific storage and conversion
 
-For Node, the converter reads the authoritative current `node_projection_table` rows whose type is `Text box`, including soft-deleted rows. It uses `information_id` as the textbox/document identity and never scans the bloated historical `node_information` event pile. Project and Logic Gate conversion retain their current `editor_collaboration_documents` source until their separately reviewed batches.
+For Node, the converter reads the authoritative current `node_projection_table` rows whose type is `Text box`, including soft-deleted rows. It strictly parses the `<!-- mango-node-text-block-v1 -->` projection envelope and converts only its `document` field, while retaining support for older direct-body rows; titles and attachment metadata are not treated as editor text. It uses `information_id` as the textbox/document identity and never scans the bloated historical `node_information` event pile. Project and Logic Gate conversion retain their current `editor_collaboration_documents` source until their separately reviewed batches.
 
 All owners use the same Mango Tiptap schema and official Tiptap HTML-to-JSON/Yjs bridge. Permanent current documents remain domain owned:
 
@@ -60,7 +60,7 @@ After an exact Project or Logic Gate owner gate becomes active, the existing JSO
 
 The converter records a deterministic identity from company, owner, document, source revision, and source SHA-256. A resumed run must match its company, owner selection, compatible mode, batch size, backup reference, and expected count. Source or target identity conflicts fail closed. Each item retains the authoritative source HTML snapshot, source/target hashes, warnings, comment-anchor report, attachment-reference report, retry count, and failure report.
 
-The Node writer stores the same validated JSON in the transitional `editor_json_documents` row, the permanent `node_textboxes` row, and the sequence-zero Yjs migration checkpoint inside one transaction. Active projections remain active and deleted projections receive matching deleted/archive state. An unedited revision-zero transitional trial row may be refreshed to the current deterministic conversion while retaining its annotation array; a row with a real JSON revision is never overwritten on conflict. The source projection is locked against concurrent drift during that transaction but is never updated.
+The Node writer stores the same validated JSON in the transitional `editor_json_documents` row, the permanent `node_textboxes` row, and the sequence-zero Yjs migration checkpoint inside one transaction. The same transaction creates the active `node_textbox_attachment_links` entries required by every inline image in the JSON. It reuses an exact active legacy inline/file resource link when available and otherwise adds an exact `migrated_inline_image` resource link to the already-existing attachment object; existing chat attachment links are never edited or deleted. Active projections remain active and deleted projections receive matching deleted/archive state. An unedited revision-zero transitional trial row may be refreshed to the current deterministic conversion while retaining its annotation array; a row with a real JSON revision is never overwritten on conflict. The source projection is locked against concurrent drift during that transaction but is never updated.
 
 ## Migration commands
 

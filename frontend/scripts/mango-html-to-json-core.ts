@@ -49,6 +49,22 @@ export type MangoHTMLConversionResult = {
   jsonCounts: MangoHTMLConversionCounts;
   warnings: string[];
 };
+
+export type MangoLegacyAttachmentMetadata = {
+  attachmentId: string;
+  sourceResourceAttachmentId?: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+  width?: number | null;
+  height?: number | null;
+  relationshipKind?: string;
+};
+
+export type MangoHTMLConversionOptions = {
+  attachments?: readonly MangoLegacyAttachmentMetadata[];
+};
 export type MangoQuoteAnnotationInput = {
   id: string;
   quote: string;
@@ -70,6 +86,31 @@ function normalizedText(value: string): string {
   return value.normalize("NFC").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function unescapeLegacyTagAttributeQuotes(html: string): string {
+  let result = "";
+  let inTag = false;
+  let quote: '"' | "'" | null = null;
+  for (let index = 0; index < html.length; index += 1) {
+    const character = html[index];
+    if (!inTag) {
+      if (character === "<" && /[A-Za-z!/?]/.test(html[index + 1] ?? "")) inTag = true;
+      result += character;
+      continue;
+    }
+    if (character === "\\" && (html[index + 1] === '"' || html[index + 1] === "'")) {
+      const escapedQuote = html[index + 1] as '"' | "'";
+      result += escapedQuote;
+      quote = quote === escapedQuote ? null : quote ?? escapedQuote;
+      index += 1;
+      continue;
+    }
+    result += character;
+    if (character === '"' || character === "'") quote = quote === character ? null : quote ?? character;
+    if (character === ">" && quote === null) inTag = false;
+  }
+  return result;
+}
+
 const HTML_BLOCK_TAGS = new Set([
   "address", "article", "aside", "blockquote", "div", "figure", "figcaption", "footer",
   "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav",
@@ -82,7 +123,7 @@ function collectHTMLText(node: Node): string {
   const element = node as Element;
   const tag = element.tagName.toLowerCase();
   if (tag === "br") return "\n";
-  if (tag === "mango-attachment-image") return "";
+  if (tag === "mango-attachment-image") return "\n";
   const content = Array.from(element.childNodes).map(collectHTMLText).join("");
   return HTML_BLOCK_TAGS.has(tag) ? `\n${content}\n` : content;
 }
@@ -108,22 +149,82 @@ function setOptionalAttribute(element: Element, name: string, value: unknown): v
   element.setAttribute(name, String(value));
 }
 
-function normalizeLegacyImages(root: Element, document: Document): void {
+function normalizedImageMimeType(value: string): string {
+  const clean = value.trim().toLowerCase();
+  if (clean === "image/jpg") return "image/jpeg";
+  return /^image\/(jpeg|png|gif|webp)$/.test(clean) ? clean : "";
+}
+
+function inferredImageMimeType(filename: string): string {
+  const clean = filename.trim().toLowerCase();
+  if (/\.jpe?g$/.test(clean)) return "image/jpeg";
+  if (/\.png$/.test(clean)) return "image/png";
+  if (/\.gif$/.test(clean)) return "image/gif";
+  if (/\.webp$/.test(clean)) return "image/webp";
+  return "";
+}
+
+function dataImageFingerprint(source: string): { mimeType: string; byteSize: number; sha256: string } | null {
+  const match = /^data:([^;,]+);base64,([\s\S]*)$/i.exec(source.trim());
+  if (!match) return null;
+  const mimeType = normalizedImageMimeType(match[1]);
+  if (!mimeType) return null;
+  try {
+    const bytes = Buffer.from(match[2].replace(/\s+/g, ""), "base64");
+    if (bytes.length === 0) return null;
+    return { mimeType, byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  } catch {
+    return null;
+  }
+}
+
+function attachmentPreference(metadata: MangoLegacyAttachmentMetadata): number {
+  if (metadata.relationshipKind === "inline_image") return 0;
+  if (metadata.relationshipKind === "migrated_inline_image") return 1;
+  if (metadata.relationshipKind === "file_attachment") return 2;
+  return 3;
+}
+
+function normalizeLegacyImages(
+  root: Element,
+  document: Document,
+  attachments: readonly MangoLegacyAttachmentMetadata[],
+): void {
+  const sortedAttachments = [...attachments].sort((left, right) =>
+    attachmentPreference(left) - attachmentPreference(right)
+    || left.attachmentId.localeCompare(right.attachmentId)
+    || String(left.sourceResourceAttachmentId ?? "").localeCompare(String(right.sourceResourceAttachmentId ?? ""))
+  );
   const frames = Array.from(root.querySelectorAll('span[data-mango-editor-image="true"]'));
   for (const frame of frames) {
     const image = frame.querySelector("img");
     const source = image?.getAttribute("src")?.trim() ?? "";
-    const attachmentID = frame.getAttribute("data-mango-editor-attachment-id")?.trim()
+    const linkedAnchor = frame.closest("a[href]");
+    const linkHref = linkedAnchor?.getAttribute("href")?.trim() ?? "";
+    const directAttachmentID = frame.getAttribute("data-mango-editor-attachment-id")?.trim()
       || legacyAttachmentID(source);
+    const fingerprint = directAttachmentID ? null : dataImageFingerprint(source);
+    const metadata = directAttachmentID
+      ? sortedAttachments.find((item) => item.attachmentId === directAttachmentID)
+      : fingerprint
+        ? sortedAttachments.find((item) => item.byteSize === fingerprint.byteSize && item.sha256 === fingerprint.sha256)
+        : undefined;
+    const attachmentID = directAttachmentID || metadata?.attachmentId || "";
     if (!attachmentID) {
       throw new Error("Legacy image has no permanent attachment ID; conversion stopped before storing a temporary image URL.");
     }
     const converted = document.createElement("mango-attachment-image");
     converted.setAttribute("data-attachment-id", attachmentID);
-    setOptionalAttribute(converted, "data-filename", frame.getAttribute("data-mango-editor-filename"));
-    setOptionalAttribute(converted, "data-mime-type", frame.getAttribute("data-mango-editor-mime-type"));
-    const width = safeNumber((frame as HTMLElement).style.width || image?.getAttribute("width"));
-    const height = safeNumber((frame as HTMLElement).style.height || image?.getAttribute("height"));
+    const filename = frame.getAttribute("data-mango-editor-filename")?.trim() || metadata?.filename || "";
+    const mimeType = normalizedImageMimeType(frame.getAttribute("data-mango-editor-mime-type") ?? "")
+      || normalizedImageMimeType(metadata?.mimeType ?? "")
+      || fingerprint?.mimeType
+      || inferredImageMimeType(filename);
+    if (!mimeType) throw new Error(`Legacy image attachment ${attachmentID} has no supported image MIME type.`);
+    setOptionalAttribute(converted, "data-filename", filename);
+    converted.setAttribute("data-mime-type", mimeType);
+    const width = safeNumber((frame as HTMLElement).style.width || image?.getAttribute("width")) ?? metadata?.width ?? null;
+    const height = safeNumber((frame as HTMLElement).style.height || image?.getAttribute("height")) ?? metadata?.height ?? null;
     setOptionalAttribute(converted, "data-width", width);
     setOptionalAttribute(converted, "data-height", height);
     setOptionalAttribute(converted, "data-display-width", width);
@@ -134,6 +235,12 @@ function normalizeLegacyImages(root: Element, document: Document): void {
     converted.setAttribute("data-layout", "content");
     setOptionalAttribute(converted, "aria-label", image?.getAttribute("alt")?.trim());
     setOptionalAttribute(converted, "title", image?.getAttribute("title")?.trim());
+    if (linkHref && /^(https?:|mailto:|tel:|\/|#)/i.test(linkHref)) {
+      converted.setAttribute("data-link-href", linkHref);
+      setOptionalAttribute(converted, "data-link-target", linkedAnchor?.getAttribute("target")?.trim());
+      setOptionalAttribute(converted, "data-link-rel", linkedAnchor?.getAttribute("rel")?.trim());
+      setOptionalAttribute(converted, "data-link-title", linkedAnchor?.getAttribute("title")?.trim());
+    }
     frame.replaceWith(converted);
   }
 
@@ -141,6 +248,95 @@ function normalizeLegacyImages(root: Element, document: Document): void {
   if (remainingImages.length > 0) {
     throw new Error(`Found ${remainingImages.length} image(s) without Mango attachment wrappers; conversion stopped to avoid losing them.`);
   }
+}
+
+function hasMeaningfulInlineContent(node: Node): boolean {
+  if (node.nodeType === 3) return Boolean(node.textContent?.trim());
+  if (node.nodeType !== 1) return false;
+  const element = node as Element;
+  return element.tagName.toLowerCase() === "br" || Boolean(element.textContent?.trim()) || element.childElementCount > 0;
+}
+
+function normalizeBlocksInsideInlineElements(root: Element): void {
+  const selector = `${[...HTML_BLOCK_TAGS].join(",")},mango-attachment-image`;
+  while (true) {
+    const block = Array.from(root.querySelectorAll(selector)).find((element) => {
+      const parent = element.parentElement;
+      return parent && parent !== root && !HTML_BLOCK_TAGS.has(parent.tagName.toLowerCase());
+    });
+    if (!block) return;
+    const wrapper = block.parentElement!;
+    const parent = wrapper.parentNode;
+    if (!parent) return;
+    const before = wrapper.cloneNode(false) as Element;
+    while (wrapper.firstChild && wrapper.firstChild !== block) before.appendChild(wrapper.firstChild);
+    const after = wrapper.cloneNode(false) as Element;
+    while (block.nextSibling) after.appendChild(block.nextSibling);
+    if (hasMeaningfulInlineContent(before)) parent.insertBefore(before, wrapper);
+    parent.insertBefore(block, wrapper);
+    if (hasMeaningfulInlineContent(after)) parent.insertBefore(after, wrapper);
+    wrapper.remove();
+  }
+}
+
+function isBlockElement(node: Node): boolean {
+  return node.nodeType === 1 && (
+    HTML_BLOCK_TAGS.has((node as Element).tagName.toLowerCase())
+    || (node as Element).tagName.toLowerCase() === "mango-attachment-image"
+  );
+}
+
+function normalizeLegacyListItems(root: Element, document: Document): void {
+  for (const item of Array.from(root.querySelectorAll("li"))) {
+    let paragraph: Element | null = null;
+    for (const child of Array.from(item.childNodes)) {
+      if (isBlockElement(child)) {
+        paragraph = null;
+        continue;
+      }
+      if (child.nodeType === 8) continue;
+      if (!paragraph && !hasMeaningfulInlineContent(child)) {
+        child.remove();
+        continue;
+      }
+      if (!paragraph) {
+        paragraph = document.createElement("p");
+        item.insertBefore(paragraph, child);
+      }
+      paragraph.appendChild(child);
+    }
+    if (item.firstElementChild?.tagName.toLowerCase() !== "p") {
+      item.insertBefore(document.createElement("p"), item.firstChild);
+    }
+  }
+}
+
+function normalizeRootInlineRuns(root: Element, document: Document): void {
+  let paragraph: Element | null = null;
+  for (const child of Array.from(root.childNodes)) {
+    const isBlock = child.nodeType === 1 && (
+      HTML_BLOCK_TAGS.has((child as Element).tagName.toLowerCase())
+      || (child as Element).tagName.toLowerCase() === "mango-attachment-image"
+    );
+    if (isBlock) {
+      paragraph = null;
+      continue;
+    }
+    if (child.nodeType === 8) continue;
+    if (!paragraph && !hasMeaningfulInlineContent(child)) {
+      child.remove();
+      continue;
+    }
+    if (!paragraph) {
+      paragraph = document.createElement("p");
+      root.insertBefore(paragraph, child);
+    }
+    paragraph.appendChild(child);
+  }
+  const hasBlock = Array.from(root.children).some((child) =>
+    HTML_BLOCK_TAGS.has(child.tagName.toLowerCase()) || child.tagName.toLowerCase() === "mango-attachment-image"
+  );
+  if (!hasBlock) root.appendChild(document.createElement("p"));
 }
 
 function normalizeLegacyMentions(root: Element): void {
@@ -239,10 +435,14 @@ function normalizeVisibleLegacyRootNewlines(root: Element, document: Document): 
   }
 }
 
-function normalizeLegacyHTML(storedHTML: string): { html: string; text: string; sourceCounts: MangoHTMLConversionCounts } {
-  const html = storedHTML.startsWith(LEGACY_HTML_PREFIX)
+function normalizeLegacyHTML(
+  storedHTML: string,
+  options: MangoHTMLConversionOptions,
+): { html: string; text: string; sourceCounts: MangoHTMLConversionCounts } {
+  const prefixedHTML = storedHTML.startsWith(LEGACY_HTML_PREFIX)
     ? storedHTML.slice(LEGACY_HTML_PREFIX.length)
     : storedHTML;
+  const html = unescapeLegacyTagAttributeQuotes(prefixedHTML);
   const window = new Window({ settings: {
     disableJavaScriptEvaluation: true,
     disableJavaScriptFileLoading: true,
@@ -255,13 +455,16 @@ function normalizeLegacyHTML(storedHTML: string): { html: string; text: string; 
     const root = document.createElement("div");
     root.innerHTML = html;
     for (const unsafe of Array.from(root.querySelectorAll(UNSAFE_ELEMENTS))) unsafe.remove();
-    normalizeLegacyImages(root, document);
+    normalizeLegacyImages(root, document, options.attachments ?? []);
     normalizeLegacyMentions(root);
     normalizeLegacyLists(root);
     normalizeLegacyTextStyles(root);
     normalizeLegacyHighlights(root, document);
     normalizeLegacyTables(root);
     normalizeVisibleLegacyRootNewlines(root, document);
+    normalizeBlocksInsideInlineElements(root);
+    normalizeLegacyListItems(root, document);
+    normalizeRootInlineRuns(root, document);
     const normalized = root.innerHTML;
     return {
       html: normalized,
@@ -293,12 +496,14 @@ function countNormalizedHTML(root: Element): MangoHTMLConversionCounts {
   counts.orderedLists = root.querySelectorAll("ol").length;
   counts.listItems = root.querySelectorAll("li").length;
   counts.tables = root.querySelectorAll("table").length;
-  counts.links = root.querySelectorAll("a[href]").length;
-  counts.bold = root.querySelectorAll("strong,b").length;
-  counts.italic = root.querySelectorAll("em,i").length;
-  counts.underline = root.querySelectorAll("u").length;
-  counts.strike = root.querySelectorAll("s,strike,del").length;
-  counts.highlights = root.querySelectorAll("mark").length;
+  const meaningfulCount = (selector: string): number => Array.from(root.querySelectorAll(selector))
+    .filter((element) => Boolean(normalizedText(collectHTMLText(element)))).length;
+  counts.links = meaningfulCount("a[href]") + root.querySelectorAll("mango-attachment-image[data-link-href]").length;
+  counts.bold = meaningfulCount("strong,b");
+  counts.italic = meaningfulCount("em,i");
+  counts.underline = meaningfulCount("u");
+  counts.strike = meaningfulCount("s,strike,del");
+  counts.highlights = meaningfulCount("mark");
   counts.mentions = root.querySelectorAll('span[data-type="mention"]').length;
   counts.entityLinks = root.querySelectorAll('[data-mango-entity-link="true"]').length;
   counts.attachmentImages = root.querySelectorAll("mango-attachment-image[data-attachment-id]").length;
@@ -398,7 +603,10 @@ function countJSON(document: JSONContent): MangoHTMLConversionCounts {
     if (type === "table") counts.tables += 1;
     if (type === "mention") counts.mentions += 1;
     if (type === "mangoEntityLink") counts.entityLinks += 1;
-    if (type === "mangoAttachmentImage") counts.attachmentImages += 1;
+    if (type === "mangoAttachmentImage") {
+      counts.attachmentImages += 1;
+      if (typeof node.attrs?.linkHref === "string" && node.attrs.linkHref.trim()) counts.links += 1;
+    }
     for (const mark of node.marks ?? []) {
       if (mark.type === "link") counts.links += 1;
       if (mark.type === "bold") counts.bold += 1;
@@ -427,11 +635,10 @@ function assertPreserved(source: MangoHTMLConversionCounts, target: MangoHTMLCon
   }
 }
 
-export function convertMangoLegacyHTML(storedHTML: string): MangoHTMLConversionResult {
-  if (!storedHTML.trim()) throw new Error("Legacy HTML is empty.");
+export function convertMangoLegacyHTML(storedHTML: string, options: MangoHTMLConversionOptions = {}): MangoHTMLConversionResult {
   const sourceSHA256 = sha256(storedHTML);
   const sourceMD5 = createHash("md5").update(storedHTML, "utf8").digest("hex");
-  const normalized = normalizeLegacyHTML(storedHTML);
+  const normalized = normalizeLegacyHTML(storedHTML, options);
   const extensions = createMangoTiptapExtensions({ editable: false });
   const generated = generateJSON(normalized.html, extensions) as JSONContent;
   const document: MangoTiptapDocument = {
