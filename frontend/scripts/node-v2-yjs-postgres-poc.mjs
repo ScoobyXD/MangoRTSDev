@@ -57,6 +57,7 @@ const MIGRATION_PROJECT_ID = "34343434-3434-4343-8343-343434343434";
 const MIGRATION_LOGIC_GATE_ID = "45454545-4545-4454-8454-454545454545";
 const MIGRATION_DOCUMENT_IDS = Object.freeze({
   node: "56565656-5656-4565-8565-565656565656",
+  deletedNode: "57575757-5757-4575-8575-575757575757",
   project: "67676767-6767-4676-8676-676767676767",
   logic_gate: "78787878-7878-4787-8787-787878787878",
 });
@@ -831,9 +832,9 @@ function runMigrationTool(port, database, arguments_, expectFailure = false, fai
     return output;
   } catch (error) {
     if (!expectFailure) throw error;
-    const stderr = String(error?.stderr || error?.message || "");
-    assert.match(stderr, failurePattern);
-    return stderr;
+    const diagnostic = String(error?.stderr || error?.stdout || error?.message || "");
+    assert.match(diagnostic, failurePattern);
+    return diagnostic;
   }
 }
 
@@ -842,8 +843,40 @@ async function seedMigrationWorkflow(pool) {
   await pool.query("insert into nodes(company_id,node_id,name,created_timestamp) values($1,$2,'Migration proof Node',clock_timestamp())", [MIGRATION_COMPANY_ID, MIGRATION_NODE_ID]);
   await pool.query("insert into projects(company_id,project_id,name) values($1,$2,'Migration proof Project')", [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID]);
   await pool.query("insert into logic_gates(company_id,logic_gate_id,header,created_timestamp) values($1,$2,'Migration proof Logic Gate',clock_timestamp())", [MIGRATION_COMPANY_ID, MIGRATION_LOGIC_GATE_ID]);
+  await pool.query(
+    `insert into node_projection_table(
+       company_id,node_id,information_id,type,information,is_deleted,revision,created_timestamp,updated_timestamp
+     ) values
+       ($1,$2,$3,'Text box',$4,false,3,clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour'),
+       ($1,$2,$5,'Text box',$6,true,2,clock_timestamp()-interval '90 minutes',clock_timestamp()-interval '30 minutes')`,
+    [
+      MIGRATION_COMPANY_ID,
+      MIGRATION_NODE_ID,
+      MIGRATION_DOCUMENT_IDS.node,
+      '<h2>Node source</h2><p>Exact <strong>rich text</strong> with <a href="https://example.com">link</a>.</p>',
+      MIGRATION_DOCUMENT_IDS.deletedNode,
+      '<p>Deleted Node source remains recoverable.</p>',
+    ],
+  );
+  const trialDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Older trial snapshot" }] }] },
+  };
+  await pool.query(
+    `insert into editor_json_documents(
+       company_id,resource_type,resource_id,document_id,document_schema_version,revision,
+       canonical_document,canonical_annotations,is_deleted
+     ) values($1,'node',$2,$3,1,0,$4::jsonb,$5::jsonb,false)`,
+    [
+      MIGRATION_COMPANY_ID,
+      MIGRATION_NODE_ID,
+      MIGRATION_DOCUMENT_IDS.node,
+      JSON.stringify(trialDocument),
+      JSON.stringify([{ id: "trial-chat", kind: "chat", from: 1, to: 2 }]),
+    ],
+  );
   const fixtures = [
-    ["node", MIGRATION_NODE_ID, MIGRATION_DOCUMENT_IDS.node, '<h2>Node source</h2><p>Exact <strong>rich text</strong> with <a href="https://example.com">link</a>.</p>'],
     ["project", MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project, '<p>Project source</p><ul><li>One</li><li>Two</li></ul>'],
     ["logic_gate", MIGRATION_LOGIC_GATE_ID, MIGRATION_DOCUMENT_IDS.logic_gate, '<p>Logic Gate source</p><blockquote>Decision</blockquote>'],
   ];
@@ -859,23 +892,85 @@ async function runMigrationWorkflowProof(pool, port, database) {
   await seedMigrationWorkflow(pool);
   const conversionRun = "89898989-8989-4898-8989-898989898989";
   const common = ["--company", MIGRATION_COMPANY_ID, "--owner", "all", "--run-id", conversionRun];
+  const inventoryOutput = runMigrationTool(port, database, [
+    "--mode", "inventory", "--company", MIGRATION_COMPANY_ID, "--owner", "node", "--run-id", conversionRun,
+  ]);
+  const inventory = JSON.parse(inventoryOutput.trim());
+  assert.equal(inventory.expected_count, 2);
+  assert.equal(inventory.active_count, 1);
+  assert.equal(inventory.deleted_count, 1);
+  assert.equal(inventory.per_node_totals.length, 1);
+  assert.equal(inventory.per_node_totals[0].total_count, 2);
   const dryRunOutput = runMigrationTool(port, database, ["--mode", "dry-run", ...common]);
-  assert.match(dryRunOutput, /"processed":3/);
+  assert.match(dryRunOutput, /"processed":4/);
   const before = await pool.query("select count(*)::integer as count from node_textboxes where company_id=$1", [MIGRATION_COMPANY_ID]);
   assert.equal(before.rows[0].count, 0, "dry-run must not write targets");
+  const legacyBefore = await pool.query(
+    "select information_id::text,information,is_deleted from node_projection_table where company_id=$1 and type='Text box' order by information_id",
+    [MIGRATION_COMPANY_ID],
+  );
 
   const writeSafety = ["--allow-write", "--backup-reference", "disposable-proof"];
-  runMigrationTool(port, database, ["--mode", "backfill", ...common, ...writeSafety, "--confirm", `BACKFILL ${MIGRATION_COMPANY_ID}`]);
+  await pool.query(`
+    create function reject_deleted_migration_checkpoint() returns trigger language plpgsql as $$
+    begin
+      if new.textbox_id='${MIGRATION_DOCUMENT_IDS.deletedNode}'::uuid then
+        raise exception 'forced_deleted_migration_checkpoint_failure';
+      end if;
+      return new;
+    end $$;
+    create trigger trg_reject_deleted_migration_checkpoint
+      before insert on node_textbox_yjs_checkpoints
+      for each row execute function reject_deleted_migration_checkpoint()`);
+  runMigrationTool(
+    port,
+    database,
+    ["--mode", "backfill", ...common, ...writeSafety, "--confirm", `BACKFILL ${MIGRATION_COMPANY_ID}`],
+    true,
+    /forced_deleted_migration_checkpoint_failure/,
+  );
+  const failedDeletedTarget = await pool.query(
+    `select
+       (select count(*)::integer from editor_json_documents where company_id=$1 and resource_type='node' and document_id=$2) as transitional,
+       (select count(*)::integer from node_textboxes where company_id=$1 and textbox_id=$2::uuid) as permanent,
+       (select count(*)::integer from node_textbox_yjs_checkpoints where company_id=$1 and textbox_id=$2::uuid) as checkpoints`,
+    [MIGRATION_COMPANY_ID, MIGRATION_DOCUMENT_IDS.deletedNode],
+  );
+  assert.deepEqual(failedDeletedTarget.rows[0], { transitional: 0, permanent: 0, checkpoints: 0 });
+  await pool.query("drop trigger trg_reject_deleted_migration_checkpoint on node_textbox_yjs_checkpoints; drop function reject_deleted_migration_checkpoint()");
   runMigrationTool(port, database, ["--mode", "backfill", ...common, ...writeSafety, "--confirm", `BACKFILL ${MIGRATION_COMPANY_ID}`]);
   const ledger = await pool.query(
     "select count(*)::integer as items,min(retry_count)::integer as min_retries,count(*) filter(where source_html_snapshot <> '')::integer as snapshots from editor_conversion_items where conversion_run_id=$1",
     [conversionRun],
   );
-  assert.deepEqual(ledger.rows[0], { items: 3, min_retries: 1, snapshots: 3 });
+  assert.deepEqual(ledger.rows[0], { items: 4, min_retries: 1, snapshots: 4 });
+  const nodeTargets = await pool.query(
+    `select
+       (select count(*)::integer from node_textboxes where company_id=$1) as permanent,
+       (select count(*) filter(where deleted_timestamp is not null)::integer from node_textboxes where company_id=$1) as permanent_deleted,
+       (select count(*)::integer from editor_json_documents where company_id=$1 and resource_type='node') as transitional,
+       (select count(*) filter(where is_deleted)::integer from editor_json_documents where company_id=$1 and resource_type='node') as transitional_deleted,
+       (select jsonb_array_length(canonical_annotations)::integer from editor_json_documents where company_id=$1 and resource_type='node' and document_id=$2) as preserved_annotations,
+       (select count(*)::integer from node_textbox_yjs_checkpoints where company_id=$1 and checkpoint_reason='migration_seed') as checkpoints`,
+    [MIGRATION_COMPANY_ID, MIGRATION_DOCUMENT_IDS.node],
+  );
+  assert.deepEqual(nodeTargets.rows[0], {
+    permanent: 2,
+    permanent_deleted: 1,
+    transitional: 2,
+    transitional_deleted: 1,
+    preserved_annotations: 1,
+    checkpoints: 2,
+  });
+  const legacyAfter = await pool.query(
+    "select information_id::text,information,is_deleted from node_projection_table where company_id=$1 and type='Text box' order by information_id",
+    [MIGRATION_COMPANY_ID],
+  );
+  assert.deepEqual(legacyAfter.rows, legacyBefore.rows, "backfill must not alter projection HTML or deletion state");
 
   runMigrationTool(port, database, ["--mode", "shadow", ...common, ...writeSafety, "--confirm", `SHADOW ${MIGRATION_COMPANY_ID}`]);
   const comparisons = await pool.query("select count(*)::integer as count,count(*) filter(where equivalent)::integer as equivalent from editor_shadow_comparisons where conversion_run_id=$1", [conversionRun]);
-  assert.deepEqual(comparisons.rows[0], { count: 3, equivalent: 3 });
+  assert.deepEqual(comparisons.rows[0], { count: 4, equivalent: 4 });
   runMigrationTool(port, database, ["--mode", "readiness", ...common, "--allow-write", "--confirm", `VALIDATE ${MIGRATION_COMPANY_ID}`]);
   await pool.query(
     "update editor_collaboration_documents set canonical_html=canonical_html || '<p>drift</p>' where company_id=$1 and resource_type='project' and resource_id=$2 and document_id=$3",
@@ -942,7 +1037,7 @@ async function runMigrationWorkflowProof(pool, port, database) {
   );
   assert.equal(deletedRollback.rows[0].is_deleted, true);
   return {
-    converted_documents: 3,
+    converted_documents: 4,
     resumable_retry_count: ledger.rows[0].min_retries,
     shadow_matches: comparisons.rows[0].equivalent,
     activation_gates: active.rows[0].active_gates,
