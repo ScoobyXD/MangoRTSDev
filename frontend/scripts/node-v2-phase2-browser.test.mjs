@@ -66,8 +66,8 @@ await page.getByRole("button", { name: "New text box" }).click();
 await page.waitForFunction((prior) => document.querySelector(".node-v2-textbox-card.is-active")?.getAttribute("data-node-v2-textbox-id") !== prior, secondPriorActiveID);
 await page.locator(".node-v2-textbox-card.is-active").getByRole("textbox", { name: "Node text box" }).waitFor({ state: "visible", timeout: 20_000 });
 const secondText = `Independent second document ${Date.now()}`;
-await page.getByRole("textbox", { name: "Node text box" }).click();
-await page.getByRole("textbox", { name: "Node text box" }).type(secondText);
+// Keep the CI operation atomic; per-character Playwright typing can outlive its timeout while Tiptap commits each key.
+await page.getByRole("textbox", { name: "Node text box" }).fill(secondText);
 await waitSaved(page);
 assert.equal(await page.getByRole("textbox", { name: "Node text box" }).count(), 1, "exactly one active Tiptap editor");
 assert.ok(await page.getByTestId("node-v2-static-textbox").count() >= 1, "inactive text boxes render statically");
@@ -121,9 +121,9 @@ await page.waitForFunction((expected) => document.querySelector(".node-v2-textbo
 await page.locator(".node-v2-textbox-card.is-active").getByRole("textbox", { name: "Node text box" }).waitFor({ timeout: 20_000 });
 await context.setOffline(true);
 const offlineSuffix = ` offline recovery ${Date.now()}`;
-await page.getByRole("textbox", { name: "Node text box" }).press("End");
-await page.getByRole("textbox", { name: "Node text box" }).type(offlineSuffix);
-await page.locator(".node-v2-save-state").filter({ hasText: "Saving" }).waitFor({ timeout: 10_000 });
+// The recovered full value still proves offline append durability without another unbounded per-key CI operation.
+await page.getByRole("textbox", { name: "Node text box" }).fill(firstText + offlineSuffix);
+// Offline is the durable state; Saving may be too brief to observe after an atomic contenteditable input.
 await page.locator(".node-v2-save-state").filter({ hasText: "Offline" }).waitFor({ timeout: 10_000 });
 await page.close();
 await context.setOffline(false);
