@@ -1,3 +1,11 @@
+import {
+  editorChatEntityLinkPayloads,
+  parseEditorChatEntityLinks,
+  type EditorChatEntityLink,
+} from "./chatEntityLinks.js";
+
+export type { EditorChatEntityLink } from "./chatEntityLinks.js";
+
 export type EditorProjectionItem = {
   information_id: string;
   type: string;
@@ -75,6 +83,7 @@ export type EditorTextBlockChatMessage = {
   createdTimestamp: string;
   editedTimestamp?: string;
   attachments: EditorChatAttachment[];
+  entityLinks?: EditorChatEntityLink[];
   mentionedUserIDs?: string[];
   mentionedGroupIDs?: string[];
 };
@@ -179,6 +188,7 @@ export function buildEditorTextBlockChatPayload(input: {
   createdTimestamp: string;
   editedTimestamp?: string;
   attachments?: EditorChatAttachment[];
+  entityLinks?: EditorChatEntityLink[];
   mentionedUserIDs?: string[];
   mentionedGroupIDs?: string[];
 }): string {
@@ -197,6 +207,7 @@ export function buildEditorTextBlockChatPayload(input: {
     created_timestamp: input.createdTimestamp,
     edited_timestamp: input.editedTimestamp?.trim() ?? "",
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
+    entity_links: editorChatEntityLinkPayloads(input.message, input.entityLinks ?? []),
     mentioned_user_ids: uniqueStringList(input.mentionedUserIDs ?? []),
     mentioned_group_ids: uniqueStringList(input.mentionedGroupIDs ?? []),
   });
@@ -392,6 +403,7 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     createdTimestamp: stringValue(record, "created_timestamp") || item.created_timestamp || "",
     editedTimestamp: stringValue(record, "edited_timestamp") || undefined,
     attachments,
+    entityLinks: parseEditorChatEntityLinks(record.entity_links, message),
     mentionedUserIDs: stringListValue(record, "mentioned_user_ids"),
     mentionedGroupIDs: stringListValue(record, "mentioned_group_ids"),
   };

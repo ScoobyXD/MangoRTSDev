@@ -36,6 +36,7 @@ func TestEditChatCommentInformationPreservesCommentContext(t *testing.T) {
 		string(original),
 		authorID,
 		&message,
+		&[]chatCommentEntityLink{{Start: 0, End: 6, EntityType: "node", EntityID: "node-1", Label: "Node"}},
 		[]string{"new-user", "new-user", ""},
 		[]string{"new-group"},
 	)
@@ -63,17 +64,20 @@ func TestEditChatCommentInformationPreservesCommentContext(t *testing.T) {
 	if got := payload["mentioned_group_ids"].([]any); len(got) != 1 || got[0] != "new-group" {
 		t.Fatalf("mentioned_group_ids=%+v", got)
 	}
+	if got := payload["entity_links"].([]any); len(got) != 1 {
+		t.Fatalf("entity_links=%+v", got)
+	}
 }
 
 func TestEditChatCommentInformationRequiresOriginalAuthor(t *testing.T) {
 	original := `{"block_id":"block-1","author_id":"author-1","message":"Original","attachments":[]}`
 	message := "Edited"
-	_, _, err := editChatCommentInformation("Text block chat", original, "other-user", &message, nil, nil)
+	_, _, err := editChatCommentInformation("Text block chat", original, "other-user", &message, nil, nil, nil)
 	if !errors.Is(err, errChatCommentAuthorDenied) {
 		t.Fatalf("other-author edit error=%v, want author denied", err)
 	}
 	empty := " "
-	_, _, err = editChatCommentInformation("Text block chat", original, "author-1", &empty, nil, nil)
+	_, _, err = editChatCommentInformation("Text block chat", original, "author-1", &empty, nil, nil, nil)
 	if !errors.Is(err, errChatCommentInvalid) {
 		t.Fatalf("empty edit error=%v, want invalid", err)
 	}

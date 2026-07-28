@@ -9,6 +9,7 @@ import {
 } from "../../attachments/attachmentApi";
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
+import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
 import { EditorSelectionNodeIcon } from "../EditorSelectionNodeIcon.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
 import {
@@ -158,10 +159,40 @@ type AuthenticatedImageProps = {
   selected?: boolean;
   editable?: boolean;
   updateAttributes?: (attributes: Partial<MangoAttachmentImageAttributes>) => void;
-  deleteNode?: () => void;
   onSelect?: () => void;
   onImageChatRequest?: (image: MangoTiptapImageAction) => void;
   onImageNodeRequest?: (image: MangoTiptapImageAction) => void;
+};
+
+type ImageResizeDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+const IMAGE_RESIZE_HANDLES: ReadonlyArray<{
+  direction: ImageResizeDirection;
+  label: string;
+  cursor: React.CSSProperties["cursor"];
+  position: React.CSSProperties;
+}> = [
+  { direction: "nw", label: "top left", cursor: "nwse-resize", position: { left: -5, top: -5 } },
+  { direction: "n", label: "top", cursor: "ns-resize", position: { left: "50%", top: -5, transform: "translateX(-50%)" } },
+  { direction: "ne", label: "top right", cursor: "nesw-resize", position: { right: -5, top: -5 } },
+  { direction: "e", label: "right", cursor: "ew-resize", position: { right: -5, top: "50%", transform: "translateY(-50%)" } },
+  { direction: "se", label: "bottom right", cursor: "nwse-resize", position: { right: -5, bottom: -5 } },
+  { direction: "s", label: "bottom", cursor: "ns-resize", position: { left: "50%", bottom: -5, transform: "translateX(-50%)" } },
+  { direction: "sw", label: "bottom left", cursor: "nesw-resize", position: { left: -5, bottom: -5 } },
+  { direction: "w", label: "left", cursor: "ew-resize", position: { left: -5, top: "50%", transform: "translateY(-50%)" } },
+];
+
+const IMAGE_ICON_BUTTON_STYLE: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  display: "inline-grid",
+  placeItems: "center",
+  padding: 0,
+  border: "1px solid rgba(255,255,255,.88)",
+  borderRadius: 8,
+  background: "rgba(255,255,255,.94)",
+  cursor: "pointer",
+  boxShadow: "0 4px 14px rgba(15,23,42,.24)",
 };
 
 const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
@@ -170,12 +201,12 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   selected = false,
   editable = false,
   updateAttributes,
-  deleteNode,
   onSelect,
   onImageChatRequest,
   onImageNodeRequest,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const [eligible, setEligible] = useState(selected);
   const [objectURL, setObjectURL] = useState("");
   const [error, setError] = useState("");
@@ -184,8 +215,16 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   const [previewObjectURL, setPreviewObjectURL] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [previewRetryKey, setPreviewRetryKey] = useState(0);
-  const [resizingWidth, setResizingWidth] = useState<number | null>(null);
-  const dragRef = useRef<{ startX: number; startWidth: number; latestWidth: number } | null>(null);
+  const [resizingDimensions, setResizingDimensions] = useState<{ width: number; height: number } | null>(null);
+  const dragRef = useRef<{
+    direction: ImageResizeDirection;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    latestWidth: number;
+    latestHeight: number;
+  } | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -272,19 +311,49 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
 
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
-  const beginResize = (event: React.PointerEvent) => {
+  const beginResize = (direction: ImageResizeDirection, event: React.PointerEvent) => {
     if (!editable || !updateAttributes) return;
     event.preventDefault();
+    event.stopPropagation();
     resizeCleanupRef.current?.();
+    const frameRect = frameRef.current?.getBoundingClientRect();
+    const startWidth = Math.max(48, Math.round(frameRect?.width || attributes.displayWidth || attributes.width || 200));
+    const startHeight = Math.max(48, Math.round(frameRect?.height || attributes.displayHeight || attributes.height || 160));
     dragRef.current = {
+      direction,
       startX: event.clientX,
-      startWidth: attributes.displayWidth || attributes.width || rootRef.current?.getBoundingClientRect().width || 200,
-      latestWidth: attributes.displayWidth || attributes.width || rootRef.current?.getBoundingClientRect().width || 200,
+      startY: event.clientY,
+      startWidth,
+      startHeight,
+      latestWidth: startWidth,
+      latestHeight: startHeight,
     };
     const onMove = (moveEvent: PointerEvent) => {
-      if (!dragRef.current) return;
-      dragRef.current.latestWidth = Math.max(80, Math.round(dragRef.current.startWidth + moveEvent.clientX - dragRef.current.startX));
-      setResizingWidth(dragRef.current.latestWidth);
+      const drag = dragRef.current;
+      if (!drag) return;
+      const horizontalDelta = drag.direction.includes("e")
+        ? moveEvent.clientX - drag.startX
+        : drag.direction.includes("w") ? drag.startX - moveEvent.clientX : 0;
+      const verticalDelta = drag.direction.includes("s")
+        ? moveEvent.clientY - drag.startY
+        : drag.direction.includes("n") ? drag.startY - moveEvent.clientY : 0;
+      const changesWidth = drag.direction.includes("e") || drag.direction.includes("w");
+      const changesHeight = drag.direction.includes("n") || drag.direction.includes("s");
+      let width = changesWidth ? Math.max(48, drag.startWidth + horizontalDelta) : drag.startWidth;
+      let height = changesHeight ? Math.max(48, drag.startHeight + verticalDelta) : drag.startHeight;
+      if (changesWidth && changesHeight) {
+        const aspectRatio = drag.startWidth / drag.startHeight;
+        if (Math.abs(horizontalDelta / drag.startWidth) >= Math.abs(verticalDelta / drag.startHeight)) height = width / aspectRatio;
+        else width = height * aspectRatio;
+      }
+      const maximumWidth = Math.max(48, rootRef.current?.getBoundingClientRect().width || width);
+      if (width > maximumWidth) {
+        width = maximumWidth;
+        if (changesWidth && changesHeight) height = width / (drag.startWidth / drag.startHeight);
+      }
+      drag.latestWidth = Math.round(width);
+      drag.latestHeight = Math.round(height);
+      setResizingDimensions({ width: drag.latestWidth, height: drag.latestHeight });
     };
     const cleanup = () => {
       dragRef.current = null;
@@ -295,10 +364,13 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
       if (resizeCleanupRef.current === cleanup) resizeCleanupRef.current = null;
     };
     const onEnd = () => {
-      const width = dragRef.current?.latestWidth;
+      const dimensions = dragRef.current && {
+        displayWidth: dragRef.current.latestWidth,
+        displayHeight: dragRef.current.latestHeight,
+      };
       cleanup();
-      setResizingWidth(null);
-      if (width) updateAttributes({ displayWidth: width });
+      setResizingDimensions(null);
+      if (dimensions) updateAttributes(dimensions);
     };
     const releaseListeners = trackEditorRuntimeResource("listeners");
     resizeCleanupRef.current = cleanup;
@@ -308,7 +380,7 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   };
 
   const imageAction = (): MangoTiptapImageAction => {
-    const rect = rootRef.current?.getBoundingClientRect();
+    const rect = frameRef.current?.getBoundingClientRect();
     return {
       attributes,
       objectURL,
@@ -346,64 +418,107 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         onSelect?.();
         setPreviewOpen(true);
       }}
-      style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0" }}
+      style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0", cursor: "pointer" }}
     >
-      {objectURL ? (
-        <img
-          src={objectURL}
-          alt={attributes.alt || attributes.filename}
-          title={attributes.title || attributes.filename}
-          draggable={false}
-          style={{
-            display: "block",
-            maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)",
-            width: resizingWidth || attributes.displayWidth || attributes.width || undefined,
-            height: attributes.displayHeight || undefined,
-            objectFit: "contain",
-            borderRadius: 6,
-            outline: selected ? "2px solid #0ea5e9" : "none",
-          }}
-        />
-      ) : (
-        <span role={error ? "alert" : undefined}>
-          {error || (eligible ? "Loading image…" : attributes.alt || attributes.filename || "Attached image")}
-          {error && <button type="button" onClick={() => setRetryKey((current) => current + 1)}>Retry</button>}
-        </span>
-      )}
-      {selected && (
-        <div contentEditable={false} style={{ position: "absolute", right: 4, top: 4, display: "flex", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "calc(100% - 8px)", gap: 4 }}>
-          <button type="button" onClick={downloadImage}>Download</button>
-          {attributes.linkHref && <a href={attributes.linkHref} target={attributes.linkTarget || undefined} rel={attributes.linkRel || "noopener noreferrer nofollow"} title={attributes.linkTitle || undefined} onClick={(event) => event.stopPropagation()}>Open link</a>}
-          {objectURL && <button type="button" onClick={() => setPreviewOpen(true)}>Preview</button>}
-          {editable && onImageChatRequest && <button type="button" onClick={() => onImageChatRequest(imageAction())}>Comment</button>}
-          {editable && onImageNodeRequest && <button type="button" onClick={() => onImageNodeRequest(imageAction())}>Create Node</button>}
-          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "left" })}>Left</button>}
-          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "center" })}>Center</button>}
-          {editable && <button type="button" onClick={() => updateAttributes?.({ alignment: "right" })}>Right</button>}
-          {editable && <button type="button" onClick={() => updateAttributes?.({ layout: attributes.layout === "wide" ? "content" : "wide" })}>{attributes.layout === "wide" ? "Content width" : "Wide"}</button>}
-          {editable && <button type="button" onPointerDown={beginResize}>Resize</button>}
-          {editable && <button type="button" onClick={deleteNode}>Delete</button>}
-        </div>
-      )}
-      {previewOpen && (
-        <div
-          contentEditable={false}
-          role="dialog"
-          aria-label={`Preview ${attributes.filename || "image"}`}
-          onClick={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }}
-          style={{ position: "fixed", inset: 0, zIndex: 2200, display: "grid", placeItems: "center", padding: 24, background: "rgba(15,23,42,.78)" }}
-        >
-          <div style={{ position: "fixed", top: 16, right: 16, display: "flex", gap: 8 }}>
-            <button type="button" aria-label="Download image" onClick={downloadImage}>Download</button>
-            <button type="button" aria-label="Close image preview" onClick={() => setPreviewOpen(false)}>X</button>
-          </div>
-          {previewObjectURL
-            ? <img src={previewObjectURL} alt={attributes.alt || attributes.filename} style={{ maxWidth: "95vw", maxHeight: "90vh", objectFit: "contain" }} />
-            : previewError
-              ? <div role="alert" style={{ color: "white" }}>{previewError} <button type="button" onClick={() => setPreviewRetryKey((current) => current + 1)}>Retry</button></div>
-              : <div style={{ color: "white" }}>Loading original image…</div>}
-        </div>
-      )}
+      <div
+        ref={frameRef}
+        data-mango-tiptap-image-frame="true"
+        style={{ position: "relative", display: "inline-block", maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)", lineHeight: 0, cursor: "pointer" }}
+      >
+        {objectURL ? (
+          <img
+            src={objectURL}
+            alt={attributes.alt || attributes.filename}
+            title={attributes.title || attributes.filename}
+            draggable={false}
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              width: resizingDimensions?.width || attributes.displayWidth || attributes.width || undefined,
+              height: resizingDimensions?.height || attributes.displayHeight || undefined,
+              objectFit: "contain",
+              borderRadius: 6,
+              outline: selected ? "2px solid #0ea5e9" : "none",
+              outlineOffset: selected ? 2 : undefined,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          />
+        ) : (
+          <span role={error ? "alert" : undefined} style={{ display: "inline-flex", minWidth: 120, minHeight: 64, alignItems: "center", justifyContent: "center", lineHeight: 1.35 }}>
+            {error || (eligible ? "Loading image…" : attributes.alt || attributes.filename || "Attached image")}
+            {error && <button type="button" onClick={() => setRetryKey((current) => current + 1)}>Retry</button>}
+          </span>
+        )}
+        {selected && (
+          <>
+            <div contentEditable={false} style={{ position: "absolute", right: 6, top: 6, zIndex: 3, display: "flex", gap: 5 }}>
+              {editable && onImageChatRequest && (
+                <button
+                  type="button"
+                  aria-label="Comment on image"
+                  title="Comment on image"
+                  data-mango-tiptap-image-comment="true"
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  onClick={(event) => { event.stopPropagation(); onImageChatRequest(imageAction()); }}
+                  style={{ ...IMAGE_ICON_BUTTON_STYLE, color: "#0369a1" }}
+                >
+                  <ChatIcon color="#0369a1" />
+                </button>
+              )}
+              {editable && onImageNodeRequest && (
+                <button
+                  type="button"
+                  aria-label="Create node from image"
+                  title="Create node from image"
+                  data-mango-tiptap-image-create-node="true"
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  onClick={(event) => { event.stopPropagation(); onImageNodeRequest(imageAction()); }}
+                  style={{ ...IMAGE_ICON_BUTTON_STYLE, color: "#0f766e" }}
+                >
+                  <EditorSelectionNodeIcon />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              aria-label="Download image"
+              title="Download image"
+              data-mango-inline-image-download="true"
+              contentEditable={false}
+              onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+              onClick={(event) => { event.stopPropagation(); downloadImage(); }}
+              style={{ ...IMAGE_ICON_BUTTON_STYLE, position: "absolute", right: 7, bottom: 7, zIndex: 3, background: "rgba(15,23,42,.82)", color: "#ffffff", fontSize: 19, lineHeight: 1 }}
+            >
+              ⇩
+            </button>
+            {editable && updateAttributes && IMAGE_RESIZE_HANDLES.map((handle) => (
+              <button
+                key={handle.direction}
+                type="button"
+                aria-label={`Resize image from ${handle.label}`}
+                title={`Resize image from ${handle.label}`}
+                data-mango-tiptap-image-resize-handle={handle.direction}
+                contentEditable={false}
+                onPointerDown={(event) => beginResize(handle.direction, event)}
+                style={{ position: "absolute", zIndex: 4, width: 10, height: 10, boxSizing: "border-box", padding: 0, border: "2px solid #0284c7", borderRadius: 2, background: "#ffffff", cursor: handle.cursor, ...handle.position }}
+              />
+            ))}
+          </>
+        )}
+        {previewOpen && (
+          <EditorImagePreviewModal
+            label={`Preview ${attributes.filename || "image"}`}
+            src={previewObjectURL}
+            loading={!previewObjectURL && !previewError}
+            emptyLabel={previewError || "Preview unavailable"}
+            copyable={Boolean(previewObjectURL)}
+            onClose={() => setPreviewOpen(false)}
+            onDownload={downloadImage}
+            onRetry={previewError ? () => setPreviewRetryKey((current) => current + 1) : undefined}
+          />
+        )}
+      </div>
     </div>
   );
 };
@@ -412,7 +527,7 @@ function attachmentNodeViewExtension(
   contextRef: React.MutableRefObject<EditorImageAttachmentContext | undefined>,
   actionsRef: React.MutableRefObject<Pick<MangoTiptapEditorProps, "onImageChatRequest" | "onImageNodeRequest">>,
 ): AnyExtension {
-  const ImageNodeView: React.FC<ReactNodeViewProps> = ({ node, selected, updateAttributes, deleteNode, editor, getPos }) => {
+  const ImageNodeView: React.FC<ReactNodeViewProps> = ({ node, selected, updateAttributes, editor, getPos }) => {
     const selectImage = () => {
       const position = getPos();
       if (typeof position !== "number") return;
@@ -427,7 +542,6 @@ function attachmentNodeViewExtension(
           selected={selected}
           editable={editor.isEditable}
           updateAttributes={updateAttributes}
-          deleteNode={deleteNode}
           onSelect={selectImage}
           onImageChatRequest={actionsRef.current.onImageChatRequest}
           onImageNodeRequest={actionsRef.current.onImageNodeRequest}

@@ -28,6 +28,7 @@ function message(input: Partial<EditorTextBlockChatMessage> & { id: string }): E
     message: input.message ?? "Comment",
     createdTimestamp: input.createdTimestamp ?? "2026-07-13T12:00:00.000Z",
     attachments: input.attachments ?? [],
+    entityLinks: input.entityLinks,
   };
 }
 
@@ -644,6 +645,68 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await acceptComposerMention("@Ad", "mention");
     await acceptComposerMention("!Ad", "urgent");
     assert.deepEqual(mentionedPrincipals, ["ada", "ada"], "accepted composer entities keep the existing mentioned-principal model");
+
+    const requestedEntityPaths: string[] = [];
+    const entityRequestJSON = async <T,>(path: string): Promise<T> => {
+      requestedEntityPaths.push(path);
+      return {
+        results: [
+          { resource_type: "node", resource_id: "node-1", display_name: "Node One" },
+          { resource_type: "project", resource_id: "project-1", display_name: "Project One" },
+          { resource_type: "logic_gate", resource_id: "gate-1", display_name: "Gate One" },
+        ],
+      } as T;
+    };
+    let acceptedEntityLinks: NonNullable<EditorTextBlockChatMessage["entityLinks"]> = [];
+    const EntityComposerHarness: React.FC = () => {
+      const [entityDraft, setEntityDraft] = React.useState("#Pro");
+      const [entityLinks, setEntityLinks] = React.useState<NonNullable<EditorTextBlockChatMessage["entityLinks"]>>([]);
+      acceptedEntityLinks = entityLinks;
+      return (
+        <ChatPane
+          {...chatProps}
+          messages={[]}
+          draft={entityDraft}
+          draftEntityLinks={entityLinks}
+          entityRequestJSON={entityRequestJSON}
+          onDraftChange={setEntityDraft}
+          onDraftEntityLinksChange={setEntityLinks}
+          messageFocusRequest={null}
+        />
+      );
+    };
+    await act(async () => root.render(<EntityComposerHarness />));
+    const entityComposer = container.querySelector<HTMLTextAreaElement>("textarea");
+    assert.ok(entityComposer);
+    entityComposer.focus();
+    entityComposer.setSelectionRange(entityComposer.value.length, entityComposer.value.length);
+    await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "o", bubbles: true })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    await flushFrames();
+    assert.ok(requestedEntityPaths.some((path) => path.includes("resource_types=node%2Clogic_gate%2Cproject") && path.includes("ranking=editor_entities")));
+    const entityMenu = container.querySelector<HTMLElement>('[data-mango-chat-entity-menu="true"]');
+    assert.ok(entityMenu, "# opens the shared workspace entity picker in chat");
+    assert.deepEqual(
+      Array.from(entityMenu.querySelectorAll<HTMLElement>("[data-mango-chat-entity-type]")).map((option) => option.dataset.mangoChatEntityType),
+      ["node", "project", "logic_gate"],
+      "chat exposes Nodes, Projects, and Logic Gates returned by the permission-filtered editor search",
+    );
+    const arrowDown = new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
+    await act(async () => entityComposer.dispatchEvent(arrowDown));
+    const acceptEntity = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => entityComposer.dispatchEvent(acceptEntity));
+    await flushFrames();
+    assert.equal(acceptEntity.defaultPrevented, true);
+    assert.equal(entityComposer.value, "#Project One ");
+    assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 12, entityType: "project", entityID: "project-1", label: "Project One" }]);
+
+    const linkedMessage = message({ id: "linked-entity", message: "See #Project One", entityLinks: [{ start: 4, end: 16, entityType: "project", entityID: "project-1", label: "Project One" }] });
+    await act(async () => root.render(<ChatPane {...chatProps} messages={[linkedMessage]} draft="" messageFocusRequest={null} />));
+    const sentEntityLink = container.querySelector<HTMLButtonElement>('[data-mango-chat-entity-link="true"][data-mango-entity-type="project"]');
+    assert.ok(sentEntityLink, "sent chat preserves and renders the selected entity identity");
+    assert.match(sentEntityLink.textContent ?? "", /#Project One/);
+    await act(async () => sentEntityLink.click());
+    assert.equal(dom.window.location.pathname, "/projects/project-1", "chat entity activation uses the same in-app deep route as editor entities");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     if (scrollIntoViewDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", scrollIntoViewDescriptor);
