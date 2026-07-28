@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
@@ -768,6 +768,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, [lifecycle.state, prepare]);
 
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
     const coordinates = { left: event.clientX, top: event.clientY };
     const root = event.currentTarget;
     const preservedScrollTop = root.scrollTop;
@@ -872,7 +874,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isActive || editorRef.current) return undefined;
     const releaseActive = trackEditorRuntimeResource("active_editors");
     const editor = new Editor({
@@ -1122,7 +1124,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onFocusCapture={!isActive ? activate : undefined}
       onDoubleClick={!isActive ? activate : undefined}
     >
-      {isActive ? <EditorContent editor={activeEditor} className="mango-tiptap-active-surface" /> : (
+      {isActive && activeEditor ? <EditorContent editor={activeEditor} className="mango-tiptap-active-surface" /> : (
         <MangoTiptapStaticRenderer
           value={document}
           annotations={renderedAnnotations}

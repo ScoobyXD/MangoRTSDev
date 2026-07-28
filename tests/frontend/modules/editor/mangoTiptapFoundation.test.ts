@@ -841,8 +841,10 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
   assert.doesNotMatch(sync, /getAll\(/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
   assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);
-  assert.match(editor, /<EditorContent editor=\{activeEditor\}/);
+  assert.match(editor, /useLayoutEffect\(\(\) => \{\s*if \(!isActive \|\| editorRef\.current\) return undefined;/);
+  assert.match(editor, /\{isActive && activeEditor \? <EditorContent editor=\{activeEditor\}/);
   assert.match(editor, /activateFromPointer/);
+  assert.match(editor, /if \(event\.button !== 0\) return;\s*event\.preventDefault\(\);/);
   assert.match(editor, />Keep my version<\/button>/);
   assert.match(editor, />Use saved version<\/button>/);
   const communications = read("frontend/src/modules/communications/communicationsApi.ts");

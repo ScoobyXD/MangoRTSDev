@@ -13,6 +13,7 @@ const backend = resolve(root, "backend");
 const frontend = resolve(root, "frontend");
 const requireFromFrontend = createRequire(resolve(frontend, "package.json"));
 const { chromium } = requireFromFrontend("playwright-core");
+const { buildSync: buildWithEsbuild } = requireFromFrontend("esbuild");
 const windows = process.platform === "win32";
 const exeSuffix = windows ? ".exe" : "";
 const pgBin = process.env.POSTGRES_BIN || (windows ? "C:\\Program Files\\PostgreSQL\\18\\bin" : "");
@@ -508,7 +509,17 @@ async function main() {
 
   run("Build migration runner", "go", ["build", "-o", migrateExe, "./cmd/miraeopus-migrate"], { cwd: backend });
   run("Build production API", "go", ["build", "-o", apiExe, "./cmd/miraeopus-api"], { cwd: backend });
-  run("Build Node V2 collaboration service", process.execPath, [resolve(frontend, "node_modules", "esbuild", "bin", "esbuild"), "scripts/node-v2-collaboration-server.ts", "--bundle", "--packages=external", "--platform=node", "--target=node22", "--format=esm", "--outfile=dist-services/node-v2-collaboration-server.mjs"], { cwd: frontend });
+  process.stdout.write("\n--- Build Node V2 collaboration service ---\n");
+  buildWithEsbuild({
+    entryPoints: [resolve(frontend, "scripts", "node-v2-collaboration-server.ts")],
+    bundle: true,
+    packages: "external",
+    platform: "node",
+    target: "node22",
+    format: "esm",
+    outfile: resolve(frontend, "dist-services", "node-v2-collaboration-server.mjs"),
+    logLevel: "info",
+  });
   for (const name of ["20260715_unified_realtime_collaboration.sql", "20260715_zz_edit_or_no_access.sql"]) {
     copyFileSync(resolve(backend, "db", "migrations", name), resolve(migrationDir, name));
     copyFileSync(resolve(backend, "db", "migrations", name), resolve(legacyMigrationDir, name));
