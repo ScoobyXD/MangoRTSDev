@@ -234,7 +234,8 @@ var editorJSONNodeAttrs = map[string]map[string]bool{
 	"mangoAttachmentImage": {
 		"attachmentId": true, "filename": true, "mimeType": true, "width": true, "height": true,
 		"displayWidth": true, "displayHeight": true, "alignment": true, "position": true,
-		"layout": true, "alt": true, "title": true,
+		"layout": true, "alt": true, "title": true, "linkHref": true, "linkTarget": true,
+		"linkRel": true, "linkTitle": true,
 	},
 }
 
@@ -610,6 +611,18 @@ func validateEditorJSONAttributes(kind string, value any, allowed map[string]boo
 				if !ok || !allowedValues[text] {
 					return nil, fmt.Errorf("%w: invalid image layout", ErrInvalid)
 				}
+			}
+		}
+		if item, exists := attrs["linkHref"]; exists && item != nil {
+			text, ok := item.(string)
+			if !ok || (text != "" && !safeEditorJSONLink(text)) {
+				return nil, fmt.Errorf("%w: unsafe image link", ErrInvalid)
+			}
+		}
+		if item, exists := attrs["linkTarget"]; exists && item != nil {
+			text, ok := item.(string)
+			if !ok || (text != "" && text != "_blank" && text != "_self") {
+				return nil, fmt.Errorf("%w: invalid image link target", ErrInvalid)
 			}
 		}
 	}

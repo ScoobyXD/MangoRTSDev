@@ -41,7 +41,7 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 				{"type":"tableHeader","attrs":{"colspan":1,"rowspan":1,"colwidth":[160]},"content":[{"type":"paragraph","content":[{"type":"text","text":"Key"}]}]},
 				{"type":"tableCell","attrs":{"colspan":1,"rowspan":1},"content":[{"type":"paragraph","content":[{"type":"text","text":"Value"}]}]}
 			]}]},
-			{"type":"mangoAttachmentImage","attrs":{"attachmentId":"attachment-1","filename":"diagram.png","mimeType":"image/png","width":640,"height":360,"displayWidth":320,"displayHeight":180,"alignment":"center","position":"break","layout":"content","alt":"Diagram","title":"Diagram"}}
+			{"type":"mangoAttachmentImage","attrs":{"attachmentId":"attachment-1","filename":"diagram.png","mimeType":"image/png","width":640,"height":360,"displayWidth":320,"displayHeight":180,"alignment":"center","position":"break","layout":"content","alt":"Diagram","title":"Diagram","linkHref":"https://example.test/diagram","linkTarget":"_blank","linkRel":"noopener noreferrer","linkTitle":"Open diagram"}}
 		]}
 	}`)
 	canonical, err := ValidateMangoTiptapJSON(raw)
@@ -89,6 +89,8 @@ func TestMangoTiptapJSONRejectsUnknownSchemaHTMLAndTransientURLs(t *testing.T) {
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","marks":[{"type":"bold"}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"textStyle","attrs":{"color":"red;background:url(https://example.test)"}}]}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","displayWidth":1000000}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","linkHref":"javascript:alert(1)"}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","linkTarget":"popup"}}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"folder","entityId":"folder-1","label":"Bad"}}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"node","entityId":"","label":"Missing"}}]}]}}`),
 	}
