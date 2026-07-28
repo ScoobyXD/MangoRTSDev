@@ -4074,6 +4074,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const attachmentActionMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const portalTarget = useAppOverlayPortalTarget(triggerRef.current?.ownerDocument);
   const triggerRect = useAppViewportAnchorRect(triggerRef, open);
@@ -4104,7 +4105,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
     setOpen(false);
     setAttachmentMenu(null);
   }, []);
-  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close, menuRef);
+  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close, menuRef, attachmentActionMenuRef);
   useEffect(() => {
     if (activeUploadCount > 0) setOpen(true);
   }, [activeUploadCount]);
@@ -4290,7 +4291,23 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                 if (!onRemove) return;
                 event.preventDefault();
                 event.stopPropagation();
-                setAttachmentMenu({ item, x: event.clientX, y: event.clientY });
+                const listRect = menuRef.current?.getBoundingClientRect();
+                const view = event.currentTarget.ownerDocument.defaultView;
+                const viewportWidth = view?.innerWidth ?? 1024;
+                const viewportHeight = view?.innerHeight ?? 720;
+                const actionWidth = 164;
+                const actionHeight = 42;
+                const margin = 8;
+                const gap = 8;
+                let x = Math.max(margin, Math.min(event.clientX, viewportWidth - actionWidth - margin));
+                if (listRect) {
+                  const rightSide = listRect.right + gap;
+                  const leftSide = listRect.left - actionWidth - gap;
+                  if (rightSide + actionWidth <= viewportWidth - margin) x = rightSide;
+                  else if (leftSide >= margin) x = leftSide;
+                }
+                const y = Math.max(margin, Math.min(event.clientY, viewportHeight - actionHeight - margin));
+                setAttachmentMenu({ item, x, y });
               }}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
@@ -4354,12 +4371,13 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
         </div>,
         portalTarget,
       )}
-      {attachmentMenu && onRemove && (
+      {attachmentMenu && onRemove && portalTarget && createPortal(
         <div
+          ref={attachmentActionMenuRef}
           role="menu"
           aria-label="Attachment actions"
           onContextMenu={(event) => event.preventDefault()}
-          style={{ position: "fixed", zIndex: 1030, top: attachmentMenu.y, left: attachmentMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
+          style={{ position: "fixed", zIndex: 1030, top: attachmentMenu.y, left: attachmentMenu.x, width: 164, boxSizing: "border-box", display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
         >
           <button
             type="button"
@@ -4373,7 +4391,8 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
           >
             Remove from node
           </button>
-        </div>
+        </div>,
+        portalTarget,
       )}
     </div>
     {previewItem?.resourceAttachment.attachment && (

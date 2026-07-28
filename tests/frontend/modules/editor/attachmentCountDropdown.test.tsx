@@ -44,6 +44,7 @@ test("attachment split control portals its menu and sends selected files through
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
     ]);
     const selectedFiles: File[][] = [];
+    const removedAttachmentIDs: string[] = [];
     const resourceAttachment: MangoResourceAttachment = {
       resource_attachment_id: "resource-attachment-1",
       company_id: "company-1",
@@ -79,6 +80,7 @@ test("attachment split control portals its menu and sends selected files through
           surfaceText="#111827"
           compact
           onAddFiles={(files) => { selectedFiles.push(files); }}
+          onRemove={(item) => { removedAttachmentIDs.push(item.resourceAttachment.resource_attachment_id); }}
           onError={(message) => assert.fail(message)}
         />
       </div>,
@@ -99,6 +101,27 @@ test("attachment split control portals its menu and sends selected files through
     assert.match(menu.textContent ?? "", /Screenshot 2026-07-05 201109/);
     assert.match(menu.textContent ?? "", /216 KB/);
     assert.doesNotMatch(menu.textContent ?? "", /Hello, I am a title/);
+
+    Object.defineProperty(menu, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 100, right: 364, top: 50, bottom: 250, width: 264, height: 200, x: 100, y: 50, toJSON: () => ({}) }),
+    });
+    const attachmentRow = menu.querySelector<HTMLElement>('[role="button"]');
+    assert.ok(attachmentRow);
+    await act(async () => attachmentRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 150,
+      clientY: 90,
+    })));
+    const actionMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Attachment actions"]');
+    assert.ok(actionMenu, "right-click should open attachment actions");
+    assert.equal(actionMenu.parentElement, dom.window.document.body, "attachment actions must escape the attachment list stacking context");
+    assert.equal(actionMenu.style.left, "372px", "attachment actions should prefer the visible side of the attachment list");
+    const removeButton = actionMenu.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    assert.ok(removeButton);
+    await act(async () => removeButton.click());
+    assert.deepEqual(removedAttachmentIDs, ["resource-attachment-1"]);
 
     await act(async () => menu.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })));
     assert.ok(dom.window.document.querySelector('[role="menu"][aria-label="Attachments"]'), "interacting with the portaled list must not dismiss it");
