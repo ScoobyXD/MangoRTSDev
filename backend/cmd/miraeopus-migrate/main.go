@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 	if err != nil {
 		return err
 	}
-	dbCfg, err := parseDBConfig(getenv)
+	dbCfg, err := parseDBConfig(getenv, cfg.Mode == "audit")
 	if err != nil {
 		return err
 	}
@@ -92,20 +92,24 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 	}
 	defer conn.Close()
 
-	if err := acquireMigrationLock(ctx, conn); err != nil {
-		return err
-	}
-	defer func() {
-		if err := releaseMigrationLock(context.Background(), conn); err != nil {
-			log.Printf("failed to release migration lock: %v", err)
+	if cfg.Mode != "audit" {
+		if err := acquireMigrationLock(ctx, conn); err != nil {
+			return err
 		}
-	}()
+		defer func() {
+			if err := releaseMigrationLock(context.Background(), conn); err != nil {
+				log.Printf("failed to release migration lock: %v", err)
+			}
+		}()
+	}
 
 	if err := conn.PingContext(ctx); err != nil {
 		return fmt.Errorf("connect postgres host=%s db=%s sslmode=%s: %w", dbCfg.Host, dbCfg.Name, dbCfg.SSLMode, err)
 	}
 
 	switch cfg.Mode {
+	case "audit":
+		return runAuditMode(ctx, conn, cfg)
 	case "schema":
 		return runSchemaMode(ctx, conn, cfg)
 	case "migrate":
@@ -116,7 +120,7 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 		}
 		return runMigrateMode(ctx, conn, cfg)
 	default:
-		return fmt.Errorf("invalid -mode %q; expected schema, migrate, or all", cfg.Mode)
+		return fmt.Errorf("invalid -mode %q; expected audit, schema, migrate, or all", cfg.Mode)
 	}
 }
 
@@ -127,7 +131,7 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 	cfg := commandConfig{}
 	flags.StringVar(&cfg.SchemaPath, "schema", defaultSchemaPath, "path to schema.sql")
 	flags.StringVar(&cfg.MigrationsDir, "migrations", defaultMigrationsDir, "directory containing .sql migration files")
-	flags.StringVar(&cfg.Mode, "mode", defaultMode, "schema, migrate, or all")
+	flags.StringVar(&cfg.Mode, "mode", defaultMode, "audit, schema, migrate, or all")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print planned work without applying changes")
 	flags.BoolVar(&cfg.BaselineMigrations, "baseline-migrations", false, "with -mode schema, record current migration filenames after applying the schema snapshot")
 	flags.StringVar(&cfg.StartAt, "start-at", strings.TrimSpace(getenv("DB_MIGRATION_START_AT")), "first migration filename to consider")
@@ -156,17 +160,20 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 		return commandConfig{}, errors.New("-start-at and -start-after are mutually exclusive")
 	}
 	switch cfg.Mode {
-	case "schema", "migrate", "all":
+	case "audit", "schema", "migrate", "all":
 		if cfg.BaselineMigrations && cfg.Mode != "schema" {
 			return commandConfig{}, errors.New("-baseline-migrations requires -mode schema")
 		}
+		if cfg.Mode == "audit" && (cfg.StartAt != "" || cfg.StartAfter != "") {
+			return commandConfig{}, errors.New("-start-at and -start-after are not valid with -mode audit")
+		}
 		return cfg, nil
 	default:
-		return commandConfig{}, fmt.Errorf("invalid -mode %q; expected schema, migrate, or all", cfg.Mode)
+		return commandConfig{}, fmt.Errorf("invalid -mode %q; expected audit, schema, migrate, or all", cfg.Mode)
 	}
 }
 
-func parseDBConfig(getenv envLookup) (dbConfig, error) {
+func parseDBConfig(getenv envLookup, allowPasswordFile bool) (dbConfig, error) {
 	cfg := dbConfig{
 		Host:                  strings.TrimSpace(getenv("DB_HOST")),
 		Port:                  getenvDefault(getenv, "DB_PORT", "5432"),
@@ -182,7 +189,7 @@ func parseDBConfig(getenv envLookup) (dbConfig, error) {
 	if cfg.Host == "" {
 		missing = append(missing, "DB_HOST")
 	}
-	if strings.TrimSpace(cfg.Password) == "" {
+	if strings.TrimSpace(cfg.Password) == "" && !allowPasswordFile {
 		missing = append(missing, "DB_PASSWORD")
 	}
 	if len(missing) > 0 {
@@ -225,9 +232,13 @@ func buildConnString(cfg dbConfig) string {
 	query.Set("sslmode", cfg.SSLMode)
 	query.Set("connect_timeout", strconv.Itoa(cfg.ConnectTimeoutSeconds))
 
+	userInfo := url.User(cfg.User)
+	if cfg.Password != "" {
+		userInfo = url.UserPassword(cfg.User, cfg.Password)
+	}
 	u := url.URL{
 		Scheme:   "postgres",
-		User:     url.UserPassword(cfg.User, cfg.Password),
+		User:     userInfo,
 		Host:     net.JoinHostPort(cfg.Host, cfg.Port),
 		Path:     "/" + cfg.Name,
 		RawQuery: query.Encode(),
@@ -246,6 +257,83 @@ func releaseMigrationLock(ctx context.Context, conn *sql.Conn) error {
 	if _, err := conn.ExecContext(ctx, `select pg_advisory_unlock($1)`, migrationLockID); err != nil {
 		return err
 	}
+	return nil
+}
+
+type migrationLedgerAudit struct {
+	MissingFromLedger []string
+	UnknownToRepo     []string
+}
+
+func classifyMigrationLedger(files []migrationFile, applied map[string]bool) migrationLedgerAudit {
+	repository := make(map[string]bool, len(files))
+	audit := migrationLedgerAudit{}
+	for _, file := range files {
+		repository[file.Name] = true
+		if !applied[file.Name] {
+			audit.MissingFromLedger = append(audit.MissingFromLedger, file.Name)
+		}
+	}
+	for version := range applied {
+		if !repository[version] {
+			audit.UnknownToRepo = append(audit.UnknownToRepo, version)
+		}
+	}
+	sort.Strings(audit.MissingFromLedger)
+	sort.Strings(audit.UnknownToRepo)
+	return audit
+}
+
+func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error {
+	files, err := listMigrationFiles(cfg.MigrationsDir)
+	if err != nil {
+		return err
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return fmt.Errorf("begin read-only migration audit: %w", err)
+	}
+	defer tx.Rollback()
+
+	var currentUser string
+	var readOnly bool
+	var ledgerExists bool
+	var applicationTables int
+	if err := tx.QueryRowContext(ctx, `select current_user,current_setting('transaction_read_only')::boolean,to_regclass('public.schema_migrations') is not null,(select count(*)::integer from pg_catalog.pg_tables where schemaname='public')`).Scan(&currentUser, &readOnly, &ledgerExists, &applicationTables); err != nil {
+		return fmt.Errorf("read migration audit identity: %w", err)
+	}
+	if !readOnly {
+		return errors.New("migration audit refused a non-read-only transaction")
+	}
+	applied := map[string]bool{}
+	if ledgerExists {
+		rows, queryErr := tx.QueryContext(ctx, `select version from schema_migrations order by version`)
+		if queryErr != nil {
+			return fmt.Errorf("read schema_migrations in audit: %w", queryErr)
+		}
+		for rows.Next() {
+			var version string
+			if scanErr := rows.Scan(&version); scanErr != nil {
+				rows.Close()
+				return scanErr
+			}
+			if version = strings.TrimSpace(version); version != "" {
+				applied[version] = true
+			}
+		}
+		if rowsErr := rows.Close(); rowsErr != nil {
+			return rowsErr
+		}
+	}
+	audit := classifyMigrationLedger(files, applied)
+	log.Printf("read-only migration audit user=%s transaction_read_only=%t public_tables=%d repository_migrations=%d ledger_exists=%t ledger_rows=%d missing_from_ledger=%d unknown_to_repository=%d", currentUser, readOnly, applicationTables, len(files), ledgerExists, len(applied), len(audit.MissingFromLedger), len(audit.UnknownToRepo))
+	for _, version := range audit.MissingFromLedger {
+		log.Printf("missing_from_ledger %s", version)
+	}
+	for _, version := range audit.UnknownToRepo {
+		log.Printf("unknown_to_repository %s", version)
+	}
+	log.Printf("audit only: classify every missing version against a clean same-commit catalog before any reviewed ledger repair; this command made no database changes")
 	return nil
 }
 

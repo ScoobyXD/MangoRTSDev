@@ -160,3 +160,10 @@ export PGPASSWORD="<db-password>"
 ```
 
 The migration runner records applied files in `schema_migrations` so migrations are not rerun on later deploys.
+## Node v2 Phase 3 editor storage (2026-07-28)
+
+The inactive Node v2 Phase 3 schema keeps permanent editor ownership separate. Node documents use node_textboxes plus Yjs update/checkpoint tables. Project documents use project_editor_documents with owner-specific operation/version tables. Logic Gate documents use logic_gate_editor_documents with owner-specific operation/version tables. Once an exact Project or Logic Gate rollout row is active, the production JSON repository routes current reads/writes to those tables and does not create a generic editor_json_documents current row.
+
+editor_conversion_runs/items, editor_shadow_comparisons, editor_rollout_gates, and editor_rollback_exports are transitional rollout evidence. No default gate rows are created. Rollback exports record current revision/update sequence and delete state; rollback refuses stale coverage and restores post-cutover edits, creates, and deletes to legacy HTML atomically.
+
+node_verification_content_pins and node_verification_update_pins preserve the exact checkpoint-plus-tail boundary required for verification. mangorts_cleanup_node_v2_yjs_retention deletes only expired unpinned covered history. mangorts_prepare_company_editor_purge is the explicit first step of company deletion and removes restrictive Node v2 comment-attachment, email, and attachment links in dependency order; the caller must execute it and company deletion in one transaction.

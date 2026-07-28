@@ -118,20 +118,29 @@ type NodeV2Comment struct {
 }
 
 type NodeV2CommentThread struct {
-	ThreadID             string          `json:"thread_id"`
-	TextboxID            string          `json:"textbox_id"`
-	SelectedQuote        string          `json:"selected_quote"`
-	AnchorBeforeText     string          `json:"anchor_before_text"`
-	AnchorAfterText      string          `json:"anchor_after_text"`
-	AnchorFormat         string          `json:"anchor_format"`
-	AnchorStatus         string          `json:"anchor_status"`
-	AnchorStartBase64    string          `json:"anchor_start_base64,omitempty"`
-	AnchorEndBase64      string          `json:"anchor_end_base64,omitempty"`
-	CreatedByUserID      string          `json:"created_by_user_id,omitempty"`
-	CreatedByDisplayName string          `json:"created_by_display_name"`
-	CreatedTimestamp     time.Time       `json:"created_timestamp"`
-	ResolvedTimestamp    *time.Time      `json:"resolved_timestamp,omitempty"`
-	Comments             []NodeV2Comment `json:"comments"`
+	ThreadID             string               `json:"thread_id"`
+	TextboxID            string               `json:"textbox_id"`
+	SelectedQuote        string               `json:"selected_quote"`
+	AnchorBeforeText     string               `json:"anchor_before_text"`
+	AnchorAfterText      string               `json:"anchor_after_text"`
+	AnchorFormat         string               `json:"anchor_format"`
+	AnchorStatus         string               `json:"anchor_status"`
+	AnchorStartBase64    string               `json:"anchor_start_base64,omitempty"`
+	AnchorEndBase64      string               `json:"anchor_end_base64,omitempty"`
+	CreatedByUserID      string               `json:"created_by_user_id,omitempty"`
+	CreatedByDisplayName string               `json:"created_by_display_name"`
+	CreatedTimestamp     time.Time            `json:"created_timestamp"`
+	ResolvedTimestamp    *time.Time           `json:"resolved_timestamp,omitempty"`
+	Comments             []NodeV2Comment      `json:"comments"`
+	CommentCount         int                  `json:"comment_count"`
+	CommentsNextCursor   *NodeV2CommentCursor `json:"comments_next_cursor,omitempty"`
+}
+
+type NodeV2CommentCursor struct {
+	Version   int       `json:"v"`
+	Kind      string    `json:"kind"`
+	Timestamp time.Time `json:"timestamp"`
+	ID        string    `json:"id"`
 }
 
 type NodeV2AttachmentLink struct {

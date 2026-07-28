@@ -1,8 +1,8 @@
 # Node v2: product requirements, editor architecture, scale, and handoff
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
-Status: authoritative architecture handoff and project tracker. The Phase 2 implementation exists behind its development feature flag, but the 2026-07-27 readiness re-audit below reopened its acceptance gate. Phase 1 live-ledger reconciliation and Phase 3 migration/cutover remain separate human-reviewed work.
+Status: authoritative architecture handoff and project tracker. Phase 2 repository acceptance and Phase 3 engineering are complete behind inactive safety gates. Manual browser acceptance, the human-controlled development migration-ledger reconciliation, and every real conversion/cutover remain pending.
 
 ## Why this document exists
 
@@ -53,8 +53,8 @@ Remaining foundation work:
 - [x] Finish the Yjs provider decision with PostgreSQL durability/acknowledgement and compute measurements. The repository-owned Hocuspocus v4/Yjs 13.6.8 extension now commits deduplicated updates before a separate state-vector/checksum acknowledgement, restores checkpoint plus tail after restart, quarantines failed document sessions, compacts atomically, and reports bounded disposable-PostgreSQL measurements at the live p50, p95, and maximum text-box sizes.
 - [x] Define the Node workspace API, cursor contracts, batch hydration, idempotent mutations, transaction boundaries, collaboration tickets, durable state-vector acknowledgements, and realtime boundaries.
 - [x] Implement additive Node-text-box, normalized comment, email-link, attachment-link, movement, verification, three-type timeline, Yjs update/checkpoint, and migration-ledger table foundations behind inactive gates.
-- [ ] Implement the shared Tiptap schema and Mango migration wrapper around Tiptap's HTML-to-JSON utility.
-- [ ] Build dry-run conversion, validation, migration-ledger, shadow-read, and rollback tooling without cutting over live reads.
+- [x] Implement the shared Tiptap schema and Mango migration wrapper around Tiptap's official HTML-to-JSON conversion path.
+- [x] Build resumable dry-run/backfill conversion, validation, migration-ledger, shadow-read, readiness, activation, rollback-export, and rollback tooling without cutting over live reads.
 
 2026-07-26 Phase 1 foundation milestone evidence:
 
@@ -62,13 +62,13 @@ Remaining foundation work:
 - `backend/db/migrations/20260726_node_v2_phase1_foundation.sql` and the marked block in `backend/db/schema.sql` create only additive inactive storage. They do not backfill, enable a workspace gate, redirect a reader, delete a legacy row, convert email HTML, or impose a document-size constraint.
 - `backend/internal/store/node_v2_foundation_schema_test.go` keeps migration and canonical schema definitions identical and rejects destructive/cutover/content-boundary regressions.
 - `frontend/scripts/node-v2-yjs-postgres-store.mjs` and `frontend/scripts/node-v2-yjs-postgres-poc.mjs` implement and verify the repository-owned PostgreSQL persistence/acknowledgement path with generated inputs at the live p50, p95, and maximum text-box byte sizes. The proof creates only a disposable local PostgreSQL cluster and does not read or print live document content.
-- The migration-ledger blocker, shared Tiptap schema/converter, dry-run/shadow tooling, and post-cutover edit-preserving rollback exporter remain open. Therefore Phase 1 as a whole is not complete.
+- The shared schema/converter, dry-run/backfill/shadow/readiness tooling, and post-cutover edit-preserving rollback exporter are complete and proven against disposable PostgreSQL. Phase 1 remains open only for the human-controlled live development ledger reconciliation; no live schema was changed.
 
 Phase 1 completion gate: reviewed DDL and APIs exist; representative legacy content converts and validates in dry-run/shadow mode; old HTML remains recoverable; and no unresolved ownership rule or unexplained live-table lifecycle remains.
 
 ### Phase 2 - Build the complete Node v2 experience
 
-Status: **Implementation complete behind `VITE_NODE_V2_PHASE2=true`; acceptance reopened by the 2026-07-27 readiness re-audit below**
+Status: **Repository acceptance complete behind the inactive Node v2 build/workspace gates; manual user acceptance remains pending.**
 
 Goal: make a large Node work end to end on the new model for a reliable single active editor before collaborative rollout.
 
@@ -82,7 +82,7 @@ Goal: make a large Node work end to end on the new model for a reliable single a
 - [x] Implement immediate local typing, undo/redo, save state, IndexedDB recovery, retry, idempotency, and safe refresh/navigation behavior.
 - [x] Prove bounded Node loading, timeline pagination, comment pagination, lazy email bodies, attachment previews, and textbox virtualization at target scale.
 
-Phase 2 completion gate: **Previously recorded as passed locally on 2026-07-27, but not currently satisfied.** The readiness re-audit below found that the test suite did not exercise the production materialization authority or current email/chat product parity.
+Phase 2 completion gate: **Satisfied in repository and disposable production-path automation on 2026-07-28.** The user still performs the separate manual browser acceptance before any approved real conversion or cutover.
 
 Evidence: `docs/backend/node-v2-phase2-completion.md` records implementation boundaries, the PostgreSQL-backed real-Mango browser workflow, target-scale scenarios (140 text boxes, 2,000 comments, 200 email threads/400 messages), focused checks, repeated disposable migration application, and the repository gate result. This implementation does not enable a live cutover or resolve the human-controlled development migration-ledger discrepancy.
 
@@ -102,21 +102,36 @@ This audit fixed two local correctness/test defects: every `/v2` route except th
 
 It is safe to continue Phase 3 engineering behind inactive workspace gates. It is not safe to activate converted workspaces, migrate development data, or cut over durable reads/writes until the open gates are implemented and exercised end to end.
 
+### 2026-07-28 readiness closure
+
+The re-audit findings above are retained as the historical acceptance record. The repository now closes each material implementation gap:
+
+- The production Hocuspocus service is on the real Node v2 runtime path. It authorizes a short-lived exact document ticket, validates Yjs before commit, acknowledges only committed updates, materializes Tiptap JSON/plain text, compacts checkpoint plus tail atomically, quarantines failed sessions, and restores from PostgreSQL after restart.
+- The public REST update endpoint rejects writes. Arbitrary bytes cannot enter the durable Yjs log through an ordinary client.
+- The Node surface restores the separate email column, textbox chat, exact message-to-textbox placement, and complete inline-image actions.
+- Verification records pin the exact checkpoint, head, revision, and every required tail update through retention.
+- Initial comments and mentions are bounded, and a thread with more than one thousand replies is reachable through bounded continuation pages without duplicates.
+- Company deletion has one ordered transactional purge function for restrictive comment-attachment, email, and attachment links.
+- The owner-specific converter, ledger, shadow comparison, readiness gates, production Project/Logic Gate JSON readers and writers, activation, rollback export, and rollback are implemented. Rollback refuses stale coverage and preserves edits, creates, and deletes made after cutover.
+- The real API/Vite/PostgreSQL/object-storage-compatible browser harness proves activation, typing, save, reload, navigation, Strict Mode remount, scroll/caret behavior, comments, email/chat parity, and inline-image selection, preview, alignment, download, and deletion.
+
+All real company gates remain inactive. No development content was converted, no live reader or writer was cut over, and no legacy storage was removed.
+
 ### Phase 3 - Collaboration, migration, rollout, and cleanup
 
-Status: **Not started**
+Status: **Engineering complete behind inactive gates; manual acceptance and every real conversion/cutover remain pending.**
 
 Goal: add safe multi-tab/multi-user convergence, migrate existing dev workspaces gradually, and retire legacy systems only after the replacement is proven.
 
-- [ ] Add Yjs synchronization, durable updates, checkpoints, state vectors, compaction, awareness boundaries, and server authorization.
-- [ ] Prove same-browser tabs, different devices/users, offline edits, reconnects, crashes, undo, replay, and worker restarts without overwrite or loss.
-- [ ] Load-test huge Nodes and long-running collaboration streams while measuring browser, API, server, and database costs.
-- [ ] Convert existing dev content in small resumable batches while preserving original HTML and reporting every warning or failed anchor.
-- [ ] Roll out by workspace behind gates, compare old/new reads, monitor failures and latency, and retain an immediate rollback path.
-- [ ] Cut over durable reads and writes only after workspace-level validation is complete.
+- [x] Add production Yjs synchronization, durable updates, checkpoints, exact durability snapshots, compaction, bounded awareness, session isolation, server authorization, commit-only acknowledgement, quarantine, and restart recovery.
+- [x] Prove same-browser tabs, isolated clients, offline edits, reconnects, forced failures, concurrent undo, replay, duplicate/lost acknowledgement, compaction races, and service restart without overwrite or loss.
+- [x] Load-test measured p50, p95, and 1.87-MiB source documents plus a 520-update stream with browser/network/API/server/database measurements and enforceable update/document/awareness limits.
+- [x] Build the owner-specific, resumable dry-run/backfill converter while preserving source HTML and reporting checksums, warnings, comment-anchor handling, attachment references, failures, and retries. This check means tooling only; no development content was converted.
+- [x] Build workspace gates, count/readiness validation, old/new checksum comparison, health/metrics logs, latency/failure signals, activation mechanics, current-state rollback export, and immediate atomic rollback. Every real gate remains inactive.
+- [ ] Perform the separately approved real conversion and durable read/write cutover only after the user's manual browser acceptance and human migration-ledger reconciliation.
 - [ ] Remove legacy readers, writers, tables, limits, and temporary migration infrastructure only through a later reviewed cleanup after the rollback window.
 
-Phase 3 completion gate: Node v2 is the verified dev source of truth, concurrent editing converges reliably, migration is complete, observability is healthy, and explicit approval exists for each legacy cleanup.
+Phase 3 engineering gate: complete in repository and disposable proof. Operational completion remains pending until the user manually accepts the behavior, a human reconciles the development migration ledger, an explicitly approved conversion/cutover succeeds, its rollback window passes, and separate approval exists for cleanup.
 
 ## Development database read-only handoff
 

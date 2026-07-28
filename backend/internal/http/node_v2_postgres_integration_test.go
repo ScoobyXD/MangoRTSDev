@@ -47,6 +47,13 @@ func TestPostgresRealtimeNodeV2HTTPTimelineCursorWithTiedTimestamps(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rolloutRunID string
+	if err := db.QueryRow(`insert into editor_conversion_runs(conversion_run_id,company_id,owner_type,mode,status,batch_size,source_snapshot_timestamp,backup_reference,completed_timestamp) values(gen_random_uuid(),$1::uuid,'all','shadow_validate','completed',100,now(),'disposable PostgreSQL integration proof',now()) returning conversion_run_id::text`, company.CompanyID).Scan(&rolloutRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into editor_rollout_gates(company_id,owner_type,rollout_state,validation_run_id,validated_timestamp,activated_timestamp) select $1::uuid,owner_type,'active',$2::uuid,now(),now() from unnest(array['node','project','logic_gate']) owner_type`, company.CompanyID, rolloutRunID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp) values($1::uuid,'tiptap_json','ready',0,0,now(),now())`, company.CompanyID); err != nil {
 		t.Fatal(err)
 	}

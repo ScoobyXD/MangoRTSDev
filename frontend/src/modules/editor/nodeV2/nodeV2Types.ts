@@ -3,7 +3,7 @@ import type { MangoTiptapDocument } from "../tiptap/mangoTiptapDocument.js";
 
 export type NodeV2Cursor = {
   v: 1;
-  kind: "node_v2_timeline" | "node_v2_textboxes_active" | "node_v2_textboxes_archived" | "node_v2_comments" | "node_v2_attachments" | "node_v2_email_threads" | "node_v2_email_messages";
+  kind: "node_v2_timeline" | "node_v2_textboxes_active" | "node_v2_textboxes_archived" | "node_v2_comments" | "node_v2_comment_replies" | "node_v2_attachments" | "node_v2_email_threads" | "node_v2_email_messages";
   timestamp?: string;
   id: string;
   sequence?: number;
@@ -113,6 +113,8 @@ export type NodeV2CommentThread = {
   created_by_display_name: string;
   created_timestamp: string;
   comments: NodeV2Comment[];
+  comment_count: number;
+  comments_next_cursor?: NodeV2Cursor;
 };
 
 export type NodeV2AttachmentLink = {

@@ -2,9 +2,7 @@ package httpapi
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -73,20 +71,10 @@ func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 		t.Fatalf("idempotent create status=%d payload=%+v", replay.Code, replayed)
 	}
 
-	updateBytes := []byte{1, 4, 1, 4}
-	digest := sha256.Sum256(updateBytes)
-	updateBody := map[string]any{
-		"collaboration_epoch": created.Textbox.CollaborationEpoch,
-		"update_id":           "api-update-1", "update_sha256": hex.EncodeToString(digest[:]), "client_id": "api-tab",
-		"payload_base64": base64.StdEncoding.EncodeToString(updateBytes),
-	}
+	updateBody := map[string]any{"payload_base64": base64.StdEncoding.EncodeToString([]byte{1, 4, 1, 4})}
 	update := request(http.MethodPost, root+"/textboxes/"+created.Textbox.TextboxID+"/updates"+companyQuery, updateBody)
-	if update.Code != http.StatusCreated {
-		t.Fatalf("append update status=%d body=%s", update.Code, update.Body.String())
-	}
-	updateRetry := request(http.MethodPost, root+"/textboxes/"+created.Textbox.TextboxID+"/updates"+companyQuery, updateBody)
-	if updateRetry.Code != http.StatusCreated || updateRetry.Body.String() != update.Body.String() {
-		t.Fatalf("idempotent update status=%d first=%s retry=%s", updateRetry.Code, update.Body.String(), updateRetry.Body.String())
+	if update.Code != http.StatusForbidden || !strings.Contains(update.Body.String(), "node_v2_collaboration_service_only") {
+		t.Fatalf("unsafe browser update status=%d body=%s", update.Code, update.Body.String())
 	}
 
 	syncResponse := request(http.MethodGet, root+"/textboxes/"+created.Textbox.TextboxID+"/sync"+companyQuery+"&include_checkpoint=1&limit=10", nil)
@@ -95,7 +83,7 @@ func TestNodeV2APITextBoxDurabilityCommentsAndPagination(t *testing.T) {
 	}
 	var syncPage store.NodeV2SyncPage
 	_ = json.Unmarshal(syncResponse.Body.Bytes(), &syncPage)
-	if syncPage.Checkpoint == nil || len(syncPage.Updates) != 1 {
+	if syncPage.Checkpoint == nil || len(syncPage.Updates) != 0 {
 		t.Fatalf("sync page=%+v", syncPage)
 	}
 

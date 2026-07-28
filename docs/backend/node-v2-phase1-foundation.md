@@ -1,8 +1,8 @@
 # Node v2 Phase 1 foundation decision record
 
-Last updated: 2026-07-26
+Last updated: 2026-07-28
 
-Status: implemented as an additive, inactive repository foundation. No live database was written, no editor gate was enabled, and no existing Node reader or writer was redirected.
+Status: additive foundation and Phase 3 prerequisite engineering complete in the repository. The only open Phase 1 gate is human reconciliation of the live development migration ledger. No live database was written and no real editor gate was enabled.
 
 ## Completed milestone
 
@@ -15,7 +15,7 @@ This milestone turns the settled Node v2 ownership rules into:
 - a repeatable PostgreSQL-backed Yjs/Hocuspocus v4 durability proof based on measured live text-box sizes; and
 - schema contract tests that keep the forward migration and canonical schema identical and inactive.
 
-This is not the complete Phase 1 gate. The live migration ledger still needs human reconciliation, and the shared Tiptap schema, additive converter, dry-run/shadow comparison, and post-cutover edit-preserving rollback tooling are not yet implemented. The PostgreSQL collaboration persistence/acknowledgement proof described below is complete, but it is not a production service rollout.
+The live migration ledger still needs human reconciliation. The shared exact Tiptap schema, official converter, resumable backfill ledger, shadow/readiness validation, owner-specific cutover readers/writers, and post-cutover edit-preserving rollback exporter are now implemented and proven against disposable PostgreSQL. The collaboration path is now a production service implementation behind inactive gates, not a live service rollout.
 
 ## Read-only development evidence
 
@@ -309,3 +309,15 @@ The repository now enforces the operational boundary that this foundation descri
 Disposable PostgreSQL and browser coverage verifies pre-schema and post-schema sequencing, 145 text boxes, tied timeline/email cursors, delta row/write counts for a 1-MiB document, checkpoint rejection/recovery chains, outbox rollback/idempotency, and the real API/Vite/S3-compatible workflow.
 
 This does **not** complete Phase 1 rollout. Human live-schema/migration-ledger reconciliation, the shared TipTap HTML-to-JSON converter, and reviewed dry-run/shadow/rollback tooling remain open. No live database was changed. The conversion boundary remains current/recoverable deduplicated documents only; the historical 3.58-GB editor-event pile is not a conversion source, and legacy HTML remains available for rollback.
+## 2026-07-28 prerequisite closure
+
+Phase 3 engineering completes the repository-side prerequisites that were open when this record was written:
+
+- one exact Tiptap schema and Yjs bridge are shared by Node, Project, and Logic Gate conversion;
+- conversion inventory, dry-run, resumable backfill, checksums, deterministic identities, reports, shadow comparison, readiness, activation, rollback export, and rollback are executable tooling;
+- Project and Logic Gate cutover reads, commits, idempotent operations, versions, deletes, and plain-text materialization use owner-specific permanent tables after their exact gate becomes active;
+- Node collaboration is authorized, Yjs-validating, commit-acknowledged, materializing, compacting, observable, and restart-safe;
+- rollback requires current revision/update coverage and restores edits, creates, and deletes made after cutover; and
+- a read-only migration-runner audit reports repository-versus-ledger differences without taking the migration advisory lock or writing the ledger.
+
+None of that reconciles the actual development ledger. A human must follow the runbook in the Phase 3 engineering record before applying any repository migration. No live schema, content, or gate changed during this work.

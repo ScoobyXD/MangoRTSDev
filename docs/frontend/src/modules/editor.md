@@ -3,15 +3,15 @@
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
-## Node v2 Phase 2 editor path (2026-07-27)
+## Node v2 Phase 2/3 editor path (2026-07-28)
 
 When `VITE_NODE_V2_PHASE2=true`, Node workspaces use `nodeV2/NodeV2WorkspaceSurface.tsx` instead of the legacy Node information/projection editor. This path owns independent `node_textboxes`, mounts exactly one active `NodeV2Editor`, renders visible inactive Tiptap JSON through `MangoTiptapStaticRenderer`, and uses intersection-based placeholders for offscreen documents. Project and Logic Gate ownership are unchanged.
 
 `nodeV2/nodeV2Sync.ts` owns a textbox-scoped `Y.Doc`, Tiptap collaboration transactions, Yjs-aware undo/redo, 180 ms update merging, bounded checkpoints, polling merge, and an exact pending-update queue. `y-indexeddb` stores a separate recovery document per user/company/Node/textbox. Offline status is not shown until the pending update is durably queued, so close/navigation immediately after typing remains recoverable. Ordinary typing never serializes or persists the complete Tiptap document; materialized JSON and plain text update only at explicit or bounded checkpoint boundaries.
 
-Comments, attachments, and inline images are owned through the exact textbox. The Node attachment panel is an aggregate, and inline editor JSON stores only permanent attachment IDs. Email remains independent HTML: the Node v2 panel initially loads thread summaries, loads bodies only on request, and can add thread or exact-message textbox context without converting email content.
+Comments, attachments, inline images, and textbox chat are owned through the exact textbox. Initial/reply comment pages are bounded. The Node attachment panel aggregates exact links, and inline JSON stores permanent attachment IDs only. Email remains independent HTML in its own column: summaries and bodies paginate separately, and a selected exact message can be placed into the active textbox context without converting the email body.
 
-The Node v2 path uses the additive `/v1/nodes/:node_id/v2/...` API family and remains a development feature flag until the separate conversion, shadow-read, rollback, and workspace cutover work is approved. See `docs/backend/node-v2-phase2-completion.md` for the complete implementation, scale, durability, and rollout record.
+The Node v2 path uses the additive Node v2 API plus a short-lived collaboration ticket. Browser calls to public Yjs update/checkpoint writers are rejected; only the authorized collaboration service persists updates and materializes JSON/plain text. All real workspace gates remain inactive until manual acceptance and a separately approved conversion/cutover.
 
 ## Gated JSON-Native Tiptap Implementation (2026-07-18)
 

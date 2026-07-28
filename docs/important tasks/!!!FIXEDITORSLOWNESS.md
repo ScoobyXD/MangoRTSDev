@@ -682,3 +682,8 @@ The Node V2 browser no longer calls `getJSON()`/`getText()` or sends a full `Y.e
 Initial Node workspace reads now return only text-box metadata/counts and stable continuation cursors. Full TipTap JSON/plain text is fetched for the active or visible document, and archived summaries never hydrate document bodies. Text-box reordering uses a sparse single-item move command, so a paged browser never sends a partial list as if it were complete.
 
 Disposable PostgreSQL coverage measures 20 small durable update rows against a generated 1-MiB canonical document and asserts that ordinary input creates no extra checkpoint and does not increment the materialized revision. The production-path browser harness proves paged hydration and continuation instead of relying on source-text assertions.
+## 2026-07-28 Node v2 Phase 3 override
+
+The earlier “no Yjs/Hocuspocus” decision in this document remains accurate for the legacy generic JSON editor and HTML email surfaces, but it is superseded for the gated Node v2 text-box path. Node v2 now uses the repository-owned production Hocuspocus/Yjs service with PostgreSQL commit-only acknowledgement, exact snapshot durability, materialization, compaction, authorization, quarantine, and offline recovery. Project and Logic Gate cutover continue to use exact-revision JSON writes in owner-specific tables. Email remains HTML and outside document conversion.
+
+See docs/backend/node-v2-phase3-engineering.md for the current authority, rollout gates, tests, limits, and manual/live steps. No real workspace was converted or activated.

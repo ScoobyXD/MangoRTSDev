@@ -26,6 +26,7 @@ type NodeV2Repository interface {
 	AppendNodeV2YjsUpdate(input NodeV2YjsUpdateInput) (domain.NodeV2YjsUpdate, error)
 	CheckpointNodeV2TextBox(input NodeV2CheckpointInput) (domain.NodeV2TextBox, error)
 	ListNodeV2Comments(query NodeV2CommentQuery) (NodeV2CommentPage, error)
+	ListNodeV2CommentReplies(query NodeV2CommentReplyQuery) (NodeV2CommentReplyPage, error)
 	CreateNodeV2CommentThread(input NodeV2CreateCommentThreadInput) (domain.NodeV2CommentThread, error)
 	ReplyNodeV2Comment(input NodeV2ReplyCommentInput) (domain.NodeV2Comment, error)
 	ListNodeV2Attachments(query NodeV2AggregateQuery) (NodeV2AttachmentPage, error)
@@ -186,6 +187,19 @@ type NodeV2CommentQuery struct {
 type NodeV2CommentPage struct {
 	Threads    []domain.NodeV2CommentThread `json:"threads"`
 	NextCursor *NodeV2Cursor                `json:"next_cursor,omitempty"`
+}
+type NodeV2CommentReplyQuery struct {
+	CompanyID string
+	NodeID    string
+	TextboxID string
+	ThreadID  string
+	Limit     int
+	Cursor    *NodeV2Cursor
+}
+
+type NodeV2CommentReplyPage struct {
+	Items      []domain.NodeV2Comment `json:"items"`
+	NextCursor *NodeV2Cursor          `json:"next_cursor,omitempty"`
 }
 
 type NodeV2MentionInput struct {

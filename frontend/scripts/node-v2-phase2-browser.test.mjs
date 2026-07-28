@@ -79,12 +79,14 @@ assert.equal(await page.getByRole("textbox", { name: "Node text box" }).getAttri
 await page.waitForTimeout(600);
 await page.getByRole("button", { name: "Undo" }).click();
 await page.waitForFunction((expected) => document.querySelector('[aria-label="Node text box"]')?.textContent?.trim() !== expected, secondText);
+await waitSaved(page);
 await page.getByRole("button", { name: "Redo" }).click();
 await page.waitForFunction((expected) => document.querySelector('[aria-label="Node text box"]')?.textContent?.trim() === expected, secondText);
 assert.equal((await page.getByRole("textbox", { name: "Node text box" }).innerText()).trim(), secondText);
+await waitSaved(page);
 
 await page.getByRole("textbox", { name: "Node text box" }).press("Control+A");
-await page.getByLabel("Comment on this text box or the current selection").fill("Anchored browser comment");
+await page.getByLabel(/Chat about this text box/).fill("Anchored browser comment");
 await page.getByRole("button", { name: "Add comment" }).click();
 await page.locator(".node-v2-comment-thread").filter({ hasText: "Anchored browser comment" }).waitFor({ timeout: 20_000 });
 await page.locator(".node-v2-comment-thread").filter({ hasText: "Anchored browser comment" }).getByPlaceholder("Reply").fill("Browser reply");
@@ -93,7 +95,7 @@ await page.locator(".node-v2-comment-thread").filter({ hasText: "Browser reply" 
 
 await page.getByRole("button", { name: "Timeline" }).click();
 assert.ok(await page.getByText("Text box created", { exact: true }).count() >= 2);
-await page.getByRole("button", { name: "Comments" }).click();
+await page.getByRole("button", { name: "Chat" }).click();
 
 const activeCard = page.locator(".node-v2-textbox-card.is-active");
 const secondTextboxID = await activeCard.getAttribute("data-node-v2-textbox-id");
@@ -121,6 +123,7 @@ await context.setOffline(true);
 const offlineSuffix = ` offline recovery ${Date.now()}`;
 await page.getByRole("textbox", { name: "Node text box" }).press("End");
 await page.getByRole("textbox", { name: "Node text box" }).type(offlineSuffix);
+await page.locator(".node-v2-save-state").filter({ hasText: "Saving" }).waitFor({ timeout: 10_000 });
 await page.locator(".node-v2-save-state").filter({ hasText: "Offline" }).waitFor({ timeout: 10_000 });
 await page.close();
 await context.setOffline(false);
@@ -145,9 +148,18 @@ await attachmentInputs.nth(1).setInputFiles({
 });
 await page.getByText(inlineImageFilename, { exact: true }).waitFor({ timeout: 30_000 });
 await page.locator(".node-v2-inline-image").last().waitFor({ state: "attached", timeout: 30_000 });
+await page.getByRole("button", { name: `Select image ${inlineImageFilename}` }).click();
+const imageActions = page.locator(".node-v2-inline-image.is-selected .node-v2-inline-image-actions");
+await imageActions.getByRole("button", { name: "Preview" }).click();
+await page.getByRole("dialog", { name: `Image preview: ${inlineImageFilename}` }).waitFor({ state: "visible" });
+await page.getByRole("button", { name: "Close image preview" }).click();
+await imageActions.getByRole("button", { name: "Align left" }).click();
+const downloadPromise = page.waitForEvent("download");
+await imageActions.getByRole("button", { name: "Download" }).click();
+assert.equal((await downloadPromise).suggestedFilename(), inlineImageFilename);
 await waitSaved(page);
 
-await page.getByRole("button", { name: "Emails" }).click();
+
 const email = page.locator(".node-v2-email").filter({ hasText: "Durable Node v2 email" });
 await email.waitFor({ timeout: 20_000 });
 assert.equal(await page.locator(".node-v2-email").count(), 1, "Node-wide email aggregate is deduplicated");
@@ -164,6 +176,15 @@ const providerIDs = await email.locator(".node-v2-email-message").evaluateAll((i
 assert.equal(new Set(providerIDs).size, 35, "tied-order email continuation has no duplicates");
 assert.equal(providerIDs.length, 35, "all email messages are reachable");
 assert.equal(await email.getByRole("button", { name: "Link to this text box" }).isDisabled(), true, "textbox context is durable after reload");
+const emailTextboxIDBefore = await page.locator(".node-v2-textbox-card.is-active").getAttribute("data-node-v2-textbox-id");
+await email.getByRole("button", { name: "Create text box for this email" }).first().click();
+await page.waitForFunction(
+  (priorID) => document.querySelector(".node-v2-textbox-card.is-active.is-email-linked")?.getAttribute("data-node-v2-textbox-id") !== priorID,
+  emailTextboxIDBefore,
+);
+const emailCreatedCard = page.locator(".node-v2-textbox-card.is-active.is-email-linked");
+await emailCreatedCard.waitFor({ state: "visible", timeout: 20_000 });
+assert.equal(await emailCreatedCard.getAttribute("data-linked-email-thread-id"), "44444444-0000-4000-8000-000000000001", "message-to-textbox keeps exact email context");
 
 assert.deepEqual(failures, [], `browser/API failures: ${failures.join("; ")}`);
 await context.close();

@@ -20,6 +20,8 @@ func nodeV2TimelineBridgeAvailableTx(ctx context.Context, tx *sql.Tx) (bool, err
 		and to_regclass('public.node_timeline_items') is not null
 		and to_regclass('public.node_verification_requests') is not null
 		and to_regclass('public.node_verification_events') is not null
+		and to_regclass('public.node_verification_content_pins') is not null
+		and to_regclass('public.node_verification_update_pins') is not null
 		and to_regclass('public.node_verification_recipients') is not null`).Scan(&available)
 	return available, err
 }
@@ -47,22 +49,60 @@ func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx,
 	if err != nil || !available {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `select textbox_id::text,content_revision,latest_update_sequence from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null order by display_order,textbox_id`, input.CompanyID, input.NodeID)
+	type verificationContentSnapshot struct {
+		TextboxID                 string
+		ContentRevision           int64
+		LatestUpdateSequence      int64
+		CollaborationEpoch        string
+		CheckpointID              string
+		CheckpointThroughSequence int64
+	}
+	rows, err := tx.QueryContext(ctx, `select
+		textbox.textbox_id::text, textbox.content_revision, textbox.latest_update_sequence,
+		textbox.collaboration_epoch::text, checkpoint.checkpoint_id::text, checkpoint.through_update_sequence
+	from node_textboxes textbox
+	join lateral (
+		select checkpoint_id, through_update_sequence
+		from node_textbox_yjs_checkpoints
+		where company_id=textbox.company_id and node_id=textbox.node_id and textbox_id=textbox.textbox_id
+		  and collaboration_epoch=textbox.collaboration_epoch
+		  and through_update_sequence<=textbox.latest_update_sequence
+		order by through_update_sequence desc, checkpoint_id desc
+		limit 1
+	) checkpoint on true
+	where textbox.company_id=$1::uuid and textbox.node_id=$2::uuid and textbox.deleted_timestamp is null
+	order by textbox.display_order,textbox.textbox_id
+	for share of textbox`, input.CompanyID, input.NodeID)
 	if err != nil {
 		return err
 	}
+	snapshots := make([]verificationContentSnapshot, 0)
 	manifest := make([]map[string]any, 0)
 	for rows.Next() {
-		var textboxID string
-		var revision, sequence int64
-		if err := rows.Scan(&textboxID, &revision, &sequence); err != nil {
+		var snapshot verificationContentSnapshot
+		if err := rows.Scan(&snapshot.TextboxID, &snapshot.ContentRevision, &snapshot.LatestUpdateSequence, &snapshot.CollaborationEpoch, &snapshot.CheckpointID, &snapshot.CheckpointThroughSequence); err != nil {
 			rows.Close()
 			return err
 		}
-		manifest = append(manifest, map[string]any{"textbox_id": textboxID, "content_revision": revision, "latest_update_sequence": sequence})
+		snapshots = append(snapshots, snapshot)
+		manifest = append(manifest, map[string]any{
+			"textbox_id":                  snapshot.TextboxID,
+			"content_revision":            snapshot.ContentRevision,
+			"collaboration_epoch":         snapshot.CollaborationEpoch,
+			"checkpoint_id":               snapshot.CheckpointID,
+			"checkpoint_through_sequence": snapshot.CheckpointThroughSequence,
+			"latest_update_sequence":      snapshot.LatestUpdateSequence,
+		})
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	var activeTextboxCount int
+	if err := tx.QueryRowContext(ctx, `select count(*)::integer from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null`, input.CompanyID, input.NodeID).Scan(&activeTextboxCount); err != nil {
+		return err
+	}
+	if len(snapshots) != activeTextboxCount {
+		return errors.New("node v2 verification requires a reconstructable checkpoint for every active textbox")
 	}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
@@ -71,6 +111,14 @@ func insertNodeV2VerificationRequestForLegacyTx(ctx context.Context, tx *sql.Tx,
 	digest := sha256.Sum256(manifestJSON)
 	if _, err := tx.ExecContext(ctx, `insert into node_verification_requests(company_id,node_id,verification_request_id,verification_scope,requested_by_user_id,requested_by_display_name,content_manifest,content_manifest_sha256,idempotency_key,requested_timestamp) values($1::uuid,$2::uuid,$3::uuid,'node',$4::uuid,$5,$6::jsonb,$7,$8,$9) on conflict(company_id,node_id,idempotency_key) do nothing`, input.CompanyID, input.NodeID, item.EventID, input.ActorUserID, item.ActorDisplayName, manifestJSON, hex.EncodeToString(digest[:]), input.IdempotencyKey, item.CreatedTimestamp); err != nil {
 		return err
+	}
+	for _, snapshot := range snapshots {
+		if _, err := tx.ExecContext(ctx, `insert into node_verification_content_pins(company_id,node_id,verification_request_id,textbox_id,collaboration_epoch,checkpoint_id,checkpoint_through_sequence,head_update_sequence,content_revision) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8,$9) on conflict do nothing`, input.CompanyID, input.NodeID, item.EventID, snapshot.TextboxID, snapshot.CollaborationEpoch, snapshot.CheckpointID, snapshot.CheckpointThroughSequence, snapshot.LatestUpdateSequence, snapshot.ContentRevision); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `insert into node_verification_update_pins(company_id,node_id,verification_request_id,textbox_id,update_sequence) select $1::uuid,$2::uuid,$3::uuid,$4::uuid,update_sequence from node_textbox_yjs_updates where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$4::uuid and collaboration_epoch=$5::uuid and update_sequence>$6 and update_sequence<=$7 on conflict do nothing`, input.CompanyID, input.NodeID, item.EventID, snapshot.TextboxID, snapshot.CollaborationEpoch, snapshot.CheckpointThroughSequence, snapshot.LatestUpdateSequence); err != nil {
+			return err
+		}
 	}
 	for _, recipient := range item.VerificationRecipients {
 		if _, err := tx.ExecContext(ctx, `insert into node_verification_recipients(company_id,node_id,verification_request_id,user_id,user_display_name,assigned_timestamp) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) on conflict do nothing`, input.CompanyID, input.NodeID, item.EventID, recipient.UserID, recipient.UserDisplayName, recipient.CreatedTimestamp); err != nil {

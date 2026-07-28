@@ -1,8 +1,8 @@
 # Node v2 Phase 2 completion record
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
-Status: implementation record for the repository work behind `VITE_NODE_V2_PHASE2=true`. A 2026-07-27 Phase 3 readiness re-audit reopened Phase 2 acceptance because production materialization and current email/chat parity are incomplete. No live database was written, no production or development cloud resource was changed, and no legacy data was migrated or deleted.
+Status: repository acceptance complete behind inactive build and workspace gates. The user still performs manual browser acceptance before any separately approved live conversion or cutover. No live database was written, no cloud resource was changed, and no legacy data was migrated or deleted.
 
 ## Product boundary
 
@@ -14,9 +14,9 @@ The feature flag is intentionally separate from the Phase 3 migration and rollou
 
 - Node text boxes create idempotently, load independently, reorder, archive, restore, edit, checkpoint, and reload without rewriting sibling documents.
 - One visible text box owns the active Tiptap/Yjs editor. Inactive visible text boxes use the static Tiptap renderer and offscreen text boxes use `IntersectionObserver` placeholders.
-- Tiptap transactions update a `Y.Doc`. Ordinary typing is merged into small Yjs updates after a 180 ms quiet period; full materialized JSON is written only at explicit or bounded checkpoint boundaries.
+- Tiptap transactions update a Y.Doc through the production Hocuspocus provider. The server validates and commits Yjs updates before acknowledging them, then atomically materializes Tiptap JSON/plain text and compacts at bounded update, byte, and idle thresholds.
 - Undo and redo use Yjs-aware Tiptap history. Startup clears the initial hydration capture so the first undo affects the user's edit rather than document loading.
-- Each user/company/Node/textbox scope has separate `y-indexeddb` document recovery plus an IndexedDB pending-operation queue. The queue stores the exact payload and checksum before the UI reports that offline work is safe. Retry, lost-ack replay, checksum idempotency, polling merge, page-hide keepalive, and navigation flushes prevent silent overwrite.
+- Each user/company/Node/textbox scope has separate y-indexeddb recovery. An exact pending server-durability update is stored before the UI reports offline work as recoverable, reapplied after a close/remount, and cleared only after the server proves the exact durable Yjs snapshot, including delete sets.
 - Textbox-only comment threads support root comments, replies, user mentions, selected quotes, before/after fallback context, encoded Yjs relative positions, stable cursor pagination, and explicit legacy-unanchored presentation.
 - File and inline-image links use exact `(company_id, node_id, textbox_id)` ownership. Inline JSON stores only permanent attachment IDs and presentation fields. The Node attachment panel is a paginated aggregate and image bytes/previews continue through authenticated attachment storage.
 - Existing durable Node email membership remains authoritative. Optional text-box/thread and text-box/message links reference that membership. The Node-wide view deduplicates threads, initially returns summaries only, and fetches sanitized message bodies only after selection.
@@ -26,7 +26,7 @@ The feature flag is intentionally separate from the Phase 3 migration and rollou
 
 `GET /v1/nodes/:node_id/v2/workspace` returns bounded text boxes, archived summaries, counts, one timeline page, and bounded attachment/email summaries without joining child collections into a multiplied result. Additional route groups provide:
 
-- text-box create, order, archive/restore, sync-update, and checkpoint commands;
+- text-box create, order, archive/restore, read hydration, and short-lived collaboration-ticket commands; the public update/checkpoint writers reject browser writes;
 - timeline cursor pages;
 - textbox comment pages, thread creation, and replies;
 - Node-wide attachment pages and exact textbox attachment links;
@@ -39,7 +39,7 @@ All routes require an authenticated company member with normal Node view or edit
 Focused automated scenarios prove:
 
 - 140 active text boxes with a workspace payload capped at 100 and 25-item stable timeline pages;
-- 2,000 comment threads with 30-item cursor pages and independently persisted replies/mentions;
+- 2,000 ordinary comment threads plus a single 1,002-comment reply-heavy thread; initial pages contain at most 30 comments and every reply/mention continuation is bounded and reachable without duplicates;
 - 200 email threads and 400 durable HTML messages with 30-item aggregate pages, one-message lazy body pages, Node-wide deduplication, and both thread and exact-message textbox context;
 - checksum-idempotent retry under a different client operation ID, checkpoint materialization, archive/restore, and exactly the three timeline item types;
 - same-browser Yjs convergence, relative-anchor movement, IndexedDB recovery, pending-operation retry, bounded checkpoint rules, and the absence of whole-document `onUpdate` serialization.
@@ -77,7 +77,7 @@ The Phase 2 repository implementation now also includes:
 
 `scripts/run_all_tests.mjs` now runs the executable Phase 2 durability suite and the production-path harness. That harness provisions disposable PostgreSQL, two API instances, Vite, Chromium, and an S3-compatible local fixture, then proves legacy-before-activation and V2-after-activation behavior in one command. Its V2 browser path covers bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and 35-message email continuation.
 
-The Phase 2 implementation is present in the repository. Phase 1 migration/rollout is still in progress for the human ledger reconciliation, shared converter, and dry-run/shadow/rollback work listed in the foundation record. This change did not migrate a live database or authorize rollout.
+The Phase 2 implementation is present in the repository. Shared conversion/shadow/rollback engineering is now complete; Phase 1 remains open only for the human development-ledger reconciliation. This change did not migrate a live database or authorize rollout.
 
 ## 2026-07-27 Phase 3 readiness correction
 
@@ -93,3 +93,16 @@ The later readiness audit found that the completion claim was broader than the e
 - Typed attachment and email links block generic company deletion through restrictive foreign keys. The test harness now cleans them in dependency order, but the production company-deletion lifecycle still needs an explicit product-owned workflow before rollout.
 
 Therefore the Phase 2 acceptance gate is reopened. The foundation is suitable for continued gated Phase 3 engineering, but not for workspace activation, migration, or read/write cutover.
+## 2026-07-28 acceptance closure
+
+The readiness correction above is retained as historical evidence. Its material findings are now closed in production code and fail-closed tests:
+
+- The real browser uses the production Hocuspocus service. Authorization is scoped to one user/company/Node/textbox ticket; every update is decoded as Yjs, size/checksum/deduplication contracts are enforced, and only a committed PostgreSQL update receives a durability acknowledgement.
+- Exact Yjs snapshots, not state vectors alone, prove durability. This covers delete sets, lost acknowledgements, offline tab close/remount, reconnect, concurrent clients, service restart, and quarantine after a failed write.
+- Ordinary edits advance the trusted materialized Tiptap document/plain text used by static, search, and recovery readers. The public REST update path always rejects writes.
+- The Node workspace has distinct editor, textbox-chat, and email columns. It preserves exact message-to-textbox behavior, accent state, bounded email pages, lazy bodies, and HTML email storage.
+- Verification pins exact checkpoints and update tails. Retention cleanup deletes expired unpinned history while retaining every row required to reconstruct verified content.
+- A reply-heavy thread is bounded through continuation cursors, and the ordered company purge function clears restrictive typed links in one transaction before company deletion.
+- The production browser harness proves typing, undo/redo, save, reload, navigation, Strict Mode remount, scroll/caret behavior, offline recovery, comments, archive/restore, file upload, and the full inline-image surface through real API/PostgreSQL paths.
+
+Repository automation passed the expanded disposable production-path harness on 2026-07-28. Manual user acceptance remains intentionally separate. No real conversion, live activation, live read/write cutover, or legacy cleanup occurred.

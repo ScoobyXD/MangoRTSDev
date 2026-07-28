@@ -16,7 +16,7 @@ func testEnv(values map[string]string) envLookup {
 }
 
 func TestParseDBConfigDefaultsAndRequiredEnv(t *testing.T) {
-	if _, err := parseDBConfig(testEnv(nil)); err == nil {
+	if _, err := parseDBConfig(testEnv(nil), false); err == nil {
 		t.Fatalf("expected missing env error")
 	} else if !strings.Contains(err.Error(), "DB_HOST") || !strings.Contains(err.Error(), "DB_PASSWORD") {
 		t.Fatalf("missing env error did not name required vars: %v", err)
@@ -26,7 +26,7 @@ func TestParseDBConfigDefaultsAndRequiredEnv(t *testing.T) {
 		"DB_HOST":                    "host=db.example.com",
 		"DB_PASSWORD":                "pa ss",
 		"DB_CONNECT_TIMEOUT_SECONDS": "not-an-int",
-	}))
+	}), false)
 	if err != nil {
 		t.Fatalf("parseDBConfig returned error: %v", err)
 	}
@@ -42,6 +42,26 @@ func TestParseDBConfigDefaultsAndRequiredEnv(t *testing.T) {
 	}
 	if cfg.ConnectTimeoutSeconds != 5 {
 		t.Fatalf("ConnectTimeoutSeconds = %d, want fallback 5", cfg.ConnectTimeoutSeconds)
+	}
+}
+
+func TestParseDBConfigAuditAllowsPasswordFile(t *testing.T) {
+	cfg, err := parseDBConfig(testEnv(map[string]string{
+		"DB_HOST": "db.example.com",
+		"DB_USER": "mangorts_readonly",
+	}), true)
+	if err != nil {
+		t.Fatalf("password-file audit config: %v", err)
+	}
+	if cfg.Password != "" {
+		t.Fatalf("audit password=%q, want omitted password", cfg.Password)
+	}
+	parsed, err := url.Parse(buildConnString(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := parsed.User.Password(); present {
+		t.Fatal("passwordless audit connection encoded an empty password")
 	}
 }
 
@@ -75,6 +95,13 @@ func TestParseCommandConfigDefaultsAndAnchors(t *testing.T) {
 	_, err = parseCommandConfig([]string{"-start-at", "a.sql", "-start-after", "b.sql"}, testEnv(nil))
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("expected mutually exclusive error, got %v", err)
+	}
+	auditCfg, err := parseCommandConfig([]string{"-mode", "audit"}, testEnv(nil))
+	if err != nil || auditCfg.Mode != "audit" {
+		t.Fatalf("audit config=%+v err=%v", auditCfg, err)
+	}
+	if _, err := parseCommandConfig([]string{"-mode", "audit", "-start-at", "a.sql"}, testEnv(nil)); err == nil {
+		t.Fatal("audit mode accepted a migration execution anchor")
 	}
 }
 
@@ -128,6 +155,17 @@ func TestListMigrationFilesFiltersAndSortsSQLFiles(t *testing.T) {
 	want := []string{"20260701_first.sql", "20260702_second.sql"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("migration names = %#v, want %#v", got, want)
+	}
+}
+
+func TestClassifyMigrationLedger(t *testing.T) {
+	files := []migrationFile{{Name: "a.sql"}, {Name: "b.sql"}}
+	audit := classifyMigrationLedger(files, map[string]bool{"a.sql": true, "orphan.sql": true})
+	if !reflect.DeepEqual(audit.MissingFromLedger, []string{"b.sql"}) {
+		t.Fatalf("missing=%v", audit.MissingFromLedger)
+	}
+	if !reflect.DeepEqual(audit.UnknownToRepo, []string{"orphan.sql"}) {
+		t.Fatalf("unknown=%v", audit.UnknownToRepo)
 	}
 }
 

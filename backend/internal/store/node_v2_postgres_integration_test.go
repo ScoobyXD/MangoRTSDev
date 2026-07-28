@@ -23,21 +23,27 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	companyDeleted := false
 	t.Cleanup(func() {
-		if _, cleanupErr := db.Exec("delete from node_textbox_attachment_links where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
-			t.Errorf("clean Node V2 attachment links: %v", cleanupErr)
+		if companyDeleted {
+			return
 		}
-		if _, cleanupErr := db.Exec("delete from node_textbox_email_links where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
-			t.Errorf("clean Node V2 email links: %v", cleanupErr)
+		tx, cleanupErr := db.Begin()
+		if cleanupErr != nil {
+			t.Errorf("begin Node V2 company cleanup: %v", cleanupErr)
+			return
 		}
-		if _, cleanupErr := db.Exec("delete from realtime_outbox where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
-			t.Errorf("clean Node V2 realtime outbox: %v", cleanupErr)
+		defer tx.Rollback()
+		if _, cleanupErr = tx.Exec("select mangorts_prepare_company_editor_purge($1::uuid)", company.CompanyID); cleanupErr != nil {
+			t.Errorf("prepare Node V2 company cleanup: %v", cleanupErr)
+			return
 		}
-		if _, cleanupErr := db.Exec("delete from domain_events where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
-			t.Errorf("clean Node V2 domain events: %v", cleanupErr)
+		if _, cleanupErr = tx.Exec("delete from companies where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
+			t.Errorf("delete Node V2 company: %v", cleanupErr)
+			return
 		}
-		if _, cleanupErr := db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID); cleanupErr != nil {
-			t.Errorf("clean Node V2 company: %v", cleanupErr)
+		if cleanupErr = tx.Commit(); cleanupErr != nil {
+			t.Errorf("commit Node V2 company cleanup: %v", cleanupErr)
 		}
 	})
 	suffix := fmt.Sprint(time.Now().UnixNano())
@@ -51,6 +57,13 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 	}
 	node, err := repo.CreateNode(company.CompanyID, "145 text boxes")
 	if err != nil {
+		t.Fatal(err)
+	}
+	var rolloutRunID string
+	if err := db.QueryRow(`insert into editor_conversion_runs(conversion_run_id,company_id,owner_type,mode,status,batch_size,source_snapshot_timestamp,backup_reference,completed_timestamp) values(gen_random_uuid(),$1::uuid,'all','shadow_validate','completed',100,now(),'disposable PostgreSQL integration proof',now()) returning conversion_run_id::text`, company.CompanyID).Scan(&rolloutRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into editor_rollout_gates(company_id,owner_type,rollout_state,validation_run_id,validated_timestamp,activated_timestamp) select $1::uuid,owner_type,'active',$2::uuid,now(),now() from unnest(array['node','project','logic_gate']) owner_type`, company.CompanyID, rolloutRunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`insert into workspace_editor_formats(company_id,editor_format,migration_state,expected_document_count,converted_document_count,validated_timestamp,cutover_timestamp) values($1::uuid,'tiptap_json','ready',0,0,now(),now())`, company.CompanyID); err != nil {
@@ -153,6 +166,82 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 		t.Fatalf("typing materialized revision=%d err=%v", revision, err)
 	}
 
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: actor.UserID,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, ActorUserID: actor.UserID,
+		IdempotencyKey: "node-v2-retention-verification",
+	})
+	if err != nil {
+		t.Fatalf("create exact-content verification: %v", err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_verification_content_pins where company_id=$1::uuid and node_id=$2::uuid and verification_request_id=$3::uuid`, company.CompanyID, node.NodeID, verification.TimelineEvent.EventID); got != 145 {
+		t.Fatalf("verification checkpoint pins=%d want=145", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_verification_update_pins where company_id=$1::uuid and node_id=$2::uuid and verification_request_id=$3::uuid and textbox_id=$4::uuid`, company.CompanyID, node.NodeID, verification.TimelineEvent.EventID, target.TextboxID); got != 20 {
+		t.Fatalf("verification tail pins=%d want=20", got)
+	}
+	if _, err := repo.CheckpointNodeV2TextBox(NodeV2CheckpointInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID,
+		ActorUserID: actor.UserID, CheckpointID: newUUIDv7String(), CollaborationEpoch: target.CollaborationEpoch,
+		ThroughSequence: 20, CheckpointPayload: []byte{0, 0}, StateVector: []byte{0},
+		DocumentJSON: envelope, PlainText: string(largeText), Reason: "manual_recovery", Trusted: true,
+	}); err != nil {
+		t.Fatalf("checkpoint verified tail: %v", err)
+	}
+
+	control := created[1].Textbox
+	var controlUpdates []domain.NodeV2YjsUpdate
+	for index := 0; index < 2; index++ {
+		payload := []byte(fmt.Sprintf("retention-control-%d", index))
+		digest := sha256.Sum256(payload)
+		item, appendErr := repo.AppendNodeV2YjsUpdate(NodeV2YjsUpdateInput{
+			CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: control.TextboxID,
+			ActorUserID: actor.UserID, CollaborationEpoch: control.CollaborationEpoch,
+			UpdateID: newUUIDv7String(), UpdateSHA256: hex.EncodeToString(digest[:]),
+			ClientID: "retention-control", Payload: payload,
+		})
+		if appendErr != nil {
+			t.Fatal(appendErr)
+		}
+		controlUpdates = append(controlUpdates, item)
+		if _, checkpointErr := repo.CheckpointNodeV2TextBox(NodeV2CheckpointInput{
+			CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: control.TextboxID,
+			ActorUserID: actor.UserID, CheckpointID: newUUIDv7String(), CollaborationEpoch: control.CollaborationEpoch,
+			ThroughSequence: item.UpdateSequence, CheckpointPayload: []byte{0, 0}, StateVector: []byte{0},
+			DocumentJSON: json.RawMessage(nodeV2EmptyDocument), PlainText: "", Reason: "manual_recovery", Trusted: true,
+		}); checkpointErr != nil {
+			t.Fatal(checkpointErr)
+		}
+	}
+	if _, err := db.Exec(`update node_textbox_yjs_updates set received_timestamp=now()-interval '30 days',checkpointed_timestamp=now()-interval '20 days',retain_until=now()-interval '1 day' where company_id=$1::uuid and node_id=$2::uuid and textbox_id in ($3::uuid,$4::uuid)`, company.CompanyID, node.NodeID, target.TextboxID, control.TextboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`update node_textbox_yjs_checkpoints set created_timestamp=now()-interval '30 days',retain_until=now()-interval '1 day' where company_id=$1::uuid and node_id=$2::uuid and ((textbox_id=$3::uuid and through_update_sequence=0) or (textbox_id=$4::uuid and through_update_sequence=1))`, company.CompanyID, node.NodeID, target.TextboxID, control.TextboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`select mangorts_cleanup_node_v2_yjs_retention(1000)`); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_textbox_yjs_updates where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, company.CompanyID, node.NodeID, target.TextboxID); got != 20 {
+		t.Fatalf("retention removed verification-pinned updates: got=%d want=20", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_textbox_yjs_checkpoints where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and through_update_sequence=0`, company.CompanyID, node.NodeID, target.TextboxID); got != 1 {
+		t.Fatalf("retention removed verification-pinned checkpoint: got=%d want=1", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_textbox_yjs_updates where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and update_sequence in ($4,$5)`, company.CompanyID, node.NodeID, control.TextboxID, controlUpdates[0].UpdateSequence, controlUpdates[1].UpdateSequence); got != 0 {
+		t.Fatalf("retention kept unpinned covered updates: got=%d want=0", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from node_textbox_yjs_checkpoints where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and through_update_sequence=1`, company.CompanyID, node.NodeID, control.TextboxID); got != 0 {
+		t.Fatalf("retention kept unpinned superseded checkpoint: got=%d want=0", got)
+	}
+
 	if _, err := db.Exec(`update node_timeline_items set occurred_at='2026-01-01T00:00:00Z' where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID); err != nil {
 		t.Fatal(err)
 	}
@@ -232,6 +321,63 @@ values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'provider-000',$5::uuid)`,
 	if err != nil || retriedComment.ThreadID != firstComment.ThreadID {
 		t.Fatalf("comment retry=%+v err=%v", retriedComment, err)
 	}
+	if _, err := db.Exec(`insert into node_textbox_comments(
+company_id,node_id,textbox_id,thread_id,comment_id,parent_comment_id,author_user_id,
+author_display_name,body_text,idempotency_key,created_timestamp)
+select $1::uuid,$2::uuid,$3::uuid,$4::uuid,gen_random_uuid(),$5::uuid,$6::uuid,
+'Node V2 PostgreSQL','Bulk reply '||reply_index,'bulk-reply-'||reply_index,
+clock_timestamp()+(reply_index*interval '1 millisecond')
+from generate_series(1,1001) reply_index`, company.CompanyID, node.NodeID, target.TextboxID, firstComment.ThreadID, firstComment.Comments[0].CommentID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into node_textbox_comment_mentions(
+company_id,node_id,textbox_id,thread_id,comment_id,principal_type,principal_id,principal_display_name)
+select company_id,node_id,textbox_id,thread_id,comment_id,'user',$5::uuid,'Node V2 PostgreSQL'
+from node_textbox_comments
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and thread_id=$4::uuid
+  and idempotency_key like 'bulk-reply-%'`, company.CompanyID, node.NodeID, target.TextboxID, firstComment.ThreadID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	boundedThreads, err := repo.ListNodeV2Comments(NodeV2CommentQuery{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID, Limit: 1,
+	})
+	if err != nil || len(boundedThreads.Threads) != 1 {
+		t.Fatalf("bounded comment thread page=%+v err=%v", boundedThreads, err)
+	}
+	boundedThread := boundedThreads.Threads[0]
+	if boundedThread.CommentCount != 1002 || len(boundedThread.Comments) != NodeV2DefaultPageLimit || boundedThread.CommentsNextCursor == nil {
+		t.Fatalf("huge thread initial window count=%d loaded=%d cursor=%v", boundedThread.CommentCount, len(boundedThread.Comments), boundedThread.CommentsNextCursor)
+	}
+	replyIDs := map[string]bool{}
+	replyCursor := (*NodeV2Cursor)(nil)
+	for {
+		replyPage, pageErr := repo.ListNodeV2CommentReplies(NodeV2CommentReplyQuery{
+			CompanyID: company.CompanyID, NodeID: node.NodeID, TextboxID: target.TextboxID,
+			ThreadID: firstComment.ThreadID, Limit: 37, Cursor: replyCursor,
+		})
+		if pageErr != nil {
+			t.Fatal(pageErr)
+		}
+		if len(replyPage.Items) > 37 {
+			t.Fatalf("unbounded reply page returned %d items", len(replyPage.Items))
+		}
+		for _, reply := range replyPage.Items {
+			if replyIDs[reply.CommentID] {
+				t.Fatalf("duplicate reply across cursor pages: %s", reply.CommentID)
+			}
+			replyIDs[reply.CommentID] = true
+			if strings.HasPrefix(reply.BodyText, "Bulk reply ") && len(reply.Mentions) != 1 {
+				t.Fatalf("bounded mention hydration for %s = %d, want 1", reply.CommentID, len(reply.Mentions))
+			}
+		}
+		if replyPage.NextCursor == nil {
+			break
+		}
+		replyCursor = replyPage.NextCursor
+	}
+	if len(replyIDs) != 1002 {
+		t.Fatalf("reachable huge-thread comments=%d want=1002", len(replyIDs))
+	}
 
 	attachmentID := newUUIDv7String()
 	if _, err := db.Exec(`insert into attachments(
@@ -296,6 +442,46 @@ values($1::uuid,$2::uuid,$3::uuid,'audit.txt','text/plain',1,$4,'disposable','au
 	}
 	if got := countPostgresRows(t, db, `select count(*) from realtime_outbox where company_id=$1::uuid and event_type='node.textbox.archived'`, company.CompanyID); got != 1 {
 		t.Fatalf("archive outbox rows=%d want=1", got)
+	}
+
+	if _, err := db.Exec(`insert into node_textbox_comment_attachment_links(
+company_id,node_id,textbox_id,thread_id,comment_id,attachment_link_id)
+values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid)`,
+		company.CompanyID, node.NodeID, target.TextboxID, firstComment.ThreadID,
+		firstComment.Comments[0].CommentID, firstAttachment.AttachmentLinkID); err != nil {
+		t.Fatal(err)
+	}
+	purgeTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer purgeTx.Rollback()
+	var purgeJSON []byte
+	if err := purgeTx.QueryRow(`select mangorts_prepare_company_editor_purge($1::uuid)`, company.CompanyID).Scan(&purgeJSON); err != nil {
+		t.Fatal(err)
+	}
+	var purgeCounts map[string]int
+	if err := json.Unmarshal(purgeJSON, &purgeCounts); err != nil {
+		t.Fatal(err)
+	}
+	for relation, count := range map[string]int{
+		"node_textbox_comment_attachment_links": 1,
+		"node_textbox_email_links":              1,
+		"node_textbox_attachment_links":         1,
+	} {
+		if purgeCounts[relation] != count {
+			t.Fatalf("company purge %s=%d want=%d; report=%s", relation, purgeCounts[relation], count, purgeJSON)
+		}
+	}
+	if _, err := purgeTx.Exec(`delete from companies where company_id=$1::uuid`, company.CompanyID); err != nil {
+		t.Fatalf("company deletion after ordered Node V2 purge: %v", err)
+	}
+	if err := purgeTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	companyDeleted = true
+	if got := countPostgresRows(t, db, `select count(*) from companies where company_id=$1::uuid`, company.CompanyID); got != 0 {
+		t.Fatalf("company remains after ordered purge transaction: %d", got)
 	}
 }
 
