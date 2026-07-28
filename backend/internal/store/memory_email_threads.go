@@ -43,11 +43,19 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 	providerKey := communicationsEmailThreadProviderKey(input.ProviderThreadID, input.SelectedMessageID)
 	scopeKey := communicationsEmailThreadScopeKey(input.CompanyID, scope, providerKey)
 	threadID := r.emailThreadScopeIDs[scopeKey]
-	if threadID == "" && input.ProviderThreadID != "" {
+	if threadID == "" {
 		for _, candidate := range r.emailThreads {
-			if candidate.RootProviderMessageID == input.SelectedMessageID && communicationsEmailThreadMatchesScope(candidate, input.CompanyID, scope) {
-				threadID = candidate.EmailThreadID
-				r.emailThreadScopeIDs[scopeKey] = threadID
+			if !communicationsEmailThreadMatchesScope(candidate, input.CompanyID, scope) {
+				continue
+			}
+			for _, message := range candidate.Messages {
+				if message.ProviderMessageID == input.SelectedMessageID {
+					threadID = candidate.EmailThreadID
+					r.emailThreadScopeIDs[scopeKey] = threadID
+					break
+				}
+			}
+			if threadID != "" {
 				break
 			}
 		}
@@ -64,10 +72,13 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 			PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
 			SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail,
 			ProviderThreadID: input.ProviderThreadID, RootProviderMessageID: input.SelectedMessageID,
-			HydrationStatus:  CommunicationsEmailThreadHydrationPartial,
+			DownloadStatus:   CommunicationsEmailThreadDownloadPartial,
 			CreatedTimestamp: now,
 		}
 		r.emailThreadScopeIDs[scopeKey] = threadID
+	}
+	if thread.ProviderThreadID != "" && input.ProviderThreadID != "" && thread.ProviderThreadID != input.ProviderThreadID {
+		return domain.CommunicationsEmailThread{}, ErrInvalid
 	}
 	if thread.ProviderThreadID == "" {
 		thread.ProviderThreadID = input.ProviderThreadID
@@ -104,11 +115,11 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 	}
 	thread.HistoryComplete = thread.HistoryComplete || input.HistoryComplete
 	if thread.HistoryComplete {
-		thread.HydrationStatus = CommunicationsEmailThreadHydrationComplete
-		thread.LastHydrationError = ""
+		thread.DownloadStatus = CommunicationsEmailThreadDownloadComplete
+		thread.LastDownloadError = ""
 	} else {
-		thread.HydrationStatus = CommunicationsEmailThreadHydrationPartial
-		thread.LastHydrationError = input.LastHydrationError
+		thread.DownloadStatus = CommunicationsEmailThreadDownloadPartial
+		thread.LastDownloadError = input.LastDownloadError
 	}
 	fetchedAt := input.FetchedAt
 	thread.FetchedAt = &fetchedAt
@@ -209,5 +220,10 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 		Type: info.Type, Information: information, CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now)
+	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {
+		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.Thread.RequestedByUserID); err != nil {
+			return CommunicationsNodeEmailImportResult{}, err
+		}
+	}
 	return CommunicationsNodeEmailImportResult{InformationID: input.InformationID, EmailThread: thread}, nil
 }

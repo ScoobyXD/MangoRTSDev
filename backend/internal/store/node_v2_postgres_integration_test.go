@@ -270,7 +270,7 @@ func TestPostgresRealtimeNodeV2PaginationDurabilityAndOutbox(t *testing.T) {
 	emailThreadID := newUUIDv7String()
 	if _, err := db.Exec(`insert into communications_email_threads(
 company_id,email_thread_id,scope_type,personal_user_id,personal_account_email,account_email,
-provider_thread_key,provider_thread_id,root_provider_message_id,hydration_status,history_complete)
+provider_thread_key,provider_thread_id,root_provider_message_id,download_status,history_complete)
 values($1::uuid,$2::uuid,'personal',$3::uuid,$4,$4,'audit-thread','audit-thread','provider-000','complete',true)`,
 		company.CompanyID, emailThreadID, actor.UserID, subject+"@example.test"); err != nil {
 		t.Fatal(err)

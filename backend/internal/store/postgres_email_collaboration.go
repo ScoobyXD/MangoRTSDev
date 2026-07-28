@@ -210,13 +210,15 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	if !member {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrPrincipalNotInCompany
 	}
-	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
+	threadInput := CommunicationsEmailThreadUpsertInput{
 		CompanyID: input.CompanyID, PersonalUserID: scope.personalUserID,
 		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
 		AccountEmail: scope.accountEmail, ProviderThreadID: input.Message.ThreadID,
 		SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
 		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(),
-	})
+		RequestDownload: true, RequestedByUserID: input.CreatedByUserID,
+	}
+	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, threadInput)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("persist_email_thread", err)
 	}
@@ -233,6 +235,11 @@ where company_id=$1::uuid and collaboration_id=$2::uuid`, input.CompanyID, exist
 		}
 		if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, existing.NodeID, existing.AttachedEmailInformationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("link_existing_node_thread", err)
+		}
+		if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+			if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
+				return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("queue_thread_download", err)
+			}
 		}
 		existing, err = postgresEmailCollaborationByID(ctx, tx, input.CompanyID, existing.CollaborationID, "")
 		if err != nil {
@@ -292,6 +299,11 @@ values ($1::uuid, $2::uuid, $3::uuid, $3::uuid, 'creator', null, now())`, input.
 	}
 	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("link_created_node_thread", err)
+	}
+	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("queue_thread_download", err)
+		}
 	}
 	if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: input.CreatedByUserID, AccessLevel: EntityPermissionEdit}); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("grant_creator_access", err)

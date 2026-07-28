@@ -348,5 +348,6 @@ func mergeEmailMessageSnapshot(existing, incoming domain.EmailMessageSnapshot) d
 		merged.Unread = incoming.Unread
 		merged.Starred = incoming.Starred
 	}
+	merged.DownloadComplete = existing.DownloadComplete || incoming.DownloadComplete
 	return merged
 }

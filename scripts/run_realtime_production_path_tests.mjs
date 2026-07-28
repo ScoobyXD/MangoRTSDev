@@ -546,6 +546,10 @@ async function main() {
   run("Apply revision-bound Tiptap annotation positions on the clean canonical schema", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
+  copyFileSync(resolve(backend, "db", "migrations", "20260728_durable_email_thread_download_jobs.sql"), resolve(migrationDir, "20260728_durable_email_thread_download_jobs.sql"));
+  run("Apply durable email-thread download jobs on the clean canonical schema", migrateExe, [
+    "-mode", "migrate", "-migrations", migrationDir,
+  ], { cwd: backend, env: cleanEnv });
   run("Prove recorded migration rerun is idempotent", migrateExe, [
     "-mode", "migrate", "-migrations", migrationDir,
   ], { cwd: backend, env: cleanEnv });
@@ -554,6 +558,9 @@ async function main() {
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version like '20260718%';"), "1");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version='20260719_zz_tiptap_annotation_positions.sql';"), "1");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name in ('editor_json_documents','editor_json_operations','editor_json_versions') and column_name='canonical_annotations';"), "3");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from schema_migrations where version='20260728_durable_email_thread_download_jobs.sql';"), "1");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.columns where table_name='communications_email_threads' and column_name in ('download_status','last_download_error');"), "2");
+  assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.tables where table_name='communications_email_thread_download_jobs';"), "1");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from workspace_editor_formats;"), "0");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from information_schema.tables where table_name in ('workspace_editor_formats','editor_json_documents','editor_json_operations','editor_json_versions');"), "4");
   assert.equal(psql(pgPort, "mangorts_realtime_test", "select count(*) from pg_constraint where conname in ('editor_collaboration_documents_model_version_chk','editor_collaboration_operations_kind_chk');"), "0");
@@ -627,7 +634,7 @@ async function main() {
     "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,revision,canonical_html,is_deleted) values('" + COMPANY_A + "','node','" + NODE_A + "','" + DOC_A + "',0,'" + INITIAL_RICH_EDITOR_HTML.replaceAll("'", "''") + "',false);",
   ].join("\n"));
   psql(pgPort, "mangorts_realtime_test", [
-    "insert into communications_email_threads(company_id,email_thread_id,scope_type,personal_user_id,personal_account_email,account_email,provider_thread_key,provider_thread_id,root_provider_message_id,hydration_status,history_complete) values('" + COMPANY_A + "','44444444-0000-4000-8000-000000000001','personal','" + USER_A + "','browser-user-a@mangorts.test','browser-user-a@mangorts.test','durable-browser-thread','durable-browser-thread','browser-provider-001','complete',true);",
+    "insert into communications_email_threads(company_id,email_thread_id,scope_type,personal_user_id,personal_account_email,account_email,provider_thread_key,provider_thread_id,root_provider_message_id,download_status,history_complete) values('" + COMPANY_A + "','44444444-0000-4000-8000-000000000001','personal','" + USER_A + "','browser-user-a@mangorts.test','browser-user-a@mangorts.test','durable-browser-thread','durable-browser-thread','browser-provider-001','complete',true);",
     "insert into communications_email_messages(company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,message_timestamp,rich_html_body,text_fallback,snippet) select '" + COMPANY_A + "',('44444444-1000-4000-8000-'||lpad(series::text,12,'0'))::uuid,'44444444-0000-4000-8000-000000000001',('browser-provider-'||lpad(series::text,3,'0')),(series-1)/3,'Durable Node v2 email',1700000000+series,('<p>Durable independent HTML email body '||series||'<script>throw new Error(1)</script></p>'),('Durable independent HTML email body '||series),('Durable message '||series) from generate_series(1,35) series;",
     "insert into communications_node_email_threads(company_id,node_id,information_id,email_thread_id,selected_provider_message_id,created_by_user_id) values('" + COMPANY_A + "','" + NODE_A + "','44444444-2000-4000-8000-000000000001','44444444-0000-4000-8000-000000000001','browser-provider-001','" + USER_A + "');",
   ].join("\n"));

@@ -4911,7 +4911,7 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	}
 }
 
-func TestNylasWebhookAdvancesPersonalEmailCollaborationForPermanentParticipants(t *testing.T) {
+func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "71717171-7171-4171-8171-717171717171"
 	repo.EnsureCompany(companyID, "Personal collaboration live arrival")
@@ -4964,17 +4964,10 @@ func TestNylasWebhookAdvancesPersonalEmailCollaborationForPermanentParticipants(
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			participantToken: {Subject: participant.CognitoSubject, Email: participant.Email, Name: participant.DisplayName},
 		}},
+		DisableCommunicationsEmailThreadDownloadWorker: true,
 	})
 	defer server.Close()
 	handler := server.Routes()
-	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, participantToken)
-	defer client.close()
-	client.readJSON(t)
-	participantScope := realtimePersonalMailboxScope(participant.UserID, participant.Email)
-	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": participantScope})
-	if subscribed := client.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted || subscribed["scope"] != participantScope {
-		t.Fatalf("participant mailbox subscription = %+v", subscribed)
-	}
 
 	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:30:00Z\",\"data\":{\"object\":{\"id\":\"collaboration-future-message\",\"thread_id\":\"collaboration-thread\",\"grant_id\":\"collaboration-webhook-grant\"}}}"
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
@@ -4984,23 +4977,17 @@ func TestNylasWebhookAdvancesPersonalEmailCollaborationForPermanentParticipants(
 	if rec.Code != http.StatusOK {
 		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	changed := client.readJSON(t)
-	if changed["type"] != realtimeMessageMailboxMessageChanged || changed["scope"] != participantScope ||
-		changed["trigger"] != "message.created" || changed["message_id"] != "collaboration-future-message" ||
-		changed["thread_id"] != "collaboration-thread" {
-		t.Fatalf("participant collaboration event = %+v", changed)
-	}
-	if nylas.detailCalls != 1 || nylas.lastDetailGrantID != "collaboration-webhook-grant" {
-		t.Fatalf("provider hydration calls=%d grant=%q, want one matched-thread detail read", nylas.detailCalls, nylas.lastDetailGrantID)
+	if nylas.detailCalls != 0 {
+		t.Fatalf("webhook triggered provider detail reads=%d, want zero", nylas.detailCalls)
 	}
 	collaboration, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, participant.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if collaboration.LatestMessageID != "collaboration-future-message" ||
-		collaboration.Message.Subject != "Future thread reply" ||
-		collaboration.Message.Body != "<p>New reply body</p>" {
-		t.Fatalf("advanced collaboration = %+v", collaboration)
+	if collaboration.LatestMessageID != "collaboration-root-message" ||
+		collaboration.Message.Subject != "Original subject" ||
+		collaboration.Message.Body != "<p>Original body</p>" {
+		t.Fatalf("webhook changed stored collaboration = %+v", collaboration)
 	}
 }
 
@@ -5135,7 +5122,7 @@ func TestCommunicationsReadStatusEnrichmentUsesExactPersonalAccount(t *testing.T
 	}
 }
 
-func TestNylasWebhookAdvancesSharedEmailCollaborationThroughPersonalFallback(t *testing.T) {
+func TestNylasWebhookDoesNotAdvanceSharedEmailCollaboration(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "82828282-8282-4282-8282-828282828282"
 	repo.EnsureCompany(companyID, "Shared collaboration live arrival")
@@ -5201,17 +5188,10 @@ func TestNylasWebhookAdvancesSharedEmailCollaborationThroughPersonalFallback(t *
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			participantToken: {Subject: participant.CognitoSubject, Email: participant.Email, Name: participant.DisplayName},
 		}},
+		DisableCommunicationsEmailThreadDownloadWorker: true,
 	})
 	defer server.Close()
 	handler := server.Routes()
-	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, participantToken)
-	defer client.close()
-	client.readJSON(t)
-	participantScope := realtimePersonalMailboxScope(participant.UserID, participant.Email)
-	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": participantScope})
-	if subscribed := client.readJSON(t); subscribed["type"] != realtimeMessageSubscriptionAccepted {
-		t.Fatalf("participant personal mailbox subscription = %+v", subscribed)
-	}
 
 	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:40:00Z\",\"data\":{\"object\":{\"id\":\"shared-collaboration-future\",\"thread_id\":\"shared-collaboration-thread\",\"grant_id\":\"shared-collaboration-grant\"}}}"
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
@@ -5221,22 +5201,17 @@ func TestNylasWebhookAdvancesSharedEmailCollaborationThroughPersonalFallback(t *
 	if rec.Code != http.StatusOK {
 		t.Fatalf("shared collaboration webhook status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	changed := client.readJSON(t)
-	if changed["type"] != realtimeMessageMailboxMessageChanged || changed["scope"] != participantScope ||
-		changed["trigger"] != "message.created" || changed["message_id"] != "shared-collaboration-future" {
-		t.Fatalf("shared collaboration personal fallback event = %+v", changed)
-	}
-	if _, present := changed["shared_inbox_id"]; present {
-		t.Fatalf("personal fallback leaked source shared inbox routing: %+v", changed)
+	if nylas.detailCalls != 0 {
+		t.Fatalf("shared webhook triggered provider detail reads=%d, want zero", nylas.detailCalls)
 	}
 	collaboration, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, participant.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if collaboration.LatestMessageID != "shared-collaboration-future" ||
-		collaboration.Message.Subject != "Shared future reply" ||
-		collaboration.Message.Body != "<p>Customer answer</p>" {
-		t.Fatalf("advanced shared collaboration = %+v", collaboration)
+	if collaboration.LatestMessageID != "shared-collaboration-root" ||
+		collaboration.Message.Subject != "Shared original" ||
+		collaboration.Message.Body != "<p>Original</p>" {
+		t.Fatalf("shared webhook changed stored collaboration = %+v", collaboration)
 	}
 }
 

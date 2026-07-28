@@ -134,7 +134,10 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			status = http.StatusCreated
 			s.wakeRealtimeSpine()
 		}
-		s.scheduleCommunicationsEmailCollaborationThreadHydration(result.Collaboration, actor.User.UserID)
+		s.wakeCommunicationsEmailThreadDownloadWorker()
+		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
+			_ = s.linkStoredEmailThreadAttachments(result.Collaboration.CompanyID, result.Collaboration.EmailThreadID, actor.User.UserID)
+		}
 		writeJSON(w, status, result)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -214,9 +217,6 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 	if len(parts) == 2 && parts[1] == "thread" {
 		var thread domain.CommunicationsEmailThread
 		var loaded bool
-		if isTruthyQueryValue(r.URL.Query().Get("refresh")) {
-			thread, loaded = s.hydrateAndPersistCommunicationsEmailCollaborationThread(r.Context(), item, actor.User.UserID)
-		}
 		if !loaded && strings.TrimSpace(item.EmailThreadID) != "" {
 			var loadErr error
 			thread, loadErr = s.repo.GetCommunicationsEmailThread(companyID, item.EmailThreadID)
@@ -224,14 +224,14 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 		}
 		if loaded {
 			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-				"collaboration_id":     item.CollaborationID,
-				"email_thread_id":      thread.EmailThreadID,
-				"thread_id":            thread.ProviderThreadID,
-				"messages":             storedEmailThreadMessages(thread),
-				"history_complete":     thread.HistoryComplete,
-				"hydration_status":     thread.HydrationStatus,
-				"fetched_at":           thread.FetchedAt,
-				"last_hydration_error": thread.LastHydrationError,
+				"collaboration_id":    item.CollaborationID,
+				"email_thread_id":     thread.EmailThreadID,
+				"thread_id":           thread.ProviderThreadID,
+				"messages":            storedEmailThreadMessages(thread),
+				"history_complete":    thread.HistoryComplete,
+				"download_status":     thread.DownloadStatus,
+				"fetched_at":          thread.FetchedAt,
+				"last_download_error": thread.LastDownloadError,
 			})
 			return
 		}
@@ -241,7 +241,7 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 			"thread_id":        item.ProviderThreadID,
 			"messages":         []domain.EmailMessageSnapshot{item.Message},
 			"history_complete": false,
-			"hydration_status": store.CommunicationsEmailThreadHydrationPartial,
+			"download_status":  store.CommunicationsEmailThreadDownloadPartial,
 		})
 		return
 	}

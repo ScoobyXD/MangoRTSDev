@@ -159,7 +159,7 @@ type NodeV2EmailThreadSummary struct {
 	Snippet               string    `json:"snippet"`
 	LatestMessageAt       int64     `json:"latest_message_at"`
 	MessageCount          int       `json:"message_count"`
-	HydrationStatus       string    `json:"hydration_status"`
+	DownloadStatus        string    `json:"download_status"`
 	HistoryComplete       bool      `json:"history_complete"`
 	LinkedTextboxIDs      []string  `json:"linked_textbox_ids"`
 	LinkedMessageIDs      []string  `json:"linked_message_ids"`

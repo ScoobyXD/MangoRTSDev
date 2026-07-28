@@ -152,7 +152,8 @@ func (r *PostgresRepo) addCommunicationsConversionAtomicWritesTx(ctx context.Con
 }
 
 func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, error) {
-	thread, err := r.upsertCommunicationsEmailThreadLocked(communicationsEmailThreadInputForConversionMessage(input, message))
+	threadInput := communicationsEmailThreadInputForConversionMessage(input, message)
+	thread, err := r.upsertCommunicationsEmailThreadLocked(threadInput)
 	if strings.TrimSpace(input.AccountEmail) == "" {
 		informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, "", now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 		return informationID, "", nil
@@ -162,11 +163,17 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now)
+	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
+			return "", "", err
+		}
+	}
 	return informationID, thread.EmailThreadID, nil
 }
 
 func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, error) {
-	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, communicationsEmailThreadInputForConversionMessage(input, message))
+	threadInput := communicationsEmailThreadInputForConversionMessage(input, message)
+	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, threadInput)
 	if err != nil {
 		if strings.TrimSpace(input.AccountEmail) == "" {
 			informationID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, "", now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
@@ -192,6 +199,11 @@ set email_thread_id=$5::uuid, updated_timestamp=now()
 where company_id=$1::uuid and user_id=$2::uuid and message_id=$3 and node_id=$4::uuid`,
 		input.CompanyID, input.UserID, message.ID, input.NodeID, thread.EmailThreadID); err != nil {
 		return "", "", err
+	}
+	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
+			return "", "", err
+		}
 	}
 	return informationID, thread.EmailThreadID, nil
 }

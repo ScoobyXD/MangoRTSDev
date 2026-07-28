@@ -44,8 +44,8 @@ func TestMemoryCommunicationsEmailThreadPersistsRichOrderedMailboxScopedSnapshot
 	if err != nil {
 		t.Fatalf("UpsertCommunicationsEmailThread partial: %v", err)
 	}
-	if partial.HydrationStatus != CommunicationsEmailThreadHydrationPartial || partial.HistoryComplete {
-		t.Fatalf("partial hydration state = %q/%v", partial.HydrationStatus, partial.HistoryComplete)
+	if partial.DownloadStatus != CommunicationsEmailThreadDownloadPartial || partial.HistoryComplete {
+		t.Fatalf("partial download state = %q/%v", partial.DownloadStatus, partial.HistoryComplete)
 	}
 	if len(partial.Messages) != 2 || partial.Messages[0].ProviderMessageID != "provider-message-early" || partial.Messages[1].ProviderMessageID != "provider-message-late" {
 		t.Fatalf("deterministic message order = %+v", partial.Messages)
@@ -61,7 +61,7 @@ func TestMemoryCommunicationsEmailThreadPersistsRichOrderedMailboxScopedSnapshot
 	if err != nil {
 		t.Fatalf("UpsertCommunicationsEmailThread complete: %v", err)
 	}
-	if complete.EmailThreadID != partial.EmailThreadID || complete.HydrationStatus != CommunicationsEmailThreadHydrationComplete || !complete.HistoryComplete {
+	if complete.EmailThreadID != partial.EmailThreadID || complete.DownloadStatus != CommunicationsEmailThreadDownloadComplete || !complete.HistoryComplete {
 		t.Fatalf("completed thread identity/state = %+v", complete)
 	}
 	for _, message := range complete.Messages {
@@ -109,13 +109,13 @@ func TestMemoryCommunicationsEmailThreadConvergesMessageFallbackToProviderThread
 	input.ProviderThreadID = "provider-thread-known-later"
 	input.Messages[0].ThreadID = input.ProviderThreadID
 	input.HistoryComplete = true
-	hydrated, err := repo.UpsertCommunicationsEmailThread(input)
+	downloaded, err := repo.UpsertCommunicationsEmailThread(input)
 	if err != nil {
 		t.Fatalf("provider-thread upsert: %v", err)
 	}
-	if hydrated.EmailThreadID != fallback.EmailThreadID ||
-		hydrated.Messages[0].EmailMessageID != fallback.Messages[0].EmailMessageID {
-		t.Fatalf("fallback identity forked after provider thread became known: fallback=%+v hydrated=%+v", fallback, hydrated)
+	if downloaded.EmailThreadID != fallback.EmailThreadID ||
+		downloaded.Messages[0].EmailMessageID != fallback.Messages[0].EmailMessageID {
+		t.Fatalf("fallback identity forked after provider thread became known: fallback=%+v downloaded=%+v", fallback, downloaded)
 	}
 }
 
@@ -168,6 +168,189 @@ func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjection
 		for _, forbidden := range []string{"attachment_bytes", "presigned_url", "object_url"} {
 			if strings.Contains(source, forbidden) {
 				t.Fatalf("%s must not persist %q", path, forbidden)
+			}
+		}
+	}
+}
+
+func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111196"
+	userID := "22222222-2222-4222-8222-222222222296"
+	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-root",
+		Messages: []domain.EmailMessageSnapshot{{ID: "provider-root", ThreadID: "provider-thread", Body: "<p>Selected</p>"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, created, err := repo.EnsureCommunicationsEmailThreadDownloadJob(companyID, thread.EmailThreadID, CommunicationsEmailThreadDownloadScopeFullThread, "", userID)
+	if err != nil || !created {
+		t.Fatalf("first durable job = %+v created=%v err=%v", first, created, err)
+	}
+	second, created, err := repo.EnsureCommunicationsEmailThreadDownloadJob(companyID, thread.EmailThreadID, CommunicationsEmailThreadDownloadScopeFullThread, "", userID)
+	if err != nil || created || second.DownloadJobID != first.DownloadJobID {
+		t.Fatalf("duplicate ensure = %+v created=%v err=%v", second, created, err)
+	}
+
+	claimed, err := repo.ClaimCommunicationsEmailThreadDownloadJobs(10, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].AttemptCount != 1 || claimed[0].Status != CommunicationsEmailThreadDownloadJobProcessing {
+		t.Fatalf("first claim = %+v err=%v", claimed, err)
+	}
+	if err := repo.MarkCommunicationsEmailThreadDownloadJobFailed(first.DownloadJobID, "email_thread_source_unavailable", time.Now().Add(time.Hour), false); err != nil {
+		t.Fatal(err)
+	}
+	retrying, err := repo.GetCommunicationsEmailThread(companyID, thread.EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retrying.DownloadStatus != CommunicationsEmailThreadDownloadDownloading {
+		t.Fatalf("retrying thread status = %q, want downloading", retrying.DownloadStatus)
+	}
+	claimed, err = repo.ClaimCommunicationsEmailThreadDownloadJobs(10, time.Minute)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("early retry claim = %+v err=%v", claimed, err)
+	}
+	if err := repo.MarkCommunicationsEmailThreadDownloadJobFailed(first.DownloadJobID, "email_thread_source_unavailable", time.Now().Add(-time.Second), false); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = repo.ClaimCommunicationsEmailThreadDownloadJobs(10, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].AttemptCount != 2 {
+		t.Fatalf("retry claim = %+v err=%v", claimed, err)
+	}
+	if err := repo.MarkCommunicationsEmailThreadDownloadJobCompleted(first.DownloadJobID); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := repo.ListCommunicationsEmailThreadDownloadJobs(companyID, thread.EmailThreadID)
+	if err != nil || len(jobs) != 1 || jobs[0].Status != CommunicationsEmailThreadDownloadJobCompleted {
+		t.Fatalf("jobs = %+v err=%v", jobs, err)
+	}
+}
+
+func TestMemoryCommunicationsEmailThreadLaterManualMessageReusesThreadAndQueuesOnlyMessage(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111197"
+	userID := "22222222-2222-4222-8222-222222222297"
+	base := CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-old", HistoryComplete: true,
+		Messages: []domain.EmailMessageSnapshot{{ID: "provider-old", ThreadID: "provider-thread", Date: 10, Body: "old", DownloadComplete: true}},
+	}
+	stored, err := repo.UpsertCommunicationsEmailThread(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMangoMessageID := stored.Messages[0].EmailMessageID
+
+	later := base
+	later.SelectedMessageID = "provider-new"
+	later.Messages = []domain.EmailMessageSnapshot{{ID: "provider-new", ThreadID: "provider-thread", Date: 20, Body: "new"}}
+	later.RequestDownload = true
+	later.RequestedByUserID = userID
+	updated, err := repo.UpsertCommunicationsEmailThread(later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.EmailThreadID != stored.EmailThreadID || len(updated.Messages) != 2 || updated.Messages[0].EmailMessageID != oldMangoMessageID {
+		t.Fatalf("later message forked stored thread: before=%+v after=%+v", stored, updated)
+	}
+	scope, messageID, ok := communicationsEmailThreadDownloadRequest(updated, later)
+	if !ok || scope != CommunicationsEmailThreadDownloadScopeMessage || messageID != "provider-new" {
+		t.Fatalf("later download request = scope=%q message=%q ok=%v", scope, messageID, ok)
+	}
+	job, created, err := repo.EnsureCommunicationsEmailThreadDownloadJob(companyID, updated.EmailThreadID, scope, messageID, userID)
+	if err != nil || !created || job.DownloadScope != CommunicationsEmailThreadDownloadScopeMessage {
+		t.Fatalf("later job=%+v created=%v err=%v", job, created, err)
+	}
+	duplicate, created, err := repo.EnsureCommunicationsEmailThreadDownloadJob(companyID, updated.EmailThreadID, scope, messageID, userID)
+	if err != nil || created || duplicate.DownloadJobID != job.DownloadJobID {
+		t.Fatalf("later duplicate=%+v created=%v err=%v", duplicate, created, err)
+	}
+}
+
+func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigningThreadID(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111198"
+	userID := "22222222-2222-4222-8222-222222222298"
+	stored, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		SelectedMessageID: "provider-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "provider-root", Date: 10, Body: "root"},
+			{ID: "provider-known-reply", Date: 20, Body: "known reply"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ProviderThreadID != "" {
+		t.Fatalf("initial provider thread id = %q, want empty", stored.ProviderThreadID)
+	}
+
+	assigned, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-known-reply",
+		Messages: []domain.EmailMessageSnapshot{{ID: "provider-known-reply", ThreadID: "provider-thread", Date: 20, Body: "known reply complete"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assigned.EmailThreadID != stored.EmailThreadID || assigned.ProviderThreadID != "provider-thread" || len(assigned.Messages) != 2 {
+		t.Fatalf("thread-id assignment duplicated stored thread: before=%+v after=%+v", stored, assigned)
+	}
+
+	appended, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-new-reply",
+		Messages: []domain.EmailMessageSnapshot{{ID: "provider-new-reply", ThreadID: "provider-thread", Date: 30, Body: "new reply"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appended.EmailThreadID != stored.EmailThreadID || len(appended.Messages) != 3 {
+		t.Fatalf("new reply did not reuse assigned thread: %+v", appended)
+	}
+
+	_, err = repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		ProviderThreadID: "conflicting-thread", SelectedMessageID: "provider-known-reply",
+		Messages: []domain.EmailMessageSnapshot{{ID: "provider-known-reply", ThreadID: "conflicting-thread"}},
+	})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("conflicting thread identity error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
+	checks := map[string][]string{
+		"../../db/schema.sql": {
+			"download_status text not null",
+			"download_complete boolean not null default false",
+			"create table if not exists communications_email_thread_download_jobs",
+			"idx_communications_email_thread_download_jobs_active_full",
+			"idx_communications_email_thread_download_jobs_active_message",
+			"unique (company_id, email_thread_id, provider_message_id)",
+		},
+		"../../db/migrations/20260728_durable_email_thread_download_jobs.sql": {
+			"rename column hydration_status to download_status",
+			"rename column last_hydration_error to last_download_error",
+			"add column if not exists download_complete boolean not null default false",
+			"create table if not exists communications_email_thread_download_jobs",
+			"idx_communications_email_thread_download_jobs_active_full",
+			"idx_communications_email_thread_download_jobs_active_message",
+		},
+	}
+	for path, required := range checks {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		source := strings.ToLower(string(raw))
+		for _, fragment := range required {
+			if !strings.Contains(source, fragment) {
+				t.Fatalf("%s missing %q", path, fragment)
 			}
 		}
 	}

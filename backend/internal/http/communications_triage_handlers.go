@@ -115,7 +115,6 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
-	hydrationCollaborations := make([]domain.CommunicationsEmailCollaboration, 0, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
@@ -128,22 +127,15 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 			CompanyID: conversionInput.CompanyID, AccountEmail: connection.AccountEmail,
 			ProviderThreadID: snapshot.ThreadID, SelectedMessageID: snapshot.ID,
 			Messages: []domain.EmailMessageSnapshot{snapshot}, HistoryComplete: snapshot.ThreadID == "",
-			FetchedAt: time.Now().UTC(),
+			FetchedAt: time.Now().UTC(), RequestDownload: true, RequestedByUserID: actor.User.UserID,
 		}
-		scopeType := store.CommunicationsEmailCollaborationScopePersonal
 		if sharedInboxID != "" {
 			threadInput.SharedInboxID = sharedInboxID
-			scopeType = store.CommunicationsEmailCollaborationScopeShared
 		} else {
 			threadInput.PersonalUserID = connection.UserID
 			threadInput.PersonalAccountEmail = connection.AccountEmail
 		}
 		conversionInput.EmailThreads = append(conversionInput.EmailThreads, threadInput)
-		hydrationCollaborations = append(hydrationCollaborations, domain.CommunicationsEmailCollaboration{
-			CompanyID: conversionInput.CompanyID, ScopeType: scopeType, PersonalUserID: threadInput.PersonalUserID,
-			PersonalAccountEmail: threadInput.PersonalAccountEmail, SharedInboxID: sharedInboxID, AccountEmail: connection.AccountEmail,
-			ProviderThreadID: snapshot.ThreadID, RootMessageID: snapshot.ID, Message: snapshot,
-		})
 		if _, err := s.repo.UpsertCommunicationsTriageItem(connection.UserID, snapshot); errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_triage_message")
 			return
@@ -172,9 +164,10 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	result.UnstarredMessageIDs = s.unstarConvertedCommunicationsMessages(r.Context(), connection, sourceMessagesByID, conversionInput.MessageIDs)
 	s.publishCommittedWorkspaceEvents(result.Events)
-	for _, collaboration := range hydrationCollaborations {
-		s.scheduleCommunicationsEmailCollaborationThreadHydration(collaboration, actor.User.UserID)
+	for _, emailThreadID := range result.EmailThreadIDs {
+		_ = s.linkStoredEmailThreadAttachments(conversionInput.CompanyID, emailThreadID, actor.User.UserID)
 	}
+	s.wakeCommunicationsEmailThreadDownloadWorker()
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -464,22 +457,23 @@ func (s *Server) handleCommunicationsMyLogicGateByID(w http.ResponseWriter, r *h
 
 func emailMessageSnapshotFromNylas(message NylasMessage) domain.EmailMessageSnapshot {
 	return domain.EmailMessageSnapshot{
-		ID:          strings.TrimSpace(message.ID),
-		ThreadID:    strings.TrimSpace(message.ThreadID),
-		Subject:     strings.TrimSpace(message.Subject),
-		Snippet:     strings.TrimSpace(message.Snippet),
-		Body:        strings.TrimSpace(message.Body),
-		Date:        message.Date,
-		Unread:      message.Unread,
-		Starred:     message.Starred,
-		From:        emailAddressSnapshotsFromNylas(message.From),
-		To:          emailAddressSnapshotsFromNylas(message.To),
-		Cc:          emailAddressSnapshotsFromNylas(message.Cc),
-		Bcc:         emailAddressSnapshotsFromNylas(message.Bcc),
-		ReplyTo:     emailAddressSnapshotsFromNylas(message.ReplyTo),
-		Attachments: emailAttachmentSnapshotsFromNylas(message.Attachments),
-		Folders:     cleanStringList(message.Folders),
-		FolderIDs:   cleanStringList(message.FolderIDs),
+		ID:               strings.TrimSpace(message.ID),
+		ThreadID:         strings.TrimSpace(message.ThreadID),
+		Subject:          strings.TrimSpace(message.Subject),
+		Snippet:          strings.TrimSpace(message.Snippet),
+		Body:             strings.TrimSpace(message.Body),
+		Date:             message.Date,
+		Unread:           message.Unread,
+		Starred:          message.Starred,
+		From:             emailAddressSnapshotsFromNylas(message.From),
+		To:               emailAddressSnapshotsFromNylas(message.To),
+		Cc:               emailAddressSnapshotsFromNylas(message.Cc),
+		Bcc:              emailAddressSnapshotsFromNylas(message.Bcc),
+		ReplyTo:          emailAddressSnapshotsFromNylas(message.ReplyTo),
+		Attachments:      emailAttachmentSnapshotsFromNylas(message.Attachments),
+		Folders:          cleanStringList(message.Folders),
+		FolderIDs:        cleanStringList(message.FolderIDs),
+		DownloadComplete: len(message.Attachments) == 0 && !messageNeedsRawMIMEAttachmentRecovery(message),
 	}
 }
 

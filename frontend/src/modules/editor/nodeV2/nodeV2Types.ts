@@ -133,7 +133,7 @@ export type NodeV2EmailThread = {
   snippet: string;
   latest_message_at: number;
   message_count: number;
-  hydration_status: string;
+  download_status: "partial" | "downloading" | "complete" | "failed";
   history_complete: boolean;
   linked_textbox_ids: string[];
   linked_message_ids: string[];

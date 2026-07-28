@@ -4589,15 +4589,21 @@ function createAttachedEmailFolderID(): string {
   return `folder:${Date.now()}:${Math.round(Math.random() * 1_000_000)}`;
 }
 
-async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string, nodeID: string): Promise<EmailMessage[]> {
+type EmailThreadDownloadStatus = "partial" | "downloading" | "complete" | "failed";
+type AttachedEmailThreadPreview = {
+  messages: EmailMessage[];
+  downloadStatus: EmailThreadDownloadStatus;
+};
+
+async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string, nodeID: string): Promise<AttachedEmailThreadPreview> {
   const durableThreadID = email.emailThreadID?.trim() ?? "";
   if (durableThreadID && nodeID.trim()) {
     const durableThread = await getNodeEmailThread(companyID, nodeID, durableThreadID);
     const primary = durableThread.messages.find((message) => message.id === email.messageID)
       ?? durableThread.messages[0] ?? null;
-    return primary
+    return { messages: primary
       ? mergeEmailThreadMessages(primary, durableThread.messages, primary.local_replies ?? [])
-      : [];
+      : [], downloadStatus: durableThread.download_status ?? (durableThread.history_complete ? "complete" : "partial") };
   }
   const mailboxScope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
   const collaborationID = email.collaborationID?.trim() ?? "";
@@ -4606,13 +4612,13 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
     const primary = collaborationThread.messages.find((message) => message.id === email.messageID)
       ?? collaborationThread.messages[0]
       ?? null;
-    return primary
+    return { messages: primary
       ? mergeEmailThreadMessages(primary, collaborationThread.messages, primary.local_replies ?? [])
-      : [];
+      : [], downloadStatus: collaborationThread.download_status ?? (collaborationThread.history_complete ? "complete" : "partial") };
   }
   const primary = await getEmailMessage(email.messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
   const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
-  if (!threadID) return mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []);
+  if (!threadID) return { messages: mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []), downloadStatus: "complete" };
   try {
     const thread = await getEmailThread(threadID, companyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail);
     const ids = Array.from(new Set((thread.message_ids ?? []).map((id) => id.trim()).filter(Boolean)));
@@ -4625,9 +4631,9 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
         return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
       }
     }));
-    return mergeEmailThreadMessages(primary, details.filter((item): item is EmailMessage => Boolean(item)), primary.local_replies ?? []);
+    return { messages: mergeEmailThreadMessages(primary, details.filter((item): item is EmailMessage => Boolean(item)), primary.local_replies ?? []), downloadStatus: "complete" };
   } catch {
-    return mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []);
+    return { messages: mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []), downloadStatus: "complete" };
   }
 }
 
@@ -4677,24 +4683,38 @@ const AttachedEmailThreadCard: React.FC<{
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [threadDownloadStatus, setThreadDownloadStatus] = useState<EmailThreadDownloadStatus>("complete");
   const handledFocusMessageRequestRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let initialLoad = true;
     setLoading(true);
     setLoadError("");
     setThreadMessages([]);
-    void loadAttachedEmailThreadPreview(email, companyID, nodeID)
-      .then((messages) => {
-        if (!cancelled) setThreadMessages(messages);
-      })
-      .catch((cause) => {
+    const refreshStoredThread = async () => {
+      try {
+        const preview = await loadAttachedEmailThreadPreview(email, companyID, nodeID);
+        if (cancelled) return;
+        setThreadMessages(preview.messages);
+        setThreadDownloadStatus(preview.downloadStatus);
+        setLoadError("");
+        if (preview.downloadStatus === "downloading") {
+          refreshTimer = setTimeout(() => { void refreshStoredThread(); }, 1000);
+        }
+      } catch (cause) {
         if (!cancelled) setLoadError(cause instanceof Error ? cause.message : "failed_to_load_thread");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
+      } finally {
+        if (initialLoad && !cancelled) setLoading(false);
+        initialLoad = false;
+      }
+    };
+    void refreshStoredThread();
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
   }, [companyID, email, nodeID]);
 
   useEffect(() => {
@@ -4709,6 +4729,13 @@ const AttachedEmailThreadCard: React.FC<{
 
   const childMessages = threadMessages.filter((message) => message.id !== email.messageID);
   const hasThreadChildren = childMessages.length > 0;
+  const threadDownloadMessage = threadDownloadStatus === "downloading"
+    ? "Downloading the rest of this email thread..."
+    : threadDownloadStatus === "failed"
+      ? "The rest of this email thread could not be downloaded. Import this email again to retry."
+      : threadDownloadStatus === "partial"
+        ? "Only part of this email thread is stored. Import this email again to retry."
+        : "";
   const replyButtonStyle = (enabled: boolean): React.CSSProperties => ({
     minHeight: 22,
     border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
@@ -4841,6 +4868,16 @@ const AttachedEmailThreadCard: React.FC<{
             {email.from || "Unknown sender"}
           </div>
           {email.snippet && <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.72)", fontSize: 10.5, fontWeight: 650 }}>{email.snippet}</div>}
+          {threadDownloadMessage && (
+            <div
+              role={threadDownloadStatus === "failed" ? "alert" : "status"}
+              data-email-thread-download-status={threadDownloadStatus}
+              aria-live={threadDownloadStatus === "failed" ? "assertive" : "polite"}
+              style={{ color: threadDownloadStatus === "failed" ? "#991b1b" : accent, fontSize: 10, fontWeight: 800 }}
+            >
+              {threadDownloadMessage}
+            </div>
+          )}
         </div>
         {selected && (
           <div
@@ -5019,7 +5056,7 @@ async function resolveLinkedEmailPreview(
 
   const threadResults = await Promise.allSettled(emails.map(async (email) => ({
     email,
-    messages: await loadAttachedEmailThreadPreview(email, companyID, nodeID),
+    messages: (await loadAttachedEmailThreadPreview(email, companyID, nodeID)).messages,
   })));
   for (const result of threadResults) {
     if (result.status !== "fulfilled") continue;
@@ -6653,6 +6690,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [replyTextAlignment, setReplyTextAlignment] = useState<EditorTextAlignment>("left");
   const [replyHighlightColor, setReplyHighlightColor] = useState<EditorHighlightColor | null>(null);
+  const [storedThreadDownloadStatus, setStoredThreadDownloadStatus] = useState<EmailThreadDownloadStatus>("complete");
+  const [storedThreadPollVersion, setStoredThreadPollVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -6722,6 +6761,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setStoredThreadDownloadStatus("complete");
+    setStoredThreadPollVersion(0);
     setError("");
     setMessage(null);
     setThreadMessages([]);
@@ -6757,6 +6798,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       if (!payload) throw new Error("email_collaboration_thread_unavailable");
       if (cancelled) return;
       setMessage(payload);
+      const storedDownload = storedThread ?? collaborationThread;
+      setStoredThreadDownloadStatus(
+        storedDownload?.download_status ?? (storedDownload && !storedDownload.history_complete ? "partial" : "complete"),
+      );
       setThreadMessages(singleMessageOnly ? [payload] : immediateMessages.length ? immediateMessages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
@@ -6815,6 +6860,49 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       });
     return () => { cancelled = true; };
   }, [collaborationID, companyID, emailThreadID, mailboxScope, messageID, nodeID, singleMessageOnly]);
+
+  useEffect(() => {
+    if (storedThreadDownloadStatus !== "downloading" || singleMessageOnly || replyTargetMessageID) return;
+    const cleanEmailThreadID = emailThreadID?.trim() ?? "";
+    const cleanCollaborationID = collaborationID?.trim() ?? "";
+    if ((!cleanEmailThreadID || !nodeID.trim()) && !cleanCollaborationID) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const storedThread = cleanEmailThreadID && nodeID.trim()
+          ? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID)
+          : null;
+        const collaborationThread = !storedThread && cleanCollaborationID
+          ? await getEmailCollaborationThread(companyID, cleanCollaborationID)
+          : null;
+        if (cancelled) return;
+        const refreshed = storedThread ?? collaborationThread;
+        if (!refreshed) {
+          setStoredThreadDownloadStatus("partial");
+          return;
+        }
+        const refreshedMessages = refreshed.messages ?? [];
+        const refreshedMessage = refreshedMessages.find((item) => item.id === messageID)
+          ?? refreshedMessages[0]
+          ?? null;
+        if (refreshedMessage) {
+          setMessage(refreshedMessage);
+          setThreadMessages(refreshedMessages.length ? refreshedMessages : [refreshedMessage]);
+        }
+        setStoredThreadDownloadStatus(
+          refreshed.download_status ?? (refreshed.history_complete ? "complete" : "partial"),
+        );
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled) setStoredThreadPollVersion((current) => current + 1);
+        });
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [collaborationID, companyID, emailThreadID, messageID, nodeID, replyTargetMessageID, singleMessageOnly, storedThreadDownloadStatus, storedThreadPollVersion]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;

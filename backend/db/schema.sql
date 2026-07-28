@@ -4158,7 +4158,7 @@ create index if not exists idx_logic_gate_projection_table_text_boxes
 
 -- Durable provider-independent email snapshots for Node and collaboration reads.
 -- Provider credentials, attachment bytes, object URLs, and presigned URLs are
--- intentionally excluded from these tables.
+-- excluded; attachment bytes live in Mango's private attachment object storage.
 create table if not exists communications_email_threads (
   company_id uuid not null,
   email_thread_id uuid not null,
@@ -4170,10 +4170,10 @@ create table if not exists communications_email_threads (
   provider_thread_key text not null,
   provider_thread_id text not null default '',
   root_provider_message_id text not null,
-  hydration_status text not null default 'partial',
+  download_status text not null default 'partial',
   history_complete boolean not null default false,
   fetched_at timestamptz,
-  last_hydration_error text not null default '',
+  last_download_error text not null default '',
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint communications_email_threads_scope_type_chk check (scope_type in ('personal', 'shared')),
@@ -4188,8 +4188,8 @@ create table if not exists communications_email_threads (
   ),
   constraint communications_email_threads_provider_key_chk check (btrim(provider_thread_key) <> ''),
   constraint communications_email_threads_root_message_chk check (btrim(root_provider_message_id) <> ''),
-  constraint communications_email_threads_hydration_chk check (
-    hydration_status in ('partial', 'complete') and (not history_complete or hydration_status='complete')
+  constraint communications_email_threads_download_status_chk check (
+    download_status in ('partial', 'downloading', 'complete', 'failed') and (not history_complete or download_status in ('downloading', 'complete', 'failed'))
   ),
   primary key (company_id, email_thread_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
@@ -4227,6 +4227,7 @@ create table if not exists communications_email_messages (
   folder_snapshot jsonb not null default '[]'::jsonb,
   folder_id_snapshot jsonb not null default '[]'::jsonb,
   attachment_metadata jsonb not null default '[]'::jsonb,
+  download_complete boolean not null default false,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint communications_email_messages_provider_message_chk check (btrim(provider_message_id) <> ''),
@@ -4269,6 +4270,45 @@ create table if not exists communications_node_email_threads (
 
 create index if not exists idx_communications_node_email_threads_read
   on communications_node_email_threads(company_id, node_id, email_thread_id);
+
+create table if not exists communications_email_thread_download_jobs (
+  download_job_id uuid primary key,
+  company_id uuid not null,
+  email_thread_id uuid not null,
+  download_scope text not null,
+  requested_provider_message_id text not null default '',
+  requested_by_user_id uuid,
+  status text not null default 'pending',
+  attempt_count integer not null default 0,
+  last_error text not null default '',
+  available_at timestamptz not null default now(),
+  processing_started_at timestamptz,
+  completed_timestamp timestamptz,
+  failed_timestamp timestamptz,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint communications_email_thread_download_jobs_scope_chk check (
+    (download_scope='full_thread' and requested_provider_message_id='')
+    or (download_scope='message' and btrim(requested_provider_message_id)<>'')
+  ),
+  constraint communications_email_thread_download_jobs_status_chk check (status in ('pending','processing','retry','completed','failed')),
+  constraint communications_email_thread_download_jobs_attempt_chk check (attempt_count >= 0),
+  foreign key (company_id, email_thread_id)
+    references communications_email_threads(company_id, email_thread_id) on delete cascade,
+  foreign key (requested_by_user_id) references users(user_id) on delete set null
+);
+
+create unique index if not exists idx_communications_email_thread_download_jobs_active_full
+  on communications_email_thread_download_jobs(company_id, email_thread_id)
+  where download_scope='full_thread' and status in ('pending','processing','retry');
+
+create unique index if not exists idx_communications_email_thread_download_jobs_active_message
+  on communications_email_thread_download_jobs(company_id, email_thread_id, requested_provider_message_id)
+  where download_scope='message' and status in ('pending','processing','retry');
+
+create index if not exists idx_communications_email_thread_download_jobs_claim
+  on communications_email_thread_download_jobs(status, available_at, created_timestamp)
+  where status in ('pending','processing','retry');
 
 alter table communications_email_collaborations
   add column if not exists email_thread_id uuid;
