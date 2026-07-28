@@ -84,6 +84,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorInputBatch.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorEntityLinks.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorSuggestionMenuPosition.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/chatEntityLinks.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorChatEntityPersistence.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
