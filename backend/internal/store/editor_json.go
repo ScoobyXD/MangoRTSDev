@@ -224,7 +224,7 @@ var editorJSONNodeAttrs = map[string]map[string]bool{
 	"heading":    {"blockId": true, "level": true, "textAlign": true, "indentLevel": true},
 	"blockquote": {"blockId": true}, "codeBlock": {"blockId": true, "language": true},
 	"horizontalRule": {"blockId": true}, "text": {}, "hardBreak": {},
-	"bulletList": {"blockId": true}, "orderedList": {"blockId": true, "start": true},
+	"bulletList": {"blockId": true}, "orderedList": {"blockId": true, "start": true, "type": true},
 	"listItem": {"blockId": true}, "taskList": {"blockId": true}, "taskItem": {"blockId": true, "checked": true},
 	"table": {"blockId": true, "style": true}, "tableRow": {},
 	"tableHeader":     {"colspan": true, "rowspan": true, "colwidth": true, "align": true, "backgroundColor": true},
@@ -531,6 +531,13 @@ func validateEditorJSONAttributes(kind string, value any, allowed map[string]boo
 		if start, exists := attrs["start"]; exists && start != nil && !editorJSONPositiveInteger(start, 100000) {
 			return nil, fmt.Errorf("%w: invalid ordered list start", ErrInvalid)
 		}
+		if listType, exists := attrs["type"]; exists && listType != nil {
+			text, ok := listType.(string)
+			if !ok || (text != "1" && text != "a" && text != "A" && text != "i" && text != "I") {
+				return nil, fmt.Errorf("%w: invalid ordered list type", ErrInvalid)
+			}
+		}
+
 	}
 	if kind == "taskItem" {
 		if checked, exists := attrs["checked"]; exists && checked != nil {
