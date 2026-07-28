@@ -52,12 +52,12 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
 
-test("Project and Logic Gate JSON editors are collaboration-only", () => {
+test("Project and Logic Gate collaboration is enabled only by a configured endpoint", () => {
   assert.equal(normalizeMangoTiptapCollaborationURL(undefined), "");
   assert.equal(normalizeMangoTiptapCollaborationURL("   "), "");
   assert.equal(normalizeMangoTiptapCollaborationURL("  wss://collaboration.example.test/  "), "wss://collaboration.example.test/");
-  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", ""), true);
-  assert.equal(shouldUseMangoTiptapCollaboration("project", "   "), true);
+  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", ""), false);
+  assert.equal(shouldUseMangoTiptapCollaboration("project", "   "), false);
   assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", "wss://collaboration.example.test"), true);
   assert.equal(shouldUseMangoTiptapCollaboration("project", "ws://localhost:1234"), true);
   assert.equal(shouldUseMangoTiptapCollaboration("node", "wss://collaboration.example.test"), false);

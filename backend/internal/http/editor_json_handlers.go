@@ -256,10 +256,6 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPost:
-		if ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate {
-			writeError(w, http.StatusMethodNotAllowed, "editor_document_updates_require_collaboration")
-			return
-		}
 		var request struct {
 			OperationID   string                       `json:"operation_id"`
 			ClientID      string                       `json:"client_id"`
