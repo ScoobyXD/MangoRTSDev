@@ -1604,14 +1604,20 @@ function mentionInitials(label) {
 function positionSuggestionMenu(menu, clientRect) {
   const rect = clientRect?.();
   if (!rect) return;
-  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const ownerDocument = menu.ownerDocument;
+  const ownerWindow = ownerDocument.defaultView;
+  const viewportWidth = ownerDocument.documentElement.clientWidth || ownerWindow?.innerWidth || 0;
+  const viewportHeight = ownerDocument.documentElement.clientHeight || ownerWindow?.innerHeight || 0;
   const menuWidth = Math.max(menu.offsetWidth, 280);
   const left = Math.max(8, Math.min(rect.left, viewportWidth - menuWidth - 8));
   menu.style.left = `${Math.round(left)}px`;
   menu.style.top = `${Math.round(rect.bottom + 7)}px`;
   menu.style.maxHeight = `${Math.max(88, viewportHeight - rect.bottom - 16)}px`;
   menu.dataset.side = "bottom";
+}
+function suggestionMenuPortalTarget(props, ownerDocument) {
+  const editorDOM = props.editor?.view?.dom;
+  return editorDOM?.closest('[data-mango-modal-layer="true"]') ?? ownerDocument.body;
 }
 function createSuggestionMenu(label, dataAttribute) {
   const menu = document.createElement("div");
@@ -1754,7 +1760,7 @@ function createMangoTiptapExtensions(options) {
               current = props;
               menu = createSuggestionMenu(kind === "urgent" ? "Urgently mention people" : "Mention people", "data-mango-tiptap-mention-menu");
               menu.classList.add(`mango-tiptap-suggestion-menu--${kind}`);
-              document.body.appendChild(menu);
+              suggestionMenuPortalTarget(props, document).appendChild(menu);
               paint();
             },
             onUpdate: (props) => {
@@ -1923,7 +1929,7 @@ function createMangoTiptapExtensions(options) {
               current = props;
               menu = createSuggestionMenu("Link a Node, Logic Gate, or Project", "data-mango-tiptap-entity-menu");
               menu.classList.add("mango-tiptap-suggestion-menu--entity");
-              document.body.appendChild(menu);
+              suggestionMenuPortalTarget(props, document).appendChild(menu);
               paint();
             },
             onUpdate: (props) => {

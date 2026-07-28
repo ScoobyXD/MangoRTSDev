@@ -48,8 +48,12 @@ const processes = [];
 let pgStarted = false;
 let browser;
 let stopping = false;
+let windowsGoToolchainFallback = false;
 
 function run(label, file, args, options = {}) {
+  if (windowsGoToolchainFallback && file === migrateExe) {
+    return run(label, "go", ["run", "./cmd/miraeopus-migrate", ...args], options);
+  }
   process.stdout.write("\n--- " + label + " ---\n");
   const resolvedFile = typeof file === "string" ? resolve(file) : "";
   const disposableWindowsExecutable = windows
@@ -69,6 +73,11 @@ function run(label, file, args, options = {}) {
       const transientLaunchBlock = disposableWindowsExecutable
         && cause?.status === null
         && (cause?.code === "UNKNOWN" || cause?.code === "EPERM" || cause?.code === "EBUSY");
+      if (transientLaunchBlock && file === migrateExe && attempt >= 3) {
+        windowsGoToolchainFallback = true;
+        process.stderr.write("Windows Application Control still blocks the migration executable; using the trusted Go toolchain fallback.\n");
+        return run(label, "go", ["run", "./cmd/miraeopus-migrate", ...args], options);
+      }
       if (!transientLaunchBlock || attempt >= 19) throw cause;
       if (attempt === 0) process.stderr.write("Windows temporarily blocked the disposable test executable; retrying.\n");
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
@@ -159,7 +168,7 @@ function startProcess(label, file, args, options) {
       process.stderr.write("\n" + label + " exited " + code + "\n" + logs.join(""));
     }
   });
-  record = { child, label, logs, intentionalStop: false };
+  record = { child, label, logs, intentionalStop: false, terminateTree: options.terminateTree === true };
   processes.push(record);
   return record;
 }
@@ -167,7 +176,15 @@ function startProcess(label, file, args, options) {
 async function stopProcess(record) {
   if (!record || record.child.exitCode !== null) return;
   record.intentionalStop = true;
-  record.child.kill();
+  if (windows && record.terminateTree) {
+    try {
+      execFileSync("taskkill.exe", ["/PID", String(record.child.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      record.child.kill();
+    }
+  } else {
+    record.child.kill();
+  }
   await Promise.race([
     new Promise((resolveExit) => record.child.once("exit", resolveExit)),
     new Promise((resolveWait) => setTimeout(resolveWait, 3_000)),
@@ -177,6 +194,16 @@ async function stopProcess(record) {
       execFileSync("taskkill.exe", ["/PID", String(record.child.pid), "/T", "/F"], { stdio: "ignore" });
     } catch {}
   }
+}
+
+function startAPIProcess(label, options) {
+  if (windowsGoToolchainFallback) {
+    return startProcess(label, "go", ["run", "./cmd/miraeopus-api"], {
+      ...options,
+      terminateTree: true,
+    });
+  }
+  return startProcess(label, apiExe, [], options);
 }
 
 const COMPANY_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -693,10 +720,10 @@ async function main() {
     NODE_V2_COLLAB_MATERIALIZE_MS: "100",
   } });
   let apiRecords = apiPorts.map((port, index) =>
-    startProcess("api-" + (index + 1), apiExe, [], apiProcessOptions(port)));
+    startAPIProcess("api-" + (index + 1), apiProcessOptions(port)));
   const restartAPI = async (index) => {
     await stopProcess(apiRecords[index]);
-    apiRecords[index] = startProcess("api-" + (index + 1) + "-restart", apiExe, [], apiProcessOptions(apiPorts[index]));
+    apiRecords[index] = startAPIProcess("api-" + (index + 1) + "-restart", apiProcessOptions(apiPorts[index]));
     await waitForURL("http://127.0.0.1:" + apiPorts[index] + "/healthz");
   };
   const viteRecord = startProcess("vite", process.execPath, [
