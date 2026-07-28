@@ -6,10 +6,11 @@ import { generateHTML } from "@tiptap/html/server";
 import pg from "pg";
 import * as Y from "yjs";
 
-import { convertMangoLegacyHTML } from "./mango-html-to-json-core.js";
+import { convertMangoLegacyHTML, type MangoLegacyAttachmentMetadata } from "./mango-html-to-json-core.js";
 import { createMangoTiptapExtensions } from "../src/modules/editor/tiptap/mangoTiptapExtensions.js";
 import { validateMangoTiptapDocument, type MangoTiptapDocument } from "../src/modules/editor/tiptap/mangoTiptapDocument.js";
 import { mangoProsemirrorJSONToYDoc } from "../src/modules/editor/tiptap/mangoTiptapYjs.js";
+import { EDITOR_TEXT_BLOCK_CONTENT_PREFIX } from "../src/modules/editor/editorProjection.js";
 
 const { Pool } = pg;
 
@@ -40,6 +41,11 @@ type SourceDocument = {
   created_timestamp: Date;
   updated_timestamp: Date;
   display_order: string;
+  attachment_metadata: MangoLegacyAttachmentMetadata[];
+};
+
+type NodeSourceRow = Omit<SourceDocument, "canonical_html"> & {
+  source_information: string;
 };
 
 type SourceInventory = {
@@ -72,6 +78,20 @@ function stableJSON(value: unknown): string {
     return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJSON(record[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function nodeProjectionDocument(information: string): string {
+  if (!information.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return information;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(information.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
+  } catch {
+    throw new Error("node_textbox_projection_envelope_is_invalid_json");
+  }
+  if (!payload || typeof payload !== "object" || typeof (payload as Record<string, unknown>).document !== "string") {
+    throw new Error("node_textbox_projection_envelope_has_no_document");
+  }
+  return (payload as Record<string, unknown>).document as string;
 }
 
 function parseArguments(argv: string[]): Arguments {
@@ -142,20 +162,44 @@ async function listSources(
   limit: number,
 ): Promise<SourceDocument[]> {
   if (owner === "node") {
-    const result = await client.query<SourceDocument>(
+    const result = await client.query<NodeSourceRow>(
       `with ranked as (
-         select company_id::text,
+         select projection.company_id::text,
                 'node'::text as resource_type,
-                node_id::text as resource_id,
-                information_id::text as document_id,
-                revision::text,
-                information as canonical_html,
-                is_deleted,
-                created_timestamp,
-                updated_timestamp,
-                (row_number() over(partition by company_id,node_id order by created_timestamp,information_id)*1024)::text as display_order
-           from node_projection_table
-          where company_id=$1::uuid and type='Text box'::information_type
+                projection.node_id::text as resource_id,
+                projection.information_id::text as document_id,
+                projection.revision::text,
+                projection.information as source_information,
+                projection.is_deleted,
+                projection.created_timestamp,
+                projection.updated_timestamp,
+                (row_number() over(partition by projection.company_id,projection.node_id order by projection.created_timestamp,projection.information_id)*1024)::text as display_order,
+                coalesce((
+                  select jsonb_agg(jsonb_build_object(
+                    'attachmentId',attachment.attachment_id::text,
+                    'sourceResourceAttachmentId',link.resource_attachment_id::text,
+                    'filename',attachment.original_filename,
+                    'mimeType',attachment.mime_type,
+                    'byteSize',attachment.byte_size,
+                    'sha256',attachment.sha256,
+                    'width',attachment.original_width,
+                    'height',attachment.original_height,
+                    'relationshipKind',link.relationship_kind
+                  ) order by
+                    case link.relationship_kind when 'inline_image' then 0 when 'migrated_inline_image' then 1 when 'file_attachment' then 2 else 3 end,
+                    attachment.attachment_id,link.resource_attachment_id)
+                  from resource_attachments link
+                  join attachments attachment
+                    on attachment.company_id=link.company_id and attachment.attachment_id=link.attachment_id
+                  where link.company_id=projection.company_id
+                    and link.resource_type='node'
+                    and link.resource_id=projection.node_id::text
+                    and link.information_id=projection.information_id
+                    and link.deleted_timestamp is null
+                    and attachment.deleted_timestamp is null
+                ),'[]'::jsonb) as attachment_metadata
+           from node_projection_table projection
+          where projection.company_id=$1::uuid and projection.type='Text box'::information_type
        )
        select * from ranked
         where ($2::uuid is null or (resource_id::uuid,document_id::uuid)>($2::uuid,$3::uuid))
@@ -163,11 +207,14 @@ async function listSources(
         limit $4`,
       [companyID, after?.resourceID ?? null, after?.documentID ?? null, limit],
     );
-    return result.rows;
+    return result.rows.map(({ source_information, ...row }) => ({
+      ...row,
+      canonical_html: nodeProjectionDocument(source_information),
+    }));
   }
   const result = await client.query<SourceDocument>(
     `select company_id::text,resource_type,resource_id::text,document_id::text,revision::text,canonical_html,
-            is_deleted,created_timestamp,updated_timestamp,'0'::text as display_order
+            is_deleted,created_timestamp,updated_timestamp,'0'::text as display_order,'[]'::jsonb as attachment_metadata
        from editor_collaboration_documents
       where company_id=$1::uuid and resource_type=$2 and not is_deleted
         and ($3::uuid is null or (resource_id,document_id)>($3::uuid,$4::uuid))
@@ -185,8 +232,14 @@ async function sourceInventory(client: pg.PoolClient, companyID: string, owner: 
               count(*) filter(where not is_deleted)::integer as active_count,
               count(*) filter(where is_deleted)::integer as deleted_count,
               count(distinct node_id)::integer as owner_count,
-              coalesce(sum(octet_length(information)),0)::bigint as source_bytes,
-              coalesce(max(octet_length(information)),0)::integer as largest_source_bytes
+              coalesce(sum(octet_length(case
+                when information like '<!-- mango-node-text-block-v1 -->%'
+                  then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+                else information end)),0)::bigint as source_bytes,
+              coalesce(max(octet_length(case
+                when information like '<!-- mango-node-text-block-v1 -->%'
+                  then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+                else information end)),0)::integer as largest_source_bytes
          from node_projection_table
         where company_id=$1::uuid and type='Text box'::information_type`,
       [companyID],
@@ -220,8 +273,14 @@ async function nodeInventory(client: pg.PoolClient, companyID: string): Promise<
             count(*)::integer as total_count,
             count(*) filter(where not is_deleted)::integer as active_count,
             count(*) filter(where is_deleted)::integer as deleted_count,
-            coalesce(sum(octet_length(information)),0)::bigint as source_bytes,
-            coalesce(max(octet_length(information)),0)::integer as largest_source_bytes
+            coalesce(sum(octet_length(case
+              when information like '<!-- mango-node-text-block-v1 -->%'
+                then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+              else information end)),0)::bigint as source_bytes,
+            coalesce(max(octet_length(case
+              when information like '<!-- mango-node-text-block-v1 -->%'
+                then coalesce(substring(information from length('<!-- mango-node-text-block-v1 -->')+1)::jsonb->>'document','')
+              else information end)),0)::integer as largest_source_bytes
        from node_projection_table
       where company_id=$1::uuid and type='Text box'::information_type
       group by node_id
@@ -240,6 +299,89 @@ async function nodeInventory(client: pg.PoolClient, companyID: string): Promise<
 
 function identityFor(source: SourceDocument, sourceSHA: string): string {
   return sha256([source.company_id, source.resource_type, source.resource_id, source.document_id, source.revision, sourceSHA].join(":"));
+}
+
+function nodeAttachmentIDs(document: MangoTiptapDocument): string[] {
+  const ids = new Set<string>();
+  const visit = (node: { type?: string; attrs?: Record<string, unknown>; content?: Array<Record<string, unknown>> }): void => {
+    if (node.type === "mangoAttachmentImage") {
+      const attachmentID = typeof node.attrs?.attachmentId === "string" ? node.attrs.attachmentId.trim().toLowerCase() : "";
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(attachmentID)) {
+        throw new Error("node_inline_image_attachment_id_is_not_a_uuid");
+      }
+      ids.add(attachmentID);
+    }
+    for (const child of node.content ?? []) visit(child);
+  };
+  visit(document.document as Record<string, unknown>);
+  return [...ids].sort();
+}
+
+async function ensureNodeAttachmentLinks(
+  client: pg.PoolClient,
+  source: SourceDocument,
+  document: MangoTiptapDocument,
+): Promise<number> {
+  const attachmentIDs = nodeAttachmentIDs(document);
+  for (const attachmentID of attachmentIDs) {
+    const selectSourceLink = () => client.query(
+      `select resource_attachment_id::text
+         from resource_attachments
+        where company_id=$1::uuid and resource_type='node' and resource_id=$2
+          and information_id=$3::uuid and attachment_id=$4::uuid and deleted_timestamp is null
+          and relationship_kind in ('inline_image','migrated_inline_image','file_attachment')
+        order by case relationship_kind when 'inline_image' then 0 when 'migrated_inline_image' then 1 else 2 end,
+                 resource_attachment_id
+        limit 1`,
+      [source.company_id, source.resource_id, source.document_id, attachmentID],
+    );
+    let sourceLink = await selectSourceLink();
+    if (sourceLink.rowCount !== 1) {
+      await client.query(
+        `insert into resource_attachments(
+           resource_attachment_id,company_id,resource_type,resource_id,attachment_id,information_id,
+           message_id,editor_surface,relationship_kind,created_timestamp
+         )
+         select $1::uuid,$2::uuid,'node',$3,$4::uuid,$5::uuid,'','node_text_block','migrated_inline_image',$6::timestamptz
+           from attachments
+          where company_id=$2::uuid and attachment_id=$4::uuid and deleted_timestamp is null
+         on conflict do nothing`,
+        [randomUUID(), source.company_id, source.resource_id, attachmentID, source.document_id, source.created_timestamp],
+      );
+      sourceLink = await selectSourceLink();
+    }
+    if (sourceLink.rowCount !== 1) throw new Error(`node_inline_image_attachment_not_found:${attachmentID}`);
+    await client.query(
+      `insert into node_textbox_attachment_links(
+         company_id,node_id,textbox_id,attachment_link_id,attachment_id,relationship_kind,
+         source_resource_attachment_id,created_timestamp
+       ) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,'inline_image',$6::uuid,$7::timestamptz)
+       on conflict do nothing`,
+      [source.company_id, source.resource_id, source.document_id, randomUUID(), attachmentID, sourceLink.rows[0].resource_attachment_id, source.created_timestamp],
+    );
+  }
+  const targetLinks = await client.query(
+    `select link.attachment_id::text,
+            link.source_resource_attachment_id is not null
+              and source_link.deleted_timestamp is null
+              and source_link.company_id=link.company_id
+              and source_link.resource_type='node'
+              and source_link.resource_id=link.node_id::text
+              and source_link.information_id=link.textbox_id
+              and source_link.attachment_id=link.attachment_id as source_identity_matches
+       from node_textbox_attachment_links link
+       left join resource_attachments source_link
+         on source_link.resource_attachment_id=link.source_resource_attachment_id
+      where link.company_id=$1::uuid and link.node_id=$2::uuid and link.textbox_id=$3::uuid
+        and link.relationship_kind='inline_image' and link.deleted_timestamp is null
+      order by link.attachment_id`,
+    [source.company_id, source.resource_id, source.document_id],
+  );
+  const actualIDs = targetLinks.rows.map((row) => String(row.attachment_id));
+  if (stableJSON(actualIDs) !== stableJSON(attachmentIDs) || targetLinks.rows.some((row) => !row.source_identity_matches)) {
+    throw new Error("node_attachment_target_identity_conflict");
+  }
+  return attachmentIDs.length;
 }
 
 async function ensureRun(client: pg.PoolClient, args: Arguments, expectedCount: number): Promise<void> {
@@ -378,6 +520,7 @@ async function writeNodeTarget(
   ) {
     throw new Error("node_target_identity_conflict");
   }
+  await ensureNodeAttachmentLinks(client, source, document);
   await client.query(
     `insert into node_textbox_yjs_checkpoints(
        company_id,node_id,textbox_id,checkpoint_id,collaboration_epoch,through_update_sequence,
@@ -444,7 +587,7 @@ async function writeOwnedTarget(
 async function assertSourceCurrent(client: pg.PoolClient, source: SourceDocument): Promise<void> {
   const result = source.resource_type === "node"
     ? await client.query(
-      `select revision::text,information as canonical_html,is_deleted
+      `select revision::text,information as source_information,is_deleted
          from node_projection_table
         where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid
           and type='Text box'::information_type
@@ -459,10 +602,13 @@ async function assertSourceCurrent(client: pg.PoolClient, source: SourceDocument
       [source.company_id, source.resource_type, source.resource_id, source.document_id],
     );
   const current = result.rows[0];
+  const currentHTML = source.resource_type === "node" && current
+    ? nodeProjectionDocument(String(current.source_information))
+    : String(current?.canonical_html ?? "");
   if (
     result.rowCount !== 1
     || String(current.revision) !== source.revision
-    || String(current.canonical_html) !== source.canonical_html
+    || currentHTML !== source.canonical_html
     || Boolean(current.is_deleted) !== source.is_deleted
   ) {
     throw new Error("legacy_source_changed_during_conversion");
@@ -506,7 +652,7 @@ async function convertAndMaybeWrite(client: pg.PoolClient, source: SourceDocumen
   let converted: ReturnType<typeof convertMangoLegacyHTML>;
   let document: MangoTiptapDocument;
   try {
-    converted = convertMangoLegacyHTML(source.canonical_html);
+    converted = convertMangoLegacyHTML(source.canonical_html, { attachments: source.attachment_metadata });
     const validation = validateMangoTiptapDocument(converted.document);
     if (!validation.valid) throw new Error(validation.error);
     document = validation.value;
@@ -534,7 +680,11 @@ async function convertAndMaybeWrite(client: pg.PoolClient, source: SourceDocumen
     target_structure_counts: converted.jsonCounts,
     warnings: converted.warnings,
     comment_anchor_report: { strategy: "quote-plus-context-to-yjs-relative-position", requires_review: converted.warnings.length > 0 },
-    attachment_reference_report: { inline_images: converted.jsonCounts.attachmentImages, preserved_by_attachment_id: true },
+    attachment_reference_report: {
+      inline_images: converted.jsonCounts.attachmentImages,
+      permanent_links: nodeAttachmentIDs(document).length,
+      preserved_by_attachment_id: true,
+    },
   };
   if (args.mode !== "backfill") return report;
 
@@ -686,7 +836,7 @@ async function shadowValidate(client: pg.PoolClient, args: Arguments): Promise<v
   for (const owner of args.owners) {
     const sources = await listSources(client, args.companyID, owner, null, args.limit);
     for (const source of sources) {
-      const converted = convertMangoLegacyHTML(source.canonical_html);
+      const converted = convertMangoLegacyHTML(source.canonical_html, { attachments: source.attachment_metadata });
       const expectedSHA = sha256(stableJSON(converted.document));
       let actualSHA = sha256("");
       let equivalent = false;
@@ -730,6 +880,31 @@ async function shadowValidate(client: pg.PoolClient, args: Arguments): Promise<v
           if (String(row.checkpoint_plain_text) !== converted.normalizedText) differences.push({ kind: "checkpoint_plain_text" });
           if (Boolean(row.permanent_deleted) !== source.is_deleted) differences.push({ kind: "permanent_deleted_state" });
           if (Boolean(row.transitional_deleted) !== source.is_deleted) differences.push({ kind: "transitional_deleted_state" });
+          const expectedAttachmentIDs = nodeAttachmentIDs(converted.document);
+          const attachmentLinks = await client.query(
+            `select link.attachment_id::text,
+                    link.source_resource_attachment_id is not null
+                      and source_link.deleted_timestamp is null
+                      and source_link.company_id=link.company_id
+                      and source_link.resource_type='node'
+                      and source_link.resource_id=link.node_id::text
+                      and source_link.information_id=link.textbox_id
+                      and source_link.attachment_id=link.attachment_id as source_identity_matches
+               from node_textbox_attachment_links link
+               left join resource_attachments source_link
+                 on source_link.resource_attachment_id=link.source_resource_attachment_id
+              where link.company_id=$1::uuid and link.node_id=$2::uuid and link.textbox_id=$3::uuid
+                and link.relationship_kind='inline_image' and link.deleted_timestamp is null
+              order by link.attachment_id`,
+            [args.companyID, source.resource_id, source.document_id],
+          );
+          const actualAttachmentIDs = attachmentLinks.rows.map((link) => String(link.attachment_id));
+          if (stableJSON(actualAttachmentIDs) !== stableJSON(expectedAttachmentIDs)) {
+            differences.push({ kind: "permanent_attachment_ids", expected: expectedAttachmentIDs.length, actual: actualAttachmentIDs.length });
+          }
+          if (attachmentLinks.rows.some((link) => !link.source_identity_matches)) {
+            differences.push({ kind: "permanent_attachment_source_identity" });
+          }
         }
         equivalent = differences.length === 0;
       } else {
@@ -884,15 +1059,15 @@ async function activate(client: pg.PoolClient, args: Arguments): Promise<void> {
     const sourceRows = await client.query(
       `with source as (
          select company_id,'node'::text as resource_type,node_id as resource_id,
-                information_id::text as document_id,revision,information as canonical_html
+                information_id::text as document_id,revision,information as source_information
            from node_projection_table
           where company_id=$1::uuid and type='Text box'::information_type and not is_deleted
          union all
-         select company_id,resource_type,resource_id,document_id::text,revision,canonical_html
+         select company_id,resource_type,resource_id,document_id::text,revision,canonical_html as source_information
            from editor_collaboration_documents
           where company_id=$1::uuid and resource_type in ('project','logic_gate') and not is_deleted
        )
-       select source.revision::bigint as current_revision,source.canonical_html,
+       select source.resource_type,source.revision::bigint as current_revision,source.source_information,
               item.source_revision::bigint as converted_revision,item.source_html_sha256
          from source
          join editor_rollout_gates gate
@@ -909,11 +1084,14 @@ async function activate(client: pg.PoolClient, args: Arguments): Promise<void> {
       "select coalesce(sum(expected_count),0)::bigint as expected_count from editor_rollout_gates where company_id=$1::uuid and owner_type=any($2::text[]) and rollout_state='ready'",
       [args.companyID, OWNER_TYPES],
     );
-    const sourceDrift = sourceRows.rows.some((row) =>
-      row.converted_revision === null
-      || Number(row.current_revision) !== Number(row.converted_revision)
-      || sha256(String(row.canonical_html)) !== row.source_html_sha256
-    );
+    const sourceDrift = sourceRows.rows.some((row) => {
+      const currentHTML = row.resource_type === "node"
+        ? nodeProjectionDocument(String(row.source_information))
+        : String(row.source_information);
+      return row.converted_revision === null
+        || Number(row.current_revision) !== Number(row.converted_revision)
+        || sha256(currentHTML) !== row.source_html_sha256;
+    });
     if (sourceRows.rowCount !== Number(expectedRows.rows[0].expected_count) || sourceDrift) {
       throw new Error("legacy_source_changed_after_validation");
     }    const gates = await client.query(

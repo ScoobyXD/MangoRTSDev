@@ -19,6 +19,10 @@ export type MangoStaticAttachmentImageProps = {
   layout?: string;
   alt?: string;
   title?: string;
+  linkHref?: string;
+  linkTarget?: string;
+  linkRel?: string;
+  linkTitle?: string;
 };
 
 type MangoTiptapStaticRendererProps = {
@@ -192,12 +196,19 @@ function renderNode(
         layout: typeof attrs.layout === "string" ? attrs.layout : undefined,
         alt: typeof attrs.alt === "string" ? attrs.alt : undefined,
         title: typeof attrs.title === "string" ? attrs.title : undefined,
+        linkHref: typeof attrs.linkHref === "string" ? attrs.linkHref : undefined,
+        linkTarget: typeof attrs.linkTarget === "string" ? attrs.linkTarget : undefined,
+        linkRel: typeof attrs.linkRel === "string" ? attrs.linkRel : undefined,
+        linkTitle: typeof attrs.linkTitle === "string" ? attrs.linkTitle : undefined,
       };
       const content = renderAttachmentImage?.(image) ?? <span data-mango-attachment-id={image.attachmentId}>{image.alt || image.filename || "Attached image"}</span>;
+      const linkedContent = image.linkHref
+        ? <a href={image.linkHref} target={image.linkTarget || undefined} rel={image.linkRel || "noopener noreferrer nofollow"} title={image.linkTitle || undefined}>{content}</a>
+        : content;
       const covering = annotations.filter((item) => item.from <= position && item.to >= position + 1);
       const annotated = covering.reduce<React.ReactNode>((current, annotation) => (
         <div className={annotationClass(annotation)} data-mango-annotation-id={annotation.id} data-mango-annotation-kind={annotation.kind}>{current}</div>
-      ), content);
+      ), linkedContent);
       return <React.Fragment key={key}>{annotated}</React.Fragment>;
     }
     default: return null;
