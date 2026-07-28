@@ -20,6 +20,10 @@ import {
   type MangoTiptapSnapshot,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapSync.js";
 import {
+  normalizeMangoTiptapCollaborationURL,
+  shouldUseMangoTiptapCollaboration,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapCollaborationConfig.js";
+import {
   clearMangoEditorDataFormatCacheForTests,
   loadMangoEditorDataFormat,
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
@@ -47,6 +51,17 @@ class MemoryStorage implements Storage {
   removeItem(key: string): void { this.values.delete(key); }
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
+
+test("Project and Logic Gate collaboration is enabled only by a configured endpoint", () => {
+  assert.equal(normalizeMangoTiptapCollaborationURL(undefined), "");
+  assert.equal(normalizeMangoTiptapCollaborationURL("   "), "");
+  assert.equal(normalizeMangoTiptapCollaborationURL("  wss://collaboration.example.test/  "), "wss://collaboration.example.test/");
+  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", ""), false);
+  assert.equal(shouldUseMangoTiptapCollaboration("project", "   "), false);
+  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", "wss://collaboration.example.test"), true);
+  assert.equal(shouldUseMangoTiptapCollaboration("project", "ws://localhost:1234"), true);
+  assert.equal(shouldUseMangoTiptapCollaboration("node", "wss://collaboration.example.test"), false);
+});
 
 function richDocument(text = "Mango"): MangoTiptapDocument {
   return {
