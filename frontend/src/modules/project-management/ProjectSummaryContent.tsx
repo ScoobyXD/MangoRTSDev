@@ -46,6 +46,7 @@ import {
   type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
+import { remapEditorChatEntityLinks, trimEditorChatDraft, type EditorChatEntityLink } from "../editor/chatEntityLinks.js";
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "../editor/editorMentions.js";
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
@@ -327,6 +328,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
   const [projectSidePaneWidths, setProjectSidePaneWidths] = useState({ email: 340, chat: 340 });
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatDraftEntityLinks, setChatDraftEntityLinks] = useState<Record<string, EditorChatEntityLink[]>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionDraft>>({});
@@ -1089,7 +1091,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [attachmentRequestJSON, companyID, flushProjectTextBlockSave, projectID, projectSaveScope]);
 
   const submitChatMessage = useCallback(async (blockID: string) => {
-    const message = (chatDrafts[blockID] ?? "").trim();
+    const { message, entityLinks } = trimEditorChatDraft(chatDrafts[blockID] ?? "", chatDraftEntityLinks[blockID] ?? []);
     const attachments = chatDraftAttachments[blockID] ?? [];
     if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
     if (!message && attachments.length === 0) return;
@@ -1111,6 +1113,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       message,
       createdTimestamp: timestamp,
       attachments,
+      entityLinks,
     };
     setError("");
     try {
@@ -1132,17 +1135,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           message,
           createdTimestamp: timestamp,
           attachments,
+          entityLinks,
         }),
       });
       setChatMessages((current) => [...current, nextMessage]);
       setChatDrafts((current) => ({ ...current, [blockID]: "" }));
+      setChatDraftEntityLinks((current) => omitRecordKey(current, blockID));
       setChatDraftAttachments((current) => ({ ...current, [blockID]: [] }));
       setChatReplyTargets((current) => omitRecordKey(current, blockID));
       setChatSelectionAnchors((current) => omitRecordKey(current, blockID));
     } catch (chatError) {
       setError(chatError instanceof Error ? chatError.message : "Failed to add chat message");
     }
-  }, [chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, projectID]);
+  }, [chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, projectID]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     setChatMessages((current) => current.filter((message) => message.id !== messageID));
@@ -1170,11 +1175,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     if (message === existing.message) return;
     const mentionedUserIDs = projectChatMentionedUserIDs(message, companyUsers);
+    const entityLinks = remapEditorChatEntityLinks(existing.message, message, existing.entityLinks ?? []);
     const editedTimestamp = new Date().toISOString();
     setChatMessages((current) => current.map((item) => item.id === messageID ? {
       ...item,
       message,
       editedTimestamp,
+      entityLinks,
       mentionedUserIDs,
     } : item));
     setError("");
@@ -1184,6 +1191,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         informationID: messageID,
         message,
+        entityLinks,
         mentionedUserIDs,
         mentionedGroupIDs: existing.mentionedGroupIDs,
       });
@@ -2478,9 +2486,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 editable
                                 apiBase={apiBase}
                                 companyID={companyID}
+                                entityRequestJSON={attachmentRequestJSON}
                                 messages={chatMessagesByBlockID.get(block.id) ?? []}
                                 selectionAnchor={chatSelectionAnchors[block.id]}
                                 draft={chatDrafts[block.id] ?? ""}
+                                draftEntityLinks={chatDraftEntityLinks[block.id] ?? []}
                                 companyUsers={companyUsers}
                                 draftAttachments={chatDraftAttachments[block.id] ?? []}
                                 replyTargetID={chatReplyTargets[block.id] ?? ""}
@@ -2503,6 +2513,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   projectFormattingControllerRef.current = null;
                                 }}
                                 onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
+                                onDraftEntityLinksChange={(links) => setChatDraftEntityLinks((current) => ({ ...current, [block.id]: links }))}
                                 onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => ({ ...current, [block.id]: current[block.id] === messageID ? "" : messageID }))}
                                 onNavigateToMessage={(messageID) => setChatNavigationRequests((current) => ({ ...current, [block.id]: { anchorMessageID: messageID, requestID: Date.now() } }))}
                                 onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}

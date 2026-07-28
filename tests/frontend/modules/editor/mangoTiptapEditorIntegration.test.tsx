@@ -345,6 +345,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
             informationID: "document-1",
             editorSurface: "node",
           }}
+          onImageChatRequest={() => undefined}
+          onImageNodeRequest={() => undefined}
           subscribeToCanonicalChange={(recover) => {
             subscriptionRecover = recover;
             subscriptions += 1;
@@ -409,20 +411,27 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     });
     await waitFor(() => activeImageFrame.dataset.selected === "true", "clicking an inline image should create a visible Tiptap node selection");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
-    assert.ok(Array.from(activeImageFrame.querySelectorAll("button")).some((button) => button.textContent === "Download"), "selected inline images expose their download controls");
+    assert.equal(activeImageFrame.style.cursor, "pointer", "inline images use the hand-selection cursor instead of the editor text caret");
+    assert.ok(activeImageFrame.querySelector('[data-mango-inline-image-download="true"]'), "the selected image exposes an icon-only download control attached to its frame");
+    assert.ok(activeImageFrame.querySelector('[data-mango-tiptap-image-comment="true"]'), "the selected image exposes the same comment icon action as selected text");
+    assert.ok(activeImageFrame.querySelector('[data-mango-tiptap-image-create-node="true"]'), "the selected image retains its icon-only create-node action");
+    assert.equal(activeImageFrame.querySelectorAll("[data-mango-tiptap-image-resize-handle]").length, 8, "the selected image can resize from every edge and corner");
+    assert.equal(Array.from(activeImageFrame.querySelectorAll("button")).some((button) => ["Move", "Delete", "Download", "Preview", "Left", "Center", "Right", "Wide", "Resize"].includes(button.textContent?.trim() ?? "")), false, "the detached labeled image button strip is removed");
     assert.equal(editorRoot.querySelector('[aria-label="Highlighted text actions"]'), null, "image node selections must not open the text-selection toolbar");
     await act(async () => {
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
     });
-    await waitFor(() => Boolean(editorRoot.querySelector('[role="dialog"][aria-label="Preview image.png"]')), "double-clicking an inline image should open its full-screen preview");
-    const imagePreview = editorRoot.querySelector<HTMLElement>('[role="dialog"][aria-label="Preview image.png"]');
+    await waitFor(() => Boolean(dom.window.document.querySelector('[role="dialog"][aria-label="Preview image.png"]')), "double-clicking an inline image should open its full-screen preview in the shared modal layer");
+    const imagePreview = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Preview image.png"]');
     assert.ok(imagePreview?.querySelector('button[aria-label="Download image"]'), "the full-screen image preview should expose a download button");
+    assert.equal(imagePreview?.dataset.mangoImagePreviewBackdrop, "translucent");
+    assert.equal(imagePreview?.querySelector('[data-mango-image-preview-close="true"]')?.textContent?.trim(), "X", "the preview uses the shared bright-red X control");
     await waitFor(() => Boolean(imagePreview?.querySelector("img")), "the full-screen image preview should load the original attachment");
     assert.ok(imageFetchURLs.some((url) => url.includes("variant=original")), "the full-screen preview should request the original image variant");
     const closeImagePreview = imagePreview?.querySelector<HTMLButtonElement>('button[aria-label="Close image preview"]');
     assert.ok(closeImagePreview);
     await act(async () => { closeImagePreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
-    await waitFor(() => !editorRoot.querySelector('[role="dialog"][aria-label="Preview image.png"]'), "the inline image preview should close normally");
+    await waitFor(() => !dom.window.document.querySelector('[role="dialog"][aria-label="Preview image.png"]'), "the inline image preview should close normally");
     resetEditorRuntimeMetricsForTests();
     const changeCountBeforeTyping = changes.length;
     const alphaWalker = dom.window.document.createTreeWalker(activeProseMirror, dom.window.NodeFilter.SHOW_TEXT);

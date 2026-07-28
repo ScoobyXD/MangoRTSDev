@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
+import { ExplorerEntityIcon } from "../company-explorer/CompanyExplorerEntityIcon.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
@@ -13,6 +14,13 @@ import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, canEditEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
+import {
+  remapEditorChatEntityLinks,
+  replaceEditorChatEntityDraft,
+  splitEditorChatTextByEntityLinks,
+  type EditorChatEntityLink,
+} from "./chatEntityLinks.js";
+import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest } from "./editorEntityLinks.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -1927,6 +1935,7 @@ type ChatPaneProps = {
   editable: boolean;
   apiBase?: string;
   companyID?: string;
+  entityRequestJSON?: EditorEntityLinkRequest;
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
   headerTrailing?: React.ReactNode;
@@ -1934,6 +1943,7 @@ type ChatPaneProps = {
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
+  draftEntityLinks?: EditorChatEntityLink[];
   companyUsers: MentionableCompanyUser[];
   draftAttachments: EditorChatAttachment[];
   replyTargetID: string;
@@ -1953,6 +1963,7 @@ type ChatPaneProps = {
   onFocus: () => void;
   onActiveTabChange?: (tab: "chat" | "email") => void;
   onDraftChange: (draft: string) => void;
+  onDraftEntityLinksChange?: (links: EditorChatEntityLink[]) => void;
   onMentionPrincipal?: (principal: MentionableCompanyUser) => void;
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
@@ -1981,6 +1992,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   editable,
   apiBase,
   companyID,
+  entityRequestJSON,
   messages,
   emailPane,
   headerTrailing,
@@ -1988,6 +2000,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   activeTab = "chat",
   selectionAnchor,
   draft,
+  draftEntityLinks = [],
   companyUsers,
   draftAttachments,
   replyTargetID,
@@ -2007,6 +2020,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onFocus,
   onActiveTabChange,
   onDraftChange,
+  onDraftEntityLinksChange,
   onMentionPrincipal,
   onActivateMessage,
   onNavigateToMessage,
@@ -2038,11 +2052,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
   const [activeMentionDraft, setActiveMentionDraft] = useState<ActiveMentionDraft | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [activeEntityDraft, setActiveEntityDraft] = useState<ActiveEntityLinkDraft | null>(null);
+  const [activeEntityIndex, setActiveEntityIndex] = useState(0);
+  const [entityOptions, setEntityOptions] = useState<EditorEntityLink[]>([]);
+  const [entitySearchPending, setEntitySearchPending] = useState(false);
+  const [entitySearchError, setEntitySearchError] = useState("");
   const mentionOptions = useMemo(() => {
     if (!activeMentionDraft) return [];
     return buildMentionOptions(companyUsers, activeMentionDraft.query, 8);
   }, [activeMentionDraft, companyUsers]);
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
+  const entityMenuOpen = editable && activeEntityDraft !== null && Boolean(entityRequestJSON && companyID) && (entitySearchPending || Boolean(entitySearchError) || entityOptions.length > 0);
   const composerMentionSegments = useMemo(() => splitTextByMentions(draft, companyUsers), [companyUsers, draft]);
   const composerHasMentionEntities = composerMentionSegments.some((segment) => segment.mention);
   const hasEmailPane = Boolean(emailPane);
@@ -2087,6 +2107,42 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   useEffect(() => {
     setActiveMentionIndex((current) => Math.min(current, Math.max(0, mentionOptions.length - 1)));
   }, [mentionOptions.length]);
+
+  useEffect(() => {
+    setActiveEntityIndex(0);
+  }, [activeEntityDraft?.start, activeEntityDraft?.query]);
+
+  useEffect(() => {
+    setActiveEntityIndex((current) => Math.min(current, Math.max(0, entityOptions.length - 1)));
+  }, [entityOptions.length]);
+
+  useEffect(() => {
+    if (!editable || !activeEntityDraft || !entityRequestJSON || !companyID?.trim()) {
+      setEntityOptions([]);
+      setEntitySearchPending(false);
+      setEntitySearchError("");
+      return undefined;
+    }
+    let current = true;
+    setEntitySearchPending(true);
+    setEntitySearchError("");
+    const timer = window.setTimeout(() => {
+      void searchEditorEntityLinks({ companyID, requestJSON: entityRequestJSON }, activeEntityDraft.query).then((options) => {
+        if (!current) return;
+        setEntityOptions(options);
+        setEntitySearchPending(false);
+      }).catch((cause) => {
+        if (!current) return;
+        setEntityOptions([]);
+        setEntitySearchPending(false);
+        setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search workspace entities");
+      });
+    }, 120);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [activeEntityDraft?.query, activeEntityDraft?.start, companyID, editable, entityRequestJSON]);
 
   useLayoutEffect(() => {
     if (showingEmail) return;
@@ -2202,9 +2258,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const refreshMentionDraft = (nextDraft = draft) => {
+  const refreshMentionDraft = (nextDraft = draft, nextEntityLinks = draftEntityLinks) => {
     const textarea = textareaRef.current;
-    setActiveMentionDraft(readActiveMentionDraft(nextDraft, textarea?.selectionStart ?? null));
+    const caret = textarea?.selectionStart ?? null;
+    const candidateEntityDraft = readActiveEntityLinkDraft(nextDraft, caret);
+    const candidateIsAccepted = candidateEntityDraft !== null && caret !== null && nextEntityLinks.some((entity) => (
+      entity.start === candidateEntityDraft.start && caret >= entity.end
+    ));
+    const entityDraft = candidateIsAccepted ? null : candidateEntityDraft;
+    setActiveEntityDraft(entityDraft);
+    setActiveMentionDraft(entityDraft ? null : readActiveMentionDraft(nextDraft, caret));
   };
 
   const replaceMentionDraft = (mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
@@ -2212,14 +2275,32 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const insert = `${mention.trigger}${mentionUserDisplayName(user)} `;
     const nextDraft = `${draft.slice(0, mention.start)}${insert}${draft.slice(mention.end)}`;
     onDraftChange(nextDraft);
+    onDraftEntityLinksChange?.(remapEditorChatEntityLinks(draft, nextDraft, draftEntityLinks));
     onMentionPrincipal?.(user);
     setActiveMentionDraft(null);
+    setActiveEntityDraft(null);
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       const nextCaret = mention.start + insert.length;
       textarea.focus();
       textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  const replaceEntityDraft = (entityDraft: ActiveEntityLinkDraft, entity: EditorEntityLink) => {
+    if (!editable) return;
+    const replacement = replaceEditorChatEntityDraft(draft, draftEntityLinks, entityDraft, entity);
+    onDraftChange(replacement.message);
+    onDraftEntityLinksChange?.(replacement.entityLinks);
+    setActiveEntityDraft(null);
+    setActiveMentionDraft(null);
+    setEntityOptions([]);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(replacement.caret, replacement.caret);
     });
   };
 
@@ -2425,6 +2506,69 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             />
           )}
           <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            {entityMenuOpen && activeEntityDraft && (
+              <div
+                role="listbox"
+                aria-label="Link a Node, Logic Gate, or Project"
+                data-mango-chat-entity-menu="true"
+                style={{
+                  position: "absolute",
+                  left: 38,
+                  right: 38,
+                  bottom: "calc(100% + 6px)",
+                  zIndex: 21,
+                  display: "grid",
+                  gap: 2,
+                  maxHeight: 236,
+                  overflowY: "auto",
+                  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                  borderRadius: 12,
+                  background: EDITOR_NEU_PANEL_BACKGROUND,
+                  boxShadow: EDITOR_NEU_PANEL_SHADOW,
+                  padding: 4,
+                }}
+              >
+                {entitySearchPending && <div role="status" style={{ padding: "8px 10px", color: "rgba(71,85,105,.84)", fontSize: 11, fontWeight: 750 }}>Searching workspace…</div>}
+                {!entitySearchPending && entitySearchError && <div role="alert" style={{ padding: "8px 10px", color: "#b91c1c", fontSize: 11, fontWeight: 750 }}>{entitySearchError}</div>}
+                {!entitySearchPending && !entitySearchError && entityOptions.map((entity, index) => {
+                  const selected = index === activeEntityIndex;
+                  return (
+                    <button
+                      key={`${entity.entityType}:${entity.entityID}`}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      data-mango-chat-entity-type={entity.entityType}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        replaceEntityDraft(activeEntityDraft, entity);
+                      }}
+                      style={{
+                        width: "100%",
+                        minHeight: 36,
+                        display: "grid",
+                        gridTemplateColumns: "18px minmax(0, 1fr) auto",
+                        alignItems: "center",
+                        gap: 8,
+                        border: "1px solid transparent",
+                        borderRadius: 10,
+                        background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent",
+                        color: surfaceText,
+                        cursor: "pointer",
+                        padding: "6px 8px",
+                        textAlign: "left",
+                        font: "inherit",
+                        boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(14,165,233,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
+                      }}
+                    >
+                      <ExplorerEntityIcon kind={entity.entityType} />
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 }}>{entity.label}</span>
+                      <span style={{ color: "rgba(100,116,139,.88)", fontSize: 9.5, fontWeight: 800 }}>{editorEntityTypeLabel(entity.entityType)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {mentionMenuOpen && activeMentionDraft && (
               <div
                 role="listbox"
@@ -2567,10 +2711,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               disabled={!editable}
               readOnly={!editable}
               placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
-              onFocus={(event) => {
+              onFocus={() => {
                 if (!editable) return;
                 onFocus();
-                setActiveMentionDraft(readActiveMentionDraft(draft, event.currentTarget.selectionStart));
+                refreshMentionDraft(draft);
               }}
               onClick={() => { if (editable) refreshMentionDraft(); }}
               onKeyUp={() => { if (editable) refreshMentionDraft(); }}
@@ -2579,6 +2723,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 mentionCloseTimerRef.current = window.setTimeout(() => {
                   mentionCloseTimerRef.current = null;
                   setActiveMentionDraft(null);
+                  setActiveEntityDraft(null);
                 }, 120);
               }}
               onPaste={(event) => {
@@ -2602,8 +2747,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               onChange={(event) => {
                 if (!editable) return;
                 const nextDraft = event.currentTarget.value;
+                const nextEntityLinks = remapEditorChatEntityLinks(draft, nextDraft, draftEntityLinks);
                 onDraftChange(nextDraft);
-                setActiveMentionDraft(readActiveMentionDraft(nextDraft, event.currentTarget.selectionStart));
+                onDraftEntityLinksChange?.(nextEntityLinks);
+                refreshMentionDraft(nextDraft, nextEntityLinks);
               }}
               onScroll={(event) => {
                 const overlay = composerMentionOverlayRef.current;
@@ -2615,6 +2762,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 if (!editable) {
                   event.preventDefault();
                   return;
+                }
+                if (entityMenuOpen && activeEntityDraft) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    if (entityOptions.length > 0) setActiveEntityIndex((current) => (current + 1) % entityOptions.length);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (entityOptions.length > 0) setActiveEntityIndex((current) => (current - 1 + entityOptions.length) % entityOptions.length);
+                    return;
+                  }
+                  if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+                    event.preventDefault();
+                    const entity = entityOptions[activeEntityIndex] ?? entityOptions[0];
+                    if (entity) replaceEntityDraft(activeEntityDraft, entity);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setActiveEntityDraft(null);
+                    setEntityOptions([]);
+                    return;
+                  }
                 }
                 if (mentionMenuOpen && activeMentionDraft) {
                   if (event.key === "ArrowDown") {
@@ -2721,10 +2892,10 @@ type ChatThreadItemProps = {
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompanyUser[]; color: string }> = ({ text, users, color }) => {
+const MentionAndLinkText: React.FC<{ text: string; users: MentionableCompanyUser[] }> = ({ text, users }) => {
   const segments = useMemo(() => splitTextByMentions(text, users), [text, users]);
   return (
-    <div style={{ color, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+    <>
       {segments.map((segment, index) => segment.mention ? (
         <span
           key={`${segment.text}:${index}`}
@@ -2748,6 +2919,37 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
       ) : (
         <React.Fragment key={`${segment.text}:${index}:${linkIndex}`}>{linkSegment.text}</React.Fragment>
       )))}
+    </>
+  );
+};
+
+const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompanyUser[]; color: string; entityLinks?: EditorChatEntityLink[] }> = ({ text, users, color, entityLinks = [] }) => {
+  const segments = useMemo(() => splitEditorChatTextByEntityLinks(text, entityLinks), [entityLinks, text]);
+  return (
+    <div style={{ color, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+      {segments.map((segment, index) => segment.entity ? (
+        <button
+          key={`${segment.entity.entityType}:${segment.entity.entityID}:${segment.entity.start}`}
+          type="button"
+          role="link"
+          aria-label={`Open ${editorEntityTypeLabel(segment.entity.entityType)} ${segment.entity.label}`}
+          title={`Open ${editorEntityTypeLabel(segment.entity.entityType)}: ${segment.entity.label}`}
+          data-mango-chat-entity-link="true"
+          data-mango-entity-type={segment.entity.entityType}
+          data-mango-entity-id={segment.entity.entityID}
+          onClick={(event) => {
+            event.stopPropagation();
+            openEditorEntityLink(segment.entity!);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+          style={{ display: "inline-flex", alignItems: "center", gap: 3, margin: "0 1px", padding: "0 4px", border: "1px solid rgba(14,165,233,.32)", borderRadius: 6, background: "rgba(224,242,254,.82)", color: "#075985", cursor: "pointer", font: "inherit", fontWeight: 800, lineHeight: 1.35, verticalAlign: "baseline" }}
+        >
+          <ExplorerEntityIcon kind={segment.entity.entityType} />
+          <span>{segment.text}</span>
+        </button>
+      ) : (
+        <MentionAndLinkText key={`text:${index}:${segment.text}`} text={segment.text} users={users} />
+      ))}
     </div>
   );
 };
@@ -2909,7 +3111,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               <span style={{ color: "rgba(51,65,85,0.56)", fontSize: 9, fontWeight: 700 }}>Ctrl+Enter to save</span>
             </div>
           </div>
-        ) : message.message ? <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} /> : null}
+        ) : message.message ? <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} entityLinks={message.entityLinks} /> : null}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} apiBase={apiBase} companyID={companyID} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {editable && (
@@ -3872,6 +4074,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const attachmentActionMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const portalTarget = useAppOverlayPortalTarget(triggerRef.current?.ownerDocument);
   const triggerRect = useAppViewportAnchorRect(triggerRef, open);
@@ -3902,7 +4105,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
     setOpen(false);
     setAttachmentMenu(null);
   }, []);
-  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close, menuRef);
+  useAppFloatingMenuDismissal(open || Boolean(attachmentMenu), rootRef, close, menuRef, attachmentActionMenuRef);
   useEffect(() => {
     if (activeUploadCount > 0) setOpen(true);
   }, [activeUploadCount]);
@@ -4088,7 +4291,23 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                 if (!onRemove) return;
                 event.preventDefault();
                 event.stopPropagation();
-                setAttachmentMenu({ item, x: event.clientX, y: event.clientY });
+                const listRect = menuRef.current?.getBoundingClientRect();
+                const view = event.currentTarget.ownerDocument.defaultView;
+                const viewportWidth = view?.innerWidth ?? 1024;
+                const viewportHeight = view?.innerHeight ?? 720;
+                const actionWidth = 164;
+                const actionHeight = 42;
+                const margin = 8;
+                const gap = 8;
+                let x = Math.max(margin, Math.min(event.clientX, viewportWidth - actionWidth - margin));
+                if (listRect) {
+                  const rightSide = listRect.right + gap;
+                  const leftSide = listRect.left - actionWidth - gap;
+                  if (rightSide + actionWidth <= viewportWidth - margin) x = rightSide;
+                  else if (leftSide >= margin) x = leftSide;
+                }
+                const y = Math.max(margin, Math.min(event.clientY, viewportHeight - actionHeight - margin));
+                setAttachmentMenu({ item, x, y });
               }}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
@@ -4152,12 +4371,13 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
         </div>,
         portalTarget,
       )}
-      {attachmentMenu && onRemove && (
+      {attachmentMenu && onRemove && portalTarget && createPortal(
         <div
+          ref={attachmentActionMenuRef}
           role="menu"
           aria-label="Attachment actions"
           onContextMenu={(event) => event.preventDefault()}
-          style={{ position: "fixed", zIndex: 1030, top: attachmentMenu.y, left: attachmentMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
+          style={{ position: "fixed", zIndex: 1030, top: attachmentMenu.y, left: attachmentMenu.x, width: 164, boxSizing: "border-box", display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
         >
           <button
             type="button"
@@ -4171,7 +4391,8 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
           >
             Remove from node
           </button>
-        </div>
+        </div>,
+        portalTarget,
       )}
     </div>
     {previewItem?.resourceAttachment.attachment && (

@@ -347,6 +347,8 @@ func (r *PostgresRepo) ResolveEffectiveUsersForResource(ctx context.Context, com
 		existsQuery = `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`
 	case EntityTypeLogicGate:
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`
+	case EntityTypeProject:
+		existsQuery = `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`
 	case EntityTypeSharedInbox:
 		existsQuery = `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`
 	default:

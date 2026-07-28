@@ -50,6 +50,7 @@ import {
   type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "./editorProjection";
+import { editorChatEntityLinkPayloads, remapEditorChatEntityLinks, trimEditorChatDraft, type EditorChatEntityLink } from "./chatEntityLinks.js";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
 import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
@@ -531,6 +532,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [nodeAttachmentsRefreshKey, setNodeAttachmentsRefreshKey] = useState(0);
   const [nodeAttachmentUploads, setNodeAttachmentUploads] = useState<AttachmentUploadDropdownItem[]>([]);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatDraftEntityLinks, setChatDraftEntityLinks] = useState<Record<string, EditorChatEntityLink[]>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
@@ -1834,7 +1836,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
   const submitChat = useCallback(async (blockID: string) => {
     if (!canEdit) return;
-    const message = (chatDrafts[blockID] ?? "").trim();
+    const { message, entityLinks } = trimEditorChatDraft(chatDrafts[blockID] ?? "", chatDraftEntityLinks[blockID] ?? []);
     const attachments = chatDraftAttachments[blockID] ?? [];
     if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
     if (!message && attachments.length === 0) return;
@@ -1858,9 +1860,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       message,
       createdTimestamp: now,
       attachments,
+      entityLinks,
       mentionedUserIDs,
     };
     setChatDrafts((current) => ({ ...current, [blockID]: "" }));
+    setChatDraftEntityLinks((current) => {
+      if (!current[blockID]?.length) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
     setChatDraftAttachments((current) => {
       if (!current[blockID]?.length) return current;
       const next = { ...current };
@@ -1912,6 +1921,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             message,
             createdTimestamp: now,
             attachments,
+            entityLinks,
             mentionedUserIDs,
           }),
           information_id: id,
@@ -1921,7 +1931,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
     }
-  }, [author.name, author.userID, canEdit, chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [author.name, author.userID, canEdit, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     if (!canEdit) return;
@@ -1980,10 +1990,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (message === existing.message) return;
     const editedTimestamp = new Date().toISOString();
     const mentionedUserIDs = mentionedUserIDsFromChatDraft(message, companyUsers);
+    const entityLinks = remapEditorChatEntityLinks(existing.message, message, existing.entityLinks ?? []);
     setChatMessages((current) => current.map((item) => item.id === messageID ? {
       ...item,
       message,
       editedTimestamp,
+      entityLinks,
       mentionedUserIDs,
     } : item));
     try {
@@ -1992,6 +2004,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         body: JSON.stringify({
           company_id: companyID,
           message,
+          entity_links: editorChatEntityLinkPayloads(message, entityLinks),
           mentioned_user_ids: mentionedUserIDs,
           mentioned_group_ids: existing.mentionedGroupIDs ?? [],
         }),
@@ -3919,10 +3932,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     editable={canEdit}
                     apiBase={apiBase}
                     companyID={companyID}
+                    entityRequestJSON={requestJSON}
                     messages={messages}
                     hideHeader
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[chatBlockID] ?? ""}
+                    draftEntityLinks={chatDraftEntityLinks[chatBlockID] ?? []}
                     companyUsers={companyUsers}
                     active={chatIsActive}
                     currentUserID={author.userID}
@@ -3942,6 +3957,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     fixedHeight={chatPaneHeight}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [chatBlockID]: draft }))}
+                    onDraftEntityLinksChange={(links) => setChatDraftEntityLinks((current) => ({ ...current, [chatBlockID]: links }))}
                     onActivateMessage={activateChatMessage}
                     onNavigateToMessage={(messageID) => navigateToChatMessage(chatBlockID, messages, messageID)}
                     onReply={replyToMessage}

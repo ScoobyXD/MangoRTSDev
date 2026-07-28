@@ -1,3 +1,4 @@
+import { editorChatEntityLinkPayloads, type EditorChatEntityLink } from "../editor/chatEntityLinks.js";
 import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { EntityField } from "../fields/entityFieldsApi.js";
@@ -358,6 +359,7 @@ export async function editProjectChatComment(input: {
   projectID: string;
   informationID: string;
   message: string;
+  entityLinks?: EditorChatEntityLink[];
   mentionedUserIDs?: string[];
   mentionedGroupIDs?: string[];
 }): Promise<unknown> {
@@ -366,6 +368,7 @@ export async function editProjectChatComment(input: {
     body: JSON.stringify({
       company_id: input.companyID,
       message: input.message,
+      entity_links: editorChatEntityLinkPayloads(input.message, input.entityLinks ?? []),
       mentioned_user_ids: input.mentionedUserIDs ?? [],
       mentioned_group_ids: input.mentionedGroupIDs ?? [],
     }),

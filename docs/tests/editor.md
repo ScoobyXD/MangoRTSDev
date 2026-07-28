@@ -115,6 +115,9 @@ ED89 - For editor entity ranking, a Node is done only when its status is `Done`;
 ED90 - The PostgreSQL editor-only search applies text filtering and effective-access/visible-location checks before its bounded sort and does not construct unused Explorer location-path JSON. Case-insensitive contains search uses canonical `pg_trgm` GIN indexes on Node names, Project names, and Logic Gate headers. Ordinary Company Explorer search retains its separate tree/path response and ordering.
 ED91 - The one-time Node textbox converter inventories authoritative `node_projection_table` rows whose type is `Text box`, including deleted rows, strictly extracts the `document` body from the Node metadata envelope, supports direct legacy bodies and empty bodies, and never reads `Text block chat` rows as documents. One per-textbox transaction stores identical validated JSON in `editor_json_documents`, `node_textboxes`, and the sequence-zero Yjs migration checkpoint, and seeds exact permanent inline-image attachment links while preserving active/deleted state. Any target or attachment-link failure rolls back all writes for that textbox, the same run ID can resume it, and the complete source projection payload and deletion state remain unchanged.
 ED91 - Every sent comment rendered by the shared `ChatPane` exposes Edit only to its original author. Edit opens an inline text area with Save/Cancel and Ctrl+Enter submission, keeps the editor open when persistence fails, and shows an Edited marker after success. The edit changes only message text and current mention IDs; it preserves the stable comment ID, author, created timestamp, reply/source-selection context, attachments, thread position, and all unrelated payload fields. Blank text remains valid only when the comment still has an attachment.
+ED92 - The shared Node/Project `ChatPane` composer applies the workspace-entity `#` search contract alongside its existing `@` and `!` people picker. `#` queries the same company-scoped, permission-filtered Nodes/Logic Gates/Projects endpoint and ranking as the editor, Arrow Up/Down navigate, Enter or plain Tab accepts, Escape closes, and pointer selection matches the keyboard result. Acceptance inserts readable `#Name` text plus durable type/ID/label offsets in the existing chat payload; sent and reloaded comments render the correct product icon and open the same in-app deep route without a page reload. Ordinary composer edits remap intact references and discard a reference edited through its label. This adds no table, placement, or migration.
+ED93 - An editable JSON/Tiptap attachment image uses the hand-selection cursor and direct manipulation instead of a detached labeled action strip. Its body remains a native movable ProseMirror node; selection shows eight edge/corner resize handles, an image-anchored bottom-right download icon, and icon-only comment/create-node actions when supported. Double-click uses the shared fullscreen image modal, and native Delete/Backspace removes the selected image. Selecting, dragging without a drop, opening controls, or previewing does not create a document operation; committed move, resize, or deletion does.
+ED94 - PostgreSQL realtime audience resolution recognizes Project resources for exact Project editor scopes. Every Project JSON/HTML editor event rechecks the current candidate subscribers through the same effective Edit-access function as Node and Logic Gate events, so authorized remote Project edits fan out immediately without refresh while revoked, inaccessible, missing, and cross-company targets fail closed.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -258,6 +261,7 @@ Business logic covered:
 - ED9
 - ED22
 - ED56
+- ED92
 
 Given:
 - A user opens a chat pane inside a node or project text block.
@@ -273,6 +277,7 @@ Expected:
 - The shared palette uses opaque, dark profile backgrounds with readable white foregrounds and dark borders. Profile/avatar color remains visible on ordinary, hovered, keyboard-active, and selected suggestion rows and must meet the shared minimum contrast test.
 - A keyboard-active rich-editor row adds only a translucent tint of that user's profile color plus the existing active rail; it does not replace the opaque full-color avatar. Chat may retain its existing active-row treatment, but its avatar also remains opaque and full-color.
 - Missing optional profile data uses the shared deterministic fallback presentation rather than an uncolored or broken row.
+- Typing `#` in the shared Node/Project chat composer searches the same permission-filtered Nodes, Logic Gates, and Projects inventory as the editor; selection stores durable entity identity and sent/reloaded comments render a clickable in-app entity chip.
 
 ### Scenario ED-S5: Node And Project Email Picker Is Attach Only
 
@@ -1146,6 +1151,7 @@ Business logic covered:
 - `docs/tests/attachments.md` ATT6
 - `docs/tests/attachments.md` ATT25
 - ED55
+- ED93
 
 Given:
 - Any unified rich-editor surface contains a resizable image frame.
@@ -1153,6 +1159,8 @@ Given:
 
 Expected:
 - A single click selects the image and places a collapsed caret immediately before its frame.
+- The image body uses the hand-selection cursor, remains draggable as one ProseMirror node, and exposes all eight edge/corner resize handles while selected.
+- The old detached Move/Download/Preview/Comment/Create Node/alignment/resize/delete label strip is absent; selected-image actions are the frame-anchored download icon plus supported icon-only comment/create-node actions.
 - Typing or pressing Space inserts content before the image.
 - Dragging the image body still moves it, dragging an edge/corner still resizes it, and Delete/Backspace still removes a selected image.
 - Double-click mounts the final dark fullscreen overlay directly, without a transient panel/outline or geometry jump; its bright-red top-right close X is an accessible button and closes the preview.
@@ -1296,14 +1304,17 @@ Business logic covered:
 - ED32
 - ED66
 - ED74
+- ED92
 
 Given:
 - A company user types `@Ad` or `!Ad` in a unified rich editor or chat composer and presses Tab while Ada is highlighted.
+- The user types `#Pro` in a Node or Project chat composer, selects a Project, sends the comment, and reloads it.
 - The user selects one text range and presses the font-size plus control more than once.
 - The user pastes an ordered/alphanumeric list, presses Enter at the end of a row, then presses Tab in the new row.
 
 Expected:
 - Rich editors insert the existing atomic mention/urgent-mention span, every unified adapter can open the people picker, and chat keeps its existing mentioned-principal model while visibly painting the accepted token as a normal or urgent entity chip. The shared chat overlay does not change the token's text metrics or inline advance, so the native collapsed caret remains after the accepted mention and subsequent typing paints at that same position.
+- The chat `#` picker offers permission-filtered Nodes, Logic Gates, and Projects, stores the selected type/ID/label separately from readable `#Name` text, and the sent/reloaded chip opens the exact in-app entity route.
 - Every font-size click increases the same selected text again, without stale boundary reads or empty nested font wrappers, and the numeric readout remains compact.
 - Enter leaves the caret in the new pasted ordered-list row; Tab indents that new row under its previous sibling and keeps the caret there instead of moving back to or indenting the original row.
 

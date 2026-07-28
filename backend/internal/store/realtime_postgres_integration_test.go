@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,34 @@ func countPostgresRows(t *testing.T, db *sql.DB, query string, args ...any) int 
 		t.Fatal(err)
 	}
 	return count
+}
+
+func TestPostgresRealtimeProjectAudienceResolution(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Realtime project audience")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	user, err := repo.UpsertAuthUser("realtime-pg-project-user", "realtime-pg-project-user@example.test", "Realtime Project User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("realtime-pg-project-user", company.CompanyID, "company_admin"); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateProject(ProjectInput{CompanyID: company.CompanyID, Name: "Live project editor"})
+	if err != nil || created.Project == nil {
+		t.Fatalf("CreateProject result=%+v err=%v", created, err)
+	}
+
+	exists, userIDs, err := repo.ResolveEffectiveUsersForResource(
+		context.Background(), company.CompanyID, EntityTypeProject, created.Project.ProjectID,
+		EntityPermissionEdit, []string{user.UserID},
+	)
+	if err != nil || !exists || len(userIDs) != 1 || userIDs[0] != user.UserID {
+		t.Fatalf("project audience exists=%v userIDs=%v err=%v", exists, userIDs, err)
+	}
 }
 
 func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {

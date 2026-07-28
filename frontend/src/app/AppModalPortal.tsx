@@ -111,6 +111,7 @@ export function useAppFloatingMenuDismissal(
   containerRef: React.RefObject<HTMLElement | null>,
   onClose: () => void,
   additionalContainerRef?: React.RefObject<HTMLElement | null>,
+  secondaryAdditionalContainerRef?: React.RefObject<HTMLElement | null>,
 ): void {
   const onCloseRef = React.useRef(onClose);
   onCloseRef.current = onClose;
@@ -126,6 +127,7 @@ export function useAppFloatingMenuDismissal(
       if (
         !containerRef.current?.contains(target)
         && !additionalContainerRef?.current?.contains(target)
+        && !secondaryAdditionalContainerRef?.current?.contains(target)
       ) onCloseRef.current();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -148,7 +150,7 @@ export function useAppFloatingMenuDismissal(
       targetDocument.removeEventListener("pointerdown", closeOnPointerDown, true);
       targetDocument.removeEventListener("keydown", closeOnEscape, true);
     };
-  }, [additionalContainerRef, containerRef, open]);
+  }, [additionalContainerRef, containerRef, open, secondaryAdditionalContainerRef]);
 }
 
 function elementIsVisibleForModalFocus(element: HTMLElement): boolean {

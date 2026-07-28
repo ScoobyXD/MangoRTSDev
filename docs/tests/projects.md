@@ -68,6 +68,7 @@ P56 - Each Project/Logic Gate pair has its own stable relationship row and relat
 P57 - Removing a Node relationship does not silently remove the Logic Gate's relationship from that Project. Logic Gate relationships are persistent Project associations, including when no related Node is currently visible in that Project. A rejected cross-Project Node addition changes neither the Node relationship nor either Project's Logic Gate relationships.
 P58 - Users do not add a Logic Gate directly to a Project. The supported command adds a Node, verifies that Node's single Logic Gate assignment, and brings that Logic Gate into the Project implicitly.
 P59 - Node-based Project context in My Work, Updates, and other derived views comes only from that Node's direct Project relationship. A Logic Gate's membership in multiple Projects must never make all Nodes in that Logic Gate appear in every one of those Projects.
+P60 - Production PostgreSQL realtime audience resolution treats a Project as a supported exact editor resource. Each Project editor publication resolves only current effective Edit recipients for that Project, so authorized remote text-box changes stream promptly without refresh and revoked, missing, or cross-company targets receive nothing.
 
 ## Scenarios
 
@@ -329,6 +330,7 @@ Business logic covered:
 - P41
 - P42
 - P43
+- P60
 
 Given:
 - Two authorized users or tabs edit one exact Project text box while another Project text box and unrelated scopes are mounted.
@@ -338,6 +340,7 @@ Given:
 Expected:
 - Each real document mutation becomes a bounded HTML patch; title/attachment metadata uses a separate body-free PATCH and cannot overwrite document content.
 - Both exact subscribers converge through server-ordered revisions without refresh or echo-saving, while the other text box and unrelated scopes receive nothing.
+- PostgreSQL resolves the Project as the exact publication resource and rechecks each candidate's current effective Edit access instead of rejecting or retrying the event as an unsupported resource type.
 - Reconnect subscribes first, loads the full canonical snapshot/ETag, orders buffered events, reapplies/resubmits stable pending operations, and returns green only after acknowledgement.
 - Duplicate operation/event delivery is harmless; a gap requests a full snapshot rather than showing a merge conflict.
 - Delete commits an exact tombstone after the intended local flush, unsubscribes the terminal document, and a late operation cannot recreate it.

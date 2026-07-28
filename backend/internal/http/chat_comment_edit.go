@@ -16,11 +16,20 @@ var (
 	errChatCommentInvalid      = errors.New("chat comment invalid")
 )
 
+type chatCommentEntityLink struct {
+	Start      int    `json:"start"`
+	End        int    `json:"end"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Label      string `json:"label"`
+}
+
 type chatCommentEditRequest struct {
-	CompanyID         string   `json:"company_id"`
-	Message           *string  `json:"message"`
-	MentionedUserIDs  []string `json:"mentioned_user_ids"`
-	MentionedGroupIDs []string `json:"mentioned_group_ids"`
+	CompanyID         string                   `json:"company_id"`
+	Message           *string                  `json:"message"`
+	EntityLinks       *[]chatCommentEntityLink `json:"entity_links"`
+	MentionedUserIDs  []string                 `json:"mentioned_user_ids"`
+	MentionedGroupIDs []string                 `json:"mentioned_group_ids"`
 }
 
 func uniqueChatCommentIDs(values []string) []string {
@@ -35,6 +44,25 @@ func uniqueChatCommentIDs(values []string) []string {
 			continue
 		}
 		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func cleanChatCommentEntityLinks(values []chatCommentEntityLink) []chatCommentEntityLink {
+	result := make([]chatCommentEntityLink, 0, len(values))
+	for _, value := range values {
+		value.EntityType = strings.TrimSpace(value.EntityType)
+		value.EntityID = strings.TrimSpace(value.EntityID)
+		value.Label = strings.TrimSpace(value.Label)
+		if value.Start < 0 || value.End <= value.Start || value.EntityID == "" || value.Label == "" {
+			continue
+		}
+		switch value.EntityType {
+		case "node", "logic_gate", "project":
+		default:
+			continue
+		}
 		result = append(result, value)
 	}
 	return result
@@ -61,6 +89,7 @@ func editChatCommentInformation(
 	information string,
 	actorUserID string,
 	message *string,
+	entityLinks *[]chatCommentEntityLink,
 	mentionedUserIDs []string,
 	mentionedGroupIDs []string,
 ) (string, string, error) {
@@ -85,6 +114,9 @@ func editChatCommentInformation(
 		return "", "", errChatCommentInvalid
 	}
 	payload["message"] = cleanMessage
+	if entityLinks != nil {
+		payload["entity_links"] = cleanChatCommentEntityLinks(*entityLinks)
+	}
 	payload["mentioned_user_ids"] = uniqueChatCommentIDs(mentionedUserIDs)
 	payload["mentioned_group_ids"] = uniqueChatCommentIDs(mentionedGroupIDs)
 	payload["edited_timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
@@ -155,7 +187,7 @@ func (s *Server) handleNodeChatCommentEdit(w http.ResponseWriter, r *http.Reques
 		writeChatCommentEditError(w, errChatCommentNotFound, "failed_to_load_chat_comment")
 		return
 	}
-	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actorUserID, req.Message, req.MentionedUserIDs, req.MentionedGroupIDs)
+	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actorUserID, req.Message, req.EntityLinks, req.MentionedUserIDs, req.MentionedGroupIDs)
 	if err != nil {
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
 		return
@@ -219,7 +251,7 @@ func (s *Server) handleProjectChatCommentEdit(w http.ResponseWriter, r *http.Req
 		writeChatCommentEditError(w, errChatCommentNotFound, "failed_to_load_chat_comment")
 		return
 	}
-	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actor.User.UserID, req.Message, req.MentionedUserIDs, req.MentionedGroupIDs)
+	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actor.User.UserID, req.Message, req.EntityLinks, req.MentionedUserIDs, req.MentionedGroupIDs)
 	if err != nil {
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
 		return
