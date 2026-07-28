@@ -10,6 +10,7 @@ import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
 import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
+import { mentionUserProfileColor } from "../editorMentions.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -185,12 +186,49 @@ export const MangoBlockIdentity = Extension.create({
   },
 });
 
+type MangoMentionSuggestionItem = {
+  id: string;
+  userId: string;
+  label: string;
+  email?: string;
+};
+
+function mentionInitials(label: string): string {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length === 1 ? words[0].slice(0, 2) : `${words[0][0]}${words[words.length - 1][0]}`).toUpperCase();
+}
+
+function positionSuggestionMenu(menu: HTMLDivElement, clientRect?: (() => DOMRect | null) | null) {
+  const rect = clientRect?.();
+  if (!rect) return;
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const menuWidth = Math.max(menu.offsetWidth, 280);
+  const left = Math.max(8, Math.min(rect.left, viewportWidth - menuWidth - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(rect.bottom + 7)}px`;
+  menu.style.maxHeight = `${Math.max(88, viewportHeight - rect.bottom - 16)}px`;
+  menu.dataset.side = "bottom";
+}
+
+function createSuggestionMenu(label: string, dataAttribute: string): HTMLDivElement {
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", label);
+  menu.setAttribute(dataAttribute, "true");
+  menu.className = "mango-tiptap-suggestion-menu";
+  menu.style.position = "fixed";
+  menu.style.zIndex = "2100";
+  return menu;
+}
 export type MangoTiptapExtensionOptions = {
   editable: boolean;
 	collaboration?: boolean;
   onImageFiles?: (files: File[], position: number | null) => void;
   attachmentImageExtension?: AnyExtension;
   mentionUsers?: ReadonlyArray<{ userID: string; name: string; email?: string }>;
+  getMentionUsers?: () => ReadonlyArray<{ userID: string; name: string; email?: string }>;
   searchEntityLinks?: (query: string) => Promise<EditorEntityLink[]>;
   onEntityLinkSearchError?: (message: string) => void;
 };
@@ -259,10 +297,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         char: kind === "urgent" ? "!" : "@",
         items: ({ query }) => {
           const normalized = query.trim().toLowerCase();
-          return (options.mentionUsers ?? [])
+          const users = options.getMentionUsers?.() ?? options.mentionUsers ?? [];
+          return users
             .filter((user) => !normalized || user.name.toLowerCase().includes(normalized) || user.email?.toLowerCase().includes(normalized))
             .slice(0, 20)
-            .map((user) => ({ id: user.userID, userId: user.userID, label: user.name }));
+            .map((user) => ({ id: user.userID, userId: user.userID, label: user.name, email: user.email }));
         },
         command: ({ editor, range, props }) => {
           const value = props as { userId?: string; id?: string; label?: string };
@@ -274,7 +313,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         render: () => {
           let menu: HTMLDivElement | null = null;
           let selectedIndex = 0;
-          let current: { items: Array<{ label?: string; userId?: string }>; command: (item: unknown) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
+          let current: { items: MangoMentionSuggestionItem[]; command: (item: unknown) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
           const close = () => {
             menu?.remove();
             menu = null;
@@ -290,38 +329,44 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               button.type = "button";
               button.setAttribute("role", "option");
               button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
-              button.textContent = item.label || item.userId || "User";
-              Object.assign(button.style, {
-                display: "block", width: "100%", border: "0", borderRadius: "5px",
-                padding: "6px 8px", textAlign: "left", cursor: "pointer",
-                background: index === selectedIndex ? "#e0f2fe" : "#ffffff",
+              button.className = "mango-tiptap-suggestion-option mango-tiptap-suggestion-option--person";
+              button.dataset.mangoMentionKind = kind;
+              const color = mentionUserProfileColor({
+                user_id: item.userId,
+                display_name: item.label,
+                email: item.email,
               });
+              const avatar = document.createElement("span");
+              avatar.className = "mango-tiptap-suggestion-avatar";
+              avatar.textContent = mentionInitials(item.label);
+              avatar.style.background = color.background;
+              avatar.style.color = color.foreground;
+              avatar.style.borderColor = color.border;
+              const details = document.createElement("span");
+              details.className = "mango-tiptap-suggestion-copy";
+              const label = document.createElement("span");
+              label.className = "mango-tiptap-suggestion-label";
+              label.textContent = item.label;
+              const email = document.createElement("span");
+              email.className = "mango-tiptap-suggestion-meta";
+              email.textContent = item.email || (kind === "urgent" ? "Urgent mention" : "Mention");
+              details.append(label, email);
+              button.append(avatar, details);
               button.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 current?.command(item);
               });
               menu?.appendChild(button);
             });
-            const rect = current.clientRect?.();
-            if (rect) {
-              menu.style.left = `${Math.round(rect.left)}px`;
-              menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-            }
+            positionSuggestionMenu(menu, current.clientRect);
           };
           return {
             onStart: (props) => {
               if (typeof document === "undefined") return;
               close();
               current = props as unknown as typeof current;
-              menu = document.createElement("div");
-              menu.setAttribute("role", "listbox");
-              menu.setAttribute("aria-label", kind === "urgent" ? "Urgently mention people" : "Mention people");
-              menu.setAttribute("data-mango-tiptap-mention-menu", "true");
-              Object.assign(menu.style, {
-                position: "fixed", zIndex: "2100", minWidth: "180px", maxHeight: "240px",
-                overflowY: "auto", padding: "4px", border: "1px solid #cbd5e1",
-                borderRadius: "8px", background: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,.18)",
-              });
+              menu = createSuggestionMenu(kind === "urgent" ? "Urgently mention people" : "Mention people", "data-mango-tiptap-mention-menu");
+              menu.classList.add(`mango-tiptap-suggestion-menu--${kind}`);
               document.body.appendChild(menu);
               paint();
             },
@@ -465,45 +510,34 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               button.setAttribute("role", "option");
               button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
               button.dataset.mangoEditorEntityType = item.entityType;
-              Object.assign(button.style, {
-                display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto", alignItems: "center", gap: "7px",
-                width: "100%", border: "0", borderRadius: "6px", padding: "7px 8px", textAlign: "left",
-                cursor: "pointer", background: index === selectedIndex ? "#e0f2fe" : "#ffffff", color: "#0f172a",
-              });
+              button.className = "mango-tiptap-suggestion-option mango-tiptap-suggestion-option--entity";
               const icon = createEditorEntityIconElement(document, item.entityType);
+              icon.classList.add("mango-tiptap-suggestion-product-icon");
+              const details = document.createElement("span");
+              details.className = "mango-tiptap-suggestion-copy";
               const label = document.createElement("span");
+              label.className = "mango-tiptap-suggestion-label";
               label.textContent = item.label;
-              label.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750";
               const type = document.createElement("span");
+              type.className = "mango-tiptap-suggestion-meta";
               type.textContent = editorEntityTypeLabel(item.entityType);
-              type.style.cssText = "font-size:10px;color:#64748b;font-weight:700";
-              button.append(icon, label, type);
+              details.append(label, type);
+              button.append(icon, details);
               button.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 current?.command(item);
               });
               menu?.appendChild(button);
             });
-            const rect = current.clientRect?.();
-            if (rect) {
-              menu.style.left = `${Math.round(rect.left)}px`;
-              menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-            }
+            positionSuggestionMenu(menu, current.clientRect);
           };
           return {
             onStart: (props) => {
               if (typeof document === "undefined") return;
               close();
               current = props as unknown as typeof current;
-              menu = document.createElement("div");
-              menu.setAttribute("role", "listbox");
-              menu.setAttribute("aria-label", "Link a Node, Logic Gate, or Project");
-              menu.setAttribute("data-mango-tiptap-entity-menu", "true");
-              Object.assign(menu.style, {
-                position: "fixed", zIndex: "2100", minWidth: "280px", maxWidth: "min(420px, calc(100vw - 16px))",
-                maxHeight: "280px", overflowY: "auto", padding: "4px", border: "1px solid #cbd5e1",
-                borderRadius: "8px", background: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,.18)",
-              });
+              menu = createSuggestionMenu("Link a Node, Logic Gate, or Project", "data-mango-tiptap-entity-menu");
+              menu.classList.add("mango-tiptap-suggestion-menu--entity");
               document.body.appendChild(menu);
               paint();
             },

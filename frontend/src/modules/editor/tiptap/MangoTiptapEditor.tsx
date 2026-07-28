@@ -177,7 +177,7 @@ function addedMentionDeltas(steps: readonly { toJSON: () => unknown }[]): MangoT
   return mentions;
 }
 
-type AuthenticatedImageProps = {
+export type AuthenticatedImageProps = {
   attributes: MangoStaticAttachmentImageProps;
   attachmentContext?: EditorImageAttachmentContext;
   selected?: boolean;
@@ -219,7 +219,7 @@ const IMAGE_ICON_BUTTON_STYLE: React.CSSProperties = {
   boxShadow: "0 4px 14px rgba(15,23,42,.24)",
 };
 
-const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
+export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   attributes,
   attachmentContext,
   selected = false,
@@ -415,6 +415,22 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
     };
   };
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const openPreview = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("button") || !attachmentContext || !attributes.attachmentId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPreviewOpen(true);
+    };
+    root.addEventListener("dblclick", openPreview, true);
+    return () => {
+      root.removeEventListener("dblclick", openPreview, true);
+    };
+  }, [attachmentContext, attributes.attachmentId]);
+
   const downloadImage = useCallback(() => {
     if (!attachmentContext) return;
     void downloadMangoAttachment({
@@ -434,19 +450,12 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         if ((event.target as HTMLElement).closest?.("button")) return;
         onSelect?.();
       }}
-      onDoubleClick={(event) => {
-        if ((event.target as HTMLElement).closest?.("button")) return;
-        if (!attachmentContext || !attributes.attachmentId) return;
-        event.preventDefault();
-        event.stopPropagation();
-        onSelect?.();
-        setPreviewOpen(true);
-      }}
       style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0", cursor: "pointer" }}
     >
       <div
         ref={frameRef}
         data-mango-tiptap-image-frame="true"
+        data-drag-handle={editable ? "true" : undefined}
         style={{ position: "relative", display: "inline-block", maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)", lineHeight: 0, cursor: "pointer" }}
       >
         {objectURL ? (
@@ -459,6 +468,8 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
               display: "block",
               maxWidth: "100%",
               width: resizingDimensions?.width || attributes.displayWidth || attributes.width || undefined,
+              minWidth: 32,
+              minHeight: 32,
               height: resizingDimensions?.height || attributes.displayHeight || undefined,
               objectFit: "contain",
               borderRadius: 6,
@@ -476,7 +487,7 @@ const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         )}
         {selected && (
           <>
-            <div contentEditable={false} style={{ position: "absolute", right: 6, top: 6, zIndex: 3, display: "flex", gap: 5 }}>
+            <div data-mango-tiptap-image-actions="true" contentEditable={false} style={{ position: "absolute", right: 0, top: -8, transform: "translateY(-100%)", zIndex: 5, display: "flex", gap: 5 }}>
               {editable && onImageChatRequest && (
                 <button
                   type="button"
@@ -646,6 +657,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const visibleRef = useRef(false);
   const attachmentContextRef = useRef(attachmentContext);
   const imageActionsRef = useRef({ onImageChatRequest, onImageNodeRequest });
+  const mentionUsersRef = useRef(normalizedMentionUsers(mentionUsers));
+  mentionUsersRef.current = normalizedMentionUsers(mentionUsers);
   const currentDocumentRef = useRef(initial.document);
   const currentSerializedRef = useRef("");
   if (!currentSerializedRef.current) {
@@ -1071,14 +1084,14 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     editable,
     collaboration: usesYjsCollaboration,
     attachmentImageExtension: attachmentExtension,
-    mentionUsers: normalizedMentionUsers(mentionUsers),
+    getMentionUsers: () => mentionUsersRef.current,
     searchEntityLinks: searchEntityLinksForEditor,
     onEntityLinkSearchError: (message) => {
       setError(message);
       callbacksRef.current.onError?.(message);
     },
     onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
-  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers, searchEntityLinksForEditor, usesYjsCollaboration]);
+  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, searchEntityLinksForEditor, usesYjsCollaboration]);
 
   const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
 

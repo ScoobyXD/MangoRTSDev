@@ -146,16 +146,23 @@ await attachmentInputs.nth(1).setInputFiles({
   mimeType: "image/png",
   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2pWQAAAAASUVORK5CYII=", "base64"),
 });
-await page.getByText(inlineImageFilename, { exact: true }).waitFor({ timeout: 30_000 });
-await page.locator(".node-v2-inline-image").last().waitFor({ state: "attached", timeout: 30_000 });
-await page.getByRole("button", { name: `Select image ${inlineImageFilename}` }).click();
-const imageActions = page.locator(".node-v2-inline-image.is-selected .node-v2-inline-image-actions");
-await imageActions.getByRole("button", { name: "Preview" }).click();
-await page.getByRole("dialog", { name: `Image preview: ${inlineImageFilename}` }).waitFor({ state: "visible" });
+const inlineImage = page.locator(".node-v2-inline-image").last();
+await inlineImage.waitFor({ state: "attached", timeout: 30_000 });
+await inlineImage.getByRole("img", { name: inlineImageFilename }).waitFor({ state: "visible", timeout: 30_000 });
+const imageFrame = inlineImage.locator('[data-mango-tiptap-image-frame="true"]');
+await imageFrame.click();
+await inlineImage.locator('[data-mango-tiptap-image-actions="true"]').waitFor({ state: "visible" });
+assert.equal(await inlineImage.getByRole("button", { name: "Comment on image" }).count(), 1);
+assert.equal(await inlineImage.getByRole("button", { name: "Create node from image" }).count(), 1);
+assert.equal(await inlineImage.locator('[data-mango-tiptap-image-resize-handle]').count(), 8);
+const frameBox = await imageFrame.boundingBox();
+const actionBox = await inlineImage.locator('[data-mango-tiptap-image-actions="true"]').boundingBox();
+assert.ok(frameBox && actionBox && actionBox.y + actionBox.height <= frameBox.y, "image actions render above the image frame");
+await imageFrame.getByRole("img", { name: inlineImageFilename }).dispatchEvent("dblclick");
+await page.getByRole("dialog", { name: `Preview ${inlineImageFilename}` }).waitFor({ state: "visible" });
 await page.getByRole("button", { name: "Close image preview" }).click();
-await imageActions.getByRole("button", { name: "Align left" }).click();
 const downloadPromise = page.waitForEvent("download");
-await imageActions.getByRole("button", { name: "Download" }).click();
+await inlineImage.getByRole("button", { name: "Download image" }).click();
 assert.equal((await downloadPromise).suggestedFilename(), inlineImageFilename);
 await waitSaved(page);
 
