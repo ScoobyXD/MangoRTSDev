@@ -48,10 +48,10 @@ const processes = [];
 let pgStarted = false;
 let browser;
 let stopping = false;
-let windowsGoToolchainFallback = false;
+const useWindowsGoToolchainRunner = windows;
 
 function run(label, file, args, options = {}) {
-  if (windowsGoToolchainFallback && file === migrateExe) {
+  if (useWindowsGoToolchainRunner && file === migrateExe) {
     return run(label, "go", ["run", "./cmd/miraeopus-migrate", ...args], options);
   }
   process.stdout.write("\n--- " + label + " ---\n");
@@ -73,11 +73,6 @@ function run(label, file, args, options = {}) {
       const transientLaunchBlock = disposableWindowsExecutable
         && cause?.status === null
         && (cause?.code === "UNKNOWN" || cause?.code === "EPERM" || cause?.code === "EBUSY");
-      if (transientLaunchBlock && file === migrateExe && attempt >= 3) {
-        windowsGoToolchainFallback = true;
-        process.stderr.write("Windows Application Control still blocks the migration executable; using the trusted Go toolchain fallback.\n");
-        return run(label, "go", ["run", "./cmd/miraeopus-migrate", ...args], options);
-      }
       if (!transientLaunchBlock || attempt >= 19) throw cause;
       if (attempt === 0) process.stderr.write("Windows temporarily blocked the disposable test executable; retrying.\n");
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
@@ -197,7 +192,7 @@ async function stopProcess(record) {
 }
 
 function startAPIProcess(label, options) {
-  if (windowsGoToolchainFallback) {
+  if (useWindowsGoToolchainRunner) {
     return startProcess(label, "go", ["run", "./cmd/miraeopus-api"], {
       ...options,
       terminateTree: true,
