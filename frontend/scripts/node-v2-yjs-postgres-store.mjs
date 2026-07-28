@@ -37,22 +37,24 @@ function encodeDurableSnapshot(document) {
   return Buffer.from(Y.encodeSnapshot(Y.snapshot(document))).toString("base64");
 }
 
-export function formatNodeTextboxDocumentName({ companyId, nodeId, textboxId }) {
+export function formatNodeTextboxDocumentName({ companyId, nodeId, textboxId, collaborationEpoch }) {
   return [
     DOCUMENT_PREFIX,
     assertUuid(companyId, "company_id"),
     assertUuid(nodeId, "node_id"),
     assertUuid(textboxId, "textbox_id"),
+    assertUuid(collaborationEpoch, "collaboration_epoch"),
   ].join(":");
 }
 
 export function parseNodeTextboxDocumentName(documentName) {
-  const [prefix, companyId, nodeId, textboxId, ...extra] = String(documentName).split(":");
+  const [prefix, companyId, nodeId, textboxId, collaborationEpoch, ...extra] = String(documentName).split(":");
   if (prefix !== DOCUMENT_PREFIX || extra.length > 0) throw new Error("invalid_node_textbox_document_name");
   return {
     companyId: assertUuid(companyId, "company_id"),
     nodeId: assertUuid(nodeId, "node_id"),
     textboxId: assertUuid(textboxId, "textbox_id"),
+    collaborationEpoch: assertUuid(collaborationEpoch, "collaboration_epoch"),
   };
 }
 
@@ -151,8 +153,9 @@ export class NodeV2YjsPostgresStore {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null`,
-        [identity.companyId, identity.nodeId, identity.textboxId],
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null`,
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch],
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -178,8 +181,9 @@ export class NodeV2YjsPostgresStore {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null`,
-        [identity.companyId, identity.nodeId, identity.textboxId],
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null`,
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch],
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -206,7 +210,7 @@ export class NodeV2YjsPostgresStore {
     }
   }
 
-  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null, documentJson = null } = {}) {
+  async appendUpdate(documentName, update, { updateId = randomUUID(), clientId, actorUserId = null } = {}) {
     const identity = parseNodeTextboxDocumentName(documentName);
     const payload = asUint8Array(update);
     if (payload.byteLength === 0) throw new Error("node_v2_yjs_empty_update");
@@ -231,28 +235,12 @@ export class NodeV2YjsPostgresStore {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null
           for update`,
-        [identity.companyId, identity.nodeId, identity.textboxId],
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch],
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
-      if (documentJson) {
-        // Match the database trigger's row-lock-then-owner-lock order. Keeping
-        // this order prevents a durable append and compaction from deadlocking.
-        await client.query(
-          "select pg_advisory_xact_lock(hashtextextended('editor-owner-text:' || $1 || ':node:' || $2, 0))",
-          [identity.companyId, identity.nodeId],
-        );
-        const limitResult = await client.query(
-          `select coalesce(sum(octet_length(document_json::text)) filter (
-                   where deleted_timestamp is null and textbox_id <> $3), 0)
-                  + octet_length($4::jsonb::text) <= 1073741824 as within_limit
-             from node_textboxes
-            where company_id = $1 and node_id = $2`,
-          [identity.companyId, identity.nodeId, identity.textboxId, JSON.stringify(documentJson)],
-        );
-        if (limitResult.rows[0]?.within_limit !== true) throw new Error("editor_owner_text_limit_exceeded");
-      }
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
       const durableHeadBefore = numericSequence(textboxResult.rows[0].latest_update_sequence, "latest_update_sequence");
       let latestUpdateSequence = durableHeadBefore;
@@ -381,9 +369,10 @@ export class NodeV2YjsPostgresStore {
       const textboxResult = await client.query(
         `select collaboration_epoch, latest_update_sequence, materialized_through_sequence
            from node_textboxes
-          where company_id = $1 and node_id = $2 and textbox_id = $3 and deleted_timestamp is null
+          where company_id = $1 and node_id = $2 and textbox_id = $3
+            and collaboration_epoch = $4 and deleted_timestamp is null
           for update`,
-        [identity.companyId, identity.nodeId, identity.textboxId],
+        [identity.companyId, identity.nodeId, identity.textboxId, identity.collaborationEpoch],
       );
       if (textboxResult.rowCount !== 1) throw new Error("node_v2_yjs_textbox_not_found");
       const collaborationEpoch = textboxResult.rows[0].collaboration_epoch;
@@ -506,35 +495,43 @@ export class NodeV2YjsPostgresExtension {
     store,
     operationCountThreshold = 512,
     updateBytesThreshold = 512 * 1024,
-    materializationDelayMs = 1_500,
+    materializationDelayMs = 30_000,
+    changeBatchDelayMs = 75,
     authorizeUpdate = async () => {},
-    validateDocument = async () => {},
     onAcknowledgement = async () => {},
     onPersistenceError = () => {},
     onCompactionError = () => {},
+    acceptsDocument = () => true,
   }) {
-    if (!(store instanceof NodeV2YjsPostgresStore)) throw new Error("node_v2_yjs_store_required");
+    if (!store || typeof store.loadDocument !== "function" || typeof store.appendUpdate !== "function" || typeof store.compactDocument !== "function") {
+      throw new Error("yjs_store_required");
+    }
     this.store = store;
     this.operationCountThreshold = operationCountThreshold;
     this.updateBytesThreshold = updateBytesThreshold;
     this.materializationDelayMs = materializationDelayMs;
+    this.changeBatchDelayMs = changeBatchDelayMs;
     this.authorizeUpdate = authorizeUpdate;
-    this.validateDocument = validateDocument;
     this.onAcknowledgement = onAcknowledgement;
     this.onPersistenceError = onPersistenceError;
     this.onCompactionError = onCompactionError;
+    this.acceptsDocument = acceptsDocument;
     this.updateQueues = new Map();
     this.compactions = new Map();
     this.materializationTimers = new Map();
+    this.pendingChangeBatches = new Map();
     this.failedDocumentInstances = new WeakSet();
   }
 
   async onLoadDocument({ document, documentName }) {
+    if (!this.acceptsDocument(documentName)) return;
     const durable = await this.store.loadDocument(documentName);
     Y.applyUpdate(document, durable.mergedUpdate);
   }
 
   async afterUnloadDocument({ documentName }) {
+    if (!this.acceptsDocument(documentName)) return;
+    this.#flushChangeBatch(documentName);
     const timer = this.materializationTimers.get(documentName);
     if (timer) {
       clearTimeout(timer);
@@ -551,23 +548,59 @@ export class NodeV2YjsPostgresExtension {
   }
 
   onChange(payload) {
-    const prior = this.updateQueues.get(payload.documentName) ?? Promise.resolve();
+    if (!this.acceptsDocument(payload.documentName)) return;
+    return new Promise((resolve) => {
+      const clientId = payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`;
+      const actorUserId = payload.context?.actorUserId ?? null;
+      const groupKey = `${clientId}:${actorUserId ?? "anonymous"}`;
+      const existing = this.pendingChangeBatches.get(payload.documentName);
+      if (existing && existing.groupKey !== groupKey) this.#flushChangeBatch(payload.documentName);
+
+      let batch = this.pendingChangeBatches.get(payload.documentName);
+      if (!batch) {
+        batch = {
+          groupKey,
+          clientId,
+          actorUserId,
+          entries: [],
+          bytes: 0,
+          timer: setTimeout(() => this.#flushChangeBatch(payload.documentName), this.changeBatchDelayMs),
+        };
+        this.pendingChangeBatches.set(payload.documentName, batch);
+      }
+      batch.entries.push({ payload, resolve });
+      batch.bytes += payload.update.byteLength;
+      if (batch.bytes >= this.updateBytesThreshold) this.#flushChangeBatch(payload.documentName);
+    });
+  }
+
+  #flushChangeBatch(documentName) {
+    const batch = this.pendingChangeBatches.get(documentName);
+    if (!batch) return this.updateQueues.get(documentName) ?? Promise.resolve();
+    clearTimeout(batch.timer);
+    this.pendingChangeBatches.delete(documentName);
+    const representative = batch.entries[batch.entries.length - 1].payload;
+    const mergedUpdate = batch.entries.length === 1
+      ? batch.entries[0].payload.update
+      : Y.mergeUpdates(batch.entries.map((entry) => entry.payload.update));
+    const prior = this.updateQueues.get(documentName) ?? Promise.resolve();
     const current = prior
       .catch(() => {})
       .then(async () => {
         // Once one write fails, later changes from the same Hocuspocus Y.Doc may depend on
         // non-durable structs. Drop that old session and let reconnect replay from PostgreSQL.
-        if (this.failedDocumentInstances.has(payload.document)) return;
+        if (this.failedDocumentInstances.has(representative.document)) return;
         try {
-          await this.authorizeUpdate(payload);
-          const materialized = await this.validateDocument(payload.document, payload);
-          const acknowledgement = await this.store.appendUpdate(payload.documentName, payload.update, {
-            clientId: payload.context?.clientId || `hocuspocus:${payload.socketId || "server"}`,
-            actorUserId: payload.context?.actorUserId ?? null,
-            documentJson: materialized?.documentJson ?? null,
+          await this.authorizeUpdate(representative);
+          const acknowledgement = await this.store.appendUpdate(documentName, mergedUpdate, {
+            clientId: batch.clientId,
+            actorUserId: batch.actorUserId,
           });
-          payload.connection?.sendStateless(JSON.stringify(acknowledgement));
-          await this.onAcknowledgement(acknowledgement, payload);
+          const acknowledgementJSON = JSON.stringify(acknowledgement);
+          for (const connection of new Set(batch.entries.map((entry) => entry.payload.connection).filter(Boolean))) {
+            connection.sendStateless(acknowledgementJSON);
+          }
+          await this.onAcknowledgement(acknowledgement, representative);
           if (
             acknowledgement.uncheckpointed_update_count >= this.operationCountThreshold ||
             acknowledgement.uncheckpointed_update_bytes >= this.updateBytesThreshold
@@ -575,16 +608,16 @@ export class NodeV2YjsPostgresExtension {
             const reason = acknowledgement.uncheckpointed_update_count >= this.operationCountThreshold
               ? "operation_count"
               : "update_bytes";
-            this.#scheduleCompaction(payload.documentName, reason);
+            this.#scheduleCompaction(documentName, reason);
           } else {
-            this.#scheduleMaterialization(payload.documentName);
+            this.#scheduleMaterialization(documentName);
           }
         } catch (error) {
-          if (payload.document && typeof payload.document === "object") {
-            this.failedDocumentInstances.add(payload.document);
+          if (representative.document && typeof representative.document === "object") {
+            this.failedDocumentInstances.add(representative.document);
           }
           try {
-            await this.onPersistenceError(error, payload);
+            await this.onPersistenceError(error, representative);
           } catch {
             // Observability hooks must not prevent the durability failure response and disconnect.
           }
@@ -592,18 +625,24 @@ export class NodeV2YjsPostgresExtension {
             const code = error instanceof Error && error.message.includes("editor_owner_text_limit_exceeded")
               ? "editor_owner_text_limit_exceeded"
               : "durable_commit_failed";
-            payload.connection?.sendStateless(JSON.stringify({ type: ERROR_TYPE, code }));
+            const errorJSON = JSON.stringify({ type: ERROR_TYPE, code });
+            for (const connection of new Set(batch.entries.map((entry) => entry.payload.connection).filter(Boolean))) {
+              connection.sendStateless(errorJSON);
+            }
           } catch {
             // A peer may already have closed while the database transaction was rolling back.
           }
           // Hocuspocus has already integrated and may have broadcast the update. Closing every
           // connection forces the next session to reload only checkpoint-plus-tail durable state.
-          payload.instance.closeConnections(payload.documentName);
+          representative.instance.closeConnections(documentName);
         }
+      })
+      .finally(() => {
+        for (const entry of batch.entries) entry.resolve();
       });
-    this.updateQueues.set(payload.documentName, current);
+    this.updateQueues.set(documentName, current);
     current.finally(() => {
-      if (this.updateQueues.get(payload.documentName) === current) this.updateQueues.delete(payload.documentName);
+      if (this.updateQueues.get(documentName) === current) this.updateQueues.delete(documentName);
     });
     return current;
   }
@@ -641,6 +680,7 @@ export class NodeV2YjsPostgresExtension {
   }
 
   async flush() {
+    for (const documentName of [...this.pendingChangeBatches.keys()]) this.#flushChangeBatch(documentName);
     for (const [documentName, timer] of this.materializationTimers) {
       clearTimeout(timer);
       this.materializationTimers.delete(documentName);

@@ -406,7 +406,12 @@ func (s *Server) handleNodeV2CollaborationTicket(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	ticket, expiresAt, err := s.realtimeTickets.mintNodeV2Collaboration(actor, companyID, nodeID, textboxID, request.ClientID)
+	textbox, err := s.repo.GetNodeV2TextBox(companyID, nodeID, textboxID)
+	if err != nil {
+		writeNodeV2StoreError(w, err)
+		return
+	}
+	ticket, expiresAt, err := s.realtimeTickets.mintNodeV2Collaboration(actor, companyID, nodeID, textboxID, textbox.CollaborationEpoch, request.ClientID)
 	if err != nil {
 		log.Printf("node_v2_collaboration_ticket_rejected company_id=%s node_id=%s textbox_id=%s error=%v", companyID, nodeID, textboxID, err)
 		writeError(w, http.StatusServiceUnavailable, "node_v2_collaboration_unavailable")
@@ -415,7 +420,7 @@ func (s *Server) handleNodeV2CollaborationTicket(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":         ticket,
 		"expires_at":    expiresAt,
-		"document_name": strings.Join([]string{"node-textbox", strings.ToLower(companyID), strings.ToLower(nodeID), strings.ToLower(textboxID)}, ":"),
+		"document_name": strings.Join([]string{"node-textbox", strings.ToLower(companyID), strings.ToLower(nodeID), strings.ToLower(textboxID), strings.ToLower(textbox.CollaborationEpoch)}, ":"),
 	})
 }
 

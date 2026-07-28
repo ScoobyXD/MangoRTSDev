@@ -9,13 +9,14 @@ import (
 )
 
 type memoryEditorJSONDocument struct {
-	Ref              EditorJSONDocumentRef
-	Revision         int64
-	SchemaVersion    int
-	JSONDocument     json.RawMessage
-	Annotations      []EditorJSONAnnotation
-	Deleted          bool
-	UpdatedTimestamp time.Time
+	Ref                EditorJSONDocumentRef
+	CollaborationEpoch string
+	Revision           int64
+	SchemaVersion      int
+	JSONDocument       json.RawMessage
+	Annotations        []EditorJSONAnnotation
+	Deleted            bool
+	UpdatedTimestamp   time.Time
 }
 
 type memoryEditorJSONOperation struct {
@@ -96,9 +97,14 @@ func memoryEditorJSONSnapshot(ref EditorJSONDocumentRef, document memoryEditorJS
 	if len(jsonDocument) == 0 {
 		jsonDocument = append(json.RawMessage(nil), emptyMangoTiptapDocument...)
 	}
+	collaborationEpoch := document.CollaborationEpoch
+	if collaborationEpoch == "" {
+		collaborationEpoch = ref.ResourceID
+	}
 	return EditorJSONSnapshot{
 		Document: ref, Revision: document.Revision, SchemaVersion: MangoTiptapSchemaVersion,
-		JSONDocument: append(json.RawMessage(nil), jsonDocument...), Deleted: document.Deleted,
+		CollaborationEpoch: collaborationEpoch,
+		JSONDocument:       append(json.RawMessage(nil), jsonDocument...), Deleted: document.Deleted,
 		Annotations:      append([]EditorJSONAnnotation(nil), document.Annotations...),
 		UpdatedTimestamp: document.UpdatedTimestamp,
 	}
@@ -124,6 +130,31 @@ func (r *MemoryRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJSO
 			JSONDocument:     append(json.RawMessage(nil), emptyMangoTiptapDocument...),
 			UpdatedTimestamp: time.Now().UTC(),
 		}
+	}
+	return memoryEditorJSONSnapshot(ref, document), nil
+}
+
+func (r *MemoryRepo) EnsureEditorJSONCollaborationDocument(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error) {
+	ref, err := NormalizeEditorJSONDocumentRef(ref)
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.editorJSONFormatReadyLocked(ref.CompanyID) {
+		return EditorJSONSnapshot{}, ErrVersionConflict
+	}
+	if !r.editorJSONResourceExistsLocked(ref) {
+		return EditorJSONSnapshot{}, ErrNotFound
+	}
+	key := editorJSONMemoryKey(ref)
+	document, exists := r.editorJSONDocuments[key]
+	if !exists {
+		document = memoryEditorJSONDocument{
+			Ref: ref, CollaborationEpoch: newUUIDv7String(), SchemaVersion: MangoTiptapSchemaVersion,
+			JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...), UpdatedTimestamp: time.Now().UTC(),
+		}
+		r.editorJSONDocuments[key] = document
 	}
 	return memoryEditorJSONSnapshot(ref, document), nil
 }
@@ -160,9 +191,12 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	document, exists := r.editorJSONDocuments[key]
 	if !exists {
 		document = memoryEditorJSONDocument{
-			Ref: input.Document, SchemaVersion: MangoTiptapSchemaVersion,
+			Ref: input.Document, CollaborationEpoch: newUUIDv7String(), SchemaVersion: MangoTiptapSchemaVersion,
 			JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...),
 		}
+	}
+	if document.CollaborationEpoch == "" {
+		document.CollaborationEpoch = newUUIDv7String()
 	}
 	if document.Deleted {
 		return EditorJSONCommit{}, ErrNotFound
@@ -292,6 +326,7 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 		return EditorJSONCommit{}, err
 	}
 	document.Revision, document.Deleted, document.UpdatedTimestamp = revision, true, now
+	document.CollaborationEpoch = newUUIDv7String()
 	r.editorJSONDocuments[key] = document
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,

@@ -10,7 +10,7 @@ import {
   listMangoResourceAttachments,
   mangoEmailDraftResourceID,
   mangoEmailSignatureResourceID,
-  unlinkMangoResourceAttachment,
+  deleteMangoAttachmentPermanently,
   type AttachmentRequestJSON,
   type MangoResourceAttachment,
   type MangoResourceAttachmentListResponse,
@@ -260,13 +260,13 @@ test("groups attachments by normalized information ID and preserves item order",
   assert.deepEqual(grouped.get("block-b")?.map((item) => item.attachment_id), ["block-b"]);
 });
 
-test("resource attachment metadata coalesces StrictMode-style reads and invalidates after unlink", async () => {
+test("resource attachment metadata coalesces StrictMode-style reads and invalidates after permanent delete", async () => {
   const firstLoad = deferred<MangoResourceAttachmentListResponse>();
   let listCalls = 0;
-  let unlinkCalls = 0;
+  let deleteCalls = 0;
   const underlyingRequest: AttachmentRequestJSON = async <T>(_path: string, init?: Parameters<AttachmentRequestJSON>[1]): Promise<T> => {
     if (init?.method === "DELETE") {
-      unlinkCalls += 1;
+      deleteCalls += 1;
       return { status: "ok" } as T;
     }
     listCalls += 1;
@@ -296,8 +296,8 @@ test("resource attachment metadata coalesces StrictMode-style reads and invalida
   assert.equal((await listMangoResourceAttachments(strictModeReplayOwner, input)).attachments[0]?.attachment_id, "attachment-1");
   assert.equal(listCalls, 1);
 
-  await unlinkMangoResourceAttachment(firstOwner, { ...input, attachmentID: "attachment-1" });
-  assert.equal(unlinkCalls, 1);
+  await deleteMangoAttachmentPermanently(firstOwner, { ...input, attachmentID: "attachment-1" });
+  assert.equal(deleteCalls, 1);
   assert.equal((await listMangoResourceAttachments(strictModeReplayOwner, input)).attachments[0]?.attachment_id, "attachment-2");
   assert.equal(listCalls, 2);
   invalidateMangoResourceAttachmentsCache(firstOwner);

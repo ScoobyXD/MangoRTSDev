@@ -148,6 +148,7 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [workspace, setWorkspace] = useState<NodeV2Workspace | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deletingAttachmentID, setDeletingAttachmentID] = useState("");
   const [activeTextboxID, setActiveTextboxID] = useState("");
   const [saveState, setSaveState] = useState<NodeV2SaveState>("loading");
   const [panel, setPanel] = useState<"comments" | "files" | "timeline">("comments");
@@ -502,7 +503,15 @@ export const NodeV2WorkspaceSurface: React.FC<Props> = ({
             <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ""; void uploadFiles(files, false).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to upload files")); }} />
             <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ""; void uploadFiles(files, true).then((images) => editorRef.current?.insertImages(images)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to upload images")); }} />
           </div>
-          <div className="node-v2-attachment-grid">{workspace.attachment_summaries.map((link: NodeV2AttachmentLink) => <article key={link.attachment_link_id}><AttachmentPreview apiBase={apiBase} companyID={companyID} attachment={link.attachment} /><strong>{link.attachment.original_filename}</strong><span>{readableBytes(link.attachment.byte_size)} · Text box {workspace.textboxes.findIndex((item) => item.textbox_id === link.textbox_id) + 1}</span></article>)}</div>
+          <div className="node-v2-attachment-grid">{workspace.attachment_summaries.map((link: NodeV2AttachmentLink) => <article key={link.attachment_link_id}><AttachmentPreview apiBase={apiBase} companyID={companyID} attachment={link.attachment} /><strong>{link.attachment.original_filename}</strong><span>{readableBytes(link.attachment.byte_size)} · Text box {workspace.textboxes.findIndex((item) => item.textbox_id === link.textbox_id) + 1}</span>{canEdit && link.relationship_kind === "file_attachment" && <button type="button" className="node-v2-delete-attachment" disabled={deletingAttachmentID === link.attachment.attachment_id} onClick={() => {
+            if (!window.confirm(`Permanently delete ${link.attachment.original_filename}? This removes the stored file and cannot be undone.`)) return;
+            setDeletingAttachmentID(link.attachment.attachment_id);
+            void client.deleteAttachment(link.attachment.attachment_id).then(() => setWorkspace((current) => {
+              if (!current) return current;
+              const remaining = current.attachment_summaries.filter((item) => item.attachment.attachment_id !== link.attachment.attachment_id);
+              return { ...current, attachment_summaries: remaining, counts: { ...current.counts, attachments: Math.max(0, current.counts.attachments - (current.attachment_summaries.length - remaining.length)) } };
+            })).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to delete attachment")).finally(() => setDeletingAttachmentID(""));
+          }}>Delete permanently</button>}</article>)}</div>
           {workspace.attachment_next_cursor && <button type="button" onClick={() => void client.attachments(workspace.attachment_next_cursor).then((page) => setWorkspace((current) => current ? { ...current, attachment_summaries: [...current.attachment_summaries, ...page.items], attachment_next_cursor: page.next_cursor } : current)).catch((cause) => onError(cause instanceof Error ? cause.message : "Unable to load more attachments"))}>Load more attachments</button>}
         </section>}
 

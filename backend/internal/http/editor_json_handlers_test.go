@@ -176,6 +176,18 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 		server.Routes().ServeHTTP(response, request)
 		return response
 	}
+	postMentionDelta := func(path, operationID, kind string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"operation_id": operationID,
+			"mentions":     []any{map[string]any{"user_id": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind}},
+		})
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, request)
+		return response
+	}
 	deleteDocument := func(path, operationID string, baseRevision int) *httptest.ResponseRecorder {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
@@ -269,8 +281,8 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 	}
 	waitNotifications(3)
 
-	projectPath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/88888888-8888-4888-8888-888888888888?company_id=" + companyID
-	if response := post(projectPath, "project-mention-operation", 0, regular); response.Code != http.StatusOK {
+	projectPath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/88888888-8888-4888-8888-888888888888/mentions?company_id=" + companyID
+	if response := postMentionDelta(projectPath, "project-mention-operation", "regular"); response.Code != http.StatusAccepted {
 		t.Fatalf("project mention status=%d body=%s", response.Code, response.Body.String())
 	}
 	items = waitNotifications(4)
@@ -284,8 +296,8 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 		t.Fatalf("project notifications=%d items=%+v", projectNotifications, items)
 	}
 
-	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/89898989-8989-4989-8989-898989898989?company_id=" + companyID
-	if response := post(logicGatePath, "logic-gate-urgent-operation", 0, mentionContent("urgent")); response.Code != http.StatusOK {
+	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/89898989-8989-4989-8989-898989898989/mentions?company_id=" + companyID
+	if response := postMentionDelta(logicGatePath, "logic-gate-urgent-operation", "urgent"); response.Code != http.StatusAccepted {
 		t.Fatalf("logic gate mention status=%d body=%s", response.Code, response.Body.String())
 	}
 	items = waitNotifications(5)
@@ -319,5 +331,49 @@ func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	server.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "editor_format_mismatch") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestEditorOwnerCollaborationTicketIsEpochScopedAndWholeDocumentWritesAreRejected(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "91919191-9191-4191-8191-919191919191"
+	repo.EnsureCompany(companyID, "Yjs editor")
+	actor := mustRealtimeAuthUser(t, repo, companyID, "yjs-editor-admin", domain.RoleCompanyAdmin)
+	projectResult, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Yjs project", ActorUserID: actor.UserID})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("project=%+v err=%v", projectResult, err)
+	}
+	if err := repo.SetEditorDataFormatForTests(store.EditorDataFormatGate{
+		CompanyID: companyID, EditorFormat: store.EditorFormatTiptapJSON,
+		MigrationState: store.EditorMigrationReady, DocumentSchemaVersion: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const token = "yjs-editor-token"
+	server := newRealtimeAuthServerForTest(repo, token, actor)
+	server.realtimeTickets = newRealtimeTicketStore("editor-owner-collaboration-test-secret")
+	defer server.Close()
+	documentID := "project-overview"
+	basePath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/" + documentID
+	body, _ := json.Marshal(map[string]any{"client_id": "browser-tab-1"})
+	request := httptest.NewRequest(http.MethodPost, basePath+"/collaboration-ticket?company_id="+companyID, bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"document_name":"editor-owner:project:`) || !strings.Contains(response.Body.String(), `"collaboration_epoch"`) {
+		t.Fatalf("ticket status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	wholeDocument, _ := json.Marshal(map[string]any{
+		"operation_id": "forbidden-whole-document", "client_id": "browser-tab-1", "base_revision": 0, "schema_version": 1,
+		"document":    map[string]any{"format": "mango-tiptap-json", "schema_version": 1, "document": map[string]any{"type": "doc"}},
+		"annotations": []any{},
+	})
+	request = httptest.NewRequest(http.MethodPost, basePath+"?company_id="+companyID, bytes.NewReader(wholeDocument))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed || !strings.Contains(response.Body.String(), "editor_document_updates_require_collaboration") {
+		t.Fatalf("whole document status=%d body=%s", response.Code, response.Body.String())
 	}
 }

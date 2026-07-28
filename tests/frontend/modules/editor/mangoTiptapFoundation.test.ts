@@ -898,20 +898,24 @@ test("exact realtime scope exists only while the document is visibly eligible", 
   }
 });
 
-test("owner text limit is enforced before durable acknowledgement and explains attachment accounting", () => {
+test("ordinary Yjs acknowledgements store deltas while background checkpoints enforce the owner text limit", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   const postgresStore = read("frontend/scripts/node-v2-yjs-postgres-store.mjs");
-  assert.match(postgresStore, /1073741824 as within_limit/);
-  assert.match(postgresStore, /documentJson: materialized\?\.documentJson \?\? null/);
-  assert.match(postgresStore, /editor_owner_text_limit_exceeded/);
-  const rowLockIndex = postgresStore.indexOf("for update");
-  const ownerLockIndex = postgresStore.indexOf("pg_advisory_xact_lock");
-  assert.ok(rowLockIndex >= 0 && ownerLockIndex > rowLockIndex, "the textbox row lock precedes the owner limit lock");
+  const appendStart = postgresStore.indexOf("async appendUpdate(");
+  const compactStart = postgresStore.indexOf("async compactDocument(", appendStart);
+  assert.ok(appendStart >= 0 && compactStart > appendStart);
+  const appendPath = postgresStore.slice(appendStart, compactStart);
+  assert.match(appendPath, /update_payload/);
+  assert.doesNotMatch(appendPath, /materializeDocument|document_json|JSON\.stringify\(materialized/);
+  const compactPath = postgresStore.slice(compactStart);
+  assert.match(compactPath, /this\.materializeDocument/);
+  assert.match(compactPath, /document_json = \$5::jsonb/);
 
   const provider = read("frontend/src/modules/editor/nodeV2/nodeV2ProviderSync.ts");
   assert.match(provider, /1 GB editor-text limit/);
   assert.match(provider, /Attachments are separate and do not count toward the 1 GB/);
 
   const server = read("frontend/scripts/node-v2-collaboration-server.ts");
-  assert.match(server, /return materializeNodeV2Document\(document\)/);
+  assert.match(server, /materializeDocument: materializeNodeV2Document/);
+  assert.match(server, /materializeDocument: materializeEditorOwnerDocument/);
 });

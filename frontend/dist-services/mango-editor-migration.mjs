@@ -2082,13 +2082,54 @@ async function writeOwnedTarget(client, source, document2, plainText, sourceSHA,
     ]
   );
   const target = await client.query(
-    `select revision,document_json,plain_text,source_html,source_html_sha256,target_json_sha256,is_deleted
+    `select revision,collaboration_epoch,latest_update_sequence,materialized_through_sequence,
+            document_json,plain_text,canonical_annotations,source_html,source_html_sha256,target_json_sha256,is_deleted
        from ${table}
       where company_id=$1::uuid and ${ownerColumn}=$2::uuid and document_id=$3`,
     [source.company_id, source.resource_id, source.document_id]
   );
-  if (target.rowCount !== 1 || Number(target.rows[0].revision) !== 0 || stableJSON(target.rows[0].document_json) !== stableJSON(document2) || String(target.rows[0].plain_text) !== plainText || String(target.rows[0].source_html) !== source.canonical_html || target.rows[0].source_html_sha256 !== sourceSHA || target.rows[0].target_json_sha256 !== targetSHA || Boolean(target.rows[0].is_deleted) !== source.is_deleted) {
+  if (target.rowCount !== 1 || Number(target.rows[0].revision) !== 0 || Number(target.rows[0].latest_update_sequence) !== 0 || Number(target.rows[0].materialized_through_sequence) !== 0 || stableJSON(target.rows[0].document_json) !== stableJSON(document2) || String(target.rows[0].plain_text) !== plainText || String(target.rows[0].source_html) !== source.canonical_html || target.rows[0].source_html_sha256 !== sourceSHA || target.rows[0].target_json_sha256 !== targetSHA || Boolean(target.rows[0].is_deleted) !== source.is_deleted) {
     throw new Error(`${source.resource_type}_target_identity_conflict`);
+  }
+  const yDocument = mangoProsemirrorJSONToYDoc(document2.document, "default");
+  try {
+    yDocument.getMap("mango-metadata").set("annotations", JSON.stringify(target.rows[0].canonical_annotations ?? []));
+    const checkpoint = Y.encodeStateAsUpdate(yDocument);
+    const stateVector = Y.encodeStateVector(yDocument);
+    await client.query(
+      `insert into editor_owner_yjs_checkpoints(
+         company_id,owner_type,owner_id,document_id,checkpoint_id,collaboration_epoch,through_update_sequence,
+         checkpoint_payload,state_vector,document_schema_version,document_json,plain_text,
+         canonical_annotations,checkpoint_reason,retain_until
+       ) values($1::uuid,$2,$3::uuid,$4,$5::uuid,$6::uuid,0,$7,$8,1,$9::jsonb,$10,$11::jsonb,
+                'migration_seed',clock_timestamp()+interval '100 years')
+       on conflict(company_id,owner_type,owner_id,document_id,collaboration_epoch,through_update_sequence) do nothing`,
+      [
+        source.company_id,
+        source.resource_type,
+        source.resource_id,
+        source.document_id,
+        randomUUID(),
+        target.rows[0].collaboration_epoch,
+        Buffer.from(checkpoint),
+        Buffer.from(stateVector),
+        JSON.stringify(document2),
+        plainText,
+        JSON.stringify(target.rows[0].canonical_annotations ?? [])
+      ]
+    );
+  } finally {
+    yDocument.destroy();
+  }
+  const checkpointTarget = await client.query(
+    `select document_json,plain_text,canonical_annotations
+       from editor_owner_yjs_checkpoints
+      where company_id=$1::uuid and owner_type=$2 and owner_id=$3::uuid and document_id=$4
+        and collaboration_epoch=$5::uuid and through_update_sequence=0`,
+    [source.company_id, source.resource_type, source.resource_id, source.document_id, target.rows[0].collaboration_epoch]
+  );
+  if (checkpointTarget.rowCount !== 1 || stableJSON(checkpointTarget.rows[0].document_json) !== stableJSON(document2) || String(checkpointTarget.rows[0].plain_text) !== plainText || stableJSON(checkpointTarget.rows[0].canonical_annotations) !== stableJSON(target.rows[0].canonical_annotations ?? [])) {
+    throw new Error(`${source.resource_type}_checkpoint_target_identity_conflict`);
   }
 }
 async function assertSourceCurrent(client, source) {
@@ -2547,6 +2588,24 @@ async function validateReadiness(client, args) {
       convertedTotal = Number(targetResult.rows[0].total);
       convertedActive = Number(targetResult.rows[0].active);
       convertedDeleted = Number(targetResult.rows[0].deleted);
+      const checkpointResult = await client.query(
+        `select count(*)::bigint as count
+           from ${sourceTable} source
+           join ${targetTable} target
+             on target.company_id=source.company_id
+            and target.${ownerColumn}=source.${ownerColumn}
+            and target.document_id=source.information_id::text
+           join editor_owner_yjs_checkpoints checkpoint
+             on checkpoint.company_id=target.company_id
+            and checkpoint.owner_type=$2
+            and checkpoint.owner_id=target.${ownerColumn}
+            and checkpoint.document_id=target.document_id
+            and checkpoint.collaboration_epoch=target.collaboration_epoch
+            and checkpoint.through_update_sequence=0
+          where source.company_id=$1::uuid and source.type='Text box'::information_type`,
+        [args.companyID, owner]
+      );
+      checkpointTotal = Number(checkpointResult.rows[0].count);
     }
     const failureResult = await client.query("select count(*)::bigint as count from editor_conversion_items where conversion_run_id=$1::uuid and owner_type=$2 and status='failed'", [args.runID, owner]);
     const comparisonResult = await client.query(
@@ -2654,11 +2713,11 @@ async function rollbackExport(client, args) {
   await ensureRun(client, { ...args, owners: ["node"] }, 0);
   const extensions = createMangoTiptapExtensions({ editable: false });
   for (const owner of args.owners) {
-    const query = owner === "node" ? "select node_id::text as owner_id,textbox_id::text as document_id,content_revision as revision,latest_update_sequence,materialized_through_sequence,document_json,deleted_timestamp is not null as is_deleted from node_textboxes where company_id=$1::uuid" : owner === "project" ? "select project_id::text as owner_id,document_id,revision,null::bigint as latest_update_sequence,null::bigint as materialized_through_sequence,document_json,is_deleted from project_editor_documents where company_id=$1::uuid" : "select logic_gate_id::text as owner_id,document_id,revision,null::bigint as latest_update_sequence,null::bigint as materialized_through_sequence,document_json,is_deleted from logic_gate_editor_documents where company_id=$1::uuid";
+    const query = owner === "node" ? "select node_id::text as owner_id,textbox_id::text as document_id,content_revision as revision,latest_update_sequence,materialized_through_sequence,document_json,deleted_timestamp is not null as is_deleted from node_textboxes where company_id=$1::uuid" : owner === "project" ? "select project_id::text as owner_id,document_id,revision,latest_update_sequence,materialized_through_sequence,document_json,is_deleted from project_editor_documents where company_id=$1::uuid" : "select logic_gate_id::text as owner_id,document_id,revision,latest_update_sequence,materialized_through_sequence,document_json,is_deleted from logic_gate_editor_documents where company_id=$1::uuid";
     const rows = await client.query(query, [args.companyID]);
     for (const row of rows.rows) {
-      if (owner === "node" && Number(row.latest_update_sequence) !== Number(row.materialized_through_sequence)) {
-        throw new Error(`node_not_materialized:${row.owner_id}:${row.document_id}`);
+      if (Number(row.latest_update_sequence) !== Number(row.materialized_through_sequence)) {
+        throw new Error(`${owner}_not_materialized:${row.owner_id}:${row.document_id}`);
       }
       const validation = validateMangoTiptapDocument(row.document_json);
       if (!validation.valid) throw new Error(validation.error);
@@ -2695,9 +2754,9 @@ async function rollback(client, args) {
          select 'node'::text as owner_type,node_id as owner_id,textbox_id::text as document_id,content_revision as revision,latest_update_sequence as update_sequence
            from node_textboxes where company_id=$1::uuid and deleted_timestamp is null
          union all
-         select 'project',project_id,document_id,revision,null::bigint from project_editor_documents where company_id=$1::uuid
+         select 'project',project_id,document_id,revision,latest_update_sequence from project_editor_documents where company_id=$1::uuid
          union all
-         select 'logic_gate',logic_gate_id,document_id,revision,null::bigint from logic_gate_editor_documents where company_id=$1::uuid
+         select 'logic_gate',logic_gate_id,document_id,revision,latest_update_sequence from logic_gate_editor_documents where company_id=$1::uuid
        )
        select count(*)::bigint as count from current_documents current_document
         where not exists (

@@ -160,6 +160,7 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
       companyID,
       nodeID,
       userID,
+      collaborationEpoch: textbox.collaboration_epoch,
       onSaveState,
       onError,
     });
@@ -215,7 +216,7 @@ export const NodeV2Editor = forwardRef<NodeV2EditorHandle, Props>(function NodeV
       controllerRef.current = null;
       if (activeController) void activeController.stop();
     };
-  }, [client, textbox.textbox_id, companyID, nodeID, userID, canEdit, imageExtension]);
+  }, [client, textbox.textbox_id, textbox.collaboration_epoch, companyID, nodeID, userID, canEdit, imageExtension]);
 
   useEffect(() => {
     const controller = controllerRef.current;

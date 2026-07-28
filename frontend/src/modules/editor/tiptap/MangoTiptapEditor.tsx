@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
+import Collaboration from "@tiptap/extension-collaboration";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import {
@@ -57,6 +58,7 @@ import {
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType } from "./mangoTiptapSync.js";
+import { MangoTiptapProviderSync, type MangoTiptapMentionDelta } from "./mangoTiptapProviderSync.js";
 
 export type MangoTiptapFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -150,6 +152,28 @@ function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
       email: user.email?.trim(),
     }];
   });
+}
+
+function addedMentionDeltas(steps: readonly { toJSON: () => unknown }[]): MangoTiptapMentionDelta[] {
+  const mentions: MangoTiptapMentionDelta[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    if (node.type === "mention" && node.attrs && typeof node.attrs === "object") {
+      const attrs = node.attrs as Record<string, unknown>;
+      const userID = typeof attrs.userId === "string" ? attrs.userId.trim() : "";
+      const label = typeof attrs.label === "string" ? attrs.label.trim() : "";
+      const kind = attrs.kind === "urgent" ? "urgent" : "regular";
+      if (userID && label) mentions.push({ user_id: userID, label, kind });
+    }
+    Object.values(node).forEach(visit);
+  };
+  steps.forEach((step) => visit(step.toJSON()));
+  return mentions;
 }
 
 type AuthenticatedImageProps = {
@@ -467,6 +491,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   resourceType,
   resourceID,
   documentID,
+  currentUserID,
   requestJSON,
   subscribeToCanonicalChange,
   attachmentContext,
@@ -501,6 +526,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const syncRef = useRef<MangoTiptapSync | null>(null);
+  const providerSyncRef = useRef<MangoTiptapProviderSync | null>(null);
   const syncStartedRef = useRef(false);
   const syncPreparationRef = useRef<Promise<void> | null>(null);
   const visibleRef = useRef(false);
@@ -530,6 +556,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
+  const usesYjsCollaboration = resourceType === "project" || resourceType === "logic_gate";
   const callbacksRef = useRef({
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
     onRecoveryStorageError, onRecoveryStorageRecovered,
@@ -561,10 +588,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const deactivate = useCallback(async (): Promise<boolean> => {
     if (!lifecycleRef.current.requestSleep()) return false;
     const sync = syncRef.current;
+    const providerSync = providerSyncRef.current;
     syncRef.current = null;
+    providerSyncRef.current = null;
     syncStartedRef.current = false;
     syncPreparationRef.current = null;
     if (sync) await sync.shutdown();
+    if (providerSync) await providerSync.shutdown();
     if (lifecycleRef.current.getSnapshot().state === "safely-inactive") {
       lifecycleRef.current.finishDeactivation();
     }
@@ -613,6 +643,53 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     if (syncPreparationRef.current) return syncPreparationRef.current;
     const preparation = (async () => {
       syncStartedRef.current = true;
+      if (usesYjsCollaboration) {
+        const providerSync = new MangoTiptapProviderSync({
+          companyID, resourceType, resourceID, documentID, userID: currentUserID, requestJSON,
+          onDocument: (canonical) => {
+            const serialized = serializeMangoTiptapDocument(canonical);
+            if (serialized !== currentSerializedRef.current) {
+              setDocument(canonical);
+              currentDocumentRef.current = canonical;
+              currentSerializedRef.current = serialized;
+              callbacksRef.current.onChange?.(serialized);
+            }
+            setError("");
+          },
+          onAnnotations: (canonicalAnnotations) => publishAnnotationPositions(canonicalAnnotations),
+          onPendingChange: (count) => {
+            lifecycleRef.current.setPendingCount(count);
+            if (count === 0 && !lifecycleRef.current.getSnapshot().nearViewport) void deactivate();
+          },
+          onError: (cause) => {
+            const message = cause instanceof Error ? cause.message : "Unable to save this text box";
+            setError(message);
+            callbacksRef.current.onError?.(message);
+          },
+          onRecoveryStorageError: (message) => {
+            setRecoveryStorageError(message);
+            callbacksRef.current.onRecoveryStorageError?.(message);
+          },
+          onRecoveryStorageRecovered: () => {
+            setRecoveryStorageError("");
+            callbacksRef.current.onRecoveryStorageRecovered?.();
+          },
+        });
+        providerSyncRef.current = providerSync;
+        try {
+          await providerSync.start();
+          providerSync.setRealtimeVisible(visibleRef.current);
+          lifecycleRef.current.finishPreparation();
+        } catch (cause) {
+          providerSyncRef.current = null;
+          syncStartedRef.current = false;
+          syncPreparationRef.current = null;
+          const message = cause instanceof Error ? cause.message : "Unable to prepare this text box";
+          setError(message);
+          callbacksRef.current.onError?.(message);
+        }
+        return;
+      }
       const sync = new MangoTiptapSync({
       companyID,
       resourceType,
@@ -709,7 +786,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })();
     syncPreparationRef.current = preparation;
     return preparation;
-  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange]);
+  }, [attachmentContext?.apiBase, companyID, currentUserID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange, usesYjsCollaboration]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -735,8 +812,14 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       const visible = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
       visibleRef.current = visible;
       const sync = syncRef.current;
+      const providerSync = providerSyncRef.current;
       if (!visible) {
         sync?.setRealtimeVisible(false);
+        providerSync?.setRealtimeVisible(false);
+        return;
+      }
+      if (providerSync) {
+        providerSync.setRealtimeVisible(true);
         return;
       }
       if (sync) {
@@ -751,6 +834,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return () => {
       visibleRef.current = false;
       syncRef.current?.setRealtimeVisible(false);
+      providerSyncRef.current?.setRealtimeVisible(false);
       observer.disconnect();
       release();
     };
@@ -763,6 +847,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const activate = useCallback(async () => {
     if (lifecycle.state === "sleeping" || lifecycle.state === "safely-inactive" || lifecycle.state === "preparing") {
       await prepare();
+      if (providerSyncRef.current) {
+        try {
+          await providerSyncRef.current.connectAndSync();
+        } catch {
+          return;
+        }
+      }
       if (syncStartedRef.current) lifecycleRef.current.activate();
     }
   }, [lifecycle.state, prepare]);
@@ -804,6 +895,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, async () => {
     await prepare();
     await syncRef.current?.flush();
+    await providerSyncRef.current?.flush();
+    providerSyncRef.current?.publishMaterialized();
   }), [companyID, documentID, prepare, resourceID, resourceType]);
 
   const attachmentExtension = useMemo(
@@ -862,6 +955,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, [onEntityOpen]);
   const extensions = useMemo(() => createMangoTiptapExtensions({
     editable,
+    collaboration: usesYjsCollaboration,
     attachmentImageExtension: attachmentExtension,
     mentionUsers: normalizedMentionUsers(mentionUsers),
     searchEntityLinks: searchEntityLinksForEditor,
@@ -870,16 +964,22 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       callbacksRef.current.onError?.(message);
     },
     onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
-  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers, searchEntityLinksForEditor]);
+  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, mentionUsers, searchEntityLinksForEditor, usesYjsCollaboration]);
 
   const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
 
   useLayoutEffect(() => {
     if (!isActive || editorRef.current) return undefined;
+    const providerSync = providerSyncRef.current;
+    if (usesYjsCollaboration && !providerSync) return undefined;
     const releaseActive = trackEditorRuntimeResource("active_editors");
+    const activeExtensions = [...extensions];
+    if (providerSync) {
+      activeExtensions.push(Collaboration.configure({ document: providerSync.document, field: "default" }));
+    }
     const editor = new Editor({
-      extensions,
-      content: currentDocumentRef.current.document,
+      extensions: activeExtensions,
+      content: providerSync ? undefined : currentDocumentRef.current.document,
       editable,
       enableContentCheck: true,
       emitContentError: true,
@@ -928,21 +1028,36 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onFocus: () => callbacksRef.current.onFocus?.(),
       onBlur: () => {
         callbacksRef.current.onBlur?.();
-        void syncRef.current?.flush().then(() => callbacksRef.current.onFlush?.(currentSerializedRef.current)).catch(() => undefined);
+        if (providerSyncRef.current) {
+          void providerSyncRef.current.flush().then(() => {
+            providerSyncRef.current?.publishMaterialized();
+            callbacksRef.current.onFlush?.(currentSerializedRef.current);
+          }).catch(() => undefined);
+        } else {
+          void syncRef.current?.flush().then(() => callbacksRef.current.onFlush?.(currentSerializedRef.current)).catch(() => undefined);
+        }
       },
       onSelectionUpdate: ({ editor: activeEditor }) => updateSelectionState(activeEditor),
       onTransaction: ({ editor: transactionEditor, transaction }) => {
         if (!transaction.docChanged) return;
         incrementEditorRuntimeMetric("transactions");
         mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
+        if (providerSyncRef.current && !transaction.getMeta("y-sync$")) {
+          providerSyncRef.current.queueMentionNotifications(addedMentionDeltas(transaction.steps));
+        }
       },
       onUpdate: ({ editor: activeEditor }) => {
         lifecycleRef.current.markDirty();
-        syncRef.current?.schedule(() => ({
-          format: "mango-tiptap-json",
-          schema_version: 1,
-          document: activeEditor.getJSON(),
-        }), false, () => durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)));
+        const provider = providerSyncRef.current;
+        if (provider) {
+          provider.setAnnotations(durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)));
+        } else {
+          syncRef.current?.schedule(() => ({
+            format: "mango-tiptap-json",
+            schema_version: 1,
+            document: activeEditor.getJSON(),
+          }), false, () => durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)));
+        }
       },
     });
     editor.registerPlugin(MangoTiptapAnnotations);
@@ -953,6 +1068,15 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       focus: () => { editor.commands.focus(); },
       flush: () => {
         void syncRef.current?.flush();
+        if (providerSyncRef.current) {
+          const materialized = providerSyncRef.current.materialize();
+          const serialized = serializeMangoTiptapDocument(materialized.document);
+          currentDocumentRef.current = materialized.document;
+          currentSerializedRef.current = serialized;
+          setDocument(materialized.document);
+          publishAnnotationPositions(materialized.annotations);
+          void providerSyncRef.current.flush();
+        }
         callbacksRef.current.onFlush?.(currentSerializedRef.current);
         return currentSerializedRef.current;
       },
@@ -1001,7 +1125,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       releaseActive();
     };
   }, [
-    ariaLabel, editable, extensions, formattingControllerRef, isActive, openEntityLink, placeholder, updateSelectionState,
+    ariaLabel, editable, extensions, formattingControllerRef, isActive, openEntityLink, placeholder, publishAnnotationPositions, updateSelectionState, usesYjsCollaboration,
   ]);
 
   useEffect(() => {
@@ -1055,10 +1179,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   useEffect(() => () => {
     if (formattingControllerRef) formattingControllerRef.current = null;
     const sync = syncRef.current;
+    const providerSync = providerSyncRef.current;
     syncRef.current = null;
+    providerSyncRef.current = null;
     syncStartedRef.current = false;
     syncPreparationRef.current = null;
     void sync?.shutdown();
+    void providerSync?.shutdown();
   }, [formattingControllerRef]);
 
   useEffect(() => {

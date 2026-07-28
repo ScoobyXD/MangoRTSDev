@@ -183,6 +183,109 @@ where a.company_id=$1::uuid
 	return attachment, nil
 }
 
+func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error) {
+	companyID = strings.TrimSpace(companyID)
+	attachmentID = cleanUUIDText(attachmentID)
+	if companyID == "" || attachmentID == "" {
+		return AttachmentDeletionPlan{}, ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	defer tx.Rollback()
+	var originalKey string
+	if err := tx.QueryRowContext(ctx, `select storage_key from attachments where company_id=$1::uuid and attachment_id=$2::uuid for update`, companyID, attachmentID).Scan(&originalKey); errors.Is(err, sql.ErrNoRows) {
+		return AttachmentDeletionPlan{}, ErrNotFound
+	} else if err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	var matchingLink, otherActiveLink bool
+	if err := tx.QueryRowContext(ctx, `select
+		coalesce(bool_or(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment'),false),
+		coalesce(bool_or(deleted_timestamp is null and not(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment')),false)
+		from resource_attachments where company_id=$1::uuid and attachment_id=$2::uuid`,
+		companyID, attachmentID, resourceType, resourceID).Scan(&matchingLink, &otherActiveLink); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	if !matchingLink {
+		return AttachmentDeletionPlan{}, ErrNotFound
+	}
+	if otherActiveLink {
+		return AttachmentDeletionPlan{}, ErrAttachmentShared
+	}
+	keys := []string{originalKey}
+	rows, err := tx.QueryContext(ctx, `select storage_key from attachment_variants where attachment_id=$1::uuid order by variant_type`, attachmentID)
+	if err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return AttachmentDeletionPlan{}, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Close(); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `update attachments set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `update resource_attachments set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	var nodeV2LinksAvailable bool
+	if err := tx.QueryRowContext(ctx, `select to_regclass('public.node_textbox_attachment_links') is not null`).Scan(&nodeV2LinksAvailable); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	if nodeV2LinksAvailable {
+		if _, err := tx.ExecContext(ctx, `update node_textbox_attachment_links set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+			return AttachmentDeletionPlan{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return AttachmentDeletionPlan{}, err
+	}
+	return AttachmentDeletionPlan{StorageKeys: keys}, nil
+}
+
+func (r *PostgresRepo) FinalizePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID string) error {
+	companyID = strings.TrimSpace(companyID)
+	attachmentID = cleanUUIDText(attachmentID)
+	if companyID == "" || attachmentID == "" {
+		return ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var nodeV2LinksAvailable bool
+	if err := tx.QueryRowContext(ctx, `select to_regclass('public.node_textbox_attachment_links') is not null`).Scan(&nodeV2LinksAvailable); err != nil {
+		return err
+	}
+	if nodeV2LinksAvailable {
+		if _, err := tx.ExecContext(ctx, `delete from node_textbox_comment_attachment_links child using node_textbox_attachment_links link where (child.company_id,child.node_id,child.textbox_id,child.attachment_link_id)=(link.company_id,link.node_id,link.textbox_id,link.attachment_link_id) and link.company_id=$1::uuid and link.attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `delete from node_textbox_attachment_links where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `delete from attachments where company_id=$1::uuid and attachment_id=$2::uuid and deleted_timestamp is not null`, companyID, attachmentID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (r *PostgresRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
 	companyID = strings.TrimSpace(companyID)
 	attachmentID = cleanUUIDText(attachmentID)
