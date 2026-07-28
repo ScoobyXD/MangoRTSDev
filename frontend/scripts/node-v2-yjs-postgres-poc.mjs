@@ -895,16 +895,25 @@ async function seedMigrationWorkflow(pool) {
       JSON.stringify([{ id: "trial-chat", kind: "chat", from: 1, to: 2 }]),
     ],
   );
-  const fixtures = [
-    ["project", MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project, '<p>Project source</p><ul><li>One</li><li>Two</li></ul>'],
-    ["logic_gate", MIGRATION_LOGIC_GATE_ID, MIGRATION_DOCUMENT_IDS.logic_gate, '<p>Logic Gate source</p><blockquote>Decision</blockquote>'],
-  ];
-  for (const fixture of fixtures) {
-    await pool.query(
-      "insert into editor_collaboration_documents(company_id,resource_type,resource_id,document_id,canonical_html) values($1,$2,$3,$4,$5)",
-      [MIGRATION_COMPANY_ID, ...fixture],
-    );
-  }
+  const projectHTML = '<p>Project source</p><ul><li>One</li><li>Two</li></ul>';
+  const projectProjection = `<!-- mango-node-text-block-v1 -->${JSON.stringify({ title: "Project proof", document: projectHTML, attachments: [] })}`;
+  await pool.query(
+    `insert into project_projection_table(
+       company_id,project_id,information_id,type,information,created_timestamp,updated_timestamp
+     ) values($1,$2,$3,'Text box',$4,clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour')`,
+    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project, projectProjection],
+  );
+  await pool.query(
+    `insert into logic_gate_projection_table(
+       company_id,logic_gate_id,information_id,type,information,is_deleted,revision,created_timestamp,updated_timestamp
+     ) values($1,$2,$3,'Text box',$4,false,4,clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour')`,
+    [
+      MIGRATION_COMPANY_ID,
+      MIGRATION_LOGIC_GATE_ID,
+      MIGRATION_DOCUMENT_IDS.logic_gate,
+      '<p>Logic Gate source</p><blockquote>Decision</blockquote>',
+    ],
+  );
 }
 
 async function runMigrationWorkflowProof(pool, port, database) {
@@ -997,9 +1006,12 @@ async function runMigrationWorkflowProof(pool, port, database) {
   const comparisons = await pool.query("select count(*)::integer as count,count(*) filter(where equivalent)::integer as equivalent from editor_shadow_comparisons where conversion_run_id=$1", [conversionRun]);
   assert.deepEqual(comparisons.rows[0], { count: 4, equivalent: 4 });
   runMigrationTool(port, database, ["--mode", "readiness", ...common, "--allow-write", "--confirm", `VALIDATE ${MIGRATION_COMPANY_ID}`]);
+  const originalProjectHTML = '<p>Project source</p><ul><li>One</li><li>Two</li></ul>';
+  const originalProjectProjection = `<!-- mango-node-text-block-v1 -->${JSON.stringify({ title: "Project proof", document: originalProjectHTML, attachments: [] })}`;
+  const driftedProjectProjection = `<!-- mango-node-text-block-v1 -->${JSON.stringify({ title: "Project proof", document: originalProjectHTML + '<p>drift</p>', attachments: [] })}`;
   await pool.query(
-    "update editor_collaboration_documents set canonical_html=canonical_html || '<p>drift</p>' where company_id=$1 and resource_type='project' and resource_id=$2 and document_id=$3",
-    [MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
+    "update project_projection_table set information=$1 where company_id=$2 and project_id=$3 and information_id=$4",
+    [driftedProjectProjection, MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
   );
   runMigrationTool(
     port,
@@ -1009,8 +1021,8 @@ async function runMigrationWorkflowProof(pool, port, database) {
     /legacy_source_changed_after_validation/,
   );
   await pool.query(
-    "update editor_collaboration_documents set canonical_html=$1 where company_id=$2 and resource_type='project' and resource_id=$3 and document_id=$4",
-    ['<p>Project source</p><ul><li>One</li><li>Two</li></ul>', MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
+    "update project_projection_table set information=$1 where company_id=$2 and project_id=$3 and information_id=$4",
+    [originalProjectProjection, MIGRATION_COMPANY_ID, MIGRATION_PROJECT_ID, MIGRATION_DOCUMENT_IDS.project],
   );
   runMigrationTool(port, database, ["--mode", "activate", ...common, ...writeSafety, "--confirm", "ACTIVATE " + MIGRATION_COMPANY_ID]);
   const active = await pool.query("select editor_format,migration_state,(select count(*) from editor_rollout_gates where company_id=$1 and rollout_state='active')::integer as active_gates from workspace_editor_formats where company_id=$1", [MIGRATION_COMPANY_ID]);
