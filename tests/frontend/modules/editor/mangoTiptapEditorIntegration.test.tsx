@@ -630,8 +630,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(pageHostContainer.querySelector('[aria-label="Node text box"]'));
     assert.ok(pageHostContainer.querySelector('[aria-label="Project text box"]'));
     assert.ok(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]'));
-    assert.equal(pageHostContainer.querySelector('[aria-label="Project text box"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "revisioned-json");
-    assert.equal(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "revisioned-json");
+    assert.equal(pageHostContainer.querySelector('[aria-label="Project text box"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "collaboration");
+    assert.equal(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "collaboration");
     await waitFor(
       () => pageHostPaths.some((path) => path.includes("/v1/editor-json/node/node-host/documents/node-document"))
         && pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document"))
@@ -640,8 +640,11 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     );
     assert.equal(pageHostPaths.some((path) => path.includes("/collaboration-ticket")), false, "offscreen Project and Logic Gate hosts should not request collaboration identity");
     for (const observer of observers.filter((observer) => observer.rootMargin === "0px").slice(-3)) observer.trigger(true);
-    await flushAsyncWork();
-    assert.equal(pageHostPaths.some((path) => path.includes("/collaboration-ticket")), false, "an absent collaboration URL keeps visible Project and Logic Gate editors on revisioned JSON sync");
+    await waitFor(
+      () => pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document/collaboration-ticket"))
+        && pageHostPaths.some((path) => path.includes("/v1/editor-json/logic_gate/logic-gate-host/documents/logic-gate-document/collaboration-ticket")),
+      "visible Project and Logic Gate hosts should address their delta collaboration resources",
+    );
     await act(async () => pageRoot.unmount());
     pageHostRoot = null;
     pageHostContainer.remove();

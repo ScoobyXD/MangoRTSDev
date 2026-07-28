@@ -36,7 +36,7 @@ type PendingCommit = {
   attempted: boolean;
 };
 
-type PendingDocumentRecord = {
+export type PendingDocumentRecord = {
   storage_key: string;
   company_id: string;
   resource_type: MangoTiptapResourceType;
@@ -130,6 +130,15 @@ export async function readExactMangoTiptapPending(storage_key: string): Promise<
     request.onsuccess = () => resolve((request.result as PendingDocumentRecord | undefined) ?? null);
   });
 }
+export async function clearExactMangoTiptapPending(storage_key: string): Promise<void> {
+  incrementEditorRuntimeMetric("indexeddb_writes");
+  await withStore<void>("readwrite", (store, resolve, reject) => {
+    const request = store.delete(storage_key);
+    request.onerror = () => reject(request.error);
+    store.transaction.oncomplete = () => resolve();
+  });
+}
+
 
 async function writePending(record: PendingDocumentRecord): Promise<void> {
   incrementEditorRuntimeMetric("indexeddb_writes");

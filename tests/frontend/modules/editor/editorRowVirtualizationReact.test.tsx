@@ -1378,8 +1378,8 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     const projectEditor = projectContainer.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
     const logicEditor = logicContainer.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
     assert.ok(nodeEditor && projectEditor && logicEditor);
-    assert.equal(projectEditor.dataset.mangoEditorSyncMode, "revisioned-json");
-    assert.equal(logicEditor.dataset.mangoEditorSyncMode, "revisioned-json");
+    assert.equal(projectEditor.dataset.mangoEditorSyncMode, "collaboration");
+    assert.equal(logicEditor.dataset.mangoEditorSyncMode, "collaboration");
     await waitFor(
       () => [nodeEditor, projectEditor, logicEditor].every((editor) => editor.dataset.mangoEditorState === "sleeping"),
       "offscreen page-host editors should prepare a sleeping static renderer",
@@ -1407,16 +1407,14 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     for (const observer of exactObservers) observer.trigger(true);
     await waitFor(
       () => ticketRequests > 0
-        && websocketScopes.some((scope) => scope === `editor-json:node:${hostNodeID}:${hostNodeDocumentID}`)
-        && websocketScopes.some((scope) => scope === `editor-json:project:${hostProjectID}:${hostProjectDocumentID}`)
-        && websocketScopes.some((scope) => scope === `editor-json:logic_gate:${hostLogicGateID}:${hostLogicDocumentID}`),
-      "visible page-host editors should request their configured realtime sync path",
+        && websocketScopes.some((scope) => scope === `editor-json:node:${hostNodeID}:${hostNodeDocumentID}`),
+      "visible page-host editors should request their configured realtime and collaboration paths",
     );
     assert.equal(
       websocketScopes.some((scope) => scope === `editor-json:project:${hostProjectID}:${hostProjectDocumentID}`
         || scope === `editor-json:logic_gate:${hostLogicGateID}:${hostLogicDocumentID}`),
-      true,
-      "without a collaboration URL, Project and Logic Gate editors use revisioned JSON realtime recovery",
+      false,
+      "Project and Logic Gate deltas use their collaboration provider instead of full-document realtime scopes",
     );
     assert.equal(nodeEditor.dataset.mangoEditorState, "sleeping", "visibility alone keeps the page-host editor static until focus");
 
