@@ -48,7 +48,7 @@ Default enforceable limits are:
 
 ## Owner-specific storage and conversion
 
-The converter reads only current/recoverable `editor_collaboration_documents` for Node, Project, and Logic Gate. It never scans or converts the bloated historical `node_information` event pile.
+For Node, the converter reads the authoritative current `node_projection_table` rows whose type is `Text box`, including soft-deleted rows. It uses `information_id` as the textbox/document identity and never scans the bloated historical `node_information` event pile. Project and Logic Gate conversion retain their current `editor_collaboration_documents` source until their separately reviewed batches.
 
 All owners use the same Mango Tiptap schema and official Tiptap HTML-to-JSON/Yjs bridge. Permanent current documents remain domain owned:
 
@@ -60,9 +60,31 @@ After an exact Project or Logic Gate owner gate becomes active, the existing JSO
 
 The converter records a deterministic identity from company, owner, document, source revision, and source SHA-256. A resumed run must match its company, owner selection, compatible mode, batch size, backup reference, and expected count. Source or target identity conflicts fail closed. Each item retains the authoritative source HTML snapshot, source/target hashes, warnings, comment-anchor report, attachment-reference report, retry count, and failure report.
 
+The Node writer stores the same validated JSON in the transitional `editor_json_documents` row, the permanent `node_textboxes` row, and the sequence-zero Yjs migration checkpoint inside one transaction. Active projections remain active and deleted projections receive matching deleted/archive state. An unedited revision-zero transitional trial row may be refreshed to the current deterministic conversion while retaining its annotation array; a row with a real JSON revision is never overwritten on conflict. The source projection is locked against concurrent drift during that transaction but is never updated.
+
 ## Migration commands
 
 All examples run from `frontend`. `MANGORTS_MIGRATION_DATABASE_URL` must point to the exact reviewed database. Inventory and dry-run begin a read-only transaction. Every mutating mode requires `--allow-write` and an exact company-specific confirmation. Backfill, shadow, activation, export, and rollback also require a reviewed backup reference.
+
+The immediate Node-textbox batch uses `--owner node` (also the default owner). It does not update `workspace_editor_formats` or create/activate an `editor_rollout_gates` row:
+
+```powershell
+# Authoritative active/deleted counts, source bytes, and per-Node totals
+npm run migrate:mango-editors -- --mode inventory --company <company-uuid> --owner node --run-id <run-uuid>
+
+# Convert and report every textbox without database writes
+npm run migrate:mango-editors -- --mode dry-run --company <company-uuid> --owner node --run-id <run-uuid> --batch-size 100
+
+# Jonat runs this only after reviewing the dry run and verifying the development backup
+npm run migrate:mango-editors -- --mode backfill --company <company-uuid> --owner node --run-id <same-run-uuid> --batch-size 100 --allow-write --backup-reference <restore-tested-backup> --confirm "BACKFILL <company-uuid>"
+
+# Verify the bridge document, permanent document, deleted state, plain text, and Yjs seed
+npm run migrate:mango-editors -- --mode shadow --company <company-uuid> --owner node --run-id <same-run-uuid> --allow-write --backup-reference <restore-tested-backup> --confirm "SHADOW <company-uuid>"
+```
+
+Do not run `readiness` or `activate` for this narrow batch. Chats remain in `Text block chat` projection rows, every legacy textbox HTML row remains untouched, and the Node V2 owner gate stays inactive.
+
+The following all-owner commands describe the later full cutover workflow, not the immediate Node-textbox batch:
 
 ```powershell
 # Read-only inventory
