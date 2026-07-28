@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,33 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 	}
 	if len(canonical) == 0 || string(canonical) == string(raw) {
 		t.Fatalf("expected a non-empty canonical compact document")
+	}
+}
+
+func TestMangoTiptapJSONAcceptsDocumentsAndAnnotationPositionsBeyondTwoMiB(t *testing.T) {
+	largeText := strings.Repeat("x", 2*1024*1024+4096)
+	raw, err := json.Marshal(map[string]any{
+		"format":         MangoTiptapFormat,
+		"schema_version": MangoTiptapSchemaVersion,
+		"document": map[string]any{
+			"type": "doc",
+			"content": []any{map[string]any{
+				"type":    "paragraph",
+				"content": []any{map[string]any{"type": "text", "text": largeText}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) <= 2*1024*1024 {
+		t.Fatalf("fixture bytes=%d, want above former two-MiB limit", len(raw))
+	}
+	if _, err := ValidateMangoTiptapJSON(raw); err != nil {
+		t.Fatalf("large document rejected: %v", err)
+	}
+	if _, err := NormalizeEditorJSONAnnotations([]EditorJSONAnnotation{{ID: "large-position", Kind: "chat", From: 2*1024*1024 + 1, To: 2*1024*1024 + 100}}); err != nil {
+		t.Fatalf("large annotation position rejected: %v", err)
 	}
 }
 

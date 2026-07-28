@@ -14,7 +14,7 @@ The existing editor modernization work contains useful foundations, but some ear
 
 - the existing plan uses complete JSON snapshots with exact-revision conflicts;
 - the existing plan explicitly excludes Yjs, CRDTs, Hocuspocus, and automatic concurrent merging;
-- a single Tiptap JSON document is arbitrarily limited to two MiB;
+- a single Tiptap JSON document was arbitrarily limited to two MiB; that editor-specific cap was removed on 2026-07-27 while structural validation and the general API request ceiling remain;
 - the current JSON save path stores the complete accepted document in current, operation, and version rows;
 - the current browser pending record is keyed only by the document, so same-document tabs share one IndexedDB record without a cross-tab coordinator;
 - the current conflict choice is whole-document `keep-local` or `use-canonical`, not merged concurrent editing.
@@ -1216,6 +1216,23 @@ The first trial row had already stored `07/20/26` and bold `HR / EA, Sammie Lee`
 The final browser comparison passed the intended visual trial. The user confirmed that the converted text box retained its complete visible text, bold text, nested list indentation and marker progression, permanent inline image, mention, right-side chat, and six bright-yellow comment selections. The corrected JSON view also matches the requested 14px font size, 20px line height, and legacy content padding. The paragraph separation between `07/20/26` and `HR / EA, Sammie Lee` is restored. These presentation corrections did not require rewriting the converted database row.
 
 This success proves that one representative Node text box can be read from authoritative `editor_collaboration_documents.canonical_html`, converted with Tiptap's official HTML-to-JSON function, inserted additively, and displayed with its important rich-text structure intact. It does **not** prove complete Node/Project/Logic Gate discovery, batch conversion, production collaboration durability, all-document validation, workspace cutover, post-cutover rollback, or legacy cleanup. The experiment also exposed separate activation, save, scroll, caret-surface, and inline-image interaction problems. Corrections exist for several of those paths, but the next worker must exercise the real browser/API/database path again and close Phase 2 acceptance instead of treating this visual conversion as proof that editing is complete.
+
+### This is where we are at now - Node textbox conversion plan (2026-07-27 20:38 PDT)
+
+A fresh database-enforced read-only query confirmed the immediate conversion scope. `node_projection_table` contains exactly 937 distinct current rows with `type = 'Text box'`: 912 active rows and 25 deleted rows across 662 Nodes. All 937 bodies are HTML-like, none starts as JSON, their combined body size is 3,057,413 bytes, and the largest body is 1,870,652 bytes. No source row currently has a matching `node_textboxes` target. The table also contains 583 active legacy `Text block chat` rows. These counts are the agreed current development-database baseline and will naturally change if the development company is edited before conversion.
+
+The next real-data operation is deliberately narrower than the complete migration originally described above:
+
+1. Convert the 937 Node `Text box` projection bodies from HTML to Mango Tiptap JSON. Do not convert Projects, Logic Gates, chats, email bodies, or other projection types in this operation.
+2. Use the existing projection `information_id` as the stable textbox/document ID. The 912 active rows remain active; the 25 deleted rows are preserved as deleted/archived targets rather than becoming visible active textboxes.
+3. Leave every source `node_projection_table` row untouched. The legacy HTML therefore remains available as the original source and rollback reference.
+4. Produce the JSON once and store the same validated document in the transitional `editor_json_documents` path used by the successful one-textbox browser trial and in the final `node_textboxes` path with its initial Yjs migration checkpoint. This lets the current Node surface display the converted body while preparing the permanent Node v2 document.
+5. Leave the Node v2 `editor_rollout_gates` owner gate inactive. The current Node shell and its legacy projection-table chat reader must remain in use while chat migration is deferred.
+6. Leave the 583 active `Text block chat` projection rows in place for the later chat migration. The existing right-side chat remains available through the current shell. Ordinary rich-text marks and HTML highlights convert with the textbox body; chat-specific selected-text anchors, chat normalization, and exact jump-to-selection behavior are later work.
+
+At this timestamp the development `workspace_editor_formats` row is already `tiptap_json`/`ready` with the original one-document trial counts (`1/1`), while `editor_rollout_gates` has no rows. The batch operation must replace those temporary trial counts with truthful textbox conversion counts without activating the full Node v2 workspace. The current Phase 3 migration command cannot yet perform this exact operation because its Node inventory reads `editor_collaboration_documents` instead of the 937 authoritative projection rows; update that inventory and transitional dual-write behavior before generating or applying the batch.
+
+The old Mango-specific 2 MiB Tiptap JSON document restriction is being removed as part of this continuation because the real largest source is already approximately 1.87 MiB. Structural validation remains required. The separate general API request-body ceiling remains a platform safety boundary rather than an editor-document rule.
 
 Agreed continuation after this experiment:
 

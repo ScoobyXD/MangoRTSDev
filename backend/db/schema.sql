@@ -4390,12 +4390,10 @@ create table if not exists editor_json_documents (
     and canonical_document->>'schema_version' = '1'
     and jsonb_typeof(canonical_document->'document') = 'object'
     and canonical_document->'document'->>'type' = 'doc'
-    and pg_column_size(canonical_document) <= 2097152
   ),
   constraint editor_json_documents_annotations_chk check (
     jsonb_typeof(canonical_annotations) = 'array'
     and jsonb_array_length(canonical_annotations) <= 10000
-    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 
@@ -4437,12 +4435,10 @@ create table if not exists editor_json_operations (
     jsonb_typeof(canonical_document) = 'object'
     and canonical_document->>'format' = 'mango-tiptap-json'
     and canonical_document->>'schema_version' = '1'
-    and pg_column_size(canonical_document) <= 2097152
   ),
   constraint editor_json_operations_annotations_chk check (
     jsonb_typeof(canonical_annotations) = 'array'
     and jsonb_array_length(canonical_annotations) <= 10000
-    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 
@@ -4471,12 +4467,10 @@ create table if not exists editor_json_versions (
     jsonb_typeof(canonical_document) = 'object'
     and canonical_document->>'format' = 'mango-tiptap-json'
     and canonical_document->>'schema_version' = '1'
-    and pg_column_size(canonical_document) <= 2097152
   ),
   constraint editor_json_versions_annotations_chk check (
     jsonb_typeof(canonical_annotations) = 'array'
     and jsonb_array_length(canonical_annotations) <= 10000
-    and pg_column_size(canonical_annotations) <= 2097152
   )
 );
 
@@ -5276,7 +5270,6 @@ create table if not exists project_editor_documents (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
   ),
   constraint project_editor_documents_annotations_chk check (
     jsonb_typeof(canonical_annotations)='array' and jsonb_array_length(canonical_annotations) <= 10000
@@ -5314,7 +5307,6 @@ create table if not exists logic_gate_editor_documents (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
   ),
   constraint logic_gate_editor_documents_annotations_chk check (
     jsonb_typeof(canonical_annotations)='array' and jsonb_array_length(canonical_annotations) <= 10000
@@ -5350,7 +5342,6 @@ create table if not exists project_editor_document_operations (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
     and jsonb_typeof(canonical_annotations)='array'
     and jsonb_array_length(canonical_annotations) <= 10000
   )
@@ -5377,7 +5368,6 @@ create table if not exists project_editor_document_versions (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
     and jsonb_typeof(canonical_annotations)='array'
     and jsonb_array_length(canonical_annotations) <= 10000
   )
@@ -5409,7 +5399,6 @@ create table if not exists logic_gate_editor_document_operations (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
     and jsonb_typeof(canonical_annotations)='array'
     and jsonb_array_length(canonical_annotations) <= 10000
   )
@@ -5436,7 +5425,6 @@ create table if not exists logic_gate_editor_document_versions (
     document_json->>'format'='mango-tiptap-json'
     and document_json->>'schema_version'='1'
     and document_json->'document'->>'type'='doc'
-    and pg_column_size(document_json) <= 2097152
     and jsonb_typeof(canonical_annotations)='array'
     and jsonb_array_length(canonical_annotations) <= 10000
   )
