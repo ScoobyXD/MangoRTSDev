@@ -38,6 +38,8 @@ const migrationDir = join(tempRoot, "migrations");
 const legacyMigrationDir = join(tempRoot, "legacy-migrations");
 const migrateExe = join(tempRoot, "miraeopus-migrate" + exeSuffix);
 const apiExe = join(tempRoot, "miraeopus-api" + exeSuffix);
+const collaborationBuildRoot = mkdtempSync(join(frontend, ".mangorts-realtime-production-path-"));
+const collaborationService = join(collaborationBuildRoot, "node-v2-collaboration-server.mjs");
 const password = "mangorts-disposable-test-only";
 const processes = [];
 let pgStarted = false;
@@ -517,7 +519,7 @@ async function main() {
     platform: "node",
     target: "node22",
     format: "esm",
-    outfile: resolve(frontend, "dist-services", "node-v2-collaboration-server.mjs"),
+    outfile: collaborationService,
     logLevel: "info",
   });
   for (const name of ["20260715_unified_realtime_collaboration.sql", "20260715_zz_edit_or_no_access.sql"]) {
@@ -655,7 +657,7 @@ async function main() {
     resolve(frontend, "scripts", "node-v2-s3-mock.mjs"),
   ], { cwd: frontend, env: { ...process.env, MANGORTS_NODE_V2_S3_PORT: String(s3Port) } });
   const collaborationRecord = startProcess("node-v2-collaboration", process.execPath, [
-    resolve(frontend, "dist-services", "node-v2-collaboration-server.mjs"),
+    collaborationService,
   ], { cwd: frontend, env: {
     ...process.env,
     DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${pgPort}/mangorts_realtime_test`,
@@ -758,4 +760,13 @@ try {
     throw new Error("Refusing to remove unrecognized integration path: " + resolved);
   }
   rmSync(resolved, { recursive: true, force: true });
+  const resolvedCollaborationBuildRoot = resolve(collaborationBuildRoot);
+  const collaborationBuildParent = resolve(frontend);
+  if (!(resolvedCollaborationBuildRoot.startsWith(collaborationBuildParent + "\\") || resolvedCollaborationBuildRoot.startsWith(collaborationBuildParent + "/"))) {
+    throw new Error("Refusing to remove unexpected collaboration build path: " + resolvedCollaborationBuildRoot);
+  }
+  if (!resolvedCollaborationBuildRoot.includes(".mangorts-realtime-production-path-")) {
+    throw new Error("Refusing to remove unrecognized collaboration build path: " + resolvedCollaborationBuildRoot);
+  }
+  rmSync(resolvedCollaborationBuildRoot, { recursive: true, force: true });
 }
