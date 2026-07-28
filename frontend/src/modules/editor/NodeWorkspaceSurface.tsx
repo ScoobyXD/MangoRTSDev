@@ -813,8 +813,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       const pinnedIndex = blocks.findIndex((block) => block.id === blockID);
       if (pinnedIndex >= 0) indices.add(pinnedIndex);
     }
+    if (expandedLinkedEmailBlockIDs.size > 0) {
+      blocks.forEach((_block, index) => indices.add(index));
+    }
     return Array.from(indices);
-  }, [activeChatBlockID, activeRowBlockID, blocks, emailOriginChatBlockID, emailOriginChatHostBlockID, emailReplyBlockID, focusedTextBlockID, tiptapPinnedBlockIDs]);
+  }, [activeChatBlockID, activeRowBlockID, blocks, emailOriginChatBlockID, emailOriginChatHostBlockID, emailReplyBlockID, expandedLinkedEmailBlockIDs, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const rowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -1181,6 +1184,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       emailOriginChatID,
       emailOriginHostBlockID,
     );
+    const defaultChatBlockIDSet = new Set(defaultChatBlockIDs);
     setExpandedLinkedEmailBlockIDs((current) => {
       if (nodeChanged) return new Set();
       const linkedBlockIDs = new Set(textBlocks.filter((block) => Boolean(block.emailMessageID?.trim())).map((block) => block.id));
@@ -1231,7 +1235,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
       setActiveChatBlockID((current) => {
         const candidate = nodeChanged ? storedLayout?.activeChatBlockID ?? "" : current;
-        return chatBlockIDs.has(candidate) ? candidate : "";
+        return chatBlockIDs.has(candidate) && defaultChatBlockIDSet.has(candidate) ? candidate : "";
       });
       setSelectedEmailIDsByBlock((current) => Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => blockID === NODE_EMAIL_COLUMN_LAYOUT_ID && parsedAttachedEmails.some((email) => email.messageID === messageID))));
       setClosedEditorBlockIDs(validClosedEditorBlockIDs);
@@ -1250,7 +1254,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         return next;
       });
       setOpenChatBlockIDs((current) => {
-        const next = new Set((nodeChanged ? storedLayout?.openChatBlockIDs ?? [] : Array.from(current)).filter((id) => chatBlockIDs.has(id)));
+        const next = new Set((nodeChanged ? storedLayout?.openChatBlockIDs ?? [] : Array.from(current)).filter((id) => chatBlockIDs.has(id) && (!nodeChanged || defaultChatBlockIDSet.has(id))));
         for (const blockID of defaultChatBlockIDs) {
           if (!validClosedChatBlockIDs.has(blockID)) next.add(blockID);
         }
@@ -3560,7 +3564,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             className="mango-pane-layout-transition"
             aria-hidden={!nodeEmailColumnVisible}
             {...(!nodeEmailColumnVisible ? { inert: "" } : {})}
-            style={{ gridColumn: "1", position: "sticky", top: 38, minWidth: 0, height: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
+            style={{ gridColumn: "1", position: "relative", minWidth: 0, height: "auto", minHeight: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: nodeEmailColumnVisible ? "visible" : "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
           >
             <AttachedEmailOrganizerPane
               emails={nodeAttachedEmails}
@@ -3573,6 +3577,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               attachmentResourceID={nodeID}
               storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
               tabbed={false}
+              expandContent
               editable={canEdit}
               accent={accent}
               surfaceText={surfaceText}
@@ -3682,10 +3687,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 ? "chat-only"
                 : "none";
           const textBlockIsFocused = focusedTextBlockID === block.id;
-          const linkedEmailPreviewHeight = linkedEmailExpanded
-            ? editorPaneIsVisible ? Math.round(TEXT_BLOCK_MIN_HEIGHT * 0.42) : TEXT_BLOCK_MIN_HEIGHT
-            : 0;
-          const editorPaneHeight = editorPaneIsVisible ? TEXT_BLOCK_MIN_HEIGHT - linkedEmailPreviewHeight : 0;
+          const editorPaneHeight = editorPaneIsVisible ? TEXT_BLOCK_MIN_HEIGHT : 0;
           const chatPaneHeight = TEXT_BLOCK_MIN_HEIGHT;
           const selectionAnchor = chatSelectionAnchors[chatBlockID];
           const activeChatMessageID = activeChatMessageIDs[chatBlockID] ?? "";
@@ -3834,14 +3836,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           return (
             <React.Fragment key={block.id}>
               {timelineEventsByBlockIndex[index]?.map(renderNodeTimelineEvent)}
-              <div style={{ height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+              <div style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, minHeight: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
                 <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               </div>
-              <div style={{ minWidth: 0, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+              <div style={{ minWidth: 0, height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, minHeight: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
                 <div
                   data-node-text-box-row={block.id}
                   className="mango-fixed-editor-row"
-                  style={{ height: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", borderWidth: 1, borderStyle: "solid", borderColor: textBlockIsFocused ? "transparent" : blockEmailAccent || EDITOR_NEU_SOFT_BORDER, borderLeftWidth: blockEmailAccent ? 4 : 1, borderLeftColor: blockEmailAccent || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER), borderRadius: 14, background: blockEmailAccent ? `linear-gradient(135deg, ${blockEmailAccent}16, rgba(255,255,255,0.96))` : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
+                  style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderWidth: 1, borderStyle: "solid", borderColor: textBlockIsFocused ? "transparent" : blockEmailAccent || EDITOR_NEU_SOFT_BORDER, borderLeftWidth: blockEmailAccent ? 4 : 1, borderLeftColor: blockEmailAccent || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER), borderRadius: 14, background: blockEmailAccent ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div
                     data-node-text-box-header="true"
@@ -3897,12 +3899,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       </div>
                     </div>
                   </div>
-                  <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
-                    <div className="mango-pane-layout-transition" data-node-text-box-columns="editor-chat" data-node-visible-panes={visiblePaneMode} data-node-linked-email-layout={linkedEmailExpanded ? "content-column" : "closed"} style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: chatPaneHeight, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "stretch", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
+                  <div style={{ minWidth: 0, minHeight: 0, overflowX: linkedEmailExpanded ? "visible" : "auto", overflowY: linkedEmailExpanded ? "visible" : "hidden" }}>
+                    <div className="mango-pane-layout-transition" data-node-text-box-columns="editor-chat" data-node-visible-panes={visiblePaneMode} data-node-linked-email-layout={linkedEmailExpanded ? "content-column" : "closed"} style={{ minWidth: Math.max(minimumCommunicationWidth, 1), height: linkedEmailExpanded ? "auto" : chatPaneHeight, minHeight: chatPaneHeight, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: 0, alignItems: "start", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
                       {contentPaneIsVisible && (
-                        <div data-node-text-box-content-column="true" style={{ minWidth: 0, minHeight: 0, height: chatPaneHeight, display: "grid", gridTemplateRows: linkedEmailExpanded && editorPaneIsVisible ? `${linkedEmailPreviewHeight}px minmax(0, 1fr)` : "minmax(0, 1fr)", overflow: "hidden" }}>
+                        <div data-node-text-box-content-column="true" style={{ minWidth: 0, minHeight: 0, height: linkedEmailExpanded ? "auto" : chatPaneHeight, display: "grid", gridTemplateRows: linkedEmailExpanded && editorPaneIsVisible ? `auto ${editorPaneHeight}px` : linkedEmailExpanded ? "auto" : "minmax(0, 1fr)", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
                           {linkedEmailExpanded && linkedEmailMessageID && (
-                            <div data-node-linked-email-content="true" className="mango-pane-enter" style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+                            <div data-node-linked-email-content="true" className="mango-pane-enter" style={{ minWidth: 0, minHeight: 0, overflow: "visible" }}>
                               <LinkedEmailPreviewPane
                                 messageID={linkedEmailMessageID}
                                 emails={nodeAttachedEmails}

@@ -334,7 +334,7 @@ func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	}
 }
 
-func TestEditorOwnerCollaborationTicketIsEpochScopedAndWholeDocumentWritesAreRejected(t *testing.T) {
+func TestEditorOwnerCollaborationTicketIsEpochScopedAndRevisionedFallbackWritesAreAccepted(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "91919191-9191-4191-8191-919191919191"
 	repo.EnsureCompany(companyID, "Yjs editor")
@@ -343,6 +343,11 @@ func TestEditorOwnerCollaborationTicketIsEpochScopedAndWholeDocumentWritesAreRej
 	if err != nil || projectResult.Project == nil {
 		t.Fatalf("project=%+v err=%v", projectResult, err)
 	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Fallback Logic Gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := repo.SetEditorDataFormatForTests(store.EditorDataFormatGate{
 		CompanyID: companyID, EditorFormat: store.EditorFormatTiptapJSON,
 		MigrationState: store.EditorMigrationReady, DocumentSchemaVersion: 1,
@@ -365,15 +370,29 @@ func TestEditorOwnerCollaborationTicketIsEpochScopedAndWholeDocumentWritesAreRej
 	}
 
 	wholeDocument, _ := json.Marshal(map[string]any{
-		"operation_id": "forbidden-whole-document", "client_id": "browser-tab-1", "base_revision": 0, "schema_version": 1,
-		"document":    map[string]any{"format": "mango-tiptap-json", "schema_version": 1, "document": map[string]any{"type": "doc"}},
+		"operation_id": "project-revisioned-fallback", "client_id": "browser-tab-1", "base_revision": 0, "schema_version": 1,
+		"document":    map[string]any{"format": "mango-tiptap-json", "schema_version": 1, "document": map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph"}}}},
 		"annotations": []any{},
 	})
 	request = httptest.NewRequest(http.MethodPost, basePath+"?company_id="+companyID, bytes.NewReader(wholeDocument))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response = httptest.NewRecorder()
 	server.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusMethodNotAllowed || !strings.Contains(response.Body.String(), "editor_document_updates_require_collaboration") {
-		t.Fatalf("whole document status=%d body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":1`) {
+		t.Fatalf("project fallback status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	logicGateDocument, _ := json.Marshal(map[string]any{
+		"operation_id": "logic-gate-revisioned-fallback", "client_id": "browser-tab-1", "base_revision": 0, "schema_version": 1,
+		"document":    map[string]any{"format": "mango-tiptap-json", "schema_version": 1, "document": map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph"}}}},
+		"annotations": []any{},
+	})
+	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/logic-gate-overview?company_id=" + companyID
+	request = httptest.NewRequest(http.MethodPost, logicGatePath, bytes.NewReader(logicGateDocument))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":1`) {
+		t.Fatalf("logic gate fallback status=%d body=%s", response.Code, response.Body.String())
 	}
 }

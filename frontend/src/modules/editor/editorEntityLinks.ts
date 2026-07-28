@@ -136,7 +136,7 @@ export async function searchEditorEntityLinks(
   });
   const response = await context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`);
   const seen = new Set<string>();
-  return (response.results ?? []).flatMap((result) => {
+  const results = (response.results ?? []).flatMap((result, responseIndex) => {
     const entityType = result.resource_type;
     const entityID = result.resource_id?.trim() ?? "";
     const label = result.display_name?.trim() ?? "";
@@ -144,8 +144,16 @@ export async function searchEditorEntityLinks(
     const key = `${entityType}:${entityID}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ entityType, entityID, label, updatedTimestamp: result.updated_timestamp }];
+    return [{ entityType, entityID, label, updatedTimestamp: result.updated_timestamp, responseIndex }];
   });
+  const typeOrder: Record<EditorEntityType, number> = {
+    node: 0,
+    logic_gate: 1,
+    project: 2,
+  };
+  return results
+    .sort((left, right) => typeOrder[left.entityType] - typeOrder[right.entityType] || left.responseIndex - right.responseIndex)
+    .map(({ entityType, entityID, label, updatedTimestamp }) => ({ entityType, entityID, label, updatedTimestamp }));
 }
 
 export async function createNodeEntityFromSelection(

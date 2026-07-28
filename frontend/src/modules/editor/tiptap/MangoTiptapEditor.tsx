@@ -20,6 +20,7 @@ import {
   searchEditorEntityLinks,
   type EditorEntityLink,
 } from "../editorEntityLinks.js";
+import { calculateEditorSelectionActionPosition } from "../editorSelectionActions.js";
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
 import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
 import type {
@@ -491,7 +492,7 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         )}
         {selected && (
           <>
-            <div data-mango-tiptap-image-actions="true" contentEditable={false} style={{ position: "absolute", right: 0, top: -8, transform: "translateY(-100%)", zIndex: 5, display: "flex", gap: 5 }}>
+            <div data-mango-tiptap-image-actions="true" contentEditable={false} style={{ position: "absolute", left: "calc(100% + 8px)", top: 4, zIndex: 5, display: "flex", gap: 5, padding: 3, border: "1px solid #bae6fd", borderRadius: 9, background: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,0.14)" }}>
               {editable && onImageChatRequest && (
                 <button
                   type="button"
@@ -750,14 +751,37 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       setSelectionAction(null);
       return;
     }
-    const rootRect = rootRef.current?.getBoundingClientRect();
-    const coords = editor.view.coordsAtPos(selection.to);
+    const root = rootRef.current;
+    const rootRect = root?.getBoundingClientRect();
+    const ownerSelection = root?.ownerDocument.getSelection();
+    const selectionRange = ownerSelection?.rangeCount ? ownerSelection.getRangeAt(0) : null;
+    const firstSelectionRect = selectionRange && root?.contains(selectionRange.commonAncestorContainer)
+      ? Array.from(selectionRange.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0)
+      : undefined;
+    const fromCoords = editor.view.coordsAtPos(selection.from);
+    const toCoords = editor.view.coordsAtPos(selection.to);
+    const actionRect = firstSelectionRect ?? {
+      left: Math.min(fromCoords.left, toCoords.left),
+      right: Math.max(fromCoords.right, toCoords.right),
+      top: Math.min(fromCoords.top, toCoords.top),
+      height: Math.max(20, Math.min(fromCoords.bottom, toCoords.bottom) - Math.min(fromCoords.top, toCoords.top)),
+    };
+    const actionPosition = calculateEditorSelectionActionPosition({
+      rect: actionRect,
+      isForwardSelection: true,
+      boundaryWidth: root?.clientWidth || rootRect?.width || 0,
+      containerLeft: rootRect?.left,
+      containerTop: rootRect?.top,
+      rightInset: 44,
+      scrollLeft: root?.scrollLeft,
+      scrollTop: root?.scrollTop,
+    });
     setSelectionAction({
       from: selection.from,
       to: selection.to,
       quote: editor.state.doc.textBetween(selection.from, selection.to, "\n", "\n"),
-      x: Math.max(4, Math.round(coords.left - (rootRect?.left || 0))),
-      y: Math.max(4, Math.round(coords.bottom - (rootRect?.top || 0) + 4)),
+      x: actionPosition.left,
+      y: actionPosition.top,
     });
   }, []);
 

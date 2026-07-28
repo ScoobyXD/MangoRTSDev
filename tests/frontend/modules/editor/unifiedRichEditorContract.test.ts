@@ -1598,7 +1598,8 @@ test("Node V2 wires live mentions, entity search, and the shared movable image c
   assert.match(nodeV2, /<MangoAuthenticatedImage/);
   assert.match(tiptap, /data-drag-handle=\{editable \? "true" : undefined\}/);
   assert.match(tiptap, /data-mango-tiptap-image-actions="true"/);
-  assert.match(tiptap, /transform: "translateY\(-100%\)"/);
+  assert.match(tiptap, /left: "calc\(100% \+ 8px\)", top: 4/);
+  assert.match(tiptap, /data-mango-tiptap-image-actions[\s\S]*boxShadow: "0 8px 24px rgba\(15,23,42,0\.14\)"/);
   assert.match(editorContent, /linkMangoResourceAttachment\(requestJSON/);
   assert.match(editorContent, /relationshipKind: "inline_image"[\s\S]{0,120}informationID/);
 });

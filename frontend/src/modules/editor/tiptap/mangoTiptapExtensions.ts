@@ -199,7 +199,12 @@ function mentionInitials(label: string): string {
   return (words.length === 1 ? words[0].slice(0, 2) : `${words[0][0]}${words[words.length - 1][0]}`).toUpperCase();
 }
 
-function positionSuggestionMenu(menu: HTMLDivElement, clientRect?: (() => DOMRect | null) | null) {
+const SUGGESTION_ROW_HEIGHT_PX = 42;
+const SUGGESTION_MENU_BORDER_PX = 2;
+const SUGGESTION_ROW_GAP_PX = 3;
+const SUGGESTION_MENU_VERTICAL_PADDING_PX = 12;
+
+function positionSuggestionMenu(menu: HTMLDivElement, visibleRows: number, clientRect?: (() => DOMRect | null) | null) {
   const rect = clientRect?.();
   if (!rect) return;
   const ownerDocument = menu.ownerDocument;
@@ -210,7 +215,11 @@ function positionSuggestionMenu(menu: HTMLDivElement, clientRect?: (() => DOMRec
   const left = Math.max(8, Math.min(rect.left, viewportWidth - menuWidth - 8));
   menu.style.left = `${Math.round(left)}px`;
   menu.style.top = `${Math.round(rect.bottom + 7)}px`;
-  menu.style.maxHeight = `${Math.max(88, viewportHeight - rect.bottom - 16)}px`;
+  const desiredHeight = (visibleRows * SUGGESTION_ROW_HEIGHT_PX)
+    + ((visibleRows - 1) * SUGGESTION_ROW_GAP_PX) + SUGGESTION_MENU_VERTICAL_PADDING_PX + SUGGESTION_MENU_BORDER_PX;
+  const availableHeight = viewportHeight > 0 ? Math.max(88, viewportHeight - rect.bottom - 16) : desiredHeight;
+  menu.style.maxHeight = `${Math.min(desiredHeight, availableHeight)}px`;
+  menu.dataset.visibleRows = String(visibleRows);
   menu.dataset.side = "bottom";
 }
 
@@ -368,7 +377,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               });
               menu?.appendChild(button);
             });
-            positionSuggestionMenu(menu, current.clientRect);
+            positionSuggestionMenu(menu, 4, current.clientRect);
           };
           return {
             onStart: (props) => {
@@ -539,7 +548,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               });
               menu?.appendChild(button);
             });
-            positionSuggestionMenu(menu, current.clientRect);
+            positionSuggestionMenu(menu, 5, current.clientRect);
           };
           return {
             onStart: (props) => {
