@@ -84,6 +84,8 @@ func (s *Server) nodeV2RequestActor(w http.ResponseWriter, r *http.Request, node
 
 func writeNodeV2StoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrEditorOwnerTextLimit):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "editor_owner_text_limit_exceeded", "error": store.EditorOwnerTextLimitMessage})
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_node_v2_request")
 	case errors.Is(err, store.ErrVersionConflict), errors.Is(err, store.ErrAlreadyExists):

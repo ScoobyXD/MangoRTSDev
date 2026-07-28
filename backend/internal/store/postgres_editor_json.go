@@ -206,7 +206,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 		input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID,
 		input.Document.DocumentID, emptyMangoTiptapDocument,
 	); err != nil {
-		return EditorJSONCommit{}, err
+		return EditorJSONCommit{}, mapEditorOwnerTextLimitError(err)
 	}
 	var revision int64
 	var deleted bool
@@ -281,7 +281,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 		input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID,
 		input.Document.DocumentID, nextRevision, input.JSONDocument, annotationsRaw, now,
 	); err != nil {
-		return EditorJSONCommit{}, err
+		return EditorJSONCommit{}, mapEditorOwnerTextLimitError(err)
 	}
 	if err := insertRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{
 		EventID: eventID, CompanyID: input.Document.CompanyID, Scope: scope,
@@ -346,7 +346,7 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 		on conflict (company_id, resource_type, resource_id, document_id) do nothing`,
 		ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, emptyMangoTiptapDocument,
 	); err != nil {
-		return EditorJSONCommit{}, err
+		return EditorJSONCommit{}, mapEditorOwnerTextLimitError(err)
 	}
 	var revision int64
 	var raw, annotationRaw []byte

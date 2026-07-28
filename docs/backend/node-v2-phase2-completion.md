@@ -62,7 +62,7 @@ The complete repository gate passed on 2026-07-27. Existing React test warnings 
 
 `backend/db/migrations/20260727_node_v2_phase2_product.sql` is additive. It adds text-box display order and create-idempotency metadata plus comment thread/comment idempotency metadata and supporting indexes. The same definitions are present in `backend/db/schema.sql`.
 
-No agent should apply this migration to development while the human-controlled development `schema_migrations` discrepancy documented in the Phase 1 record remains unresolved. A human rollout must first reconcile that ledger, rehearse on a disposable restored copy, apply both Phase 1 and Phase 2 additive migrations in reviewed order, then perform the separate Phase 3 conversion/cutover process. No document-size constraint or old two-MiB limit is introduced.
+No agent should apply this migration to development while the human-controlled development `schema_migrations` discrepancy documented in the Phase 1 record remains unresolved. A human rollout must first reconcile that ledger, rehearse on a disposable restored copy, apply both Phase 1 and Phase 2 additive migrations in reviewed order, then perform the separate Phase 3 conversion/cutover process. The old two-MiB Tiptap document limit is not reintroduced; the later product contract instead applies one aggregate 1 GiB current editor-text limit per Node, Project, or Logic Gate, excluding attachment object bytes and history.
 
 ## 2026-07-27 quality-audit closure
 

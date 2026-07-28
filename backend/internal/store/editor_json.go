@@ -11,22 +11,38 @@ import (
 )
 
 const (
-	EditorFormatLegacyHTML       = "legacy_html"
-	EditorFormatTiptapJSON       = "tiptap_json"
-	EditorMigrationNotStarted    = "not_started"
-	EditorMigrationConverting    = "converting"
-	EditorMigrationValidated     = "validated"
-	EditorMigrationReady         = "ready"
-	MangoTiptapFormat            = "mango-tiptap-json"
-	MangoTiptapSchemaVersion     = 1
-	EditorJSONSnapshotEventType  = "editor.snapshot.required"
-	EditorJSONDeletedEventType   = "editor.document.deleted"
-	EditorJSONOperationMaxIDSize = 160
+	EditorFormatLegacyHTML             = "legacy_html"
+	EditorFormatTiptapJSON             = "tiptap_json"
+	EditorMigrationNotStarted          = "not_started"
+	EditorMigrationConverting          = "converting"
+	EditorMigrationValidated           = "validated"
+	EditorMigrationReady               = "ready"
+	MangoTiptapFormat                  = "mango-tiptap-json"
+	MangoTiptapSchemaVersion           = 1
+	EditorJSONSnapshotEventType        = "editor.snapshot.required"
+	EditorJSONDeletedEventType         = "editor.document.deleted"
+	EditorJSONOperationMaxIDSize       = 160
+	EditorOwnerTextMaxBytes      int64 = 1 << 30
+	EditorOwnerTextLimitMessage        = "Mango gives each Node, Project, and Logic Gate a 1 GB editor-text limit. This counts only text and text-box document data. Attachments are separate and do not count toward the 1 GB."
 )
 
 var emptyMangoTiptapDocument = json.RawMessage(
 	`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]}}`,
 )
+
+func EditorOwnerTextLimitExceeded(otherCurrentBytes, nextDocumentBytes int64) bool {
+	if otherCurrentBytes < 0 || nextDocumentBytes < 0 {
+		return true
+	}
+	return otherCurrentBytes > EditorOwnerTextMaxBytes-nextDocumentBytes
+}
+
+func mapEditorOwnerTextLimitError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "editor_owner_text_limit_exceeded") {
+		return ErrEditorOwnerTextLimit
+	}
+	return err
+}
 
 type EditorDataFormatGate struct {
 	CompanyID              string `json:"company_id"`

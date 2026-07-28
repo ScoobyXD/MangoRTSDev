@@ -178,7 +178,10 @@ export class NodeV2ProviderSyncController {
     }
     if (message.type === DURABILITY_ERROR_TYPE) {
       this.options.onSaveState("error");
-      this.options.onError("The collaboration service could not commit this edit. It remains in this browser and will retry after reconnect.");
+      const errorMessage = message.code === "editor_owner_text_limit_exceeded"
+        ? "Mango gives each Node, Project, and Logic Gate a 1 GB editor-text limit. This counts only text and text-box document data. Attachments are separate and do not count toward the 1 GB."
+        : "The collaboration service could not commit this edit. It remains in this browser and will retry after reconnect.";
+      this.options.onError(errorMessage);
       this.provider?.disconnect();
       return;
     }
