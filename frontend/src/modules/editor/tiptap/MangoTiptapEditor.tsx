@@ -56,6 +56,10 @@ import {
   MangoAttachmentImage,
   type MangoAttachmentImageAttributes,
 } from "./mangoTiptapExtensions.js";
+import {
+  normalizeMangoTiptapCollaborationURL,
+  shouldUseMangoTiptapCollaboration,
+} from "./mangoTiptapCollaborationConfig.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType } from "./mangoTiptapSync.js";
@@ -683,7 +687,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
-  const usesYjsCollaboration = resourceType === "project" || resourceType === "logic_gate";
+  const collaborationURL = normalizeMangoTiptapCollaborationURL(import.meta.env.VITE_NODE_V2_COLLAB_URL);
+  const usesYjsCollaboration = shouldUseMangoTiptapCollaboration(resourceType, collaborationURL);
   const callbacksRef = useRef({
     onChange, onFlush, onFocus, onBlur, onConflict, onError,
     onRecoveryStorageError, onRecoveryStorageRecovered,
@@ -773,6 +778,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (usesYjsCollaboration) {
         const providerSync = new MangoTiptapProviderSync({
           companyID, resourceType, resourceID, documentID, userID: currentUserID, requestJSON,
+          collaborationURL,
           onDocument: (canonical) => {
             const serialized = serializeMangoTiptapDocument(canonical);
             if (serialized !== currentSerializedRef.current) {
@@ -913,7 +919,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })();
     syncPreparationRef.current = preparation;
     return preparation;
-  }, [attachmentContext?.apiBase, companyID, currentUserID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange, usesYjsCollaboration]);
+  }, [attachmentContext?.apiBase, collaborationURL, companyID, currentUserID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange, usesYjsCollaboration]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1374,6 +1380,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       data-mango-editor-editable={editable || undefined}
       data-mango-editor-state={lifecycle.state}
       data-mango-editor-pinned={lifecycle.pinned || undefined}
+      data-mango-editor-sync-mode={usesYjsCollaboration ? "collaboration" : "revisioned-json"}
       onPointerDown={!isActive ? activateFromPointer : undefined}
       onFocusCapture={!isActive ? activate : undefined}
       onDoubleClick={!isActive ? activate : undefined}

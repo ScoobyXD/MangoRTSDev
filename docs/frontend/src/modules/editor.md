@@ -13,6 +13,8 @@ Comments, attachments, inline images, and textbox chat are owned through the exa
 
 The Node v2 path uses the additive Node v2 API plus a short-lived collaboration ticket. Browser calls to public Yjs update/checkpoint writers are rejected; only the authorized collaboration service persists updates and materializes JSON/plain text. All real workspace gates remain inactive until manual acceptance and a separately approved conversion/cutover.
 
+Project and Logic Gate Tiptap editors enable Yjs collaboration only when `VITE_NODE_V2_COLLAB_URL` contains a nonblank `ws://` or `wss://` endpoint. When the variable is absent or blank, those editors remain fully editable through the revisioned editor JSON API and existing realtime snapshot recovery; they must not request a collaboration ticket or show a missing-collaboration-URL error. Node v2 remains an explicitly gated collaboration-only path and still requires the endpoint when `VITE_NODE_V2_PHASE2=true`.
+
 ## Gated JSON-Native Tiptap Implementation (2026-07-18)
 
 The repository now contains one reusable Tiptap/ProseMirror 3.28.0 editor core for Node, Project, and standalone Logic Gate/Editor documents. It is inactive for existing data because the company/workspace data-format gate defaults to `legacy_html/not_started`. The Tiptap chunk is lazy-loaded only after a complete JSON-ready gate is verified.
