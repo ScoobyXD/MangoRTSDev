@@ -494,9 +494,9 @@ export type CommunicationsEmailCollaborationThread = {
   email_thread_id?: string;
   thread_id?: string;
   messages: EmailMessage[];
-  hydration_status?: "partial" | "complete";
+  download_status?: "partial" | "downloading" | "complete" | "failed";
   fetched_at?: string;
-  last_hydration_error?: string;
+  last_download_error?: string;
   history_complete: boolean;
 };
 
@@ -505,9 +505,9 @@ export type CommunicationsStoredEmailThread = {
   thread_id?: string;
   messages: EmailMessage[];
   history_complete: boolean;
-  hydration_status?: "partial" | "complete";
+  download_status?: "partial" | "downloading" | "complete" | "failed";
   fetched_at?: string;
-  last_hydration_error?: string;
+  last_download_error?: string;
 };
 
 export type SendCommunicationsEmailCollaborationDraftResult = {
@@ -1022,9 +1022,9 @@ export async function getEmailCollaborationThread(companyID: string, collaborati
     collaboration_id: payload.collaboration_id,
     email_thread_id: payload.email_thread_id,
     thread_id: payload.thread_id,
-    hydration_status: payload.hydration_status,
+    download_status: payload.download_status,
     fetched_at: payload.fetched_at,
-    last_hydration_error: payload.last_hydration_error,
+    last_download_error: payload.last_download_error,
     messages: (payload.messages ?? []).map((message) => ({
       ...cloneMessage(message),
       collaboration_id: cleanCollaborationID,
@@ -1047,9 +1047,9 @@ export async function getNodeEmailThread(companyID: string, nodeID: string, emai
     thread_id: payload.thread_id,
     messages: (payload.messages ?? []).map(cloneMessage),
     history_complete: payload.history_complete === true,
-    hydration_status: payload.hydration_status,
+    download_status: payload.download_status,
     fetched_at: payload.fetched_at,
-    last_hydration_error: payload.last_hydration_error,
+    last_download_error: payload.last_download_error,
   };
 }
 

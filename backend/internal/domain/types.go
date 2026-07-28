@@ -418,9 +418,9 @@ type EmailAddressSnapshot struct {
 	Email string `json:"email"`
 }
 
-// EmailAttachmentSnapshot is durable attachment metadata. Content is
-// intentionally absent: provider bytes and temporary download URLs must never
-// be copied into Mango's email message rows.
+// EmailAttachmentSnapshot is durable attachment metadata. Provider bytes live
+// in Mango's private attachment object storage; temporary provider/download
+// URLs and raw bytes must never be copied into email rows or Node JSON.
 type EmailAttachmentSnapshot struct {
 	ID                 string `json:"id,omitempty"`
 	AttachmentID       string `json:"attachment_id,omitempty"`
@@ -433,22 +433,23 @@ type EmailAttachmentSnapshot struct {
 }
 
 type EmailMessageSnapshot struct {
-	ID          string                    `json:"id"`
-	ThreadID    string                    `json:"thread_id,omitempty"`
-	Subject     string                    `json:"subject"`
-	Snippet     string                    `json:"snippet,omitempty"`
-	Body        string                    `json:"body,omitempty"`
-	Date        int64                     `json:"date,omitempty"`
-	Unread      bool                      `json:"unread"`
-	Starred     bool                      `json:"starred"`
-	From        []EmailAddressSnapshot    `json:"from,omitempty"`
-	To          []EmailAddressSnapshot    `json:"to,omitempty"`
-	Cc          []EmailAddressSnapshot    `json:"cc,omitempty"`
-	Bcc         []EmailAddressSnapshot    `json:"bcc,omitempty"`
-	ReplyTo     []EmailAddressSnapshot    `json:"reply_to,omitempty"`
-	Attachments []EmailAttachmentSnapshot `json:"attachments,omitempty"`
-	Folders     []string                  `json:"folders,omitempty"`
-	FolderIDs   []string                  `json:"folder_ids,omitempty"`
+	ID               string                    `json:"id"`
+	ThreadID         string                    `json:"thread_id,omitempty"`
+	Subject          string                    `json:"subject"`
+	Snippet          string                    `json:"snippet,omitempty"`
+	Body             string                    `json:"body,omitempty"`
+	Date             int64                     `json:"date,omitempty"`
+	Unread           bool                      `json:"unread"`
+	Starred          bool                      `json:"starred"`
+	From             []EmailAddressSnapshot    `json:"from,omitempty"`
+	To               []EmailAddressSnapshot    `json:"to,omitempty"`
+	Cc               []EmailAddressSnapshot    `json:"cc,omitempty"`
+	Bcc              []EmailAddressSnapshot    `json:"bcc,omitempty"`
+	ReplyTo          []EmailAddressSnapshot    `json:"reply_to,omitempty"`
+	Attachments      []EmailAttachmentSnapshot `json:"attachments,omitempty"`
+	Folders          []string                  `json:"folders,omitempty"`
+	FolderIDs        []string                  `json:"folder_ids,omitempty"`
+	DownloadComplete bool                      `json:"download_complete"`
 }
 
 // CommunicationsEmailThread is Mango's provider-independent, durable copy of
@@ -465,10 +466,10 @@ type CommunicationsEmailThread struct {
 	AccountEmail          string                       `json:"account_email"`
 	ProviderThreadID      string                       `json:"provider_thread_id,omitempty"`
 	RootProviderMessageID string                       `json:"root_provider_message_id"`
-	HydrationStatus       string                       `json:"hydration_status"`
+	DownloadStatus        string                       `json:"download_status"`
 	HistoryComplete       bool                         `json:"history_complete"`
 	FetchedAt             *time.Time                   `json:"fetched_at,omitempty"`
-	LastHydrationError    string                       `json:"last_hydration_error,omitempty"`
+	LastDownloadError     string                       `json:"last_download_error,omitempty"`
 	CreatedTimestamp      time.Time                    `json:"created_timestamp"`
 	UpdatedTimestamp      time.Time                    `json:"updated_timestamp"`
 	Messages              []CommunicationsEmailMessage `json:"messages"`

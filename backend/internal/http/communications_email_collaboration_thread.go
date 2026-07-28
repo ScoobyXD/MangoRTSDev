@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const communicationsEmailCollaborationThreadHydrationWorkers = 4
+const communicationsEmailThreadDownloadWorkers = 4
 
 var errEmailCollaborationSourceUnavailable = errors.New("email collaboration source unavailable")
 
@@ -45,7 +45,7 @@ func (s *Server) loadCommunicationsEmailCollaborationThread(ctx context.Context,
 	if len(messageIDs) == 0 {
 		return nil, false
 	}
-	messages, err := s.hydrateEmailCollaborationThreadMessages(ctx, connection, threadID, messageIDs)
+	messages, err := s.downloadEmailThreadMessages(ctx, connection, threadID, messageIDs)
 	if err != nil {
 		return nil, false
 	}
@@ -99,22 +99,22 @@ func cleanEmailCollaborationThreadMessageIDs(values []string) []string {
 	return out
 }
 
-func (s *Server) hydrateEmailCollaborationThreadMessages(ctx context.Context, connection domain.UserEmailConnection, threadID string, messageIDs []string) ([]NylasMessage, error) {
-	type hydrationJob struct {
+func (s *Server) downloadEmailThreadMessages(ctx context.Context, connection domain.UserEmailConnection, threadID string, messageIDs []string) ([]NylasMessage, error) {
+	type messageDownloadJob struct {
 		index     int
 		messageID string
 	}
 
-	hydrationCtx, cancel := context.WithCancel(ctx)
+	downloadCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	jobs := make(chan hydrationJob, len(messageIDs))
+	jobs := make(chan messageDownloadJob, len(messageIDs))
 	for index, messageID := range messageIDs {
-		jobs <- hydrationJob{index: index, messageID: messageID}
+		jobs <- messageDownloadJob{index: index, messageID: messageID}
 	}
 	close(jobs)
 
 	messages := make([]NylasMessage, len(messageIDs))
-	workerCount := communicationsEmailCollaborationThreadHydrationWorkers
+	workerCount := communicationsEmailThreadDownloadWorkers
 	if workerCount > len(messageIDs) {
 		workerCount = len(messageIDs)
 	}
@@ -132,11 +132,11 @@ func (s *Server) hydrateEmailCollaborationThreadMessages(ctx context.Context, co
 		go func() {
 			defer workers.Done()
 			for job := range jobs {
-				if hydrationCtx.Err() != nil {
+				if downloadCtx.Err() != nil {
 					return
 				}
 				var message NylasMessage
-				err := s.withCommunicationsNylasGate(hydrationCtx, connection, func(callCtx context.Context) error {
+				err := s.withCommunicationsNylasGate(downloadCtx, connection, func(callCtx context.Context) error {
 					var callErr error
 					message, callErr = s.nylasClient.GetMessage(callCtx, connection.GrantID, job.messageID)
 					return callErr
@@ -160,12 +160,12 @@ func (s *Server) hydrateEmailCollaborationThreadMessages(ctx context.Context, co
 	return messages, nil
 }
 
-func communicationsEmailThreadInputFromCollaboration(collaboration domain.CommunicationsEmailCollaboration, messages []domain.EmailMessageSnapshot, historyComplete bool, hydrationError string) store.CommunicationsEmailThreadUpsertInput {
+func communicationsEmailThreadInputFromCollaboration(collaboration domain.CommunicationsEmailCollaboration, messages []domain.EmailMessageSnapshot, historyComplete bool, downloadError string) store.CommunicationsEmailThreadUpsertInput {
 	input := store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: collaboration.CompanyID, AccountEmail: collaboration.AccountEmail,
 		ProviderThreadID: collaboration.ProviderThreadID, SelectedMessageID: collaboration.RootMessageID,
 		Messages: messages, HistoryComplete: historyComplete, FetchedAt: time.Now().UTC(),
-		LastHydrationError: hydrationError,
+		LastDownloadError: downloadError,
 	}
 	if input.SelectedMessageID == "" {
 		input.SelectedMessageID = collaboration.Message.ID
@@ -179,33 +179,22 @@ func communicationsEmailThreadInputFromCollaboration(collaboration domain.Commun
 	return input
 }
 
-func (s *Server) hydrateAndPersistCommunicationsEmailCollaborationThread(ctx context.Context, collaboration domain.CommunicationsEmailCollaboration, actorUserID string) (domain.CommunicationsEmailThread, bool) {
+func (s *Server) downloadAndPersistCommunicationsEmailCollaborationThread(ctx context.Context, collaboration domain.CommunicationsEmailCollaboration, actorUserID string) (domain.CommunicationsEmailThread, bool) {
 	providerMessages, complete := s.loadCommunicationsEmailCollaborationThread(ctx, collaboration, actorUserID)
 	snapshots := make([]domain.EmailMessageSnapshot, 0, len(providerMessages))
 	for _, message := range providerMessages {
 		snapshots = append(snapshots, emailMessageSnapshotFromNylas(message))
 	}
-	hydrationError := ""
+	downloadError := ""
 	if !complete {
 		snapshots = []domain.EmailMessageSnapshot{collaboration.Message}
-		hydrationError = "provider_thread_temporarily_unavailable"
+		downloadError = "provider_thread_temporarily_unavailable"
 	}
-	thread, err := s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromCollaboration(collaboration, snapshots, complete, hydrationError))
+	thread, err := s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromCollaboration(collaboration, snapshots, complete, downloadError))
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, false
 	}
 	return thread, complete
-}
-
-func (s *Server) scheduleCommunicationsEmailCollaborationThreadHydration(collaboration domain.CommunicationsEmailCollaboration, actorUserID string) {
-	if strings.TrimSpace(collaboration.ProviderThreadID) == "" {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		_, _ = s.hydrateAndPersistCommunicationsEmailCollaborationThread(ctx, collaboration, actorUserID)
-	}()
 }
 
 func storedEmailThreadMessages(thread domain.CommunicationsEmailThread) []domain.EmailMessageSnapshot {

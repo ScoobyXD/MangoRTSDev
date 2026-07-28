@@ -55,6 +55,10 @@ func messageNeedsRawMIMEAttachmentRecovery(message NylasMessage) bool {
 	if message.RawMIMEAttachmentsRecovered {
 		return false
 	}
+	return emailMessageHasUnresolvedCIDAttachments(message)
+}
+
+func emailMessageHasUnresolvedCIDAttachments(message NylasMessage) bool {
 	refs := rawMIMEBodyCIDReferences(message.Body)
 	for ref := range refs {
 		attachment, ok := findRawMIMEAttachmentByContentID(message.Attachments, ref)

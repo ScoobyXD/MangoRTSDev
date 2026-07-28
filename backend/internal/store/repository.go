@@ -156,6 +156,12 @@ type CommunicationsRepository interface {
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
+	EnsureCommunicationsEmailThreadDownloadJob(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
+	ClaimCommunicationsEmailThreadDownloadJobs(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsEmailThreadDownloadJob, error)
+	MarkCommunicationsEmailThreadDownloadJobCompleted(downloadJobID string) error
+	MarkCommunicationsEmailThreadDownloadJobFailed(downloadJobID, lastError string, availableAt time.Time, final bool) error
+	ListCommunicationsEmailThreadDownloadJobs(companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error)
+	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
 	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
 	EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)

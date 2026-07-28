@@ -769,7 +769,7 @@ func (r *MemoryRepo) listNodeV2EmailThreadsLocked(query NodeV2AggregateQuery) No
 		if !ok {
 			continue
 		}
-		summary := domain.NodeV2EmailThreadSummary{EmailThreadID: thread.EmailThreadID, AccountEmail: thread.AccountEmail, HydrationStatus: thread.HydrationStatus, HistoryComplete: thread.HistoryComplete, NodeAttachedTimestamp: nodeLink.CreatedTimestamp, MessageCount: len(thread.Messages)}
+		summary := domain.NodeV2EmailThreadSummary{EmailThreadID: thread.EmailThreadID, AccountEmail: thread.AccountEmail, DownloadStatus: thread.DownloadStatus, HistoryComplete: thread.HistoryComplete, NodeAttachedTimestamp: nodeLink.CreatedTimestamp, MessageCount: len(thread.Messages)}
 		if len(thread.Messages) > 0 {
 			last := thread.Messages[len(thread.Messages)-1].Message
 			summary.Subject = last.Subject

@@ -8,8 +8,19 @@ import (
 )
 
 const (
-	CommunicationsEmailThreadHydrationPartial  = "partial"
-	CommunicationsEmailThreadHydrationComplete = "complete"
+	CommunicationsEmailThreadDownloadPartial     = "partial"
+	CommunicationsEmailThreadDownloadDownloading = "downloading"
+	CommunicationsEmailThreadDownloadComplete    = "complete"
+	CommunicationsEmailThreadDownloadFailed      = "failed"
+
+	CommunicationsEmailThreadDownloadScopeFullThread = "full_thread"
+	CommunicationsEmailThreadDownloadScopeMessage    = "message"
+
+	CommunicationsEmailThreadDownloadJobPending    = "pending"
+	CommunicationsEmailThreadDownloadJobProcessing = "processing"
+	CommunicationsEmailThreadDownloadJobRetry      = "retry"
+	CommunicationsEmailThreadDownloadJobCompleted  = "completed"
+	CommunicationsEmailThreadDownloadJobFailed     = "failed"
 )
 
 type CommunicationsEmailThreadUpsertInput struct {
@@ -23,7 +34,9 @@ type CommunicationsEmailThreadUpsertInput struct {
 	Messages             []domain.EmailMessageSnapshot
 	HistoryComplete      bool
 	FetchedAt            time.Time
-	LastHydrationError   string
+	LastDownloadError    string
+	RequestDownload      bool
+	RequestedByUserID    string
 }
 
 type CommunicationsNodeEmailImportInput struct {
@@ -37,6 +50,44 @@ type CommunicationsNodeEmailImportInput struct {
 type CommunicationsNodeEmailImportResult struct {
 	InformationID string                           `json:"information_id"`
 	EmailThread   domain.CommunicationsEmailThread `json:"email_thread"`
+}
+
+type CommunicationsEmailThreadDownloadJob struct {
+	DownloadJobID              string     `json:"download_job_id"`
+	CompanyID                  string     `json:"company_id"`
+	EmailThreadID              string     `json:"email_thread_id"`
+	DownloadScope              string     `json:"download_scope"`
+	RequestedProviderMessageID string     `json:"requested_provider_message_id,omitempty"`
+	RequestedByUserID          string     `json:"requested_by_user_id,omitempty"`
+	Status                     string     `json:"status"`
+	AttemptCount               int        `json:"attempt_count"`
+	LastError                  string     `json:"last_error,omitempty"`
+	AvailableAt                time.Time  `json:"available_at"`
+	ProcessingStartedAt        *time.Time `json:"processing_started_at,omitempty"`
+	CompletedTimestamp         *time.Time `json:"completed_timestamp,omitempty"`
+	FailedTimestamp            *time.Time `json:"failed_timestamp,omitempty"`
+	CreatedTimestamp           time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp           time.Time  `json:"updated_timestamp"`
+}
+
+func normalizeCommunicationsEmailThreadDownloadScope(value string) string {
+	switch strings.TrimSpace(value) {
+	case CommunicationsEmailThreadDownloadScopeFullThread:
+		return CommunicationsEmailThreadDownloadScopeFullThread
+	case CommunicationsEmailThreadDownloadScopeMessage:
+		return CommunicationsEmailThreadDownloadScopeMessage
+	default:
+		return ""
+	}
+}
+
+func communicationsEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread, providerMessageID string) bool {
+	for _, item := range thread.Messages {
+		if item.ProviderMessageID == strings.TrimSpace(providerMessageID) {
+			return item.Message.DownloadComplete
+		}
+	}
+	return false
 }
 
 func normalizeEmailAttachmentSnapshots(values []domain.EmailAttachmentSnapshot) []domain.EmailAttachmentSnapshot {
@@ -80,7 +131,8 @@ func normalizeCommunicationsEmailThreadInput(input CommunicationsEmailThreadUpse
 	input.AccountEmail = scope.accountEmail
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
 	input.SelectedMessageID = strings.TrimSpace(input.SelectedMessageID)
-	input.LastHydrationError = strings.TrimSpace(input.LastHydrationError)
+	input.LastDownloadError = strings.TrimSpace(input.LastDownloadError)
+	input.RequestedByUserID = cleanUUIDText(input.RequestedByUserID)
 	if input.FetchedAt.IsZero() {
 		input.FetchedAt = time.Now().UTC()
 	} else {
@@ -176,4 +228,17 @@ func communicationsEmailThreadForMessages(thread domain.CommunicationsEmailThrea
 		return thread.Messages[i].ProviderMessageID < thread.Messages[j].ProviderMessageID
 	})
 	return thread
+}
+
+func communicationsEmailThreadDownloadRequest(thread domain.CommunicationsEmailThread, input CommunicationsEmailThreadUpsertInput) (string, string, bool) {
+	if !input.RequestDownload || input.RequestedByUserID == "" {
+		return "", "", false
+	}
+	if strings.TrimSpace(thread.ProviderThreadID) != "" && !thread.HistoryComplete {
+		return CommunicationsEmailThreadDownloadScopeFullThread, "", true
+	}
+	if !communicationsEmailMessageDownloadComplete(thread, input.SelectedMessageID) {
+		return CommunicationsEmailThreadDownloadScopeMessage, input.SelectedMessageID, true
+	}
+	return "", "", false
 }

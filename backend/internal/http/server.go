@@ -36,90 +36,100 @@ type BootstrapDevAdminConfig struct {
 }
 
 type Server struct {
-	repo                                    store.Repository
-	realtimeRegistry                        *realtimeSubscriptionRegistry
-	realtimeTickets                         *realtimeTicketStore
-	realtimeSpineCancel                     context.CancelFunc
-	realtimeSpineWake                       chan struct{}
-	realtimeSpinePollInterval               time.Duration
-	realtimeSpineDisabled                   bool
-	realtimeSpineMu                         sync.Mutex
-	realtimeSpineCursor                     int64
-	realtimeSpineRetrySequence              int64
-	realtimeSpineRetryAttempts              int
-	realtimeSpineRetryAt                    time.Time
-	notifications                           *notifications.Service
-	kanban                                  *kanban.Service
-	workspaceDerivedCatchupCancel           context.CancelFunc
-	workspaceDerivedCatchupInterval         time.Duration
-	workspaceDerivedCatchupLimit            int
-	notificationCleanupCancel               context.CancelFunc
-	notificationCleanupInterval             time.Duration
-	notificationRetentionDuration           time.Duration
-	notificationCleanupLimit                int
-	notificationCleanupDisabled             bool
-	communicationsArchiveWorkerCancel       context.CancelFunc
-	communicationsArchiveWorkerWake         chan struct{}
-	communicationsArchiveWorkerInterval     time.Duration
-	communicationsArchiveWorkerBatchLimit   int
-	communicationsArchiveWorkerLeaseTimeout time.Duration
-	communicationsArchiveWorkerDisabled     bool
-	metrics                                 MetricsRecorder
-	commCache                               *communicationsCache
-	communicationsFolderFlights             singleflight.Group
-	communicationsMessageFlights            singleflight.Group
-	communicationsMessagePageFlights        singleflight.Group
-	nylasGate                               *nylasRequestGate
-	nylasWebhooks                           *nylasWebhookReceiptCache
-	authValidator                           AuthTokenValidator
-	testAuthHeaderEnabled                   bool
-	authCache                               *authMembershipCache
-	cognitoAdmin                            CognitoAdminClient
-	emailSender                             AuthEmailSender
-	appBaseURL                              string
-	bootstrapDevAdmin                       BootstrapDevAdminConfig
-	nylasClient                             NylasClient
-	nylasConfig                             NylasConfig
-	attachmentStorage                       AttachmentObjectStorage
-	attachmentVariantEnsurer                AttachmentImageVariantEnsurer
-	attachmentRemoteImageDownloader         attachmentRemoteImageDownloader
-	attachmentDirectUpload                  attachmentDirectUploadConfig
-	attachmentUploadCleanupCancel           context.CancelFunc
-	attachmentUploadCleanupDisabled         bool
-	maxBodyBytes                            int64
-	legacyMapRoutesEnabled                  bool
+	repo                                                store.Repository
+	realtimeRegistry                                    *realtimeSubscriptionRegistry
+	realtimeTickets                                     *realtimeTicketStore
+	realtimeSpineCancel                                 context.CancelFunc
+	realtimeSpineWake                                   chan struct{}
+	realtimeSpinePollInterval                           time.Duration
+	realtimeSpineDisabled                               bool
+	realtimeSpineMu                                     sync.Mutex
+	realtimeSpineCursor                                 int64
+	realtimeSpineRetrySequence                          int64
+	realtimeSpineRetryAttempts                          int
+	realtimeSpineRetryAt                                time.Time
+	notifications                                       *notifications.Service
+	kanban                                              *kanban.Service
+	workspaceDerivedCatchupCancel                       context.CancelFunc
+	workspaceDerivedCatchupInterval                     time.Duration
+	workspaceDerivedCatchupLimit                        int
+	notificationCleanupCancel                           context.CancelFunc
+	notificationCleanupInterval                         time.Duration
+	notificationRetentionDuration                       time.Duration
+	notificationCleanupLimit                            int
+	notificationCleanupDisabled                         bool
+	communicationsArchiveWorkerCancel                   context.CancelFunc
+	communicationsArchiveWorkerWake                     chan struct{}
+	communicationsArchiveWorkerInterval                 time.Duration
+	communicationsArchiveWorkerBatchLimit               int
+	communicationsArchiveWorkerLeaseTimeout             time.Duration
+	communicationsArchiveWorkerDisabled                 bool
+	metrics                                             MetricsRecorder
+	communicationsEmailThreadDownloadWorkerCancel       context.CancelFunc
+	communicationsEmailThreadDownloadWorkerWake         chan struct{}
+	communicationsEmailThreadDownloadWorkerInterval     time.Duration
+	communicationsEmailThreadDownloadWorkerBatchLimit   int
+	communicationsEmailThreadDownloadWorkerLeaseTimeout time.Duration
+	communicationsEmailThreadDownloadWorkerDisabled     bool
+	commCache                                           *communicationsCache
+	communicationsFolderFlights                         singleflight.Group
+	communicationsMessageFlights                        singleflight.Group
+	communicationsMessagePageFlights                    singleflight.Group
+	nylasGate                                           *nylasRequestGate
+	nylasWebhooks                                       *nylasWebhookReceiptCache
+	authValidator                                       AuthTokenValidator
+	testAuthHeaderEnabled                               bool
+	authCache                                           *authMembershipCache
+	cognitoAdmin                                        CognitoAdminClient
+	emailSender                                         AuthEmailSender
+	appBaseURL                                          string
+	bootstrapDevAdmin                                   BootstrapDevAdminConfig
+	nylasClient                                         NylasClient
+	nylasConfig                                         NylasConfig
+	attachmentStorage                                   AttachmentObjectStorage
+	attachmentVariantEnsurer                            AttachmentImageVariantEnsurer
+	attachmentRemoteImageDownloader                     attachmentRemoteImageDownloader
+	attachmentDirectUpload                              attachmentDirectUploadConfig
+	attachmentUploadCleanupCancel                       context.CancelFunc
+	attachmentUploadCleanupDisabled                     bool
+	maxBodyBytes                                        int64
+	legacyMapRoutesEnabled                              bool
 }
 
 type ServerOptions struct {
-	DisableAttachmentUploadCleanup          bool
-	AuthValidator                           AuthTokenValidator
-	TestAuthHeaderEnabled                   bool
-	AuthMembershipCacheTTL                  time.Duration
-	AuthMembershipCacheMaxEntries           int
-	CognitoAdmin                            CognitoAdminClient
-	EmailSender                             AuthEmailSender
-	AppBaseURL                              string
-	BootstrapDevAdmin                       BootstrapDevAdminConfig
-	NylasClient                             NylasClient
-	NylasConfig                             NylasConfig
-	AttachmentStorage                       AttachmentObjectStorage
-	AttachmentVariantEnsurer                AttachmentImageVariantEnsurer
-	RealtimeTicketSecret                    string
-	RealtimeSpinePollInterval               time.Duration
-	DisableRealtimeSpine                    bool
-	MaxRequestBodyBytes                     int64
-	LegacyMapRoutesEnabled                  bool
-	WorkspaceDerivedCatchupInterval         time.Duration
-	WorkspaceDerivedCatchupLimit            int
-	NotificationCleanupInterval             time.Duration
-	NotificationRetentionDuration           time.Duration
-	NotificationCleanupLimit                int
-	DisableNotificationCleanup              bool
-	CommunicationsArchiveWorkerInterval     time.Duration
-	CommunicationsArchiveWorkerBatchLimit   int
-	CommunicationsArchiveWorkerLeaseTimeout time.Duration
-	DisableCommunicationsArchiveWorker      bool
-	Metrics                                 MetricsRecorder
+	DisableAttachmentUploadCleanup                      bool
+	AuthValidator                                       AuthTokenValidator
+	TestAuthHeaderEnabled                               bool
+	AuthMembershipCacheTTL                              time.Duration
+	AuthMembershipCacheMaxEntries                       int
+	CognitoAdmin                                        CognitoAdminClient
+	EmailSender                                         AuthEmailSender
+	AppBaseURL                                          string
+	BootstrapDevAdmin                                   BootstrapDevAdminConfig
+	NylasClient                                         NylasClient
+	NylasConfig                                         NylasConfig
+	AttachmentStorage                                   AttachmentObjectStorage
+	AttachmentVariantEnsurer                            AttachmentImageVariantEnsurer
+	RealtimeTicketSecret                                string
+	RealtimeSpinePollInterval                           time.Duration
+	DisableRealtimeSpine                                bool
+	MaxRequestBodyBytes                                 int64
+	LegacyMapRoutesEnabled                              bool
+	WorkspaceDerivedCatchupInterval                     time.Duration
+	WorkspaceDerivedCatchupLimit                        int
+	NotificationCleanupInterval                         time.Duration
+	NotificationRetentionDuration                       time.Duration
+	NotificationCleanupLimit                            int
+	DisableNotificationCleanup                          bool
+	CommunicationsArchiveWorkerInterval                 time.Duration
+	CommunicationsArchiveWorkerBatchLimit               int
+	CommunicationsArchiveWorkerLeaseTimeout             time.Duration
+	DisableCommunicationsArchiveWorker                  bool
+	Metrics                                             MetricsRecorder
+	CommunicationsEmailThreadDownloadWorkerInterval     time.Duration
+	CommunicationsEmailThreadDownloadWorkerBatchLimit   int
+	CommunicationsEmailThreadDownloadWorkerLeaseTimeout time.Duration
+	DisableCommunicationsEmailThreadDownloadWorker      bool
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -163,6 +173,15 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		communicationsArchiveWorkerBatchLimit = defaultCommunicationsArchiveWorkerBatchLimit
 	}
 	communicationsArchiveWorkerLeaseTimeout := store.NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(options.CommunicationsArchiveWorkerLeaseTimeout)
+	communicationsEmailThreadDownloadWorkerInterval := options.CommunicationsEmailThreadDownloadWorkerInterval
+	if communicationsEmailThreadDownloadWorkerInterval <= 0 {
+		communicationsEmailThreadDownloadWorkerInterval = defaultCommunicationsEmailThreadDownloadWorkerInterval
+	}
+	communicationsEmailThreadDownloadWorkerBatchLimit := options.CommunicationsEmailThreadDownloadWorkerBatchLimit
+	if communicationsEmailThreadDownloadWorkerBatchLimit <= 0 {
+		communicationsEmailThreadDownloadWorkerBatchLimit = defaultCommunicationsEmailThreadDownloadBatchLimit
+	}
+	communicationsEmailThreadDownloadWorkerLeaseTimeout := store.NormalizeCommunicationsEmailThreadDownloadLease(options.CommunicationsEmailThreadDownloadWorkerLeaseTimeout)
 	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
 	if workspaceDerivedCatchupInterval <= 0 {
 		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
@@ -180,45 +199,50 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeTicketSecret = strings.TrimSpace(options.NylasConfig.StateSecret)
 	}
 	server := &Server{
-		repo:                                    repo,
-		realtimeRegistry:                        newRealtimeSubscriptionRegistry(),
-		realtimeTickets:                         newRealtimeTicketStore(realtimeTicketSecret),
-		realtimeSpineWake:                       make(chan struct{}, 1),
-		realtimeSpinePollInterval:               options.RealtimeSpinePollInterval,
-		realtimeSpineDisabled:                   options.DisableRealtimeSpine,
-		notifications:                           notifications.NewService(repo),
-		kanban:                                  kanban.NewService(repo),
-		workspaceDerivedCatchupInterval:         workspaceDerivedCatchupInterval,
-		workspaceDerivedCatchupLimit:            workspaceDerivedCatchupLimit,
-		notificationCleanupInterval:             notificationCleanupInterval,
-		notificationRetentionDuration:           notificationRetentionDuration,
-		notificationCleanupLimit:                notificationCleanupLimit,
-		notificationCleanupDisabled:             options.DisableNotificationCleanup,
-		communicationsArchiveWorkerWake:         make(chan struct{}, 1),
-		communicationsArchiveWorkerInterval:     communicationsArchiveWorkerInterval,
-		communicationsArchiveWorkerBatchLimit:   communicationsArchiveWorkerBatchLimit,
-		communicationsArchiveWorkerLeaseTimeout: communicationsArchiveWorkerLeaseTimeout,
-		communicationsArchiveWorkerDisabled:     options.DisableCommunicationsArchiveWorker,
-		metrics:                                 metrics,
-		commCache:                               newCommunicationsCache(),
-		nylasGate:                               newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks:                           newNylasWebhookReceiptCache(),
-		authValidator:                           options.AuthValidator,
-		testAuthHeaderEnabled:                   options.TestAuthHeaderEnabled,
-		authCache:                               newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
-		cognitoAdmin:                            options.CognitoAdmin,
-		emailSender:                             options.EmailSender,
-		appBaseURL:                              strings.TrimSpace(options.AppBaseURL),
-		bootstrapDevAdmin:                       normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
-		nylasClient:                             options.NylasClient,
-		nylasConfig:                             options.NylasConfig,
-		attachmentStorage:                       options.AttachmentStorage,
-		attachmentVariantEnsurer:                options.AttachmentVariantEnsurer,
-		attachmentRemoteImageDownloader:         newSafeAttachmentRemoteImageDownloader(),
-		attachmentDirectUpload:                  attachmentDirectUploadConfigFromEnv(),
-		attachmentUploadCleanupDisabled:         options.DisableAttachmentUploadCleanup,
-		maxBodyBytes:                            options.MaxRequestBodyBytes,
-		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
+		repo:                                                repo,
+		realtimeRegistry:                                    newRealtimeSubscriptionRegistry(),
+		realtimeTickets:                                     newRealtimeTicketStore(realtimeTicketSecret),
+		realtimeSpineWake:                                   make(chan struct{}, 1),
+		realtimeSpinePollInterval:                           options.RealtimeSpinePollInterval,
+		realtimeSpineDisabled:                               options.DisableRealtimeSpine,
+		notifications:                                       notifications.NewService(repo),
+		kanban:                                              kanban.NewService(repo),
+		workspaceDerivedCatchupInterval:                     workspaceDerivedCatchupInterval,
+		workspaceDerivedCatchupLimit:                        workspaceDerivedCatchupLimit,
+		notificationCleanupInterval:                         notificationCleanupInterval,
+		notificationRetentionDuration:                       notificationRetentionDuration,
+		notificationCleanupLimit:                            notificationCleanupLimit,
+		notificationCleanupDisabled:                         options.DisableNotificationCleanup,
+		communicationsArchiveWorkerWake:                     make(chan struct{}, 1),
+		communicationsArchiveWorkerInterval:                 communicationsArchiveWorkerInterval,
+		communicationsArchiveWorkerBatchLimit:               communicationsArchiveWorkerBatchLimit,
+		communicationsArchiveWorkerLeaseTimeout:             communicationsArchiveWorkerLeaseTimeout,
+		communicationsArchiveWorkerDisabled:                 options.DisableCommunicationsArchiveWorker,
+		communicationsEmailThreadDownloadWorkerWake:         make(chan struct{}, 1),
+		communicationsEmailThreadDownloadWorkerInterval:     communicationsEmailThreadDownloadWorkerInterval,
+		communicationsEmailThreadDownloadWorkerBatchLimit:   communicationsEmailThreadDownloadWorkerBatchLimit,
+		communicationsEmailThreadDownloadWorkerLeaseTimeout: communicationsEmailThreadDownloadWorkerLeaseTimeout,
+		communicationsEmailThreadDownloadWorkerDisabled:     options.DisableCommunicationsEmailThreadDownloadWorker,
+		metrics:                         metrics,
+		commCache:                       newCommunicationsCache(),
+		nylasGate:                       newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:                   newNylasWebhookReceiptCache(),
+		authValidator:                   options.AuthValidator,
+		testAuthHeaderEnabled:           options.TestAuthHeaderEnabled,
+		authCache:                       newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		cognitoAdmin:                    options.CognitoAdmin,
+		emailSender:                     options.EmailSender,
+		appBaseURL:                      strings.TrimSpace(options.AppBaseURL),
+		bootstrapDevAdmin:               normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
+		nylasClient:                     options.NylasClient,
+		nylasConfig:                     options.NylasConfig,
+		attachmentStorage:               options.AttachmentStorage,
+		attachmentVariantEnsurer:        options.AttachmentVariantEnsurer,
+		attachmentRemoteImageDownloader: newSafeAttachmentRemoteImageDownloader(),
+		attachmentDirectUpload:          attachmentDirectUploadConfigFromEnv(),
+		attachmentUploadCleanupDisabled: options.DisableAttachmentUploadCleanup,
+		maxBodyBytes:                    options.MaxRequestBodyBytes,
+		legacyMapRoutesEnabled:          options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
 	if server.attachmentVariantEnsurer == nil && server.attachmentStorage != nil {
 		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
@@ -228,6 +252,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationCleanup()
 	server.startCommunicationsArchiveWorker()
+	server.startCommunicationsEmailThreadDownloadWorker()
 	server.startRealtimeSpine()
 	return server
 }
@@ -247,6 +272,9 @@ func (s *Server) Close() {
 	}
 	if s.communicationsArchiveWorkerCancel != nil {
 		s.communicationsArchiveWorkerCancel()
+	}
+	if s.communicationsEmailThreadDownloadWorkerCancel != nil {
+		s.communicationsEmailThreadDownloadWorkerCancel()
 	}
 }
 

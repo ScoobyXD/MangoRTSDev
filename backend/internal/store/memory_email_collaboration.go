@@ -115,6 +115,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeParticipants := maps.Clone(r.emailCollaborationParticipants)
 	beforeEmailThreads := maps.Clone(r.emailThreads)
 	beforeEmailThreadScopeIDs := maps.Clone(r.emailThreadScopeIDs)
+	beforeEmailThreadDownloadJobs := maps.Clone(r.emailThreadDownloadJobs)
 	beforeNodeEmailThreads := maps.Clone(r.nodeEmailThreads)
 	beforePermissions := maps.Clone(r.entityPermissions)
 	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
@@ -134,6 +135,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		r.emailThreads = beforeEmailThreads
 		r.emailThreadScopeIDs = beforeEmailThreadScopeIDs
 		r.nodeEmailThreads = beforeNodeEmailThreads
+		r.emailThreadDownloadJobs = beforeEmailThreadDownloadJobs
 		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
 		r.gvicAssignments, r.gvicEffectiveAssignments = beforeGVICAssignments, beforeGVICEffectiveAssignments
 		r.GVICMatrixProjectionRows, r.gvicPolicyRevisions = beforeGVICMatrixProjectionRows, beforeGVICPolicyRevisions
@@ -146,13 +148,15 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	if _, ok := r.memberships[membershipKey(input.CompanyID, input.CreatedByUserID)]; !ok {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrPrincipalNotInCompany
 	}
-	thread, err := r.upsertCommunicationsEmailThreadLocked(CommunicationsEmailThreadUpsertInput{
+	threadInput := CommunicationsEmailThreadUpsertInput{
 		CompanyID: input.CompanyID, PersonalUserID: scope.personalUserID,
 		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
 		AccountEmail: scope.accountEmail, ProviderThreadID: input.Message.ThreadID,
 		SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
 		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(),
-	})
+		RequestDownload: true, RequestedByUserID: input.CreatedByUserID,
+	}
+	thread, err := r.upsertCommunicationsEmailThreadLocked(threadInput)
 	if err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -162,6 +166,12 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		existing.EmailThreadID = thread.EmailThreadID
 		r.emailCollaborations[key(existing.CompanyID, existing.CollaborationID)] = existing
 		r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, existing.NodeID, existing.AttachedEmailInformationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, time.Now().UTC())
+		if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+			if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
+				restore()
+				return CommunicationsEmailCollaborationEnsureResult{}, err
+			}
+		}
 		information := communicationsEmailAttachedProjectionPayloadWithThread(existing.AttachedEmailInformationID, existing.CollaborationID, thread.EmailThreadID, input)
 		projectionKey := key(input.CompanyID, existing.NodeID)
 		if projection, ok := r.nodeText[projectionKey][existing.AttachedEmailInformationID]; ok {
@@ -212,6 +222,12 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	}
 	r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, node.NodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now)
+	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
+		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
+			restore()
+			return CommunicationsEmailCollaborationEnsureResult{}, err
+		}
+	}
 	participant := domain.CommunicationsEmailCollaborationParticipant{CompanyID: input.CompanyID, CollaborationID: item.CollaborationID, UserID: input.CreatedByUserID, AddedByUserID: input.CreatedByUserID, AddedViaType: CommunicationsEmailCollaborationParticipantCreator, CreatedTimestamp: now}
 	r.emailCollaborationParticipants[emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, participant.UserID)] = participant
 	if err := r.grantCollaborationNodeEditLocked(input.CompanyID, node.NodeID, input.CreatedByUserID, now); err != nil {

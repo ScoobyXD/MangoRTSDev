@@ -108,26 +108,15 @@ func TestEmailCollaborationThreadPersonalOwnerReadsCompleteProviderHistory(t *te
 	}
 
 	response := performEmailCollaborationThreadTestRequest(t, repo, client, collaboration.CollaborationID, owner, domain.RoleCompanyUser, "")
-	if !response.HistoryComplete {
-		t.Fatalf("history_complete=false, messages=%+v", response.Messages)
+	if response.HistoryComplete {
+		t.Fatalf("history_complete=true before durable worker completion: %+v", response)
 	}
-	if got := emailCollaborationThreadTestMessageIDs(response.Messages); got != "personal-root,personal-old,personal-new" {
-		t.Fatalf("durable order=%q, want personal-root,personal-old,personal-new", got)
-	}
-	if response.Messages[1].Body != "Older complete body" || response.Messages[2].Body != "Newer complete body" {
-		t.Fatalf("messages were not hydrated: %+v", response.Messages)
+	if got := emailCollaborationThreadTestMessageIDs(response.Messages); got != "personal-root" {
+		t.Fatalf("stored messages=%q, want immediate selected message only", got)
 	}
 	threadGrants, threadIDs, messageGrants, requestedMessageIDs := client.calls()
-	if strings.Join(threadGrants, ",") != "personal-source-grant" || strings.Join(threadIDs, ",") != "personal-thread" {
-		t.Fatalf("thread source calls grants=%v ids=%v", threadGrants, threadIDs)
-	}
-	if len(messageGrants) != 2 || len(requestedMessageIDs) != 2 {
-		t.Fatalf("message calls grants=%v ids=%v", messageGrants, requestedMessageIDs)
-	}
-	for _, grantID := range messageGrants {
-		if grantID != "personal-source-grant" {
-			t.Fatalf("detail used grant %q, want immutable personal source", grantID)
-		}
+	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(requestedMessageIDs) != 0 {
+		t.Fatalf("collaboration read called Nylas: %v %v %v %v", threadGrants, threadIDs, messageGrants, requestedMessageIDs)
 	}
 }
 
@@ -159,17 +148,12 @@ func TestEmailCollaborationThreadSharedParticipantReadsWithoutSharedInboxAccess(
 	// The participant is only a company user and has no shared-inbox folder
 	// grant. Permanent collaboration participation is the authorization here.
 	response := performEmailCollaborationThreadTestRequest(t, repo, client, collaboration.CollaborationID, participant, domain.RoleCompanyUser, "")
-	if !response.HistoryComplete || emailCollaborationThreadTestMessageIDs(response.Messages) != "shared-root,shared-reply" {
+	if response.HistoryComplete || emailCollaborationThreadTestMessageIDs(response.Messages) != "shared-root" {
 		t.Fatalf("shared participant response = %+v", response)
 	}
-	threadGrants, threadIDs, messageGrants, _ := client.calls()
-	if strings.Join(threadGrants, ",") != "shared-source-grant" || strings.Join(threadIDs, ",") != "shared-thread" {
-		t.Fatalf("shared source calls grants=%v ids=%v", threadGrants, threadIDs)
-	}
-	for _, grantID := range messageGrants {
-		if grantID != "shared-source-grant" {
-			t.Fatalf("detail used grant %q, want immutable shared source", grantID)
-		}
+	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
+	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
+		t.Fatalf("participant read called source mailbox: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
 	}
 }
 
@@ -203,7 +187,7 @@ func TestEmailCollaborationThreadDeniesCompanyNonparticipantBeforeProviderRead(t
 	}
 }
 
-func TestEmailCollaborationThreadCannotBeRedirectedOrHydratedAcrossThreads(t *testing.T) {
+func TestEmailCollaborationThreadCannotBeRedirectedOrDownloadedAcrossThreads(t *testing.T) {
 	t.Run("query cannot redirect immutable thread", func(t *testing.T) {
 		repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 		if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
@@ -225,12 +209,12 @@ func TestEmailCollaborationThreadCannotBeRedirectedOrHydratedAcrossThreads(t *te
 
 		response := performEmailCollaborationThreadTestRequest(t, repo, client, collaboration.CollaborationID, owner, domain.RoleCompanyUser,
 			"&thread_id=thread-b&message_id=thread-b-secret")
-		if !response.HistoryComplete || emailCollaborationThreadTestMessageIDs(response.Messages) != "thread-a-root" {
+		if response.HistoryComplete || emailCollaborationThreadTestMessageIDs(response.Messages) != "thread-a-root" {
 			t.Fatalf("redirected response = %+v", response)
 		}
-		_, threadIDs, _, messageIDs := client.calls()
-		if strings.Join(threadIDs, ",") != "thread-a" || strings.Join(messageIDs, ",") != "thread-a-root" {
-			t.Fatalf("immutable source escaped: threads=%v messages=%v", threadIDs, messageIDs)
+		threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
+		if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
+			t.Fatalf("stored read called provider: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
 		}
 	})
 
@@ -259,6 +243,10 @@ func TestEmailCollaborationThreadCannotBeRedirectedOrHydratedAcrossThreads(t *te
 		}
 		if emailCollaborationThreadTestMessageIDs(response.Messages) != "safe-root" || response.Messages[0].Body != "Durable safe body" {
 			t.Fatalf("cross-thread provider body escaped fallback: %+v", response.Messages)
+		}
+		threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
+		if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
+			t.Fatalf("stored read called provider: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
 		}
 	})
 }
@@ -316,6 +304,7 @@ func newEmailCollaborationThreadTestServer(repo store.Repository, client NylasCl
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableCommunicationsArchiveWorker: true,
+		DisableCommunicationsEmailThreadDownloadWorker: true,
 	})
 	server.nylasGate = newNylasRequestGate(0)
 	return server

@@ -125,11 +125,11 @@ N96 - The lazy EMAIL52 trigger creates one private email-derived Node only after
 N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, GVIC, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
 N98 - My/Shared Triage and the email Node mount the same shared ChatPane over the same canonical chat block ID and information rows. Message IDs, parent IDs, ordering, indentation, deletion ownership, mentions, attachments, composer state, and `chat:node:{node_id}` refresh are shared data, never copied histories. The Node header shows compact durable chat-author/mention context.
 N99 - An email-selection chat persists `selection_source=email`, exact provider message ID, trimmed quote, and valid offsets. A text-box selection in the node-wide email chat additionally persists `selection_block_id`, so chat navigation can focus the originating editor while email references still open the exact reply and quote.
-N100 - The email Node creator and accepted mention participants have permanent direct edit access while default access remains `no_access`. The permissions surface cannot add/remove/replace those grants. Mention access is Node-chat access only: it grants authorized collaboration-thread reads through the immutable source mailbox adapter but never changes provider recipients, delivery, CC/BCC, or subscription.
+N100 - The email Node creator and accepted mention participants have permanent direct edit access while default access remains `no_access`. The permissions surface cannot add/remove/replace those grants. Mention access is Node-chat access only: it grants authorized reads of the Mango-stored email snapshot attached to that Node, without requiring the viewer to own or access the source Nylas mailbox, and never changes provider recipients, delivery, CC/BCC, or subscription.
 N101 - A Triage-comment email Node receives one protected Unfiled/Nodes Explorer placement and no initial Logic Gate assignment. Normal email conversions retain their established placement behavior, but every primary-email-origin Node shares the email layout/icon contract even when created by drag.
-N102 - Future provider messages join the existing source thread without creating another Node or source tab. A genuinely different email/thread attached later becomes another left-pane browser tab and retains its own provider mailbox identity and full chronological conversation.
+N102 - A provider message that arrives after a Node thread download does not appear automatically. Mango does not use Nylas webhooks, polling, scheduled reconciliation, or an open/read side effect to extend a Node's stored email thread. A later message joins the existing Node source only after a user explicitly imports that exact message; a genuinely different mailbox/thread attached later becomes another left-pane browser tab.
 N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
-N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain message/thread plus personal-account or shared-inbox identity so canonical detail can show filename, MIME type, size, authenticated download, and safe image preview without copying provider bytes into the Node projection.
+N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain immutable source mailbox/message/thread identity, while imported bodies, inline images, signatures, and ordinary attachment bytes are stored in Mango-owned email/attachment storage. Node collaborators read those stored copies through Node authorization; provider bytes are never embedded in the editable Node JSON projection.
 N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
 N106 - Transient Node popup view mode is owned by the active popup instance, not canonical Node/board projections. Same-Node refresh or title reconciliation preserves fullscreen; only explicit user exit/close or opening a different Node may restore the normal saved non-fullscreen ratio.
 N107 - Every Node rich-text body is an exact collaboration document with a server-ordered revision and ETag. Normal typing commits structured insert/delete operations plus the next revision and outbox event atomically; the projection row is a derived compatibility snapshot, not the mutation authority.
@@ -617,7 +617,7 @@ Business logic covered:
 Given:
 - An email with no existing collaboration is opened and highlighted without submitting a chat.
 - A user later submits an anchored chat and mentions another user.
-- Both participants open the resulting Node while the original email detail remains available, and a future provider message joins the thread.
+- Both participants open the resulting Node from Mango-stored email data. A future Nylas message joins the provider thread, but nobody explicitly imports it yet.
 
 Expected:
 - Highlight/read alone creates no Node; the first nonempty chat submit ensures exactly one standalone private Node outside every Logic Gate/project/work-assignment path, and retry reuses it if the following chat write fails.
@@ -625,7 +625,8 @@ Expected:
 - Its canonical attached-email projection preserves source mailbox/thread provenance, and only this collaboration Node appears in protected Unfiled/Nodes.
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
-- The future thread member appears inside the existing attached-email conversation and does not create a second collaboration Node or projection.
+- The future provider message does not appear in the Node merely because a webhook arrived, the mailbox refreshed, or either participant opened the Node.
+- When an authorized user explicitly imports that exact later message, Mango reuses the mailbox-scoped durable thread, appends the message once, and does not create a second Node source or projection.
 
 ### Scenario N-S20: Annotation Navigation, Attached Files, And Reply Signature
 
@@ -691,6 +692,14 @@ N121 - Only a snapshotted recipient can complete their own verification. Complet
 N122 - Transfer and verification stamps stack as content-height cards on the exact shared text-box line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing. Spare workspace height stays below the rows and cannot stretch a card or create internal bottom whitespace. The timestamp and clock lead the card; Logic Gate transfer headings and both stored from/to gate-name snapshots use the established Logic Gate icon. Source and destination chips with stored IDs are keyboard-accessible Logic Gate links that push browser history so Back restores the Node route and workspace state.
 N123 - Updates deep links use the verification stamp event ID, and the Node editor scrolls that exact `data-node-timeline-event-id` row into view without opening or editing an unrelated text box.
 
+N124 - Create Node From Email, Add Email to Node, and first email-chat creation share one import transaction. The selected Nylas message is fetched, identity-validated, stored completely, attached to the Node, and returned for immediate rendering before the request succeeds. The rest of the current provider thread is downloaded only by a durable retryable background job created atomically with the import.
+N125 - A Node email source is deduplicated by company plus immutable personal/shared mailbox scope plus Nylas thread ID, falling back to the exact Nylas message ID only when no thread ID exists. Messages are deduplicated inside that scope by Nylas message ID. Repeated and concurrent imports reuse the same durable thread/message/Node link/job; subject, sender, recipients, timestamps, and body similarity never establish identity.
+N126 - Importing a later Nylas message from an already stored thread appends only that message and any missing files to the existing durable thread, creates/reuses its exact linked text box, and preserves stable IDs/order for old messages. It does not re-download completed messages or duplicate the Node-wide source. Later provider mail is intentionally manual-only: no Nylas webhook, poller, scheduled reconciliation, Node open, or collaborator read may add it.
+N127 - A Node thread download job has durable pending, processing, retry, completed, and failed state plus attempt count, lease, next-attempt time, and safe error status. A server restart or transient Nylas/object-storage failure resumes missing work. One active full-thread job per thread and one active selected-message job per thread/message prevent duplicate downloads. A failed attachment does not hide the selected message or completed sibling messages/files.
+N128 - The durable email tables store immutable HTML/body and message envelope metadata; private Mango attachment storage stores ordinary files, inline CID images, and signature assets. The editable Node JSON stores only stable email/thread/message/Mango-attachment references. Node rendering sanitizes stored HTML, orders message cards by timestamp and Nylas message ID, and never needs the viewing collaborator's Nylas account.
+N129 - The Node email column renders the selected stored message immediately with an explicit thread-download status. While the durable job runs, successfully downloaded messages/files may appear without blanking the conversation. Partial/retry/failed states remain readable and expose a retryable status; successful completion means complete as of that user-initiated download, not permanently synchronized with the provider.
+N130 - Every stored-email and attachment read authorizes the company, Node, and exact Node/thread or Node/attachment link before returning data. Removing/revoking the source mailbox does not erase the imported snapshot. Provider grants, raw errors, signed object URLs, bodies, recipient data, attachment bytes, and secrets must not be logged or copied into editable Node JSON, realtime hints, or job errors.
+
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
 Business logic covered:
@@ -741,3 +750,21 @@ Automated coverage:
 - `backend/internal/http/chat_comment_edit_test.go`
 - `backend/internal/http/realtime_websocket_test.go`
 - `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`
+
+### Scenario N-S25: Manual-Only Later Email Import
+
+Business logic covered:
+- N124 through N130
+
+Given:
+- Bob imported a complete thread snapshot into a shared Node yesterday, and Joe can open the Node without access to Bob's mailbox.
+- A new Nylas message joins the provider thread today.
+
+When:
+- Joe opens the Node before anyone imports today's message, then Bob explicitly imports today's exact message into that same Node.
+
+Expected:
+- Joe initially sees yesterday's complete Mango-stored snapshot; opening the Node does not call Nylas or discover today's message.
+- Bob's import matches company, exact mailbox scope, Nylas thread ID, and Nylas message ID; it appends the new message once and reuses the existing Node-wide source.
+- The selected new message displays immediately, while only its missing content/files run through durable retryable work. Old messages and attachments are not downloaded again.
+- After commit, Joe sees the new Mango-stored card and attachments through Node authorization without obtaining Bob's provider access.
