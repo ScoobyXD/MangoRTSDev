@@ -1278,6 +1278,17 @@ For each current Node `Text box` projection:
 
 The same converter core should support Project text boxes and Logic Gate documents through owner-specific readers/writers. It should never put all converted content into one generic permanent editor table merely for migration convenience.
 
+### Logic Gate and Project conversion checkpoint (2026-07-28)
+
+A database-enforced read-only inventory confirmed that the permanent targets already exist and are empty: `logic_gate_editor_documents` and `project_editor_documents` both contain zero rows before backfill.
+
+- Logic Gate source: 68 active `Text box` rows across 65 Logic Gates in `logic_gate_projection_table`; zero deleted rows; 104,652 extracted HTML bytes; largest document 25,300 bytes.
+- Project source: 23 active `Text box` rows across 13 Projects in `project_projection_table`; zero deleted rows; 19,215 extracted document-body bytes; largest document 5,934 bytes. All 23 Project rows use the `mango-node-text-block-v1` metadata envelope, so conversion extracts its `document` field rather than converting the envelope itself.
+
+The migration CLI now reads these projection tables directly, uses `information_id` as the stable document ID, and targets `logic_gate_editor_documents` or `project_editor_documents`. It preserves the source HTML in the projection table and also records the source snapshot and checksums in the target. Project and Logic Gate conversion does not use the transitional `editor_json_documents` table or the Node Yjs checkpoint tables.
+
+Read-only dry runs passed without warnings or failures: Logic Gate run `3f0dbdb2-74bf-4f95-9b94-419572dcf1ba` converted 68 of 68; Project run `a8c11d7d-faf7-44f0-b1c6-940e90bf297f` converted 23 of 23. Both target tables remained empty afterward. No backfill or activation was performed by the agent.
+
 ### Comment-anchor conversion
 
 Legacy comment/chat payloads currently use a text-box/block ID, selected quote, and integer selection offsets. They must be migrated independently from editor content.
