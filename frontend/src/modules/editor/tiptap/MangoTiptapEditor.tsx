@@ -59,6 +59,13 @@ import {
   readMangoTiptapSelectionState,
   type MangoAttachmentImageAttributes,
 } from "./mangoTiptapExtensions.js";
+import {
+  countMangoTiptapRichClipboardImages,
+  createMangoTiptapAttachmentContent,
+  prepareMangoTiptapRichClipboardHTML,
+  readMangoTiptapInsertionAlignment,
+  resolveMangoTiptapRichClipboardImage,
+} from "./mangoTiptapRichClipboard.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType, type MangoTiptapSaveState } from "./mangoTiptapSync.js";
@@ -961,6 +968,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const handleImageFiles = useCallback((files: File[], position: number | null) => {
     const context = attachmentContextRef.current;
     if (!context) return;
+    const editor = editorRef.current;
+    const alignment = editor ? readMangoTiptapInsertionAlignment(editor, position) : "left";
     void (async () => {
       await context.prepareResource?.();
       for (const file of files) {
@@ -974,23 +983,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           informationID: context.informationID,
           editorSurface: context.editorSurface,
         });
-        const content = {
-          type: "mangoAttachmentImage",
-          attrs: {
-            attachmentId: uploaded.attachment.attachment_id,
-            filename: uploaded.attachment.original_filename,
-            mimeType: uploaded.attachment.mime_type,
-            width: uploaded.attachment.original_width ?? null,
-            height: uploaded.attachment.original_height ?? null,
-            displayWidth: uploaded.attachment.original_width ?? null,
-            displayHeight: uploaded.attachment.original_height ?? null,
-            alignment: "center",
-            position: "break",
-            layout: "content",
-            alt: uploaded.attachment.original_filename,
-            title: uploaded.attachment.original_filename,
-          },
-        };
+        const content = createMangoTiptapAttachmentContent(uploaded.attachment, alignment);
         if (position === null) editorRef.current?.chain().focus().insertContent(content).run();
         else editorRef.current?.chain().focus().insertContentAt(position, content).run();
       }
@@ -999,6 +992,47 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       context.onError?.(message);
       callbacksRef.current.onError?.(message);
     });
+  }, []);
+  const handleRichClipboardPaste = useCallback((editor: Editor, clipboardData: DataTransfer): boolean => {
+    const html = clipboardData.getData("text/html");
+    const root = rootRef.current;
+    if (!root || !html.trim()) return false;
+    const imageCount = countMangoTiptapRichClipboardImages(root.ownerDocument, html);
+    if (imageCount === 0) return false;
+    const imageFiles = Array.from(clipboardData.files).filter((file) => /^image\/(jpeg|png|gif|webp)$/i.test(file.type));
+    const matchingFiles = imageFiles.length === imageCount ? imageFiles : [];
+    const alignment = readMangoTiptapInsertionAlignment(editor);
+    const selection = { from: editor.state.selection.from, to: editor.state.selection.to };
+    const documentAtStart = editor.state.doc;
+    root.setAttribute("data-mango-rich-paste-importing", "true");
+    void prepareMangoTiptapRichClipboardHTML(
+      root.ownerDocument,
+      html,
+      alignment,
+      (request) => resolveMangoTiptapRichClipboardImage(
+        request,
+        matchingFiles[request.index],
+        attachmentContextRef.current,
+      ),
+    ).then((result) => {
+      if (editor.isDestroyed) return;
+      if (!editor.state.doc.eq(documentAtStart)) {
+        throw new Error("The document changed while pasted images were importing. Paste that selection again.");
+      }
+      if (result.html.trim()) editor.chain().focus().insertContentAt(selection, result.html).run();
+      if (result.failedImageCount > 0) {
+        const noun = result.failedImageCount === 1 ? "image" : "images";
+        throw new Error(String(result.failedImageCount) + " pasted " + noun + " could not be imported. The text and " + String(result.importedImageCount) + " imported images were kept.");
+      }
+    }).catch((cause) => {
+      const message = cause instanceof Error ? cause.message : "Unable to import pasted images";
+      setError(message);
+      const context = attachmentContextRef.current;
+      (context?.onError ?? callbacksRef.current.onError)?.(message);
+    }).finally(() => {
+      root.removeAttribute("data-mango-rich-paste-importing");
+    });
+    return true;
   }, []);
   const hasAttachmentContext = Boolean(attachmentContext);
   const searchEntityLinksForEditor = useCallback(
@@ -1039,6 +1073,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           "data-placeholder": placeholder ?? "",
           "data-mango-legacy-leading-date-heading": needsMangoTiptapLegacyDateHeadingBreak(currentDocumentRef.current) ? "true" : "false",
           class: "mango-tiptap-prosemirror",
+        },
+        handlePaste: (_view, event) => {
+          const editor = editorRef.current;
+          const clipboardData = event.clipboardData;
+          if (!editor || !clipboardData || !handleRichClipboardPaste(editor, clipboardData)) return false;
+          event.preventDefault();
+          return true;
         },
         handleKeyDown: (_view, event) => {
           const keyboardEntityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
@@ -1126,7 +1167,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       applyHighlightColor: (color) => color
         ? editor.chain().focus().setHighlight({ color }).run()
         : editor.chain().focus().unsetHighlight().run(),
-      applyTextAlignment: (alignment) => editor.chain().focus().setTextAlign(alignment).run(),
+      applyTextAlignment: (alignment) => {
+        const selectedNode = (editor.state.selection as unknown as { node?: { type?: { name?: string } } }).node;
+        const imageSelected = selectedNode?.type?.name === "mangoAttachmentImage";
+        return imageSelected
+          ? editor.commands.updateAttributes("mangoAttachmentImage", { alignment })
+          : editor.chain().focus().setTextAlign(alignment).run();
+      },
       insertLink: (href) => editor.chain().focus().extendMarkRange("link").setLink({ href }).run(),
       insertList: (kind) => kind === "checklist"
         ? editor.chain().focus().toggleTaskList().run()
@@ -1149,7 +1196,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       releaseActive();
     };
   }, [
-    ariaLabel, editable, extensions, formattingControllerRef, isActive, openEntityLink, placeholder, updateSelectionState,
+    ariaLabel, editable, extensions, formattingControllerRef, handleRichClipboardPaste, isActive, openEntityLink, placeholder, updateSelectionState,
   ]);
 
   useEffect(() => {

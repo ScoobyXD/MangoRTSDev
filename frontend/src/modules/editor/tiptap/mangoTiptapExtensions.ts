@@ -40,7 +40,14 @@ export function readMangoTiptapSelectionState(editor: Editor) {
   const caretMark = (name: string) => caretMarks?.find((mark) => mark.type.name === name);
   const markAttributes = (name: string) => caretMark(name)?.attrs ?? editor.getAttributes(name);
   const fontSizeValue = String(markAttributes("textStyle").fontSize || "15").replace("px", "");
-  const alignment = editor.getAttributes("paragraph").textAlign || editor.getAttributes("heading").textAlign || "left";
+  const selectedNode = (selection as unknown as { node?: { type?: { name?: string }; attrs?: { alignment?: string } } }).node;
+  const selectedImageAlignment = selectedNode?.type?.name === "mangoAttachmentImage"
+    ? selectedNode.attrs?.alignment
+    : undefined;
+  const alignment = selectedImageAlignment
+    || editor.getAttributes("paragraph").textAlign
+    || editor.getAttributes("heading").textAlign
+    || "left";
   return {
     fontSize: Number(fontSizeValue) || 15,
     highlightColor: normalizeEditorHighlightColor(String(markAttributes("highlight").color || "")),
@@ -105,8 +112,8 @@ export const MangoAttachmentImage = Node.create({
       displayWidth: { default: null, parseHTML: (element) => parsedNumberAttribute(element, "data-display-width") },
       displayHeight: { default: null, parseHTML: (element) => parsedNumberAttribute(element, "data-display-height") },
       alignment: {
-        default: "center",
-        parseHTML: (element) => ["left", "center", "right"].includes(element.getAttribute("data-alignment") ?? "") ? element.getAttribute("data-alignment") : "center",
+        default: "left",
+        parseHTML: (element) => ["left", "center", "right"].includes(element.getAttribute("data-alignment") ?? "") ? element.getAttribute("data-alignment") : "left",
       },
       position: {
         default: "break",
