@@ -929,11 +929,13 @@ function GVICRoleEditor({
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [assignedOpen, setAssignedOpen] = useState(false);
+  const [assignedHoverOpen, setAssignedHoverOpen] = useState(false);
   const [disabledTooltipPosition, setDisabledTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedAnchorRef = useRef<HTMLDivElement | null>(null);
   const assignedListRef = useRef<HTMLDivElement | null>(null);
+  const assignedHoverCloseTimerRef = useRef<number | null>(null);
   const inputAnchorRef = useRef<HTMLDivElement | null>(null);
   const pickerListRef = useRef<HTMLDivElement | null>(null);
   const occupiedRoleByPrincipalKey = useMemo(() => {
@@ -954,9 +956,10 @@ function GVICRoleEditor({
     ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
     : `People (${assignments.length})`;
   const showAssignedButton = !singleUserOnly || assignments.length > 0;
+  const assignedListVisible = assignedOpen || assignedHoverOpen;
   const assignmentChipLabel = showAssignedButton ? assignedSummary : "No user";
   const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
-  const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedOpen && showAssignedButton && !singleUserOnly, { width: 320, maxHeight: 240 });
+  const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedListVisible && showAssignedButton && !singleUserOnly, { width: 320, maxHeight: 240 });
   const pickerListPosition = useFloatingLayerPosition(inputAnchorRef, canEdit && open, { width: 360, maxHeight: 290 });
   const toggleGroupExpanded = (groupID: string) => {
     const cleanGroupID = groupID.trim();
@@ -1111,18 +1114,40 @@ function GVICRoleEditor({
     };
   }, [companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, occupiedRoleByPrincipalKey, primaryUserRole, role]);
 
+  const showAssignedHoverPreview = () => {
+    if (assignedHoverCloseTimerRef.current !== null) {
+      window.clearTimeout(assignedHoverCloseTimerRef.current);
+      assignedHoverCloseTimerRef.current = null;
+    }
+    setAssignedHoverOpen(true);
+    setOpen(false);
+  };
+
+  const hideAssignedHoverPreview = () => {
+    if (assignedHoverCloseTimerRef.current !== null) window.clearTimeout(assignedHoverCloseTimerRef.current);
+    assignedHoverCloseTimerRef.current = window.setTimeout(() => {
+      assignedHoverCloseTimerRef.current = null;
+      setAssignedHoverOpen(false);
+    }, 0);
+  };
+
+  useEffect(() => () => {
+    if (assignedHoverCloseTimerRef.current !== null) window.clearTimeout(assignedHoverCloseTimerRef.current);
+  }, []);
   useEffect(() => {
     if (!singleUserOnly) return;
     setAssignedOpen(false);
+    setAssignedHoverOpen(false);
   }, [singleUserOnly]);
 
   useEffect(() => {
-    if (!open && !assignedOpen) return;
+    if (!open && !assignedListVisible) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (containerRef.current?.contains(target) || assignedListRef.current?.contains(target) || pickerListRef.current?.contains(target)) return;
       setOpen(false);
       setAssignedOpen(false);
+      setAssignedHoverOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -1134,6 +1159,7 @@ function GVICRoleEditor({
         event.stopImmediatePropagation();
         setOpen(false);
         setAssignedOpen(false);
+        setAssignedHoverOpen(false);
         window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
       }
     };
@@ -1143,12 +1169,13 @@ function GVICRoleEditor({
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [assignedOpen, open]);
+  }, [assignedListVisible, open]);
 
   useEffect(() => {
     if (canEdit) return;
     setOpen(false);
     setAssignedOpen(false);
+    setAssignedHoverOpen(false);
     setDraft("");
   }, [canEdit]);
 
@@ -1159,6 +1186,7 @@ function GVICRoleEditor({
     setDraft("");
     setOpen(false);
     setAssignedOpen(false);
+    setAssignedHoverOpen(false);
   };
 
   const commitDraft = () => {
@@ -1198,13 +1226,16 @@ function GVICRoleEditor({
               type="button"
               aria-label={singleUserOnly && assignments[0] ? `Remove ${GVICAssignmentLabel(assignments[0])} from ${label}` : `${label} people`}
               aria-haspopup={singleUserOnly ? undefined : "listbox"}
-              aria-expanded={singleUserOnly ? undefined : assignedOpen}
+              aria-expanded={singleUserOnly ? undefined : assignedListVisible}
               aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
               disabled={singleUserOnly && !canEdit}
               onMouseEnter={() => {
                 if (singleUserOnly) return;
-                setAssignedOpen(true);
-                setOpen(false);
+                showAssignedHoverPreview();
+              }}
+              onMouseLeave={() => {
+                if (singleUserOnly) return;
+                hideAssignedHoverPreview();
               }}
               onClick={() => {
                 if (singleUserOnly) {
@@ -1218,19 +1249,21 @@ function GVICRoleEditor({
                 setAssignedOpen((current) => !current);
                 setOpen(false);
               }}
-              style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+              style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 999, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
-              <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedOpen ? "^" : "v"}</span>
+              <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedListVisible ? "^" : "v"}</span>
             </button>
           ) : (
             <span style={{ maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", border: `1px dashed ${hexWithAlpha(roleAccent, "32")}`, borderRadius: 999, background: "rgba(255,255,255,0.52)", color: "#64748b", padding: "2px 8px", fontSize: 11, fontWeight: 760, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {assignmentChipLabel}
             </span>
           )}
-          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && floatingPortalTarget && createPortal(
+          {assignedListVisible && showAssignedButton && !singleUserOnly && assignedListPosition && floatingPortalTarget && createPortal(
           <div
             ref={assignedListRef}
+            onMouseEnter={showAssignedHoverPreview}
+            onMouseLeave={hideAssignedHoverPreview}
             id={`${inputID}-assigned-users`}
             role="listbox"
             aria-label={primaryUserRole ? `${label} people` : `${label} people and groups`}
