@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("GVIC assignment people list opens immediately on hover", async () => {
+test("GVIC assignment people list opens immediately on hover and closes when the pointer leaves", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -112,6 +112,28 @@ test("GVIC assignment people list opens immediately on hover", async () => {
     assert.equal(peopleList.parentElement, dom.window.document.body, "the hovered list escapes clipping editor containers");
     assert.match(peopleList.textContent ?? "", /Jonathan Kim/);
     assert.match(peopleList.textContent ?? "", /jonathankim829@gmail\.com/);
+
+    await act(async () => {
+      Simulate.mouseLeave(peopleButton);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null, "leaving the People count closes a hover-only preview");
+
+    await act(async () => Simulate.mouseEnter(peopleButton));
+    const interactivePeopleList = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Informed people and groups"]');
+    assert.ok(interactivePeopleList);
+    await act(async () => {
+      Simulate.mouseLeave(peopleButton);
+      Simulate.mouseEnter(interactivePeopleList);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.ok(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), "the preview stays open while the pointer is over its list");
+
+    await act(async () => {
+      Simulate.mouseLeave(interactivePeopleList);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null, "leaving the list closes the hover preview");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     dom.window.close();
