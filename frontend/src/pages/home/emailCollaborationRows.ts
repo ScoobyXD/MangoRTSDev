@@ -108,6 +108,24 @@ export function emailCollaborationListMessage(collaboration: CommunicationsEmail
   };
 }
 
+export function mergeEmailMessageWithCollaboration(
+  providerMessage: EmailMessage,
+  collaborationMessage: EmailMessage,
+): EmailMessage & { client_source_scope_key: string } {
+  return {
+    ...collaborationMessage,
+    ...providerMessage,
+    collaboration_id: collaborationMessage.collaboration_id,
+    collaboration_node_id: collaborationMessage.collaboration_node_id,
+    collaboration_information_id: collaborationMessage.collaboration_information_id,
+    collaboration_scope_type: collaborationMessage.collaboration_scope_type,
+    collaboration_personal_user_id: collaborationMessage.collaboration_personal_user_id,
+    collaboration_shared_inbox_id: collaborationMessage.collaboration_shared_inbox_id,
+    collaboration_account_email: collaborationMessage.collaboration_account_email,
+    client_source_scope_key: providerMessage.client_source_scope_key?.trim() || collaborationMessage.client_source_scope_key?.trim() || "mailbox",
+  };
+}
+
 export function mergeEmailCollaborationsForView(
   providerMessages: EmailMessage[],
   collaborations: CommunicationsEmailCollaboration[],
@@ -141,11 +159,7 @@ export function mergeEmailCollaborationsForView(
     });
     if (existingIndexes.length > 0) {
       for (const existingIndex of existingIndexes) {
-        merged[existingIndex] = {
-          ...collaborationMessage,
-          ...merged[existingIndex],
-          client_source_scope_key: merged[existingIndex].client_source_scope_key,
-        };
+        merged[existingIndex] = mergeEmailMessageWithCollaboration(merged[existingIndex], collaborationMessage);
       }
     }
   }
