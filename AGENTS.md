@@ -138,5 +138,6 @@ Do not use made-up words that you just invent on the fly to describe something. 
 
 
 # LAWS
-1. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
-2. Whenever you are asked to push something to main, always mention yes or no if you made a backend or a db schema change
+1. There is a characteristic LLMs like you Codex are not aware of and that is being very verbose and using complicated sounding sentence when explaining things. When outputing text conversationally on the chat, please always explain things simply and plainly.
+2. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
+3. Whenever you are asked to push something to main, always mention yes or no if you made a backend or a db schema change
