@@ -2,7 +2,9 @@
 
 Last updated: 2026-07-28
 
-Status: additive foundation and Phase 3 prerequisite engineering complete in the repository. The only open Phase 1 gate is human reconciliation of the live development migration ledger. No live database was written and no real editor gate was enabled.
+Status: **superseded before rollout on 2026-07-28**. The Node v2/Yjs/Hocuspocus runtime was retired in favor of the shared revisioned Tiptap JSON save path.
+
+This document and the additive migrations remain historical records. They do not authorize enabling the retired path or changing a live database.
 
 ## Completed milestone
 

@@ -46,9 +46,7 @@ import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
-import { NodeV2WorkspaceSurface } from "./nodeV2/NodeV2WorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
-import { createNodeV2Client } from "./nodeV2/nodeV2Api";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_PANEL_BACKGROUND,
@@ -167,6 +165,7 @@ const EDITOR_RELATIONSHIP_WORLD_H = 8800;
 const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
 const EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES = 10;
 const EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED: boolean = false;
+const LOGIC_GATE_OVERVIEW_DOCUMENT_ID = "logic-gate-overview";
 
 type EditorSaveVersionItem = {
   information_id: string;
@@ -584,7 +583,6 @@ const EditorSaveSettingsSurface: React.FC<{
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const nodeV2Phase2Enabled = (import.meta.env.VITE_NODE_V2_PHASE2 as string | undefined)?.trim().toLowerCase() === "true";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
@@ -806,23 +804,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, []);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
-  const [nodeV2WorkspaceActive, setNodeV2WorkspaceActive] = useState(false);
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
-
-  useEffect(() => {
-    let cancelled = false;
-    setNodeV2WorkspaceActive(false);
-    if (!nodeV2Phase2Enabled || !companyID || !linkedNodeID || linkedEntityKind !== "node") return () => { cancelled = true; };
-    const client = createNodeV2Client(requestJSON, companyID, linkedNodeID);
-    void client.availability()
-      .then((availability) => {
-        if (!cancelled) setNodeV2WorkspaceActive(availability.active);
-      })
-      .catch(() => {
-        if (!cancelled) setNodeV2WorkspaceActive(false);
-      });
-    return () => { cancelled = true; };
-  }, [nodeV2Phase2Enabled, companyID, linkedNodeID, linkedEntityKind, requestJSON]);
   useEffect(() => {
     let cancelled = false;
     if (!companyID) {
@@ -2010,7 +1992,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const currentTextBox = activeTextBox ?? focusedTextBox ?? selectCurrentEditorTextProjection(projections);
       if (!editorDataFormat.gate) return;
       if (editorDataFormat.gate.editor_format === "tiptap_json") {
-        const informationID = currentTextBox?.information_id ?? "";
+        const informationID = currentTextBox?.information_id?.trim() || LOGIC_GATE_OVERVIEW_DOCUMENT_ID;
         setDocumentInformationID(informationID);
         documentInformationIDRef.current = informationID;
         documentDraftRef.current = "";
@@ -2489,7 +2471,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           if (editorDataFormat.gate?.editor_format === "legacy_html") {
             applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
           } else {
-            const informationID = currentTextBox?.information_id ?? "";
+            const informationID = currentTextBox?.information_id?.trim() || LOGIC_GATE_OVERVIEW_DOCUMENT_ID;
             setDocumentInformationID(informationID);
             documentInformationIDRef.current = informationID;
             documentRevisionRef.current = 0;
@@ -2936,22 +2918,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onRestore={(saveID) => { void restoreEditorSaveVersion(saveID); }}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (nodeV2WorkspaceActive ? (
-          <NodeV2WorkspaceSurface
-            apiBase={apiBase}
-            companyID={companyID}
-            nodeID={linkedNodeID}
-            currentUserID={currentUserID}
-            canEdit={linkedEntityCanEdit}
-            companyUsers={companyUsers}
-            hidden={documentIsolation.visibility === "hidden"}
-            topPx={documentTopPx}
-            requestJSON={requestJSON}
-            onCreateNodeFromImage={createNodeFromImageDocument}
-            onRegisterSaveController={(controller) => { nodeWorkspaceSaveControllerRef.current = controller; }}
-            onError={setError}
-          />
-        ) : (
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (
           <NodeWorkspaceSurface
             apiBase={apiBase}
             companyID={companyID}
@@ -2997,7 +2964,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             }}
             onError={setError}
           />
-        ))}
+        )}
         {hasLinkedDocument && linkedEntityKind !== "node" && editorDataFormat.gate?.editor_format === "legacy_html" && (
           <EditorDocumentSurface
             documentRef={editorDocumentRef}

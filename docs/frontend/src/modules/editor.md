@@ -3,17 +3,12 @@
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
-## Node v2 Phase 2/3 editor path (2026-07-28)
+## Retired Node v2/Yjs path (historical record, 2026-07-28)
 
-When `VITE_NODE_V2_PHASE2=true`, Node workspaces use `nodeV2/NodeV2WorkspaceSurface.tsx` instead of the legacy Node information/projection editor. This path owns independent `node_textboxes`, mounts exactly one active `NodeV2Editor`, renders visible inactive Tiptap JSON through `MangoTiptapStaticRenderer`, and uses intersection-based placeholders for offscreen documents. Project and Logic Gate ownership are unchanged.
+This path was removed before rollout. Node, Project, and standalone Logic Gate Tiptap editors now use the same `MangoTiptapEditor` and `MangoTiptapSync` revisioned JSON path: quiet-period whole-document batches, one exact IndexedDB recovery operation, optimistic server revisions, and realtime snapshot refreshes. There is no Hocuspocus service, Yjs provider, collaboration URL, or Node v2 frontend in the customer runtime.
 
-`nodeV2/nodeV2Sync.ts` owns a textbox-scoped `Y.Doc`, Tiptap collaboration transactions, Yjs-aware undo/redo, 180 ms update merging, bounded checkpoints, polling merge, and an exact pending-update queue. `y-indexeddb` stores a separate recovery document per user/company/Node/textbox. Offline status is not shown until the pending update is durably queued, so close/navigation immediately after typing remains recoverable. Ordinary typing never serializes or persists the complete Tiptap document; materialized JSON and plain text update only at explicit or bounded checkpoint boundaries.
+Empty Logic Gates use the stable `logic-gate-overview` document ID so the editor renders before any text exists. Historical schema migrations remain immutable records only.
 
-Comments, attachments, inline images, and textbox chat are owned through the exact textbox. Initial/reply comment pages are bounded. The Node attachment panel aggregates exact links, and inline JSON stores permanent attachment IDs only. Email remains independent HTML in its own column: summaries and bodies paginate separately, and a selected exact message can be placed into the active textbox context without converting the email body.
-
-The Node v2 path uses the additive Node v2 API plus a short-lived collaboration ticket. Browser calls to public Yjs update/checkpoint writers are rejected; only the authorized collaboration service persists updates and materializes JSON/plain text. All real workspace gates remain inactive until manual acceptance and a separately approved conversion/cutover.
-
-Project and Logic Gate Tiptap editors enable Yjs collaboration only when `VITE_NODE_V2_COLLAB_URL` contains a nonblank `ws://` or `wss://` endpoint. When the variable is absent or blank, those editors remain fully editable through the revisioned editor JSON API and existing realtime snapshot recovery; they must not request a collaboration ticket or show a missing-collaboration-URL error. Node v2 remains an explicitly gated collaboration-only path and still requires the endpoint when `VITE_NODE_V2_PHASE2=true`.
 
 ## Gated JSON-Native Tiptap Implementation (2026-07-18)
 

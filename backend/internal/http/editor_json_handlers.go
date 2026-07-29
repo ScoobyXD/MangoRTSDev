@@ -201,14 +201,6 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	if collaborationRef, collaborationRoute := editorJSONCollaborationDocumentFromPath(companyID, r.URL.Path); collaborationRoute {
-		s.handleEditorJSONCollaborationTicket(w, r, actor, collaborationRef)
-		return
-	}
-	if mentionRef, mentionRoute := editorJSONMentionDocumentFromPath(companyID, r.URL.Path); mentionRoute {
-		s.handleEditorJSONMentionDelta(w, r, mentionRef)
-		return
-	}
 	ref, versions, ok := editorJSONDocumentFromPath(companyID, r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "editor_document_route_not_found")

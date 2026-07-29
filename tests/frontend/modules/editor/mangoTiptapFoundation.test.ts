@@ -20,10 +20,6 @@ import {
   type MangoTiptapSnapshot,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapSync.js";
 import {
-  normalizeMangoTiptapCollaborationURL,
-  shouldUseMangoTiptapCollaboration,
-} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapCollaborationConfig.js";
-import {
   clearMangoEditorDataFormatCacheForTests,
   loadMangoEditorDataFormat,
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
@@ -52,16 +48,6 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
 
-test("Project and Logic Gate collaboration is enabled only by a configured endpoint", () => {
-  assert.equal(normalizeMangoTiptapCollaborationURL(undefined), "");
-  assert.equal(normalizeMangoTiptapCollaborationURL("   "), "");
-  assert.equal(normalizeMangoTiptapCollaborationURL("  wss://collaboration.example.test/  "), "wss://collaboration.example.test/");
-  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", ""), false);
-  assert.equal(shouldUseMangoTiptapCollaboration("project", "   "), false);
-  assert.equal(shouldUseMangoTiptapCollaboration("logic_gate", "wss://collaboration.example.test"), true);
-  assert.equal(shouldUseMangoTiptapCollaboration("project", "ws://localhost:1234"), true);
-  assert.equal(shouldUseMangoTiptapCollaboration("node", "wss://collaboration.example.test"), false);
-});
 
 function richDocument(text = "Mango"): MangoTiptapDocument {
   return {
@@ -814,7 +800,7 @@ test("IndexedDB cleanup failure after acknowledgement unpins and clears after st
     }
   }
 });
-test("non-email document surfaces share the gate, Node v2 uses local Yjs recovery, and email stays HTML", () => {
+test("Node, Project, and Logic Gate editors use revisioned JSON while email stays HTML", () => {
   const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
   assert.match(read("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), /useMangoEditorDataFormat/);
   assert.doesNotMatch(read("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), /MangoTiptapEditor|useMangoEditorDataFormat|tiptap_json/);
@@ -824,6 +810,8 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
   assert.match(editorContent, /editorFormat: editorDataFormat\.gate\?\.editor_format \?\? ""/);
   assert.match(editorContent, /editorDataFormat\.gate\?\.editor_format === "legacy_html"[\s\S]*applyLoadedDocument\("logic_gate"/);
   assert.match(editorContent, /documentInformationIDRef\.current = informationID;[\s\S]*documentDraftRef\.current = "";[\s\S]*persistedDocumentRef\.current = "";/);
+  assert.match(editorContent, /currentTextBox\?\.information_id\?\.trim\(\) \|\| LOGIC_GATE_OVERVIEW_DOCUMENT_ID/);
+  assert.doesNotMatch(editorContent, /NodeV2|nodeV2|VITE_NODE_V2/);
   assert.match(legacyPersistence, /enabled: editorFormat === "legacy_html" && Boolean/);
   assert.match(legacyPersistence, /if \(editorFormat !== "legacy_html"\) return null;/);
   const packageJSON = JSON.parse(read("frontend/package.json")) as {
@@ -831,12 +819,8 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
     devDependencies?: Record<string, string>;
   };
   const runtimeDependencies = JSON.stringify(packageJSON.dependencies ?? {}).toLowerCase();
-  assert.match(runtimeDependencies, /"@hocuspocus\/provider"/);
-  assert.match(runtimeDependencies, /"@hocuspocus\/server"/);
-  assert.match(runtimeDependencies, /"yjs"/);
-  assert.match(runtimeDependencies, /"y-indexeddb"/);
-  assert.match(runtimeDependencies, /"@tiptap\/extension-collaboration"/);
-  assert.doesNotMatch(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /"y-indexeddb"/);
+  assert.doesNotMatch(runtimeDependencies, /hocuspocus|yjs|y-indexeddb|extension-collaboration|y-tiptap/);
+  assert.doesNotMatch(JSON.stringify(packageJSON.devDependencies ?? {}).toLowerCase(), /hocuspocus|yjs|y-indexeddb/);
   for (const runtimePath of [
     "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "frontend/src/modules/editor/EditorContent.tsx",
@@ -845,16 +829,11 @@ test("non-email document surfaces share the gate, Node v2 uses local Yjs recover
   ]) {
     assert.doesNotMatch(read(runtimePath).toLowerCase(), /hocuspocus|from ["']yjs["']|tiptap-cloud/);
   }
-  const nodeV2Sync = read("frontend/src/modules/editor/nodeV2/nodeV2ProviderSync.ts");
-  assert.match(nodeV2Sync, /from ["']yjs["']/);
-  assert.match(nodeV2Sync, /IndexeddbPersistence/);
-  assert.match(nodeV2Sync, /HocuspocusProvider/);
-  assert.match(nodeV2Sync, /durable_snapshot_base64/);
-  assert.match(nodeV2Sync, /equalSnapshots/);
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
   assert.match(sync, /store\.get\(storage_key\)/);
   assert.doesNotMatch(sync, /getAll\(/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
+  assert.match(editor, /data-mango-editor-sync-mode="revisioned-json"/);
   assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);
   assert.match(editor, /useLayoutEffect\(\(\) => \{\s*if \(!isActive \|\| editorRef\.current\) return undefined;/);
   assert.match(editor, /\{isActive && activeEditor \? <EditorContent editor=\{activeEditor\}/);
@@ -911,26 +890,4 @@ test("exact realtime scope exists only while the document is visibly eligible", 
       else Object.defineProperty(globalThis, key, { configurable: true, value });
     }
   }
-});
-
-test("ordinary Yjs acknowledgements store deltas while background checkpoints enforce the owner text limit", () => {
-  const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
-  const postgresStore = read("frontend/scripts/node-v2-yjs-postgres-store.mjs");
-  const appendStart = postgresStore.indexOf("async appendUpdate(");
-  const compactStart = postgresStore.indexOf("async compactDocument(", appendStart);
-  assert.ok(appendStart >= 0 && compactStart > appendStart);
-  const appendPath = postgresStore.slice(appendStart, compactStart);
-  assert.match(appendPath, /update_payload/);
-  assert.doesNotMatch(appendPath, /materializeDocument|document_json|JSON\.stringify\(materialized/);
-  const compactPath = postgresStore.slice(compactStart);
-  assert.match(compactPath, /this\.materializeDocument/);
-  assert.match(compactPath, /document_json = \$5::jsonb/);
-
-  const provider = read("frontend/src/modules/editor/nodeV2/nodeV2ProviderSync.ts");
-  assert.match(provider, /1 GB editor-text limit/);
-  assert.match(provider, /Attachments are separate and do not count toward the 1 GB/);
-
-  const server = read("frontend/scripts/node-v2-collaboration-server.ts");
-  assert.match(server, /materializeDocument: materializeNodeV2Document/);
-  assert.match(server, /materializeDocument: materializeEditorOwnerDocument/);
 });

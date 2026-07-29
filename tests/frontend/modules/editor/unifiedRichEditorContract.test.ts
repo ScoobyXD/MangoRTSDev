@@ -1588,14 +1588,11 @@ test("node text-block metadata mutations honor the active editor format and remo
   assert.match(nodeSurface, /attachmentID: image\.attachmentID/);
 });
 
-test("Node V2 wires live mentions, entity search, and the shared movable image controls", () => {
-  const nodeV2 = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/nodeV2/NodeV2Editor.tsx"), "utf8");
+test("the shared revisioned JSON editor keeps movable image controls", () => {
   const tiptap = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
 
-  assert.match(nodeV2, /getMentionUsers: \(\) => mentionUsersRef\.current/);
-  assert.match(nodeV2, /searchEntityLinks: \(query\) => searchEditorEntityLinks\(\{ companyID, requestJSON \}, query\)/);
-  assert.match(nodeV2, /<MangoAuthenticatedImage/);
+  assert.doesNotMatch(editorContent, /NodeV2|nodeV2|VITE_NODE_V2/);
   assert.match(tiptap, /data-drag-handle=\{editable \? "true" : undefined\}/);
   assert.match(tiptap, /data-mango-tiptap-image-actions="true"/);
   assert.match(tiptap, /transform: "translateY\(-100%\)"/);

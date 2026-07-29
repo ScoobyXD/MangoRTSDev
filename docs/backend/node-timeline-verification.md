@@ -12,7 +12,7 @@ Creating a v2 text box writes the authoritative textbox, its timeline item, the 
 
 Pages order newest first by `occurred_at`, then source sequence, then stable timeline item ID. The cursor carries all three values, so equal timestamps cannot duplicate or skip records. Source rows retain direct Node ownership; `node_timeline_items` is rebuildable placement and is never the only owner relationship.
 
-The v2 timeline remains behind `VITE_NODE_V2_PHASE2=true`. Apply the additive Phase 1 and Phase 2 migrations only through the reviewed human rollout after the development migration ledger is reconciled; no agent-run live database change is authorized. Full Phase 2 evidence is in `docs/backend/node-v2-phase2-completion.md`.
+The Node v2 frontend flag and runtime were removed before rollout on 2026-07-28. The additive tables and this timeline design remain historical/inactive database artifacts; no agent-run live database change is authorized.
 
 ## Logic Gate transfer events
 

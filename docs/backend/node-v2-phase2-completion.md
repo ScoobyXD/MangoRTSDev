@@ -2,7 +2,9 @@
 
 Last updated: 2026-07-28
 
-Status: repository acceptance complete behind inactive build and workspace gates. The user still performs manual browser acceptance before any separately approved live conversion or cutover. No live database was written, no cloud resource was changed, and no legacy data was migrated or deleted.
+Status: **superseded before rollout on 2026-07-28**. The Node v2/Yjs/Hocuspocus frontend and service path were removed. This file is a historical engineering record only.
+
+The customer editor architecture now uses the shared revisioned Tiptap JSON save path for Nodes, Projects, and Logic Gates. Historical migrations are retained and no live database was changed by the retirement.
 
 ## Product boundary
 

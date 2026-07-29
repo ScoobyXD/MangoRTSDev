@@ -176,18 +176,6 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 		server.Routes().ServeHTTP(response, request)
 		return response
 	}
-	postMentionDelta := func(path, operationID, kind string) *httptest.ResponseRecorder {
-		t.Helper()
-		body, _ := json.Marshal(map[string]any{
-			"operation_id": operationID,
-			"mentions":     []any{map[string]any{"user_id": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind}},
-		})
-		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
-		request.Header.Set("Authorization", "Bearer "+token)
-		response := httptest.NewRecorder()
-		server.Routes().ServeHTTP(response, request)
-		return response
-	}
 	deleteDocument := func(path, operationID string, baseRevision int) *httptest.ResponseRecorder {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
@@ -281,8 +269,8 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 	}
 	waitNotifications(3)
 
-	projectPath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/88888888-8888-4888-8888-888888888888/mentions?company_id=" + companyID
-	if response := postMentionDelta(projectPath, "project-mention-operation", "regular"); response.Code != http.StatusAccepted {
+	projectPath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/88888888-8888-4888-8888-888888888888?company_id=" + companyID
+	if response := post(projectPath, "project-mention-operation", 0, mentionContent("normal")); response.Code != http.StatusOK {
 		t.Fatalf("project mention status=%d body=%s", response.Code, response.Body.String())
 	}
 	items = waitNotifications(4)
@@ -296,8 +284,8 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 		t.Fatalf("project notifications=%d items=%+v", projectNotifications, items)
 	}
 
-	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/89898989-8989-4989-8989-898989898989/mentions?company_id=" + companyID
-	if response := postMentionDelta(logicGatePath, "logic-gate-urgent-operation", "urgent"); response.Code != http.StatusAccepted {
+	logicGatePath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/89898989-8989-4989-8989-898989898989?company_id=" + companyID
+	if response := post(logicGatePath, "logic-gate-urgent-operation", 0, mentionContent("urgent")); response.Code != http.StatusOK {
 		t.Fatalf("logic gate mention status=%d body=%s", response.Code, response.Body.String())
 	}
 	items = waitNotifications(5)
@@ -334,7 +322,7 @@ func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	}
 }
 
-func TestEditorOwnerCollaborationTicketIsEpochScopedAndRevisionedFallbackWritesAreAccepted(t *testing.T) {
+func TestEditorCollaborationTicketIsRetiredAndRevisionedWritesAreAccepted(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "91919191-9191-4191-8191-919191919191"
 	repo.EnsureCompany(companyID, "Yjs editor")
@@ -356,7 +344,6 @@ func TestEditorOwnerCollaborationTicketIsEpochScopedAndRevisionedFallbackWritesA
 	}
 	const token = "yjs-editor-token"
 	server := newRealtimeAuthServerForTest(repo, token, actor)
-	server.realtimeTickets = newRealtimeTicketStore("editor-owner-collaboration-test-secret")
 	defer server.Close()
 	documentID := "project-overview"
 	basePath := "/v1/editor-json/project/" + projectResult.Project.ProjectID + "/documents/" + documentID
@@ -365,8 +352,8 @@ func TestEditorOwnerCollaborationTicketIsEpochScopedAndRevisionedFallbackWritesA
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	server.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"document_name":"editor-owner:project:`) || !strings.Contains(response.Body.String(), `"collaboration_epoch"`) {
-		t.Fatalf("ticket status=%d body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "editor_document_route_not_found") {
+		t.Fatalf("retired ticket status=%d body=%s", response.Code, response.Body.String())
 	}
 
 	wholeDocument, _ := json.Marshal(map[string]any{
