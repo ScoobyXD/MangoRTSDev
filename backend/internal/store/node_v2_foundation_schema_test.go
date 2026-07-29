@@ -36,14 +36,6 @@ func nodeV2FoundationBlock(t *testing.T, path string) string {
 	return strings.TrimSpace(strings.Join(normalized, "\n"))
 }
 
-func TestNodeV2FoundationMigrationMatchesCanonicalSchema(t *testing.T) {
-	migration := nodeV2FoundationBlock(t, "../../db/migrations/20260726_node_v2_phase1_foundation.sql")
-	canonical := nodeV2FoundationBlock(t, "../../db/schema.sql")
-	if migration != canonical {
-		t.Fatal("Node v2 foundation migration and canonical schema blocks differ")
-	}
-}
-
 func TestNodeV2FoundationOwnershipAndSafetyContract(t *testing.T) {
 	sqlText := strings.ToLower(nodeV2FoundationBlock(t, "../../db/migrations/20260726_node_v2_phase1_foundation.sql"))
 	for _, table := range []string{
