@@ -3,6 +3,38 @@ import {
   type CommunicationsEmailCollaboration,
   type EmailMessage,
 } from "../../modules/communications/communicationsApi.js";
+
+export type EmailNodeAttachmentChange = {
+  nodeID: string;
+  messageID: string;
+  threadID?: string;
+  informationID?: string;
+};
+
+export function emailMessageMatchesNodeAttachment(
+  message: EmailMessage,
+  attachment: EmailNodeAttachmentChange,
+): boolean {
+  const messageID = attachment.messageID.trim();
+  if (messageID && message.id.trim() === messageID) return true;
+  const threadID = attachment.threadID?.trim() ?? "";
+  return Boolean(threadID && message.thread_id?.trim() === threadID);
+}
+
+export function mergeEmailMessageWithNodeAttachment(
+  message: EmailMessage,
+  attachment: EmailNodeAttachmentChange,
+): EmailMessage {
+  const nodeID = attachment.nodeID.trim();
+  if (!nodeID) return message;
+  const informationID = attachment.informationID?.trim() ?? "";
+  return {
+    ...message,
+    collaboration_node_id: nodeID,
+    collaboration_information_id: informationID || message.collaboration_information_id,
+  };
+}
+
 import type { HomeViewID } from "./homeTypes.js";
 
 export function sharedInboxIDForHomeView(viewID: HomeViewID): string {

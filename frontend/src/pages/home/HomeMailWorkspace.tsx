@@ -11,6 +11,7 @@ import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from 
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
 import { emailMessageRowKey } from "./homeUtils";
 import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailCollaborationActionRequest, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
+import type { EmailNodeAttachmentChange } from "./emailCollaborationRows";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 import {
@@ -301,6 +302,7 @@ export function HomeMailWorkspace({
   onToggleStar,
   onToggleUnreadOnly,
   onEmailCollaborationChange,
+  onEmailNodeAttachmentChange,
   onOpenCollaborationNode,
 }: {
   activeViewID: HomeViewID;
@@ -387,6 +389,7 @@ export function HomeMailWorkspace({
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
+  onEmailNodeAttachmentChange: (attachment: EmailNodeAttachmentChange) => void;
   onOpenCollaborationNode: (message: EmailMessage) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
@@ -796,6 +799,7 @@ export function HomeMailWorkspace({
                           {message.collaboration_node_id?.trim() && (
                             <button
                               type="button"
+                              data-email-node-indicator="mailbox-card"
                               title="Open existing email node"
                               aria-label={`Open node for ${message.subject || "email"}`}
                               onClick={(event) => {
@@ -846,6 +850,7 @@ export function HomeMailWorkspace({
                           {message.collaboration_node_id?.trim() && (
                             <button
                               type="button"
+                              data-email-node-indicator="mailbox-card"
                               title="Open existing email node"
                               aria-label={`Open node for ${message.subject || "email"}`}
                               onClick={(event) => {
@@ -987,6 +992,7 @@ export function HomeMailWorkspace({
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
                 onCollaborationChange={onEmailCollaborationChange}
+                onNodeAttachmentChange={onEmailNodeAttachmentChange}
                 onError={setEmailCollaborationError}
                 onSuccess={clearEmailCollaborationError}
                 onActionSuccess={showEmailActionNotice}

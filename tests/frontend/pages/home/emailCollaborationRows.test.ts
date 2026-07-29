@@ -7,8 +7,10 @@ import type {
 import {
   emailCollaborationListMessage,
   emailMessageMatchesCollaboration,
+  emailMessageMatchesNodeAttachment,
   emailMessageUsesActiveProviderScope,
   mergeEmailCollaborationsForView,
+  mergeEmailMessageWithNodeAttachment,
   sharedInboxIDForHomeView,
 } from "../../../../frontend/src/pages/home/emailCollaborationRows.js";
 import {
@@ -246,4 +248,26 @@ test("shared rows dedupe only against provider messages from the active shared m
   assert.equal(merged.length, 1);
   assert.equal(merged[0]?.collaboration_id, "active-shared");
   assert.equal(merged[0]?.subject, "Provider shared row");
+});
+
+test("direct existing-node attachment annotates the selected message and every loaded thread reply", () => {
+  const attachment = {
+    nodeID: " node-direct ",
+    messageID: "message-1",
+    threadID: "thread-1",
+    informationID: " information-direct ",
+  };
+  const selected = message("message-1", { thread_id: "thread-1" });
+  const reply = message("message-2", { thread_id: "thread-1" });
+  const unrelated = message("message-3", { thread_id: "thread-2" });
+
+  assert.equal(emailMessageMatchesNodeAttachment(selected, attachment), true);
+  assert.equal(emailMessageMatchesNodeAttachment(reply, attachment), true);
+  assert.equal(emailMessageMatchesNodeAttachment(unrelated, attachment), false);
+
+  const merged = mergeEmailMessageWithNodeAttachment(reply, attachment);
+  assert.equal(merged.collaboration_node_id, "node-direct");
+  assert.equal(merged.collaboration_information_id, "information-direct");
+  assert.equal(reply.collaboration_node_id, undefined);
+  assert.equal(mergeEmailMessageWithNodeAttachment(unrelated, { ...attachment, nodeID: " " }), unrelated);
 });

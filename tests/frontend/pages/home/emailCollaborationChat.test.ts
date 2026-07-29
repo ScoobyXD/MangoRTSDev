@@ -232,6 +232,7 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailCollaborationChatSurface.tsx"), "utf8");
   const destinationSearch = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailNodeDestinationSearch.tsx"), "utf8");
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(workspace, /emailChatKey[\s\S]*JSON\.stringify\(\[activeViewID, mailbox, selectedMessageRowKey\]\)/);
@@ -277,11 +278,19 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(destinationSearch, /event\.key !== "#"[\s\S]*inputRef\.current\?\.focus\(\)/);
   assert.match(destinationSearch, /event\.key === "ArrowDown"[\s\S]*event\.key === "ArrowUp"[\s\S]*event\.key === "Enter"[\s\S]*event\.key === "Escape"/);
   assert.match(destinationSearch, /aria-label="Send email to selected destination"/);
-  assert.match(destinationSearch, /aria-label="Email Node priority"/);
-  assert.match(destinationSearch, /aria-label="Project Logic Gate"/);
+  assert.match(destinationSearch, /data-email-node-priority-choices="pre-open"[\s\S]*data-email-node-priority-option/);
+  assert.match(destinationSearch, /data-email-project-logic-gate-choices="pre-open"[\s\S]*data-email-project-logic-gate-option/);
+  assert.match(destinationSearch, /function destinationChoiceStyle\(selected: boolean\)[\s\S]*EDITOR_NEU_ACTIVE_SURFACE[\s\S]*EDITOR_NEU_SHADOW/);
+  assert.doesNotMatch(destinationSearch, /<select[^>]*aria-label="Email Node priority"/);
+  assert.doesNotMatch(destinationSearch, /<select[^>]*aria-label="Project Logic Gate"/);
   assert.match(destinationSearch, /onClick=\{\(\) => \{[\s\S]{0,180}option\.kind === "current" \|\| option\.kind === "node"\) runOption\(option\)/);
   assert.doesNotMatch(destinationSearch, /onDoubleClick/);
-  assert.match(destinationSearch, /nextPriorityValue[\s\S]*runOption\(selectedOption, \{ priority: nextPriority \}\)[\s\S]*nextLogicGateID[\s\S]*runOption\(selectedOption, \{ projectLogicGateID: nextLogicGateID \}\)/);
+  assert.match(destinationSearch, /data-email-node-priority-option[\s\S]*runOption\(selectedOption, \{ priority: nextPriority \}\)[\s\S]*data-email-project-logic-gate-option[\s\S]*runOption\(selectedOption, \{ projectLogicGateID: nextLogicGateID \}\)/);
+  assert.match(workspace, /data-email-node-indicator="mailbox-card"/);
+  assert.match(detail, /data-email-node-indicator="message-header"/);
+  assert.match(workspace, /onNodeAttachmentChange=\{onEmailNodeAttachmentChange\}/);
+  assert.match(homePage, /applyEmailNodeAttachmentChange[\s\S]*emailMessageMatchesNodeAttachment[\s\S]*mergeEmailMessageWithNodeAttachment/);
+  assert.match(surface, /const conversionResult = await convertTriageMessagesToExplorerTarget[\s\S]*onNodeAttachmentChange\?\.\(\{[\s\S]*resolveEmailCollaboration/);
   assert.match(surface, /assignNodeToLogicGateStatus\(\{[\s\S]{0,360}status: "requested"/);
   assert.match(surface, /upsertProjectRelationship\(\{[\s\S]{0,220}resourceType: "node"/);
   assert.match(surface, /"Node was created\."/);
