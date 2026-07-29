@@ -11,10 +11,12 @@ import {
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
 import {
   buildEmailCollaborationParticipantRoster,
+  buildEmailNodeDestinationSearchOptions,
   emailCollaborationChatSessionMounted,
   emailCollaborationChatSessionVisible,
   formatEmailCollaborationChatError,
   nextEmailCollaborationActionRequest,
+  nextEmailNodeDestinationRequest,
   reconcileEmailCollaborationChatSession,
   resolveEmailCollaborationChatPlacement,
   toggleEmailCollaborationChatSession,
@@ -124,6 +126,45 @@ test("email toolbar action requests are monotonic and preserve the selected oper
   assert.deepEqual(request, { action: "chat", requestID: 3 });
 });
 
+test("email hashtag search finds every destination kind and preserves current-node opening", () => {
+  const nodes = [
+    { company_id: "company-1", node_id: "node-current", name: "Current launch", created_timestamp: "2026-07-20T10:00:00.000Z" },
+    { company_id: "company-1", node_id: "node-next", name: "Launch checklist", created_timestamp: "2026-07-20T10:00:00.000Z" },
+  ];
+  const logicGates = [
+    { company_id: "company-1", logic_gate_id: "gate-1", header: "Launch approval", created_timestamp: "2026-07-20T10:00:00.000Z" },
+  ];
+  const projects = [
+    { company_id: "company-1", project_id: "project-1", name: "Launch program", status: "Active", created_timestamp: "2026-07-20T10:00:00.000Z", updated_timestamp: "2026-07-20T10:00:00.000Z" },
+  ];
+
+  const matches = buildEmailNodeDestinationSearchOptions({
+    query: "# launch",
+    nodes,
+    logicGates,
+    projects,
+    currentNodeID: "node-current",
+  });
+  assert.deepEqual(matches.map((option) => option.kind), ["current", "node", "logic_gate", "project"]);
+  assert.equal(matches[0]?.detail, "Open the Node already linked to this email");
+
+  const unlinked = buildEmailNodeDestinationSearchOptions({ query: "#", nodes, logicGates, projects });
+  assert.ok(unlinked.some((option) => option.kind === "standalone"));
+  assert.equal(unlinked.some((option) => option.kind === "current"), false);
+
+  const request = nextEmailNodeDestinationRequest(null, {
+    kind: "project",
+    projectID: "project-1",
+    logicGateID: "gate-1",
+    priority: 2,
+  });
+  assert.deepEqual(request, {
+    action: "create",
+    destination: { kind: "project", projectID: "project-1", logicGateID: "gate-1", priority: 2 },
+    requestID: 1,
+  });
+});
+
 test("email collaboration chat resolves to a real linked text box and only reads legacy attached-email chat as fallback", () => {
   const linkedTextBox = {
     information_id: "text-box-1",
@@ -190,6 +231,7 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailCollaborationChatSurface.tsx"), "utf8");
+  const destinationSearch = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailNodeDestinationSearch.tsx"), "utf8");
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(workspace, /emailChatKey[\s\S]*JSON\.stringify\(\[activeViewID, mailbox, selectedMessageRowKey\]\)/);
@@ -198,15 +240,14 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(workspace, /gridTemplateRows: !showDetailResizeHandle && emailChatVisible/);
   assert.match(workspace, /chatAvailable=\{emailChatAvailable\}[\s\S]*chatOpen=\{emailChatVisible\}[\s\S]*onToggleChat=\{toggleEmailChat\}/);
   assert.match(workspace, /\{\(emailChatMounted \|\| emailActionRequest\) && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
-  assert.match(detail, /data-email-node-actions="true"[\s\S]*Create Node From Email[\s\S]*Add Email to Node[\s\S]*aria-controls="email-collaboration-chat"/);
+  assert.match(detail, /data-email-node-actions="true"[\s\S]*emailNodeDestinationSearch[\s\S]*aria-controls="email-collaboration-chat"/);
+  assert.doesNotMatch(detail, /Create Node From Email|Add Email to Node/);
+  assert.match(workspace, /<EmailNodeDestinationSearch[\s\S]*onSubmit=\{sendEmailToNodeDestination\}[\s\S]*onOpenCurrentNode=/);
   assert.match(detail, /aria-controls="email-collaboration-chat"[\s\S]*aria-expanded=\{chatOpen\}[\s\S]*aria-pressed=\{chatOpen\}/);
-  assert.match(workspace, /requestEmailPanelAction\("create"\)/);
-  assert.match(workspace, /requestEmailPanelAction\("import"\)/);
-  const requestActionStart = workspace.indexOf("const requestEmailPanelAction");
-  const toggleChatStart = workspace.indexOf("const toggleEmailChat", requestActionStart);
-  assert.ok(requestActionStart >= 0 && toggleChatStart > requestActionStart);
-  assert.doesNotMatch(workspace.slice(requestActionStart, toggleChatStart), /setEmailChatSession/);
-  assert.match(surface, /actionRequest[\s\S]*setPendingAction\(actionRequest\.action\)[\s\S]*setPriorityMenuOpen\(actionRequest\.action !== "chat"\)/);
+  assert.match(workspace, /nextEmailNodeDestinationRequest\(current, destination\)/);
+  assert.match(workspace, /nextEmailCollaborationActionRequest\(current, "chat"\)/);
+  assert.match(surface, /setPriorityMenuOpen\(!actionRequest\.destination && actionRequest\.action !== "chat"\)/);
+  assert.match(surface, /handledDestinationRequestRef[\s\S]*destination\.kind === "node"[\s\S]*importIntoExistingNode\(destination\.nodeID, false\)/);
   assert.match(sharedChat, /headerTrailing\?: React\.ReactNode/);
   assert.match(sharedChat, /\{headerTrailing && \(/);
   assert.match(surface, /hidden=\{!active\}/);
@@ -232,16 +273,21 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   const actionPopoverSource = surface.slice(surface.indexOf('data-email-action-popover="true"'), surface.indexOf("<aside", surface.indexOf('data-email-action-popover="true"')));
   assert.match(actionPopoverSource, /data-email-action-option="true"/);
   assert.doesNotMatch(actionPopoverSource, /rgba\(249,115,22|rgba\(20,184,166|#9a3412|#7c2d12|#0f766e/);
-  assert.match(surface, /aria-label="Choose email node priority"/);
-  assert.match(surface, /data-email-logic-gate-picker="true"[\s\S]*Search Logic Gates/);
+  assert.match(destinationSearch, /data-email-node-hashtag-input="true"[\s\S]*# Search Nodes, Logic Gates, projects/);
+  assert.match(destinationSearch, /event\.key !== "#"[\s\S]*inputRef\.current\?\.focus\(\)/);
+  assert.match(destinationSearch, /event\.key === "ArrowDown"[\s\S]*event\.key === "ArrowUp"[\s\S]*event\.key === "Enter"[\s\S]*event\.key === "Escape"/);
+  assert.match(destinationSearch, /aria-label="Send email to selected destination"/);
+  assert.match(destinationSearch, /aria-label="Email Node priority"/);
+  assert.match(destinationSearch, /aria-label="Project Logic Gate"/);
   assert.match(surface, /assignNodeToLogicGateStatus\(\{[\s\S]{0,360}status: "requested"/);
-  assert.match(surface, /aria-label="Add email to node"[\s\S]*placeholder="Search nodes"/);
-  assert.match(surface, /onActionSuccess\("Node was created\."\)/);
+  assert.match(surface, /upsertProjectRelationship\(\{[\s\S]{0,220}resourceType: "node"/);
+  assert.match(surface, /"Node was created\."/);
   assert.match(surface, /onActionSuccess\("Email was added to node\."\)/);
   assert.match(workspace, /actionNotice=\{emailActionNotice\?\.message \?\? ""\}/);
   assert.match(detail, /data-email-action-success="true"/);
   assert.match(detail, /title="Chat about this email message"[\s\S]*onCommentOnMessage\(message\)/);
-  assert.match(detail, /data-email-node-actions="true"[\s\S]{0,220}flexWrap: "nowrap"/);
+  assert.match(detail, /data-email-node-actions="true"[\s\S]{0,260}flexWrap: "nowrap"/);
+  assert.match(destinationSearch, /role="combobox"[\s\S]*role="listbox"/);
   assert.match(surface, /targetEmailMessageID = selection\?\.messageID\?\.trim\(\) \|\| message\.id\.trim\(\)/);
   assert.match(surface, /message: collaborationTargetMessage,[\s\S]{0,100}messageID: targetEmailMessageID/);
   assert.match(surface, /convertTriageMessagesToExplorerTarget/);

@@ -3,6 +3,9 @@ import type {
   CompanyUser,
   CompanyUserGroup,
 } from "../../modules/communications/communicationsApi.js";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { NodeRecord } from "../../modules/node-map/shared.js";
+import type { ProjectRecord } from "../../modules/project-management/projectManagementApi.js";
 import {
   listEditorTextBlockProjections,
   parseEditorTextBlockChats,
@@ -28,9 +31,24 @@ export type EmailCollaborationChatSession = {
 
 export type EmailCollaborationPanelAction = "chat" | "create" | "import";
 
+export type EmailNodeDestination =
+  | { kind: "node"; nodeID: string }
+  | { kind: "logic_gate"; logicGateID: string; priority: number }
+  | { kind: "project"; projectID: string; logicGateID: string; priority: number }
+  | { kind: "standalone"; priority: number };
+
+export type EmailNodeDestinationSearchOption = {
+  key: string;
+  kind: "current" | EmailNodeDestination["kind"];
+  id: string;
+  label: string;
+  detail: string;
+};
+
 export type EmailCollaborationActionRequest = {
   action: EmailCollaborationPanelAction;
   requestID: number;
+  destination?: EmailNodeDestination;
 } | null;
 
 export function nextEmailCollaborationActionRequest(
@@ -38,6 +56,109 @@ export function nextEmailCollaborationActionRequest(
   action: EmailCollaborationPanelAction,
 ): NonNullable<EmailCollaborationActionRequest> {
   return { action, requestID: (current?.requestID ?? 0) + 1 };
+}
+
+export function nextEmailNodeDestinationRequest(
+  current: EmailCollaborationActionRequest,
+  destination: EmailNodeDestination,
+): NonNullable<EmailCollaborationActionRequest> {
+  return {
+    action: destination.kind === "node" ? "import" : "create",
+    destination,
+    requestID: (current?.requestID ?? 0) + 1,
+  };
+}
+
+function emailNodeDestinationQuery(value: string): string {
+  return value.trim().replace(/^#+\s*/, "").trim().toLocaleLowerCase();
+}
+
+function emailNodeDestinationMatches(option: EmailNodeDestinationSearchOption, query: string): boolean {
+  if (!query) return true;
+  return option.label.toLocaleLowerCase().includes(query)
+    || option.detail.toLocaleLowerCase().includes(query)
+    || option.id.toLocaleLowerCase().includes(query);
+}
+
+/** Builds the one hashtag search used for existing Nodes and new Node destinations. */
+export function buildEmailNodeDestinationSearchOptions(input: {
+  query: string;
+  nodes: NodeRecord[];
+  logicGates: LogicGateRecord[];
+  projects: ProjectRecord[];
+  currentNodeID?: string;
+  limit?: number;
+}): EmailNodeDestinationSearchOption[] {
+  const query = emailNodeDestinationQuery(input.query);
+  const currentNodeID = input.currentNodeID?.trim() ?? "";
+  const currentNode = currentNodeID
+    ? input.nodes.find((node) => node.node_id.trim() === currentNodeID)
+    : undefined;
+  const options: EmailNodeDestinationSearchOption[] = [];
+  if (currentNodeID) {
+    options.push({
+      key: `current:${currentNodeID}`,
+      kind: "current",
+      id: currentNodeID,
+      label: currentNode?.name?.trim() || "Current email Node",
+      detail: "Open the Node already linked to this email",
+    });
+  } else {
+    options.push({
+      key: "standalone:new",
+      kind: "standalone",
+      id: "new",
+      label: "New standalone Node",
+      detail: "Create an email Node without a Logic Gate",
+    });
+  }
+  options.push(...input.nodes
+    .filter((node) => node.node_id.trim() && node.node_id.trim() !== currentNodeID)
+    .map((node) => ({
+      key: `node:${node.node_id}`,
+      kind: "node" as const,
+      id: node.node_id,
+      label: node.name?.trim() || node.node_id,
+      detail: "Add this email to an existing Node",
+    })));
+  options.push(...input.logicGates
+    .filter((logicGate) => logicGate.logic_gate_id.trim())
+    .map((logicGate) => ({
+      key: `logic_gate:${logicGate.logic_gate_id}`,
+      kind: "logic_gate" as const,
+      id: logicGate.logic_gate_id,
+      label: logicGate.header?.trim() || logicGate.logic_gate_id,
+      detail: "Create an email Node in this Logic Gate",
+    })));
+  options.push(...input.projects
+    .filter((project) => project.project_id.trim())
+    .map((project) => ({
+      key: `project:${project.project_id}`,
+      kind: "project" as const,
+      id: project.project_id,
+      label: project.name?.trim() || project.project_id,
+      detail: "Create an email Node in this project",
+    })));
+
+  const kindOrder: Record<EmailNodeDestinationSearchOption["kind"], number> = {
+    current: 0,
+    node: 1,
+    logic_gate: 2,
+    project: 3,
+    standalone: 4,
+  };
+  return options
+    .filter((option) => emailNodeDestinationMatches(option, query))
+    .sort((left, right) => {
+      const currentNodeOrder = Number(right.kind === "current") - Number(left.kind === "current");
+      const leftPrefix = query && left.label.toLocaleLowerCase().startsWith(query) ? 0 : 1;
+      const rightPrefix = query && right.label.toLocaleLowerCase().startsWith(query) ? 0 : 1;
+      return currentNodeOrder
+        || leftPrefix - rightPrefix
+        || kindOrder[left.kind] - kindOrder[right.kind]
+        || left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" });
+    })
+    .slice(0, Math.max(1, input.limit ?? 12));
 }
 
 export function toggleEmailCollaborationChatSession(
