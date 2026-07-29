@@ -132,8 +132,6 @@ func (s *Server) handleNodeV2(w http.ResponseWriter, r *http.Request, nodeID str
 			s.handleNodeV2TextboxSync(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "updates":
 			s.handleNodeV2TextboxUpdate(w, r, nodeID, textboxID)
-		case len(parts) == 3 && parts[2] == "collaboration-ticket":
-			s.handleNodeV2CollaborationTicket(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "checkpoints":
 			s.handleNodeV2TextboxCheckpoint(w, r, nodeID, textboxID)
 		case len(parts) == 3 && parts[2] == "comments":

@@ -2,7 +2,9 @@
 
 Last updated: 2026-07-28
 
-Status: authoritative architecture handoff and project tracker. Phase 2 repository acceptance and Phase 3 engineering are complete behind inactive safety gates. Manual browser acceptance, the human-controlled development migration-ledger reconciliation, and every real conversion/cutover remain pending.
+Status: **superseded before rollout on 2026-07-28**. This document is retained only as a historical design record. Do not enable, restore, or deploy the Node v2/Yjs/Hocuspocus path from this document.
+
+Current decision: Node, Project, and Logic Gate editors use the shared revisioned Tiptap JSON save path. Historical additive migrations remain in Git, but the Node v2 frontend, collaboration service, runtime packages, flags, and build/test entry points were removed.
 
 ## Why this document exists
 
