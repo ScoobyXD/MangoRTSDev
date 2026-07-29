@@ -294,7 +294,36 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   const documentErrors: string[] = [];
   const storageErrors: string[] = [];
   let storageRecoveries = 0;
+  const remoteImageImports: Array<{ path: string; body: unknown }> = [];
   const requestJSON = async <T,>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (_path === "/v1/attachments/imports/remote-image") {
+      remoteImageImports.push({ path: _path, body: init?.json });
+      const attachment = {
+        company_id: "company-1",
+        attachment_id: "google-docs-paste-image",
+        original_filename: "google-docs-tree.png",
+        mime_type: "image/png",
+        byte_size: 2048,
+        sha256: "google-docs-image-sha256",
+        original_width: 546,
+        original_height: 427,
+        source_kind: "editor_paste",
+        created_timestamp: "2026-07-29T16:00:00Z",
+      };
+      return {
+        attachment,
+        resource_attachment: {
+          resource_attachment_id: "resource-google-docs-paste-image",
+          company_id: "company-1",
+          resource_type: "node",
+          resource_id: "node-1",
+          attachment_id: attachment.attachment_id,
+          relationship_kind: "inline_image",
+          created_timestamp: "2026-07-29T16:00:00Z",
+          attachment,
+        },
+      } as T;
+    }
     if (init?.method !== "POST") {
       canonicalReads += 1;
       return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
@@ -437,12 +466,26 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       "toolbar commands should return to the caret's original format state",
     );
 
-    const activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    let activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
     await act(async () => {
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
     });
     await waitFor(() => activeImageFrame.dataset.selected === "true", "clicking an inline image should create a visible Tiptap node selection");
+    assert.equal(controllerRef.current?.readFormatState().textAlignment, "center", "the selected image starts with its stored center alignment");
+    await act(async () => { assert.equal(controllerRef.current?.applyTextAlignment("left"), true); });
+    assert.equal(controllerRef.current?.readFormatState().textAlignment, "left", "the selected image node attributes must receive the toolbar alignment");
+    assert.match(controllerRef.current?.flush() ?? "", /"attachmentId":"image-1"[^}]*"alignment":"left"/, "the toolbar alignment must be present in the serialized document");
+    await waitFor(() => postStarted, "selected image alignment must use the normal durable document save");
+    assert.match(JSON.stringify(postedDocument), /"attachmentId":"image-1"[^}]*"alignment":"left"/);
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the selected image alignment save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
+    activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    assert.ok(activeImageFrame);
+    await waitFor(() => activeImageFrame.dataset.selected === "true", "the persisted image alignment must preserve its node selection");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
     assert.equal(activeImageFrame.style.cursor, "pointer", "inline images use the hand-selection cursor instead of the editor text caret");
     assert.ok(activeImageFrame.querySelector('[data-mango-inline-image-download="true"]'), "the selected image exposes an icon-only download control attached to its frame");
@@ -465,6 +508,48 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(closeImagePreview);
     await act(async () => { closeImagePreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
     await waitFor(() => !dom.window.document.querySelector('[role="dialog"][aria-label="Preview image.png"]'), "the inline image preview should close normally");
+    const richClipboardHTML = '<p><strong>Google Docs text before</strong></p><p><img src="https://lh7-rt.googleusercontent.com/docsz/temporary-tree?key=secret" alt="Copied tree" width="546" height="427"></p><p>Google Docs text after</p>';
+    const richClipboardData = {
+      files: [],
+      getData: (type: string) => type === "text/html" ? richClipboardHTML : type === "text/plain" ? "Google Docs text before Google Docs text after" : "",
+    } as unknown as DataTransfer;
+    const richPasteEvent = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(richPasteEvent, "clipboardData", { configurable: true, value: richClipboardData });
+    await act(async () => {
+      activeProseMirror.dispatchEvent(richPasteEvent);
+    });
+    assert.equal(richPasteEvent.defaultPrevented, true, "mixed Google Docs clipboard HTML must be owned by the durable image importer");
+    await waitFor(() => remoteImageImports.length === 1, "the Google Docs image must use the remote durable attachment importer");
+    assert.deepEqual(remoteImageImports[0], {
+      path: "/v1/attachments/imports/remote-image",
+      body: {
+        company_id: "company-1",
+        resource_type: "node",
+        resource_id: "node-1",
+        source_url: "https://lh7-rt.googleusercontent.com/docsz/temporary-tree?key=secret",
+        original_filename: "temporary-tree",
+        information_id: "document-1",
+        editor_surface: "node",
+      },
+    });
+    await waitFor(
+      () => Boolean(activeProseMirror.querySelector('[data-mango-attachment-id="google-docs-paste-image"]'))
+        && (activeProseMirror.textContent ?? "").includes("Google Docs text before")
+        && (activeProseMirror.textContent ?? "").includes("Google Docs text after"),
+      "the active editor must keep both pasted text and the imported Google Docs image",
+    );
+    const pastedImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="google-docs-paste-image"]');
+    assert.ok(pastedImageFrame);
+    assert.equal(pastedImageFrame.style.justifyContent, "flex-start", "a pasted image follows the default left toolbar alignment");
+
+    await waitFor(() => postStarted, "the complete mixed rich paste must reach the normal durable document save");
+    assert.match(JSON.stringify(postedDocument), /Google Docs text before/);
+    assert.match(JSON.stringify(postedDocument), /google-docs-paste-image/);
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the pasted text and image save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
     resetEditorRuntimeMetricsForTests();
     const changeCountBeforeTyping = changes.length;
     const alphaWalker = dom.window.document.createTreeWalker(activeProseMirror, dom.window.NodeFilter.SHOW_TEXT);

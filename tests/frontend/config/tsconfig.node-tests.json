@@ -197,6 +197,7 @@
     "../modules/editor/unifiedRichEditorContract.test.ts",
     "../modules/editor/editorTextboxSync.test.ts",
     "../modules/editor/mangoTiptapFoundation.test.ts",
+    "../modules/editor/mangoTiptapRichClipboard.test.ts",
     "../modules/editor/emailViewerContract.test.ts",
     "../../../frontend/src/modules/editor/editorImages.ts",
     "../../../frontend/src/modules/editor/emailSignatureBody.ts",
