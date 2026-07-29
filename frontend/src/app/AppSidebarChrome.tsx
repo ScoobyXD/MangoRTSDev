@@ -48,7 +48,7 @@ import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
-import { HomeSavedViewsSidebarSection, selectBuiltInHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
+import { HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -357,7 +357,7 @@ export function AppSidebar({
     [notificationSummary.total_unread, updatesMentionNotificationCount, updatesUrgentNotificationCount],
   );
   const openUpdatesFilter = useCallback((filter: UpdateFeedFilter) => {
-    selectBuiltInHomeSavedView("updates", companyID, currentUserID);
+    restoreSelectedHomeSavedView("updates", companyID, currentUserID);
     requestUpdatesFilter(companyID, filter);
     onHomeViewSelect("updates");
   }, [companyID, currentUserID, onHomeViewSelect]);
@@ -1258,7 +1258,7 @@ export function AppSidebar({
           ]} />}
           elevated
           onClick={() => {
-            selectBuiltInHomeSavedView("updates", companyID, currentUserID);
+            restoreSelectedHomeSavedView("updates", companyID, currentUserID);
             onHomeViewSelect("updates");
           }}
         />

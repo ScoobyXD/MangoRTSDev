@@ -1,10 +1,10 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, and the U84/U85 control and sidebar layout contracts. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, the U84/U85 control and sidebar layout contracts, and U97's saved-view restoration selection. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
@@ -91,7 +91,7 @@ U79 - Email collaboration mention/chat rows use the shared email icon token requ
 U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
 U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> GVIC -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
 U82 - GVIC and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. GVIC titles reuse the shared Generated cyan, Verified pink, Consulted purple, and Informed green editor palette; Other, No GVIC, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
-U83 - Opening the built-in Updates tab or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
+U83 - Opening Updates when no saved grouping views exist or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
 U84 - The Updates page header provides Collapse all and Expand all actions. Collapse all closes every currently rendered grouping level, and Expand all opens every currently rendered grouping level without changing the active grouping view, filter, selection, or notification data.
 U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Each icon and number has its own fixed, centered row with visible breathing room between them. A zero-count cell stays neutral; a nonzero urgent cell uses a four-stop fiery red-orange gradient, a nonzero normal-mention cell uses a four-stop teal-blue gradient, and a nonzero regular-update cell uses a four-stop yellow-orange gradient. The active gradients use the same light-leading-edge, saturated-middle, and darker-trailing-edge treatment as Mango's Node and Company Explorer folder icons.
 U86 - Priority grouping orders assigned priorities by their numeric value: 1, 2, 3, 4, then 5 in ascending order. The shared `Unassigned to a Logic Gate` priority-zero group and any equivalent no-priority fallback always remain after assigned priorities, including when the saved grouping direction is descending.
@@ -105,6 +105,7 @@ U94 - Verification request updates use a dedicated indigo check marker, canonica
 U95 - A verification update stores the stamp ID as its information target. Activating the row opens the authorized Node preview and scrolls that exact compact timeline stamp into view.
 U96 - Retrying the same verification-request idempotency key sends no duplicate update, and the requesting actor receives no self-notification even when included in the stamp's recipient snapshot.
 U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscreen action in its top-right controls. Activating it moves the complete selected Node panel into the shared body-level blocking overlay with the standard 8px vertical and 12px horizontal viewport insets, hides conflicting app chrome, traps focus, and preserves the selected update, Node editor, and chat context. The same control, Escape, or backdrop restores the existing Updates split-panel layout and its saved ratio; closing still closes the Node panel.
+U97 - The selected saved Updates grouping view is the user's default Updates presentation. Refreshing, leaving and returning to Updates, clicking the Updates tab, and opening an Updates notification filter restore that saved view instead of clearing it or replacing it with the built-in grouping. If no stored selection exists or it references a deleted view, the first saved Updates view becomes the default; the built-in grouping is used only when no saved Updates views exist. A transient saved-view load failure does not erase the stored selection.
 
 ## Update Row Copy And Visual Language
 
@@ -280,6 +281,7 @@ Business logic covered:
 - U67
 - U72
 - U82
+- U97
 
 Given:
 - The user opens the built-in Updates tab, then saves a custom Updates view grouped by Project, Logic Gate, and Status and separately saves an explicitly empty grouping stack.
@@ -292,6 +294,7 @@ Expected:
 - GVIC and Priority grouping titles are raised rectangular entity surfaces: GVIC uses its shared editor role palette (with neutral slate for Other or unassigned values), and Priority uses the exact shared node-priority palette for that number rather than generic plain text.
 - Project, Logic Gate, Priority, and Status grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
+- The selected saved view remains active after refresh, tab navigation, clicking Updates, and opening a notification filter. With no valid stored selection, the first saved view is restored before the built-in fallback, and a temporary saved-view request failure does not erase the stored preference.
 - The status-changing row groups by the status recorded on that event; rows without an event status use the current resolved node status and otherwise No status.
 - Comment and mention prose that happens to contain phrases such as `moved to` or `changed ... to` never creates a synthetic status group, and legacy `a new status/state` copy falls back to the current node status.
 - Status ascending renders In Progress, Review, Pending, Requested, Backlog, then Done; descending reverses the nonterminal recognized groups but keeps Done at the bottom.
@@ -495,7 +498,7 @@ Business logic covered:
 Given:
 - Updates is open with a selected row, active node preview, and a user-collapsed nested group.
 - The notification socket accepts or reconnects, then a real external notification hint arrives.
-- The user switches between built-in Updates and customized/explicitly ungrouped saved views.
+- The user switches between customized/explicitly ungrouped saved views, then deletes all saved views to expose the built-in Updates grouping.
 
 Expected:
 - Acceptance refreshes summary badges only and issues no roots/branch feed requests.
@@ -513,7 +516,7 @@ Business logic covered:
 - U85
 
 Given:
-- A user opens Mango in a fresh browser session and selects the built-in Updates tab.
+- A user opens Mango in a fresh browser session with no saved Updates views, then selects Updates.
 - The user also activates a saved Updates grouping view with multiple nested grouping levels.
 - The user has zero or nonzero urgent mentions, normal mentions, and regular updates.
 - The user manually collapses one group and later receives a background feed refresh.

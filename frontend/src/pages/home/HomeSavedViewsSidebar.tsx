@@ -20,10 +20,9 @@ import { DEFAULT_UPDATE_GROUPINGS, UPDATE_GROUPING_FIELDS, normalizeUpdateGroupi
 
 export const EVENT_HOME_SAVED_VIEWS_CHANGED = "mangorts:home-saved-views-changed";
 
-export function selectBuiltInHomeSavedView(surface: HomeSavedViewsSurface, companyID: string, userID: string): void {
+export function restoreSelectedHomeSavedView(surface: HomeSavedViewsSurface, companyID: string, userID: string): void {
   const storageUserID = userID.trim() || "local";
-  clearSelectedSavedViewID(surface, companyID, storageUserID);
-  emitHomeSavedViewsChanged(surface, "");
+  emitHomeSavedViewsChanged(surface, readSelectedSavedViewID(surface, companyID, storageUserID));
 }
 
 type HomeSavedViewsSurface = Extract<SavedViewSurface, "my_work" | "updates">;
@@ -153,6 +152,11 @@ export function HomeSavedViewsSidebarSection({
     }
     let cancelled = false;
     setError("");
+    if (surface === "updates") {
+      setSettings((current) => current.some((setting) => (
+        setting.company_id === companyID.trim() && setting.user_id === currentUserID.trim()
+      )) ? current : []);
+    }
     void fetchSavedViews({ apiBase, companyID, surface }).then((savedViews) => {
       if (cancelled) return;
       const loaded = savedViews
@@ -172,9 +176,11 @@ export function HomeSavedViewsSidebarSection({
       else clearSelectedSavedViewID(surface, companyID, storageUserID);
     }).catch((loadError) => {
       if (cancelled) return;
-      setSettings([]);
-      setSelectedSettingID("");
-      clearSelectedSavedViewID(surface, companyID, storageUserID);
+      if (surface !== "updates") {
+        setSettings([]);
+        setSelectedSettingID("");
+        clearSelectedSavedViewID(surface, companyID, storageUserID);
+      }
       setError(savedViewErrorMessage(loadError, "Failed to load saved views"));
     });
     return () => { cancelled = true; };
