@@ -1596,7 +1596,7 @@ The audit findings are closed in code and executable tests:
 - PostgreSQL timeline and email pagination include stable unique tie-breakers;
 - Yjs-relative comments render as durable decorations and support focus/navigation and detached/legacy fallbacks;
 - pre-v2 schema bridges are capability-gated, while post-v2 business writes remain atomic;
-- the full test gate includes Phase 2 and a self-provisioning PostgreSQL/API/Vite/Chromium/S3-compatible browser harness;
+- the full test gate includes Phase 2 plus self-provisioning PostgreSQL migration and backend realtime checks; the API/Vite/Chromium/S3 browser harness was removed from CI on 2026-07-28;
 - business mutations write idempotent domain events and realtime outbox rows in the same transaction, while high-frequency Yjs updates do not;
 - checkpoint coverage is server-owned and public checkpoint claims are rejected;
 - the workspace contract includes placement/GVIC summaries; and

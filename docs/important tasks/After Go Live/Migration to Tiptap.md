@@ -372,7 +372,7 @@ The migration is not complete until runtime evidence proves:
 - Exact isolation holds among companies, users, Nodes, Logic Gates, Projects, and individual text boxes.
 - Permission revocation stops future document and attachment delivery.
 - Document limits, paste batching, pending work, and storage failures have clear user-visible recovery with no silent truncation.
-- Real browser tests assert the actual editor DOM, caret-relevant content, images, and saved/healthy status against the production-path Mango backend and disposable PostgreSQL database.
+- The former real-browser CI harness asserted the actual editor DOM, caret-relevant content, images, and saved/healthy status. It was removed from CI on 2026-07-28, so these behaviors require manual acceptance until replacement automation is added.
 
 ## Decisions intentionally deferred
 

@@ -22,7 +22,7 @@ run("Node v2 Phase 2 executable frontend coverage", "npm run test:node-v2-phase2
 run("Mango legacy HTML to Tiptap JSON converter", "npm run test:mango-html-to-json", resolve(repoRoot, "frontend"));
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Backend Go tests", "go test ./...", resolve(repoRoot, "backend"));
-run("Realtime production-path PostgreSQL and browser tests", "node scripts/run_realtime_production_path_tests.mjs", repoRoot);
+run("Realtime production-path PostgreSQL tests", "node scripts/run_realtime_production_path_tests.mjs", repoRoot);
 run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");

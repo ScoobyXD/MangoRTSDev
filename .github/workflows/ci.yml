@@ -43,9 +43,5 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install Chromium for production-path tests
-        working-directory: frontend
-        run: npx --no-install playwright-core install --with-deps chromium
-
       - name: Run repo tests
         run: node scripts/run_all_tests.mjs

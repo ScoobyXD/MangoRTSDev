@@ -52,7 +52,7 @@ The PostgreSQL-backed browser scenario uses the real Mango shell, a disposable l
 - `npm run test:node-v2-phase2`
 - `npx tsc -b`
 - `npm run build`
-- `node frontend/scripts/node-v2-phase2-browser.test.mjs` against disposable PostgreSQL/API/Vite/S3 services
+- Browser-driven PostgreSQL/API/Vite/S3 workflow verification was retired from CI on 2026-07-28; run these workflows manually until replacement automation is added
 - Phase 2 forward migration applied twice to disposable PostgreSQL to prove idempotency
 - `node scripts/run_all_tests.mjs`
 
@@ -75,7 +75,7 @@ The Phase 2 repository implementation now also includes:
 - trusted checkpoint authority: clients can append updates and read recovery state but cannot claim checkpoint coverage; and
 - placement/GVIC data in the workspace header plus server/workspace-scoped activation so a global build flag cannot hide an unconverted legacy workspace.
 
-`scripts/run_all_tests.mjs` now runs the executable Phase 2 durability suite and the production-path harness. That harness provisions disposable PostgreSQL, two API instances, Vite, Chromium, and an S3-compatible local fixture, then proves legacy-before-activation and V2-after-activation behavior in one command. Its V2 browser path covers bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and 35-message email continuation.
+`scripts/run_all_tests.mjs` runs the executable Phase 2 durability suite plus disposable PostgreSQL migration and backend realtime producer checks. The former two-API/Vite/Chromium/S3 browser workflow was removed from CI on 2026-07-28. Bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and email continuation require manual browser acceptance until replacement automation is added.
 
 The Phase 2 implementation is present in the repository. Shared conversion/shadow/rollback engineering is now complete; Phase 1 remains open only for the human development-ledger reconciliation. This change did not migrate a live database or authorize rollout.
 
@@ -103,6 +103,6 @@ The readiness correction above is retained as historical evidence. Its material 
 - The Node workspace has distinct editor, textbox-chat, and email columns. It preserves exact message-to-textbox behavior, accent state, bounded email pages, lazy bodies, and HTML email storage.
 - Verification pins exact checkpoints and update tails. Retention cleanup deletes expired unpinned history while retaining every row required to reconstruct verified content.
 - A reply-heavy thread is bounded through continuation cursors, and the ordered company purge function clears restrictive typed links in one transaction before company deletion.
-- The production browser harness proves typing, undo/redo, save, reload, navigation, Strict Mode remount, scroll/caret behavior, offline recovery, comments, archive/restore, file upload, and the full inline-image surface through real API/PostgreSQL paths.
+- Historical browser-harness evidence covered typing, undo/redo, save, reload, navigation, Strict Mode remount, scroll/caret behavior, offline recovery, comments, archive/restore, file upload, and inline-image paths. That harness was removed from CI on 2026-07-28, so these workflows require manual acceptance until replacement automation is added.
 
 Repository automation passed the expanded disposable production-path harness on 2026-07-28. Manual user acceptance remains intentionally separate. No real conversion, live activation, live read/write cutover, or legacy cleanup occurred.
