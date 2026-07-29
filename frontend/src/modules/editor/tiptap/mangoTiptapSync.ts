@@ -29,6 +29,7 @@ export type MangoTiptapSaveState = {
   updatedTimestamp?: string;
   revision?: number;
   message?: string;
+  unresolvedFailure?: boolean;
 };
 
 export type MangoTiptapConflict = {
@@ -176,6 +177,7 @@ export class MangoTiptapSync {
   private stopped = false;
   private conflicted = false;
   private recoveryStorageFailed = false;
+  private unresolvedSaveFailureMessage: string | undefined;
 
   constructor(private readonly options: MangoTiptapSyncOptions) {
     this.storageKey = mangoTiptapPendingStorageKey(options);
@@ -211,7 +213,7 @@ export class MangoTiptapSync {
     if (this.stopped || this.conflicted) return;
     this.snapshotProvider = typeof document === "function" ? document : () => document;
     this.annotationProvider = annotations;
-    this.options.onSaveStateChange?.({ status: "pending" });
+    this.options.onSaveStateChange?.({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
     this.armDrain(immediate);
   }
 
@@ -229,9 +231,12 @@ export class MangoTiptapSync {
       serialized = serializeMangoTiptapDocument(pendingDocument);
       annotations = [...(annotationProvider?.() ?? [])];
     } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Unable to prepare this text box for saving";
+      this.unresolvedSaveFailureMessage = message;
       this.options.onSaveStateChange?.({
         status: "failed",
-        message: cause instanceof Error ? cause.message : "Unable to prepare this text box for saving",
+        message,
+        unresolvedFailure: true,
       });
       this.options.onError?.(cause);
       return this.persistence;
@@ -322,12 +327,15 @@ export class MangoTiptapSync {
     }
     this.options.onPendingChange?.(this.pending.length);
     this.options.onSaveStateChange?.(this.pending.length > 0
-      ? { status: "pending" }
-      : {
-        status: "saved",
-        updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
-        revision: canonical.revision,
-      });
+      ? { status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) }
+      : this.unresolvedSaveFailureMessage
+        ? { status: "failed", message: this.unresolvedSaveFailureMessage, unresolvedFailure: true }
+        : {
+          status: "saved",
+          updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
+          revision: canonical.revision,
+          unresolvedFailure: false,
+        });
     if (canonical.deleted) {
       this.pending = [];
       this.options.onPendingChange?.(0);
@@ -435,7 +443,7 @@ export class MangoTiptapSync {
       while (this.pending.length > 0 && !this.conflicted) {
         const commit = this.pending[0];
         try {
-          this.options.onSaveStateChange?.({ status: "saving" });
+          this.options.onSaveStateChange?.({ status: "saving", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
           if (!commit.attempted) {
             commit.attempted = true;
             await this.persistPendingBestEffort();
@@ -456,6 +464,7 @@ export class MangoTiptapSync {
           if (!validation.valid) throw new Error(`invalid_committed_tiptap_document: ${validation.error}`);
           this.revision = response.revision;
           this.retryAttempt = 0;
+          this.unresolvedSaveFailureMessage = undefined;
           this.pending.shift();
           this.pending.forEach((next, index) => { if (!next.attempted) next.base_revision = this.revision + index; });
           // The server acknowledgement is canonical even when local browser storage
@@ -467,6 +476,7 @@ export class MangoTiptapSync {
               status: "saved",
               updatedTimestamp: response.committed_at ?? response.updated_timestamp,
               revision: response.revision,
+              unresolvedFailure: false,
             });
           this.options.onAnnotations?.(response.annotations ?? commit.annotations ?? [], "canonical");
           await this.persistPendingBestEffort();
@@ -477,9 +487,12 @@ export class MangoTiptapSync {
           } else {
             this.armRetry();
           }
+          const message = cause instanceof Error ? cause.message : "Unable to save this text box";
+          this.unresolvedSaveFailureMessage = message;
           this.options.onSaveStateChange?.({
             status: "failed",
-            message: cause instanceof Error ? cause.message : "Unable to save this text box",
+            message,
+            unresolvedFailure: true,
           });
           throw cause;
         }

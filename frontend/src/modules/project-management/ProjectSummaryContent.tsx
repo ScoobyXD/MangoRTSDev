@@ -51,7 +51,7 @@ import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUse
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
-import { EditorSaveStatusBadge, type EditorSaveState } from "../editor/EditorSaveStatusBadge.js";
+import { EditorSaveStatusBadge, editorSaveNeedsFailureAttention, type EditorSaveState } from "../editor/EditorSaveStatusBadge.js";
 import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
 import {
   editorChatAttachmentsReadyForSubmit,
@@ -2574,10 +2574,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   chatOpen ? `${projectSidePaneWidths.chat}px` : "",
                 ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
                 const minimumWidth = (emailOpen ? projectSidePaneWidths.email + 8 : 0) + (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
+                const blockSaveState = textBlockSaveStates[block.id] ?? (savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp });
+                const blockSaveNeedsFailureAttention = editorSaveNeedsFailureAttention(blockSaveState);
                 return (
                   <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
                     <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
-                    <div className="mango-fixed-editor-row" data-project-text-box-row={block.id} style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)" }}>
+                    <div className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`} data-project-text-box-row={block.id} style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)" }}>
                       <div className="mango-editor-header-scroll" style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
                         <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${emailOpen ? projectSidePaneWidths.email : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                           <div style={{ display: "flex", justifyContent: "flex-start" }}>
@@ -2601,7 +2603,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
-                            <EditorSaveStatusBadge state={textBlockSaveStates[block.id] ?? (savingID === block.id ? { status: "saving" } : { status: "saved", updatedTimestamp: block.updatedTimestamp })} compact />
+                            <EditorSaveStatusBadge state={blockSaveState} compact />
                             <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
                               Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                             </span>

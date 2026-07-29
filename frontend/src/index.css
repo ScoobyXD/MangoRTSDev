@@ -1144,6 +1144,30 @@ button, input, textarea, select {
   box-sizing: border-box;
 }
 
+@keyframes mango-editor-save-failed-frame-pulse {
+  0%, 100% {
+    outline-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.30), 0 0 22px rgba(220, 38, 38, 0.28);
+  }
+  50% {
+    outline-color: #fca5a5;
+    box-shadow: 0 0 0 7px rgba(220, 38, 38, 0.16), 0 0 34px rgba(220, 38, 38, 0.42);
+  }
+}
+
+.mango-editor-save-failed-frame {
+  outline: 4px solid #dc2626;
+  outline-offset: -4px;
+  animation: mango-editor-save-failed-frame-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mango-editor-save-failed-frame {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.34);
+  }
+}
+
 .mango-editor-header-scroll {
   -ms-overflow-style: none;
   scrollbar-width: none;

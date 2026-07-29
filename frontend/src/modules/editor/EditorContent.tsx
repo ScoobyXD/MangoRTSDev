@@ -46,7 +46,7 @@ import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
-import type { EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { editorSaveNeedsFailureAttention, type EditorSaveState } from "./EditorSaveStatusBadge.js";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
@@ -3045,6 +3045,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
             <LogicGateTiptapEditorSurface
               key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
+              className={editorSaveNeedsFailureAttention(logicGateSaveState) ? "mango-editor-save-failed-frame" : undefined}
               value={documentDraftRef.current}
               editable={editorWriteEnabled}
               style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}

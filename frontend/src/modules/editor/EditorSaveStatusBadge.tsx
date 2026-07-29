@@ -3,6 +3,10 @@ import type { MangoTiptapSaveState } from "./tiptap/mangoTiptapSync.js";
 
 export type EditorSaveState = MangoTiptapSaveState;
 
+export function editorSaveNeedsFailureAttention(state?: EditorSaveState): boolean {
+  return state?.status === "failed" || Boolean(state?.unresolvedFailure);
+}
+
 const presentation = {
   pending: { label: "Pending", color: "#92400e", background: "#fffbeb", border: "#f59e0b" },
   saving: { label: "Saving", color: "#1d4ed8", background: "#eff6ff", border: "#60a5fa" },
