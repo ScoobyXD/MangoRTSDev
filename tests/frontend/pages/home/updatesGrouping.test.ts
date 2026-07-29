@@ -7,6 +7,7 @@ import {
   UPDATE_GROUPING_FIELDS,
   normalizeUpdateGroupingStack,
   resolveUpdatePriorityGroupOrder,
+  resolveUpdateSelectedSettingID,
   sortUpdateItemsNewestFirst,
   withBuiltInUpdateGroupingSetting,
 } from "../../../../frontend/src/pages/home/updatesGrouping.js";
@@ -86,6 +87,27 @@ test("the built-in Updates setting remains first without rewriting custom settin
   const settings = withBuiltInUpdateGroupingSetting(builtIn, [custom]);
   assert.deepEqual(settings.map((setting) => setting.setting_id), ["built-in", "custom"]);
   assert.deepEqual(settings[1], custom);
+});
+
+test("Updates restores the preferred saved view and defaults to a saved view before the built-in fallback", () => {
+  const settings = [
+    { setting_id: "built-in" },
+    { setting_id: "update-view" },
+    { setting_id: "view-2" },
+  ];
+
+  assert.equal(resolveUpdateSelectedSettingID(settings, "built-in", "view-2"), "view-2");
+  assert.equal(resolveUpdateSelectedSettingID(settings, "built-in", ""), "update-view");
+  assert.equal(resolveUpdateSelectedSettingID(settings, "built-in", "deleted-view"), "update-view");
+  assert.equal(resolveUpdateSelectedSettingID([{ setting_id: "built-in" }], "built-in", ""), "built-in");
+  assert.equal(resolveUpdateSelectedSettingID([], "built-in", ""), "");
+
+  const updatesView = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  const appSidebar = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
+  assert.match(updatesView, /resolveUpdateSelectedSettingID\(\s*settingsForState,\s*fallbackSetting\.setting_id,\s*preferredSettingID/);
+  assert.match(updatesView, /const storageUserID = userID\.trim\(\) \|\| "local"/);
+  assert.doesNotMatch(appSidebar, /selectBuiltInHomeSavedView/);
+  assert.match(appSidebar, /restoreSelectedHomeSavedView\("updates", companyID, currentUserID\)/);
 });
 
 test("Updates rows are always sorted newest first within their rendered group", () => {

@@ -50,6 +50,22 @@ export function withBuiltInUpdateGroupingSetting<T extends { setting_id: string 
   return [builtIn, ...custom.filter((setting) => setting.setting_id !== builtIn.setting_id)];
 }
 
+export function resolveUpdateSelectedSettingID<T extends { setting_id: string }>(
+  settings: readonly T[],
+  builtInSettingID: string,
+  preferredSettingID: string,
+): string {
+  const cleanBuiltInSettingID = builtInSettingID.trim();
+  const cleanPreferredSettingID = preferredSettingID.trim();
+  if (cleanPreferredSettingID && settings.some((setting) => setting.setting_id === cleanPreferredSettingID)) {
+    return cleanPreferredSettingID;
+  }
+  return settings.find((setting) => setting.setting_id && setting.setting_id !== cleanBuiltInSettingID)?.setting_id
+    ?? settings.find((setting) => setting.setting_id === cleanBuiltInSettingID)?.setting_id
+    ?? settings[0]?.setting_id
+    ?? "";
+}
+
 export function sortUpdateItemsNewestFirst<T>(
   items: readonly T[],
   getTimestamp: (item: T) => string,

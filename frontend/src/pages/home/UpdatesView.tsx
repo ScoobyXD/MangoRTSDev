@@ -49,6 +49,7 @@ import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWi
 import {
   DEFAULT_UPDATE_GROUPINGS,
   normalizeUpdateGroupingStack,
+  resolveUpdateSelectedSettingID,
   resolveUpdatePriorityGroupOrder,
   sortUpdateItemsNewestFirst,
   withBuiltInUpdateGroupingSetting,
@@ -249,17 +250,12 @@ export function UpdatesView({
       const detail = (event as CustomEvent<{ surface?: string; settingID?: string }>).detail;
       if (detail?.surface !== "updates") return;
       const settingID = detail.settingID?.trim() ?? "";
-      if (settingID) {
-        setSelectedSettingID(settingID);
-      } else {
-        setSelectedSettingID(fallbackSetting.setting_id);
-        clearUpdatesSelectedViewID(companyID, currentUserID);
-      }
+      if (settingID) setSelectedSettingID(settingID);
       setSavedViewsReloadToken((value) => value + 1);
     };
     window.addEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
     return () => window.removeEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
-  }, [companyID, currentUserID, fallbackSetting.setting_id]);
+  }, []);
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
@@ -269,33 +265,29 @@ export function UpdatesView({
     }
     let cancelled = false;
     setSettingsError("");
+    setSettings((current) => current.some((setting) => (
+      setting.company_id === companyID.trim() && setting.user_id === currentUserID.trim()
+    )) ? current : [fallbackSetting]);
     void fetchSavedViews({ apiBase, companyID, surface: "updates" }).then((savedViews) => {
       if (cancelled) return;
       const next = savedViewsToUpdateSettings(savedViews, fallbackSetting, currentUserID);
       const settingsForState = withBuiltInUpdateGroupingSetting(fallbackSetting, next);
       const preferredSettingID = readUpdatesSelectedViewID(companyID, currentUserID);
-      const nextSelectedSettingID = settingsForState.find((setting) => setting.setting_id === preferredSettingID)?.setting_id
-        ?? fallbackSetting.setting_id;
+      const nextSelectedSettingID = resolveUpdateSelectedSettingID(
+        settingsForState,
+        fallbackSetting.setting_id,
+        preferredSettingID,
+      );
       setSettings(settingsForState);
       setSelectedSettingID(nextSelectedSettingID);
       if (nextSelectedSettingID === fallbackSetting.setting_id) clearUpdatesSelectedViewID(companyID, currentUserID);
       else storeUpdatesSelectedViewID(companyID, currentUserID, nextSelectedSettingID);
     }).catch((nextError) => {
       if (cancelled) return;
-      setSettings([fallbackSetting]);
-      setSelectedSettingID(fallbackSetting.setting_id);
       setSettingsError(savedViewErrorMessage(nextError, "Failed to load saved views"));
     });
     return () => { cancelled = true; };
   }, [apiBase, companyID, currentUserID, fallbackSetting, savedViewsReloadToken]);
-
-  useEffect(() => {
-    if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
-    const nextSettingID = settings[0]?.setting_id ?? "";
-    setSelectedSettingID(nextSettingID);
-    if (nextSettingID === fallbackSetting.setting_id) clearUpdatesSelectedViewID(companyID, currentUserID);
-    else if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
-  }, [companyID, currentUserID, fallbackSetting.setting_id, selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
 
@@ -2026,9 +2018,9 @@ function storeUpdatesNodePanelMainRatio(companyID: string, userID: string, ratio
 function updatesSelectedViewStorageKey(companyID: string, userID: string): string {
 
   const cleanCompanyID = companyID.trim();
-  const cleanUserID = userID.trim();
-  return cleanCompanyID && cleanUserID
-    ? `${UPDATES_SELECTED_VIEW_STORAGE_KEY}:${cleanCompanyID}:${cleanUserID}`
+  const storageUserID = userID.trim() || "local";
+  return cleanCompanyID
+    ? `${UPDATES_SELECTED_VIEW_STORAGE_KEY}:${cleanCompanyID}:${storageUserID}`
     : UPDATES_SELECTED_VIEW_STORAGE_KEY;
 }
 
