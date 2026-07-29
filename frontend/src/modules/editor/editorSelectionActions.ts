@@ -13,6 +13,8 @@ export function calculateEditorSelectionActionPosition(options: {
   containerTop?: number;
   offsetX?: number;
   rightInset?: number;
+  scrollLeft?: number;
+  scrollTop?: number;
 }): { left: number; top: number } {
   const containerLeft = options.containerLeft ?? 0;
   const containerTop = options.containerTop ?? 0;
@@ -24,7 +26,7 @@ export function calculateEditorSelectionActionPosition(options: {
   const minLeft = 8 + Math.max(0, options.offsetX ?? 0);
   const maxLeft = Math.max(minLeft, options.boundaryWidth - 36 - (options.rightInset ?? 0));
   return {
-    left: Math.max(minLeft, Math.min(Math.round(preferredLeft), maxLeft)),
-    top: Math.max(6, Math.round(options.rect.top - containerTop + ((options.rect.height - 28) / 2))),
+    left: Math.max(minLeft, Math.min(Math.round(preferredLeft), maxLeft)) + (options.scrollLeft ?? 0),
+    top: Math.max(6, Math.round(options.rect.top - containerTop + ((options.rect.height - 28) / 2))) + (options.scrollTop ?? 0),
   };
 }

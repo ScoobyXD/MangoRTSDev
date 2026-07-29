@@ -185,6 +185,7 @@
     "../../../frontend/src/modules/editor/editorMentions.ts",
     "../modules/editor/editorMentions.test.ts",
     "../modules/editor/editorEntityLinks.test.ts",
+    "../modules/editor/emailThreadDownloadStatus.test.ts",
     "../modules/editor/editorSuggestionMenuPosition.test.ts",
     "../../../frontend/src/modules/editor/chatEntityLinks.ts",
     "../modules/editor/chatEntityLinks.test.ts",

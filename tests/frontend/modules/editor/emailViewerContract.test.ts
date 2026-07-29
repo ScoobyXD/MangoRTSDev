@@ -115,7 +115,8 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const chatPaneHeight = TEXT_BLOCK_MIN_HEIGHT/);
   assert.match(nodeSurface, /fixedHeight=\{chatPaneHeight\}/);
   assert.doesNotMatch(nodeSurface, /fixedHeight=\{communicationPaneHeight\}/);
-  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "min\(820px, calc\(100vh - 250px\)\)"/);
+  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
+  assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
   assert.match(nodeParts, /fillHeight\?: boolean/);
   assert.match(indexCSS, /@keyframes mango-pane-enter/);
   assert.match(indexCSS, /prefers-reduced-motion: reduce/);

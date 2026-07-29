@@ -282,7 +282,8 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
   assert.match(nodeSurface, /tabbed=\{false\}/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
-  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "min\(820px, calc\(100vh - 250px\)\)"/);
+  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
+  assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
   assert.match(nodeParts, /className="editor-document-scroll mango-pane-enter"/);
   assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,180}className="mango-pane-layout-transition"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);

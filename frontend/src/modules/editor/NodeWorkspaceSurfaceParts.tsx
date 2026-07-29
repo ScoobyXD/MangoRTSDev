@@ -45,6 +45,7 @@ import {
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { resolveEditorEmailMailboxScope } from "./editorEmailMailboxScope.js";
+import { resolveEmailThreadDownloadStatus, type EmailThreadDownloadStatus } from "./emailThreadDownloadStatus.js";
 import {
   applyEmailSignatureOnceForSession,
   beginEmailSignatureApplicationSession,
@@ -1321,22 +1322,18 @@ const LegacyNodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
     const selectionRect = range.getBoundingClientRect();
     const wrapperRect = wrapper.getBoundingClientRect();
-    const anchorOffset = getSelectionPointDocumentOffset(editor, selection.anchorNode, selection.anchorOffset);
-    const focusOffset = getSelectionPointDocumentOffset(editor, selection.focusNode, selection.focusOffset);
-    const isForwardSelection = anchorOffset === null || focusOffset === null || anchorOffset <= focusOffset;
     const firstRect = rangeRects[0] ?? selectionRect;
-    const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
-    const iconRect = isForwardSelection ? lastRect : firstRect;
+    const iconRect = firstRect;
     const actionPosition = calculateEditorSelectionActionPosition({
       rect: iconRect,
-      isForwardSelection,
+      isForwardSelection: true,
       boundaryWidth: wrapperRect.width,
       containerLeft: wrapperRect.left,
       containerTop: wrapperRect.top,
       rightInset: 36,
     });
     const x = actionPosition.left;
-    const y = Math.min(actionPosition.top, wrapperRect.height - 34);
+    const y = actionPosition.top;
     return {
       blockID,
       quote: selectedText,
@@ -2059,7 +2056,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [entitySearchError, setEntitySearchError] = useState("");
   const mentionOptions = useMemo(() => {
     if (!activeMentionDraft) return [];
-    return buildMentionOptions(companyUsers, activeMentionDraft.query, 8);
+    return buildMentionOptions(companyUsers, activeMentionDraft.query, 20);
   }, [activeMentionDraft, companyUsers]);
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
   const entityMenuOpen = editable && activeEntityDraft !== null && Boolean(entityRequestJSON && companyID) && (entitySearchPending || Boolean(entitySearchError) || entityOptions.length > 0);
@@ -2518,14 +2515,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   bottom: "calc(100% + 6px)",
                   zIndex: 21,
                   display: "grid",
-                  gap: 2,
+                  gap: 3,
                   maxHeight: 236,
                   overflowY: "auto",
                   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                   borderRadius: 12,
                   background: EDITOR_NEU_PANEL_BACKGROUND,
                   boxShadow: EDITOR_NEU_PANEL_SHADOW,
-                  padding: 4,
+                  padding: 6,
                 }}
               >
                 {entitySearchPending && <div role="status" style={{ padding: "8px 10px", color: "rgba(71,85,105,.84)", fontSize: 11, fontWeight: 750 }}>Searching workspace…</div>}
@@ -2545,9 +2542,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       }}
                       style={{
                         width: "100%",
-                        minHeight: 36,
+                        height: 42,
                         display: "grid",
-                        gridTemplateColumns: "18px minmax(0, 1fr) auto",
+                        gridTemplateColumns: "24px minmax(0, 1fr) auto",
                         alignItems: "center",
                         gap: 8,
                         border: "1px solid transparent",
@@ -2555,7 +2552,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent",
                         color: surfaceText,
                         cursor: "pointer",
-                        padding: "6px 8px",
+                        padding: "4px 7px",
                         textAlign: "left",
                         font: "inherit",
                         boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(14,165,233,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
@@ -2580,14 +2577,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   bottom: "calc(100% + 6px)",
                   zIndex: 20,
                   display: "grid",
-                  gap: 2,
-                  maxHeight: 206,
+                  gap: 3,
+                  maxHeight: 191,
                   overflowY: "auto",
                   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                   borderRadius: 12,
                   background: EDITOR_NEU_PANEL_BACKGROUND,
                   boxShadow: EDITOR_NEU_PANEL_SHADOW,
-                  padding: 4,
+                  padding: 6,
                 }}
               >
                 {mentionOptions.map((user, index) => {
@@ -2609,7 +2606,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       }}
                       style={{
                         width: "100%",
-                        minHeight: 34,
+                        height: 42,
                         display: "grid",
                         gridTemplateColumns: "24px minmax(0, 1fr)",
                         alignItems: "center",
@@ -2619,7 +2616,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent",
                         color: surfaceText,
                         cursor: "pointer",
-                        padding: "5px 8px",
+                        padding: "4px 7px",
                         textAlign: "left",
                         font: "inherit",
                         boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
@@ -4441,6 +4438,7 @@ type AttachedEmailOrganizerPaneProps = {
   attachmentEditorSurface?: string;
   storageKey: string;
   tabbed?: boolean;
+  expandContent?: boolean;
   editable: boolean;
   accent: string;
   surfaceText: string;
@@ -4589,7 +4587,6 @@ function createAttachedEmailFolderID(): string {
   return `folder:${Date.now()}:${Math.round(Math.random() * 1_000_000)}`;
 }
 
-type EmailThreadDownloadStatus = "partial" | "downloading" | "complete" | "failed";
 type AttachedEmailThreadPreview = {
   messages: EmailMessage[];
   downloadStatus: EmailThreadDownloadStatus;
@@ -4603,7 +4600,7 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
       ?? durableThread.messages[0] ?? null;
     return { messages: primary
       ? mergeEmailThreadMessages(primary, durableThread.messages, primary.local_replies ?? [])
-      : [], downloadStatus: durableThread.download_status ?? (durableThread.history_complete ? "complete" : "partial") };
+      : [], downloadStatus: resolveEmailThreadDownloadStatus(durableThread.download_status, durableThread.history_complete, durableThread.thread_id) };
   }
   const mailboxScope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
   const collaborationID = email.collaborationID?.trim() ?? "";
@@ -4614,7 +4611,7 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
       ?? null;
     return { messages: primary
       ? mergeEmailThreadMessages(primary, collaborationThread.messages, primary.local_replies ?? [])
-      : [], downloadStatus: collaborationThread.download_status ?? (collaborationThread.history_complete ? "complete" : "partial") };
+      : [], downloadStatus: resolveEmailThreadDownloadStatus(collaborationThread.download_status, collaborationThread.history_complete, collaborationThread.thread_id) };
   }
   const primary = await getEmailMessage(email.messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
   const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
@@ -4779,10 +4776,17 @@ const AttachedEmailThreadCard: React.FC<{
         style={{
           minWidth: 0,
           overflow: "hidden",
-          border: selected ? "1px solid transparent" : `1px solid ${strokeColor}`,
-          borderLeft: rootMessageAccent ? `3px solid ${rootMessageAccent}` : undefined,
+          borderStyle: "solid",
+          borderTopWidth: 1,
+          borderRightWidth: 1,
+          borderBottomWidth: 1,
+          borderLeftWidth: rootMessageAccent ? 3 : 1,
+          borderTopColor: selected ? "transparent" : strokeColor,
+          borderRightColor: selected ? "transparent" : strokeColor,
+          borderBottomColor: selected ? "transparent" : strokeColor,
+          borderLeftColor: rootMessageAccent || (selected ? "transparent" : strokeColor),
           borderRadius: 10,
-          background: rootMessageAccent ? `linear-gradient(135deg, ${rootMessageAccent}26, rgba(255,255,255,0.94))` : selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
+          background: "#ffffff",
           color: surfaceText,
           boxShadow: selected ? "0 9px 22px rgba(15,23,42,0.12), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 8px rgba(174,174,192,0.15), -2px -2px 8px rgba(255,255,255,0.76), inset 1px 1px 0 rgba(255,255,255,0.86)",
         }}
@@ -4816,6 +4820,7 @@ const AttachedEmailThreadCard: React.FC<{
             cursor: selected ? "pointer" : draggable ? "grab" : "pointer",
             userSelect: "none",
             padding: selected ? "9px 10px 6px" : "9px 10px",
+            background: rootMessageAccent ? `linear-gradient(90deg, ${rootMessageAccent}30, ${rootMessageAccent}0c 58%, rgba(255,255,255,0.96))` : undefined,
           }}
         >
           <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
@@ -4886,8 +4891,8 @@ const AttachedEmailThreadCard: React.FC<{
               minWidth: 0,
               display: replyComposerOpen ? "grid" : "block",
               gridTemplateRows: replyComposerOpen ? "minmax(0, 1fr)" : undefined,
-              height: replyComposerOpen ? "clamp(420px, calc(100vh - 300px), 760px)" : "min(820px, calc(100vh - 250px))",
-              minHeight: replyComposerOpen ? undefined : 420,
+              height: replyComposerOpen ? "clamp(420px, calc(100vh - 300px), 760px)" : "auto",
+              minHeight: replyComposerOpen ? undefined : 0,
               maxHeight: undefined,
               overflow: replyComposerOpen ? "hidden" : "visible",
               padding: replyComposerOpen ? "0 10px" : "0 10px 10px",
@@ -5151,7 +5156,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   }, [companyID, emails, messageID, nodeID, resolveRequestID]);
 
   return (
-    <div data-node-linked-email-preview="true" className="editor-document-scroll" style={{ minWidth: 0, minHeight: 0, overflow: "auto", padding: 8, background: "rgba(248,250,252,0.82)", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+    <div data-node-linked-email-preview="true" className="editor-document-scroll" style={{ minWidth: 0, minHeight: 0, overflow: "visible", padding: 8, background: "#ffffff", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
       {resolving && (
         <div role="status" style={{ minHeight: 72, display: "grid", placeItems: "center", color: accent, fontSize: 11, fontWeight: 850 }}>
           Loading linked email
@@ -5202,7 +5207,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
     </div>
   );
 };
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, expandContent = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -5706,7 +5711,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     );
   }
   return (
-    <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", color: surfaceText, overflow: "hidden" }}>
+    <div style={{ height: expandContent ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: expandContent ? "auto auto" : "auto minmax(0, 1fr)", color: surfaceText, overflow: expandContent ? "visible" : "hidden" }}>
       <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 900, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
         <MailIcon color={accent} />
         <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Email</span>
@@ -5817,7 +5822,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           </button>
         </div>
       )}
-      <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "grid", alignContent: "start", gap: 10, padding: 9, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+      <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: expandContent ? "visible" : "auto", overflowX: "hidden", display: "grid", alignContent: "start", gap: 10, padding: 9, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
         {uniqueEmails.length === 0 ? (
           <div style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: 14, color: surfaceText }}>
             <div style={{ display: "grid", justifyItems: "center", gap: 9, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: EDITOR_NEU_SURFACE, padding: 14, boxShadow: EDITOR_NEU_SHADOW }}>
@@ -6074,7 +6079,7 @@ const EmailBodyFrame: React.FC<{
     applyEmailBodyHighlights(frameDocument, highlights, activeSelection);
     const resize = () => {
       const measured = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
-      setHeight(Math.min(1600, Math.max(compact ? 64 : 190, measured + 4)));
+      setHeight(Math.max(compact ? 64 : 190, measured + 4));
     };
     const imageCleanups: Array<() => void> = [];
     Array.from(frameDocument.images).forEach((image, index) => {
@@ -6799,9 +6804,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       if (cancelled) return;
       setMessage(payload);
       const storedDownload = storedThread ?? collaborationThread;
-      setStoredThreadDownloadStatus(
-        storedDownload?.download_status ?? (storedDownload && !storedDownload.history_complete ? "partial" : "complete"),
-      );
+      setStoredThreadDownloadStatus(resolveEmailThreadDownloadStatus(
+        storedDownload?.download_status,
+        storedDownload?.history_complete ?? true,
+        storedDownload?.thread_id,
+      ));
       setThreadMessages(singleMessageOnly ? [payload] : immediateMessages.length ? immediateMessages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
@@ -6889,9 +6896,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           setMessage(refreshedMessage);
           setThreadMessages(refreshedMessages.length ? refreshedMessages : [refreshedMessage]);
         }
-        setStoredThreadDownloadStatus(
-          refreshed.download_status ?? (refreshed.history_complete ? "complete" : "partial"),
-        );
+        setStoredThreadDownloadStatus(resolveEmailThreadDownloadStatus(
+          refreshed.download_status,
+          refreshed.history_complete,
+          refreshed.thread_id,
+        ));
       })()
         .catch(() => undefined)
         .finally(() => {
@@ -7365,7 +7374,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   return (
     <>
-      <div ref={conversationRootRef} style={{ position: "relative", height: "100%", minHeight: 0, display: "grid", gridTemplateRows: conversationGridRows, gap: inlineExpansion ? 0 : 8, padding: inlineExpansion ? (replyDockVisible ? 0 : "0 0 8px") : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+      <div ref={conversationRootRef} style={{ position: "relative", height: inlineExpansion && !replyDockVisible ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: conversationGridRows, gap: inlineExpansion ? 0 : 8, padding: inlineExpansion ? (replyDockVisible ? 0 : "0 0 8px") : 9, color: surfaceText, overflow: inlineExpansion && !replyDockVisible ? "visible" : "hidden", boxSizing: "border-box" }}>
         {showConversationHeader && (
           <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
             {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
@@ -7389,8 +7398,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               border: inlineExpansion ? 0 : `1px solid ${strokeColor}`,
               borderRadius: inlineExpansion ? 0 : 8,
               background: "#ffffff",
-              overflow: "auto",
-              maxHeight: inlineExpansion && !replyDockVisible ? "min(520px, 52vh)" : undefined,
+              overflow: inlineExpansion && !replyDockVisible ? "visible" : "auto",
+              maxHeight: undefined,
               color: "#111827",
               padding: inlineExpansion ? "0 10px" : "0 14px",
               boxShadow: inlineExpansion ? "none" : "inset 1px 1px 0 rgba(255,255,255,0.86)",
@@ -7441,10 +7450,17 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       display: "grid",
                       gap: inlineExpansion ? 5 : 7,
                       padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "9px 10px 10px" : "13px 12px 15px",
-                      border: `1px solid ${isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER}`,
-                      borderLeft: `3px solid ${threadMessageAccent || (threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)")}`,
+                      borderStyle: "solid",
+                      borderTopWidth: 1,
+                      borderRightWidth: 1,
+                      borderBottomWidth: 1,
+                      borderLeftWidth: 3,
+                      borderTopColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
+                      borderRightColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
+                      borderBottomColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
+                      borderLeftColor: threadMessageAccent || (threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)"),
                       borderRadius: 12,
-                      background: threadMessageAccent ? `linear-gradient(135deg, ${threadMessageAccent}26, rgba(255,255,255,0.94))` : isExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                      background: "#ffffff",
                       boxShadow: isReplyTarget && !hideInlineMessageChrome
                         ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)"
                         : isExpanded ? EDITOR_NEU_SHADOW : "4px 4px 11px rgba(174,174,192,0.2), -4px -4px 11px rgba(255,255,255,0.82)",
@@ -7452,7 +7468,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     }}
                   >
                   {hideInlineMessageChrome && (
-                    <div data-linked-email-message-metadata="true" role="group" aria-label="Linked email message details" style={{ display: "grid", gap: 3, color: "rgba(71,85,105,0.9)", fontSize: 10.5, fontWeight: 700 }}>
+                    <div data-linked-email-message-metadata="true" role="group" aria-label="Linked email message details" style={{ display: "grid", gap: 3, color: "rgba(71,85,105,0.9)", fontSize: 10.5, fontWeight: 700, padding: "7px 8px", borderRadius: 8, background: `linear-gradient(90deg, ${threadMessageAccent || accent}28, ${threadMessageAccent || accent}0b 58%, rgba(255,255,255,0.96))` }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12 }}>{threadMessage.subject || "(no subject)"}</strong>
                         <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)" }}>{formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}</span>
@@ -7464,7 +7480,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     </div>
                   )}
                   {!hideInlineMessageChrome && (
-                    <>
+                    <div data-email-message-header="true" style={{ display: "grid", gap: 5, padding: "7px 8px", borderRadius: 8, background: `linear-gradient(90deg, ${threadMessageAccent || accent}28, ${threadMessageAccent || accent}0b 58%, rgba(255,255,255,0.96))` }}>
                       <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${onMessageTextBoxRequest ? " auto" : ""} auto auto`, alignItems: "start", gap: 8 }}>
                         <button
                           type="button"
@@ -7566,7 +7582,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                           {collapsedSnippet}
                         </div>
                       ) : null}
-                    </>
+                    </div>
                   )}
                   {isExpanded && (useRichThreadBody ? (
                     <EmailBodyFrame

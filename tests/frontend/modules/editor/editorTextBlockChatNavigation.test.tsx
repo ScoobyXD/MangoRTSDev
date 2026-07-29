@@ -688,8 +688,8 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     assert.ok(entityMenu, "# opens the shared workspace entity picker in chat");
     assert.deepEqual(
       Array.from(entityMenu.querySelectorAll<HTMLElement>("[data-mango-chat-entity-type]")).map((option) => option.dataset.mangoChatEntityType),
-      ["node", "project", "logic_gate"],
-      "chat exposes Nodes, Projects, and Logic Gates returned by the permission-filtered editor search",
+      ["node", "logic_gate", "project"],
+      "chat exposes Nodes, Logic Gates, and Projects in product order",
     );
     const arrowDown = new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
     await act(async () => entityComposer.dispatchEvent(arrowDown));
@@ -697,8 +697,8 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await act(async () => entityComposer.dispatchEvent(acceptEntity));
     await flushFrames();
     assert.equal(acceptEntity.defaultPrevented, true);
-    assert.equal(entityComposer.value, "#Project One ");
-    assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 12, entityType: "project", entityID: "project-1", label: "Project One" }]);
+    assert.equal(entityComposer.value, "#Gate One ");
+    assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 9, entityType: "logic_gate", entityID: "gate-1", label: "Gate One" }]);
 
     const linkedMessage = message({ id: "linked-entity", message: "See #Project One", entityLinks: [{ start: 4, end: 16, entityType: "project", entityID: "project-1", label: "Project One" }] });
     await act(async () => root.render(<ChatPane {...chatProps} messages={[linkedMessage]} draft="" messageFocusRequest={null} />));

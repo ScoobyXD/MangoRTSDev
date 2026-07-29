@@ -70,6 +70,16 @@ test("highlighted-text actions keep the square-plus button immediately right of 
   });
   assert.equal(reverseEdgeCreateNode.left - reverseEdgeChat.left, 36);
 
+  const scrolledChat = calculateEditorSelectionActionPosition({
+    rect,
+    isForwardSelection: true,
+    boundaryWidth: 500,
+    rightInset: 36,
+    scrollLeft: 10,
+    scrollTop: 300,
+  });
+  assert.deepEqual(scrolledChat, { left: 138, top: 336 });
+
   const iconSource = readFileSync("frontend/src/modules/editor/EditorSelectionNodeIcon.tsx", "utf8");
   assert.match(iconSource, /<rect x="5" y="5" width="14" height="14"/);
   assert.match(iconSource, /<path d="M9 12h6M12 9v6"/);
@@ -87,7 +97,7 @@ test("# entity drafts respect text boundaries and allow a searchable phrase", ()
   assert.equal(readActiveEntityLinkDraft("#road,", 6), null);
 });
 
-test("entity search requests scoped Nodes, Logic Gates, and Projects and keeps ranked API order", async () => {
+test("entity search groups Nodes, Logic Gates, and Projects in product order", async () => {
   let requestedPath = "";
   const results = await searchEditorEntityLinks({
     companyID: "company-1",
@@ -111,7 +121,7 @@ test("entity search requests scoped Nodes, Logic Gates, and Projects and keeps r
   assert.equal(url.searchParams.get("q"), "road");
   assert.equal(url.searchParams.get("resource_types"), "node,logic_gate,project");
   assert.equal(url.searchParams.get("ranking"), "editor_entities");
-  assert.deepEqual(results.map((entity) => entity.entityType), ["project", "node", "logic_gate"]);
+  assert.deepEqual(results.map((entity) => entity.entityType), ["node", "logic_gate", "project"]);
 });
 
 test("selection Node creation normalizes the exact title and returns a durable entity", async () => {
@@ -326,6 +336,8 @@ test("# entity menu selects its top result with Tab and the entity participates 
     assert.deepEqual(queries, [""]);
     const entityMenu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-entity-menu="true"]');
     assert.equal(entityMenu?.dataset.side, "bottom");
+    assert.equal(entityMenu?.dataset.visibleRows, "5");
+    assert.equal(entityMenu?.style.maxHeight, "236px");
     assert.equal(entityMenu?.classList.contains("mango-tiptap-suggestion-menu--entity"), true);
     assert.equal(entityMenu?.querySelector('[role="option"]')?.classList.contains("mango-tiptap-suggestion-option--entity"), true);
     assert.ok(entityMenu?.querySelector(".mango-tiptap-suggestion-product-icon"));
@@ -400,6 +412,8 @@ test("@ mention menu reads people loaded after editor creation and inserts an at
     const menu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-mention-menu="true"]');
     const option = menu?.querySelector<HTMLElement>('[role="option"]');
     assert.equal(menu?.dataset.side, "bottom");
+    assert.equal(menu?.dataset.visibleRows, "4");
+    assert.equal(menu?.style.maxHeight, "191px");
     assert.equal(menu?.classList.contains("mango-tiptap-suggestion-menu"), true);
     assert.equal(option?.classList.contains("mango-tiptap-suggestion-option--person"), true);
     assert.equal(option?.querySelector(".mango-tiptap-suggestion-label")?.textContent, "Christina Phan");

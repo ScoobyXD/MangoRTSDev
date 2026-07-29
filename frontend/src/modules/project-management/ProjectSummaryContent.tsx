@@ -555,6 +555,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setAssignmentTeamIDs(projectTeamIDs(view.project));
       setCurrentUserID(current?.user.user_id.trim() ?? "");
       const nextBlocks = blockDraftsFromProjections(view.projections ?? []);
+      const nextChatMessages = parseEditorTextBlockChats(view.projections ?? []);
+      const nextAttachedEmails = parseEditorAttachedEmails(view.projections ?? []);
+      const chatBlockIDs = new Set(nextChatMessages.map((message) => message.blockID));
+      const emailBlockIDs = new Set(nextAttachedEmails.map((email) => email.blockID?.trim() ?? "").filter(Boolean));
       if (
         !contentSaveWasPendingAtStart
         && projectTextBlockContentRevisionRef.current === contentRevisionAtStart
@@ -573,16 +577,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         if (paneProjectIDRef.current !== cleanProjectID) {
           paneProjectIDRef.current = cleanProjectID;
           setOpenEditorBlockIDs(new Set(nextBlockIDs));
-          setOpenEmailBlockIDs(new Set(nextBlockIDs));
-          setOpenChatBlockIDs(new Set(nextBlockIDs));
+          setOpenEmailBlockIDs(new Set(Array.from(emailBlockIDs).filter((id) => nextBlockIDs.has(id))));
+          setOpenChatBlockIDs(new Set(Array.from(chatBlockIDs).filter((id) => nextBlockIDs.has(id))));
         } else {
           setOpenEditorBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
           setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
           setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
         }
       }
-      setChatMessages(parseEditorTextBlockChats(view.projections ?? []));
-      setAttachedEmails(parseEditorAttachedEmails(view.projections ?? []));
+      setChatMessages(nextChatMessages);
+      setAttachedEmails(nextAttachedEmails);
     } catch (loadError) {
       if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setError(loadError instanceof Error ? loadError.message : "Failed to load project");
@@ -972,8 +976,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setError("");
     setBlocks((current) => [nextBlock, ...current]);
     setOpenEditorBlockIDs((current) => new Set(current).add(id));
-    setOpenEmailBlockIDs((current) => new Set(current).add(id));
-    setOpenChatBlockIDs((current) => new Set(current).add(id));
     projectTextBlockSaveController.startLatestContentSave(id);
   }, [editorDataFormat.gate, projectTextBlockSaveController]);
 

@@ -230,13 +230,19 @@ When editing this module, prefer comments that summarize intent and feature resp
 `NodeWorkspaceSurface` owns the Node-specific three-column composition. `AttachedEmailOrganizerPane` owns the one left email column, while each text-box row owns one Editor surface and one optional Chat surface.
 
 - The Node email column is independent of every text box. Its organizer header is the only column header. The no-folder path renders email thread cards directly and does not synthesize an `Attached emails` group.
-- The email column uses at least `TEXT_BLOCK_ROW_HEIGHT` while the root `ResizeObserver` settles. After measurement it uses the larger remaining-viewport value, preventing the column from stopping above the bottom of the visible Node workspace.
+- The email column uses at least `TEXT_BLOCK_ROW_HEIGHT` while the root `ResizeObserver` settles, then keeps the larger remaining-viewport minimum while allowing a selected message to grow to its complete natural height. Email bodies stay white; only organizer, thread, message, and linked-preview headers receive the email accent. The selected body and its containing column do not add a nested height cap or scrollbar.
 - A text-box row has exactly one horizontal chrome row. That chrome contains the optional linked-email action, the Editor label/toggle and text-box actions, then the Chat label/toggle. Node passes `hideHeader` to `ChatPane`; email collaboration and Project surfaces retain their existing ChatPane headers unless they explicitly opt out.
-- A new box is editor-only. `defaultOpenTextBlockChatIDs` opens chat only when projections already contain direct chat for that box or compatible legacy email-origin chat for its stable host. Manual open/closed layout state continues to override that default.
+- A new box is editor-only. `defaultOpenTextBlockChatIDs` opens chat only when projections already contain direct chat for that box or compatible legacy email-origin chat for its stable host. Empty Node and Project boxes do not restore persisted Chat or Email panes; panes open initially only when their box contains matching data. Manual open/closed layout state continues to override that data-aware default.
 - `resolveLegacyEmailChatHostBlockID` must not use render position. It prefers the persisted message association, then a declared block ID, then the oldest box. This prevents prepending a new box from moving old chat.
 - `TextBlockActionsMenu` is viewport-fixed. Keeping it inside the React ownership tree preserves outside-click/Escape handling, while fixed positioning escapes the row's deliberate overflow clipping.
-- `LinkedEmailPreviewPane` reuses `AttachedEmailThreadCard` and `EmailConversationPane`. It fetches and renders the email from its durable mailbox/thread reference; it does not copy provider HTML, attachments, or credentials into `Text box` information.
-- Expanding a linked email divides the existing fixed row between the email card and the remaining Editor/Chat body. It does not change virtualization row height, create a nested permanent column, or persist expansion state.
+- `LinkedEmailPreviewPane` reuses `AttachedEmailThreadCard` and `EmailConversationPane`. It fetches and renders the email from its durable mailbox/thread reference; it does not copy provider HTML, attachments, or credentials into `Text box` information. A message without a provider thread identifier is treated as a complete one-off message, so it does not show the incomplete-thread retry warning.
+- Expanding a linked email lets the exact message grow to its natural height above the normal Editor body while Chat remains an independent fixed-height right column. Dynamic linked-email expansion temporarily pins the rows instead of applying fixed-row spacers that could clip the message; collapsing returns to the bounded virtualized layout. Expansion never creates a permanent nested column or persists state.
+
+## Contextual editor menus and selection actions (2026-07-28)
+
+- The `@` and `!` people menus share compact 42-pixel rows and show four rows before scrolling. The `#` entity menu uses the same row geometry, shows five rows before scrolling, and displays smaller product icons.
+- Entity results are grouped in stable Nodes, Logic Gates, then Projects order while preserving server relevance within each group.
+- Text-selection Chat/Create Node actions are elevated at the highlight's top-right and include the editor's nested scroll offset. Image-selection actions use the same elevated surface immediately outside the image's right edge.
 
 ### Error-surface rule
 

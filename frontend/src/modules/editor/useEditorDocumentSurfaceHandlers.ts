@@ -3042,7 +3042,14 @@ async function loadEditorImagePreviewObjectURL(
 }
 
 const EDITOR_MENTION_MENU_WIDTH_PX = 320;
-const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = 242;
+const EDITOR_SUGGESTION_ROW_HEIGHT_PX = 42;
+const EDITOR_SUGGESTION_ROW_GAP_PX = 3;
+const EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX = 12;
+const EDITOR_SUGGESTION_MENU_BORDER_PX = 2;
+const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = (4 * EDITOR_SUGGESTION_ROW_HEIGHT_PX)
+  + (3 * EDITOR_SUGGESTION_ROW_GAP_PX) + EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX + EDITOR_SUGGESTION_MENU_BORDER_PX;
+const EDITOR_ENTITY_MENU_MAX_HEIGHT_PX = (5 * EDITOR_SUGGESTION_ROW_HEIGHT_PX)
+  + (4 * EDITOR_SUGGESTION_ROW_GAP_PX) + EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX + EDITOR_SUGGESTION_MENU_BORDER_PX;
 const EDITOR_MENTION_MENU_MARGIN_PX = 8;
 const EDITOR_TABLE_CONTEXT_MENU_WIDTH_PX = 230;
 const EDITOR_TABLE_CONTEXT_MENU_MAX_HEIGHT_PX = 330;
@@ -3122,7 +3129,7 @@ function readRichTextEntityDraft(root: HTMLElement, position: "fixed" | "absolut
   const top = position === "absolute" && containerRect ? rect.bottom - containerRect.top + 6 : rect.bottom + 6;
   const minLeft = position === "absolute" ? EDITOR_MENTION_MENU_MARGIN_PX : Math.max(EDITOR_MENTION_MENU_MARGIN_PX, rootRect.left);
   const maxLeft = Math.max(minLeft, (position === "absolute" && containerRect ? containerRect.width : viewportWidth) - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX);
-  const maxTop = (position === "absolute" && containerRect ? containerRect.height : viewportHeight) - EDITOR_MENTION_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  const maxTop = (position === "absolute" && containerRect ? containerRect.height : viewportHeight) - EDITOR_ENTITY_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX;
   return { ...draft, left: Math.max(minLeft, Math.min(left, maxLeft)), top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(top, maxTop)), position };
 }
 
@@ -3135,21 +3142,17 @@ function readRichTextSelectionNodeDraft(
   if (!range || range.collapsed) return null;
   const quote = range.toString();
   if (!quote.replace(/\s+/g, " ").trim()) return null;
-  const selection = root.ownerDocument.getSelection();
-  const isForwardSelection = !selection
-    || (selection.anchorNode === range.startContainer && selection.anchorOffset === range.startOffset);
   const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
   const selectionRect = range.getBoundingClientRect();
   const firstRect = rangeRects[0] ?? selectionRect;
-  const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
-  const actionRect = isForwardSelection ? lastRect : firstRect;
+  const actionRect = firstRect;
   const container = position === "absolute" ? root.parentElement : null;
   const containerRect = container?.getBoundingClientRect() ?? null;
   const view = root.ownerDocument.defaultView;
   const boundaryWidth = position === "absolute" && containerRect ? containerRect.width : view?.innerWidth ?? 1280;
   const actionPosition = calculateEditorSelectionActionPosition({
     rect: actionRect,
-    isForwardSelection,
+    isForwardSelection: true,
     boundaryWidth,
     containerLeft: position === "absolute" ? containerRect?.left : 0,
     containerTop: position === "absolute" ? containerRect?.top : 0,
@@ -4373,7 +4376,7 @@ export function useEditorDocumentSurfaceHandlers({
   const [activeTableContextMenu, setActiveTableContextMenu] = useState<RichTextTableContextMenu | null>(null);
   const [activeImagePreview, setActiveImagePreview] = useState<EditorImagePreviewDraft | null>(null);
   const mentionOptions = useMemo(() => (
-    activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
+    activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 20) : []
   ), [activeMentionDraft?.query, mentionUsers]);
   const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
   const resolvedEntityLinkContext = entityLinkContext ?? (editorImageAttachmentContext ? {
@@ -4723,8 +4726,8 @@ export function useEditorDocumentSurfaceHandlers({
         maxHeight: EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
         overflowY: "auto",
         display: "grid",
-        gap: 2,
-        padding: 4,
+        gap: EDITOR_SUGGESTION_ROW_GAP_PX,
+        padding: EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX / 2,
         border: `1px solid ${mentionStrokeColor}`,
         borderRadius: 8,
         background: "#ffffff",
@@ -4755,7 +4758,7 @@ export function useEditorDocumentSurfaceHandlers({
             },
             style: {
               width: "100%",
-              minHeight: 34,
+              height: EDITOR_SUGGESTION_ROW_HEIGHT_PX,
               display: "grid",
               gridTemplateColumns: "24px minmax(0, 1fr)",
               alignItems: "center",
@@ -4825,11 +4828,11 @@ export function useEditorDocumentSurfaceHandlers({
           zIndex: 2001,
           width: EDITOR_MENTION_MENU_WIDTH_PX,
           maxWidth: "calc(100vw - 16px)",
-          maxHeight: EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
+          maxHeight: EDITOR_ENTITY_MENU_MAX_HEIGHT_PX,
           overflowY: "auto",
           display: "grid",
-          gap: 2,
-          padding: 4,
+          gap: EDITOR_SUGGESTION_ROW_GAP_PX,
+          padding: EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX / 2,
           border: `1px solid ${mentionStrokeColor}`,
           borderRadius: 8,
           background: "#ffffff",
@@ -4857,8 +4860,8 @@ export function useEditorDocumentSurfaceHandlers({
                   if (root && activeEntityDraft) insertEntity(root, activeEntityDraft, entity);
                 },
                 style: {
-                  width: "100%", minHeight: 36, display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto",
-                  gap: 7, alignItems: "center", border: 0, borderRadius: 6, padding: "6px 8px", textAlign: "left",
+                  width: "100%", height: EDITOR_SUGGESTION_ROW_HEIGHT_PX, display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto",
+                  gap: 7, alignItems: "center", border: 0, borderRadius: 7, padding: "4px 7px", textAlign: "left",
                   background: index === activeEntityIndex ? "#e0f2fe" : "transparent", color: mentionSurfaceText, cursor: "pointer",
                 } satisfies React.CSSProperties,
               },

@@ -182,8 +182,8 @@ function assertPaneToggles(row: HTMLElement, expected: readonly [boolean, boolea
   assert.deepEqual(toggles.map((button) => button.getAttribute("aria-pressed")), expected.map(String));
 }
 
-function assertThreeOpenToggles(row: HTMLElement) {
-  assertPaneToggles(row, [true, true, true]);
+function assertOnlyEditorOpen(row: HTMLElement) {
+  assertPaneToggles(row, [false, true, false]);
 }
 
 
@@ -722,7 +722,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(chatToggle);
     assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text");
     assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-chat");
-    assert.ok(Number.parseFloat(emailColumn.style.height) >= 240, "the email column should fill the remaining Node viewport instead of using the old short height cap");
+    assert.equal(emailColumn.style.height, "auto", "the email column should grow with the complete message instead of becoming a nested scroller");
+    assert.ok(Number.parseFloat(emailColumn.style.minHeight) >= 240, "the email column should still fill the remaining Node viewport");
     assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-0"]'));
     assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
     assert.equal(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"] [data-chat-pane-header="true"]'), null, "embedded Node chat should use the shared row header instead of rendering a second header");
@@ -731,7 +732,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(emailNodeRow.querySelector('[data-node-pane-header="editor"]')?.textContent?.includes("Editor"), true);
     assert.equal(emailNodeRow.querySelector('[data-node-pane-header="chat"]')?.textContent?.includes("Chat"), true);
     assert.doesNotMatch(emailColumn.textContent ?? "", /Attached emails/, "the email column should not repeat a redundant second header");
-    assert.ok(Number.parseFloat(emailColumn.style.height) >= 700, "the email column should cover at least the full fixed row while viewport sizing settles");
+    assert.ok(Number.parseFloat(emailColumn.style.minHeight) >= 700, "the email column should cover at least the full fixed row while viewport sizing settles");
     assert.equal(emailFocusToggle.getAttribute("aria-expanded"), "false");
     assert.match(emailWorkspace.style.transition, /grid-template-columns 180ms/, "email focus mode should animate the column tracks");
     await act(async () => { emailFocusToggle.click(); });
@@ -780,7 +781,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(textBoxContentColumn?.contains(linkedEmailPreview), "the linked email should stay inside the left content column");
     assert.ok(textBoxPaneLayout);
     assert.ok(fullHeightChat?.parentElement);
-    assert.equal(fullHeightChat.parentElement.style.height, textBoxPaneLayout.style.height, "opening linked email must not shorten the independent chat column");
+    assert.equal(textBoxPaneLayout.style.height, "auto", "the linked-email row should grow to show the complete message");
+    assert.equal(textBoxContentColumn?.style.height, "auto");
+    assert.equal(linkedEmailPreview.style.overflow, "visible");
+    assert.equal(fullHeightChat.parentElement.style.height, "660px", "opening linked email must not shorten the independent chat column");
     await act(async () => { linkedEmailToggle.click(); });
     await flushWork();
     assert.equal(emailNodeRow.querySelector('[data-node-linked-email-preview="true"]'), null);
@@ -888,7 +892,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     for (const rowID of initialProjectRows) {
       const row = projectContainer.querySelector<HTMLElement>(`[data-project-text-box-row="${rowID}"]`);
       assert.ok(row);
-      assertThreeOpenToggles(row);
+      assertOnlyEditorOpen(row);
       assert.ok(row.querySelector(`[data-project-text-block-id="${rowID}"]`), "open Project editor should be mounted");
     }
     const projectList = projectContainer.querySelector<HTMLElement>('[data-mango-bounded-editor-rows="project"]');
