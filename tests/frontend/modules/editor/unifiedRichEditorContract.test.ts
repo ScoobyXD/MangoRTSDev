@@ -881,9 +881,9 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{tab\.id\}/);
   assert.match(editorTabBar, /secondaryActions\.map\(\(action\) =>/);
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{action\.id\}/);
-  assert.match(editorTabBar, /data-mango-editor-header-overflow-action="save-version"/);
+  assert.match(editorTabBar, /data-mango-editor-save-version="true"/);
   assert.match(editorTabBar, /flexWrap: singleLine \? "nowrap" : "wrap"[\s\S]*minWidth: singleLine \? "max-content" : undefined/);
-  assert.match(editorTabBar, /\}\)\}\s*\{hasOverflowActions && \([\s\S]*data-mango-editor-header-overflow="true"[\s\S]*marginLeft: singleLine \? 0 : "auto"/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow="true"[\s\S]*marginLeft: saveState \|\| onSaveCurrentVersion \|\| singleLine \? 0 : "auto"/);
   assert.match(editorTabBar, /const toggleHeaderMenu = \(menu: "outline" \| "highlight" \| "overflow"\)[\s\S]*setOutlineMenuOpen\(menu === "outline" && opening\)[\s\S]*setHighlightMenuOpen\(menu === "highlight" && opening\)[\s\S]*setOverflowMenuOpen\(menu === "overflow" && opening\)/);
   assert.match(editorTabBar, /toggleHeaderMenu\("highlight"\)[\s\S]*toggleHeaderMenu\("outline"\)[\s\S]*toggleHeaderMenu\("overflow"\)/);
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);

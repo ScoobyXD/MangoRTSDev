@@ -37,6 +37,7 @@ import {
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
+  parseEditorTextBlockContent,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
 import { editorHTMLPatchForChange } from "./editorTextboxSync";
@@ -45,6 +46,8 @@ import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
+import type { EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
 import {
@@ -211,10 +214,6 @@ function readEditorSaveIntervalMinutes(companyID: string, resourceType: "node" |
     : EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
 }
 
-function writeEditorSaveIntervalMinutes(companyID: string, resourceType: "node" | "logic_gate", resourceID: string, minutes: number) {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(editorSaveSettingsStorageKey(companyID, resourceType, resourceID), String(minutes));
-}
 
 function formatEditorSaveVersionTimestamp(value: string): string {
   const date = new Date(value);
@@ -232,13 +231,34 @@ function editorSaveVersionKindLabel(kind: string): string {
   return kind === "auto" ? "Auto save" : kind === "manual" ? "Manual save" : "Legacy save";
 }
 
+function editorSaveVersionDocumentText(information: string): string {
+  const document = parseEditorTextBlockContent(information).document || information;
+  try {
+    const envelope = JSON.parse(document) as { document?: unknown };
+    const parts: string[] = [];
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      const node = value as { text?: unknown; content?: unknown };
+      if (typeof node.text === "string") parts.push(node.text);
+      if (Array.isArray(node.content)) {
+        for (const child of node.content) visit(child);
+        if (node.content.length > 0) parts.push("\n");
+      }
+    };
+    visit(envelope.document);
+    return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+  } catch {
+    return document.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+}
+
 function editorSaveVersionPreview(version: EditorSaveVersion | null): string {
   if (!version) return "";
   const items = version.items ?? [];
   if (items.length === 0) return "";
   return items.map((item, index) => {
     const label = items.length > 1 ? `Text box ${index + 1}` : item.type || "Text box";
-    return `${label}\n${item.information}`;
+    return `${label}\n${editorSaveVersionDocumentText(item.information) || "Empty text box"}`;
   }).join("\n\n");
 }
 
@@ -436,7 +456,6 @@ const ProjectRelationshipsSurface: React.FC<{
 const EditorSaveSettingsSurface: React.FC<{
   topPx: number;
   resourceTitle: string;
-  intervalMinutes: number;
   versions: EditorSaveVersion[];
   selectedSaveID: string;
   loading: boolean;
@@ -452,15 +471,14 @@ const EditorSaveSettingsSurface: React.FC<{
   ruleColor: string;
   scrollbarAccent: string;
   scrollbarTrack: string;
-  onIntervalChange: (minutes: number) => void;
   onSaveNow: () => void;
   onSelectSave: (saveID: string) => void;
+  onExitPreview: () => void;
   onToggleSort: () => void;
   onRestore: (saveID: string) => void;
 }> = ({
   topPx,
   resourceTitle,
-  intervalMinutes,
   versions,
   selectedSaveID,
   loading,
@@ -476,9 +494,9 @@ const EditorSaveSettingsSurface: React.FC<{
   ruleColor,
   scrollbarAccent,
   scrollbarTrack,
-  onIntervalChange,
   onSaveNow,
   onSelectSave,
+  onExitPreview,
   onToggleSort,
   onRestore,
 }) => {
@@ -488,98 +506,70 @@ const EditorSaveSettingsSurface: React.FC<{
       return sortAscending ? compared : -compared;
     });
   }, [sortAscending, versions]);
-  const selectedVersion = sortedVersions.find((version) => version.save_id === selectedSaveID) ?? sortedVersions[0] ?? null;
+  const selectedVersion = selectedSaveID
+    ? sortedVersions.find((version) => version.save_id === selectedSaveID) ?? null
+    : null;
   const preview = editorSaveVersionPreview(selectedVersion);
 
   return (
     <div className="mango-editor-hover-highlight" style={{ position: "absolute", top: topPx, left: 12, right: 12, bottom: 12, zIndex: 3, pointerEvents: "auto", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 12, background: panelBackground, color: surfaceText, overflow: "hidden" }}>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: `1px solid ${ruleColor}` }}>
         <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
-          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 950 }}>Save Settings</div>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 950 }}>Saved Versions</div>
           <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 760 }}>{resourceTitle || "Editor"}</div>
         </div>
-        <button
-          type="button"
-          disabled={!canEdit || saving}
-          onClick={onSaveNow}
-          style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: canEdit ? accent : "rgba(100,116,139,0.62)", cursor: canEdit && !saving ? "pointer" : "default", padding: "0 12px", fontSize: 12, fontWeight: 900 }}
-        >
-          {saving ? "Saving" : "Save"}
+        <button type="button" disabled={!canEdit || saving} onClick={onSaveNow} style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: canEdit ? accent : "rgba(100,116,139,0.62)", cursor: canEdit && !saving ? "pointer" : "default", padding: "0 12px", fontSize: 12, fontWeight: 900 }}>
+          {saving ? "Saving version" : "Save version"}
         </button>
       </div>
-      <div className="editor-document-scroll" style={{ minHeight: 0, overflow: "auto", padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12, alignItems: "start", ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
-        <section style={{ display: "grid", gap: 10, minWidth: 0 }}>
-          <label style={{ display: "grid", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, padding: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 900 }}>We auto save this every certain amount of time</span>
-            <select
-              value={intervalMinutes}
-              disabled={!canEdit}
-              onChange={(event) => onIntervalChange(Number.parseInt(event.currentTarget.value, 10))}
-              style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 7, background: "#ffffff", color: "#111827", font: "inherit", fontSize: 12, fontWeight: 760, padding: "4px 7px" }}
-            >
-              {EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.map((minutes) => (
-                <option key={minutes} value={minutes}>{minutes === 60 ? "Every hour" : `Every ${minutes} minutes`}</option>
-              ))}
-            </select>
-          </label>
-          <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <strong style={{ fontSize: 11 }}>Saved versions</strong>
-              <button type="button" onClick={onToggleSort} style={{ border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "4px 7px", fontSize: 11, fontWeight: 800 }}>
-                {sortAscending ? "Oldest first" : "Newest first"}
-              </button>
-            </div>
-            <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-              {loading ? (
-                <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>Loading saves</div>
-              ) : sortedVersions.length === 0 ? (
-                <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>No saved versions yet</div>
-              ) : sortedVersions.map((version) => {
-                const selected = selectedVersion?.save_id === version.save_id;
-                return (
-                  <button
-                    key={version.save_id}
-                    type="button"
-                    onClick={() => onSelectSave(version.save_id)}
-                    style={{ minHeight: 46, display: "grid", gap: 2, border: `1px solid ${selected ? accent : strokeColor}`, borderRadius: 8, background: selected ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", textAlign: "left", padding: "7px 9px", font: "inherit" }}
-                  >
-                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
-                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{formatEditorSaveVersionTimestamp(version.created_timestamp)}</strong>
-                      <span style={{ color: accent, fontSize: 10, fontWeight: 900 }}>{editorSaveVersionKindLabel(version.save_kind)}</span>
-                    </span>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 700 }}>
-                      {version.saved_by_display_name || "Unknown user"} - {version.item_count} text box{version.item_count === 1 ? "" : "es"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+      <div className="editor-document-scroll" style={{ minHeight: 0, overflow: "auto", padding: 12, display: "grid", gap: 12, alignContent: "start", ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <strong style={{ fontSize: 11 }}>Saved snapshots</strong>
+          <button type="button" onClick={onToggleSort} style={{ border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "4px 7px", fontSize: 11, fontWeight: 800 }}>
+            {sortAscending ? "Oldest first" : "Newest first"}
+          </button>
+        </div>
+        {loading ? (
+          <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>Loading saved versions</div>
+        ) : sortedVersions.length === 0 ? (
+          <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>No saved versions yet</div>
+        ) : (
+          <div data-editor-save-version-grid="true" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 8, minWidth: 680 }}>
+            {sortedVersions.map((version) => {
+              const selected = selectedVersion?.save_id === version.save_id;
+              const thumbnail = editorSaveVersionPreview(version);
+              return (
+                <button key={version.save_id} type="button" onClick={() => onSelectSave(version.save_id)} style={{ minWidth: 0, height: 128, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 5, border: `2px solid ${selected ? accent : strokeColor}`, borderRadius: 9, background: selected ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", textAlign: "left", padding: 8, font: "inherit", overflow: "hidden" }}>
+                  <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.5 }}>{formatEditorSaveVersionTimestamp(version.created_timestamp)}</strong>
+                  <span style={{ display: "block", overflow: "hidden", whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#334155", background: "#ffffff", border: `1px solid ${ruleColor}`, borderRadius: 5, padding: 5, font: "9px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace" }}>{thumbnail || "Empty snapshot"}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: accent, fontSize: 9.5, fontWeight: 850 }}>{version.saved_by_display_name || "Unknown user"}</span>
+                </button>
+              );
+            })}
           </div>
-        </section>
-        <section style={{ minWidth: 0, display: "grid", gap: 10, alignContent: "start" }}>
-          <div style={{ border: `1px solid ${strokeColor}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, padding: 10, display: "grid", gap: 8, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
-              <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>
-                {selectedVersion ? formatEditorSaveVersionTimestamp(selectedVersion.created_timestamp) : "No save selected"}
-              </strong>
-              <button
-                type="button"
-                disabled={!canEdit || !selectedVersion || restoring}
-                onClick={() => { if (selectedVersion) onRestore(selectedVersion.save_id); }}
-                style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_ACTIVE_SURFACE, color: canEdit && selectedVersion ? accent : "rgba(100,116,139,0.62)", cursor: canEdit && selectedVersion && !restoring ? "pointer" : "default", padding: "0 10px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}
-              >
-                {restoring ? "Restoring" : "Overwrite with this save"}
-              </button>
+        )}
+        {selectedVersion && (
+          <section aria-label="Viewing old saved version" style={{ minWidth: 0, display: "grid", gap: 9, border: "4px solid #f59e0b", borderRadius: 12, background: "#fffbeb", padding: 10, boxShadow: "0 0 0 2px rgba(245,158,11,0.2)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 2 }}>
+                <strong style={{ color: "#92400e", fontSize: 13 }}>Viewing an old saved snapshot</strong>
+                <span style={{ color: "#92400e", fontSize: 10.5, fontWeight: 750 }}>Read-only preview. Your current editor has not changed.</span>
+              </div>
+              <div style={{ display: "flex", gap: 7 }}>
+                <button type="button" onClick={onExitPreview} style={{ minHeight: 30, border: "1px solid #d97706", borderRadius: 8, background: "#ffffff", color: "#92400e", cursor: "pointer", padding: "0 10px", fontSize: 11, fontWeight: 900 }}>Exit preview</button>
+                <button type="button" disabled={!canEdit || restoring} onClick={() => onRestore(selectedVersion.save_id)} style={{ minHeight: 30, border: "1px solid #b45309", borderRadius: 8, background: "#f59e0b", color: "#451a03", cursor: canEdit && !restoring ? "pointer" : "default", padding: "0 10px", fontSize: 11, fontWeight: 950 }}>
+                  {restoring ? "Overwriting current" : "Overwrite current with this"}
+                </button>
+              </div>
             </div>
-            <pre style={{ margin: 0, minHeight: 220, maxHeight: 420, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", color: "#111827", padding: 10, font: "11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace" }}>{preview || "Select a saved version to view it."}</pre>
-          </div>
-          {status && <div style={{ justifySelf: "start", border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>{status}</div>}
-        </section>
+            <pre style={{ margin: 0, minHeight: 220, maxHeight: 460, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", border: "1px solid #f59e0b", borderRadius: 8, background: "#ffffff", color: "#111827", padding: 10, font: "11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace" }}>{preview || "This saved snapshot is empty."}</pre>
+          </section>
+        )}
+        {status && <div style={{ justifySelf: "start", border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>{status}</div>}
       </div>
     </div>
   );
 };
-
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -628,6 +618,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [saveVersionSaving, setSaveVersionSaving] = useState(false);
   const [saveVersionRestoring, setSaveVersionRestoring] = useState(false);
   const [saveVersionStatus, setSaveVersionStatus] = useState("");
+  const [logicGateSaveState, setLogicGateSaveState] = useState<EditorSaveState>({ status: "saved" });
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -927,17 +918,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     void loadEditorSaveVersions();
   }, [activeTab, linkedEntityAccessDenied, loadEditorSaveVersions]);
 
-  const updateSaveVersionInterval = useCallback((minutes: number) => {
-    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
-    const resourceID = linkedNodeID.trim();
-    const nextMinutes = EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.includes(minutes as typeof EDITOR_SAVE_VERSION_INTERVAL_OPTIONS[number])
-      ? minutes
-      : EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
-    setSaveVersionIntervalMinutes(nextMinutes);
-    if (companyID && resourceType && resourceID) {
-      writeEditorSaveIntervalMinutes(companyID, resourceType, resourceID, nextMinutes);
-    }
-  }, [companyID, linkedEntityKind, linkedNodeID]);
 
   const showNodePriorityRequirementError = useCallback(() => {
     const message = "Must give node a priority";
@@ -2072,9 +2052,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     if (linkedEntityKind === "logic_gate") {
+      if (editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationIDRef.current) {
+        await flushMangoTiptapDocument({
+          companyID,
+          resourceType: "logic_gate",
+          resourceID: linkedNodeID,
+          documentID: documentInformationIDRef.current,
+        });
+        return;
+      }
       await saveDocumentNow(editorDocumentRef.current ? serializeEditorDocumentHTML(editorDocumentRef.current) : documentDraftRef.current);
     }
-  }, [linkedEntityKind, saveDocumentNow]);
+  }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityKind, linkedNodeID, saveDocumentNow]);
 
   const saveCurrentEditorVersion = useCallback(async (saveKind: "manual" | "auto" = "manual") => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
@@ -2110,11 +2099,76 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setSaveVersionRestoring(true);
     try {
       setError("");
-      await requestJSON<EditorSaveVersion>(`${editorSaveVersionsPath(resourceType, resourceID)}/${cleanSaveID}/restore`, {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID }),
+      const selectedVersion = saveVersions.find((version) => version.save_id === cleanSaveID);
+      const jsonItems = (selectedVersion?.items ?? []).map((item) => {
+        const content = parseEditorTextBlockContent(item.information);
+        try {
+          const document = JSON.parse(content.document);
+          return { item, content, document };
+        } catch {
+          return null;
+        }
       });
+      const canRestoreJSON = editorDataFormat.gate?.editor_format === "tiptap_json"
+        && jsonItems.length > 0
+        && jsonItems.every((item) => item?.document?.format === "mango-tiptap-json");
+      if (canRestoreJSON) {
+        const desiredItems = jsonItems.filter((item): item is NonNullable<typeof item> => item !== null);
+        const desiredIDs = new Set(desiredItems.map(({ item }) => item.source_information_id || item.information_id));
+        const currentIDs = resourceType === "node"
+          ? nodeWorkspaceProjectionsRef.current.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE).map((item) => item.information_id)
+          : [documentInformationIDRef.current].filter(Boolean);
+        for (const documentID of currentIDs) {
+          if (desiredIDs.has(documentID)) continue;
+          const path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
+          const snapshot = await requestJSON<{ revision: number; deleted?: boolean }>(path);
+          if (snapshot.deleted) continue;
+          await requestJSON(path, {
+            method: "DELETE",
+            body: JSON.stringify({
+              operation_id: generateStableInformationID(),
+              client_id: "editor-save-version-restore",
+              base_revision: snapshot.revision,
+            }),
+          });
+        }
+        for (const { item, content, document } of desiredItems) {
+          let documentID = item.source_information_id || item.information_id;
+          let path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
+          await requestJSON(path, {
+            method: "PATCH",
+            body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+          });
+          let snapshot = await requestJSON<{ revision: number; deleted?: boolean }>(path);
+          if (snapshot.deleted) {
+            documentID = generateStableInformationID();
+            path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
+            await requestJSON(path, {
+              method: "PATCH",
+              body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+            });
+            snapshot = await requestJSON<{ revision: number }>(path);
+          }
+          await requestJSON(path, {
+            method: "POST",
+            body: JSON.stringify({
+              operation_id: generateStableInformationID(),
+              client_id: "editor-save-version-restore",
+              base_revision: snapshot.revision,
+              schema_version: 1,
+              document,
+              annotations: [],
+            }),
+          });
+        }
+      } else {
+        await requestJSON<EditorSaveVersion>(`${editorSaveVersionsPath(resourceType, resourceID)}/${cleanSaveID}/restore`, {
+          method: "POST",
+          body: JSON.stringify({ company_id: companyID }),
+        });
+      }
       lastAutoSaveVersionSignatureRef.current = "";
+      setSelectedSaveVersionID("");
       showSaveVersionStatus("Current editor overwritten with saved version");
       await refreshEditorSnapshot();
       void loadEditorSaveVersions();
@@ -2123,7 +2177,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } finally {
       setSaveVersionRestoring(false);
     }
-  }, [companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, refreshEditorSnapshot, requestJSON, showSaveVersionStatus]);
+  }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, refreshEditorSnapshot, requestJSON, saveVersions, showSaveVersionStatus]);
 
   useEffect(() => {
     if (autoSaveVersionTimerRef.current !== null) {
@@ -2765,6 +2819,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
+            saveState={linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" ? logicGateSaveState : undefined}
             secondaryActions={linkedEntityKind === "logic_gate" ? [{
               id: "apply-gvic-to-assigned-nodes",
               label: logicGateGVICApplyToAssignedNodesBusy ? "Applying GVIC to assigned nodes" : "Apply GVIC to assigned nodes",
@@ -2895,7 +2950,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <EditorSaveSettingsSurface
             topPx={documentTopPx}
             resourceTitle={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
-            intervalMinutes={saveVersionIntervalMinutes}
             versions={saveVersions}
             selectedSaveID={selectedSaveVersionID}
             loading={saveVersionsLoading}
@@ -2911,9 +2965,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ruleColor={ruleColor}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
-            onIntervalChange={updateSaveVersionInterval}
             onSaveNow={() => { void saveCurrentEditorVersion("manual"); }}
             onSelectSave={setSelectedSaveVersionID}
+            onExitPreview={() => setSelectedSaveVersionID("")}
             onToggleSort={() => setSaveVersionsSortAscending((current) => !current)}
             onRestore={(saveID) => { void restoreEditorSaveVersion(saveID); }}
           />
@@ -3005,6 +3059,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               onChange={(next) => { documentDraftRef.current = next; }}
               onFlush={(next) => { documentDraftRef.current = next; }}
               onError={setError}
+              onSaveStateChange={setLogicGateSaveState}
               onRecoveryStorageError={setError}
               onRecoveryStorageRecovered={() => setError("")}
               onSelectionFontSizeChange={updateSelectionFontSize}

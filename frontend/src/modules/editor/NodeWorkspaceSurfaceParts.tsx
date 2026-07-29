@@ -22,6 +22,7 @@ import {
 } from "./chatEntityLinks.js";
 import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest } from "./editorEntityLinks.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
+import type { EditorSaveState } from "./EditorSaveStatusBadge.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
@@ -377,6 +378,7 @@ type NodeTextBlockEditorProps = {
   onDocumentFlush: (document: string) => void;
   onDocumentConflict?: () => void;
   onDocumentError?: (message: string) => void;
+  onSaveStateChange?: (state: EditorSaveState) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
   onChangeSeen: (changeID: string) => void;
@@ -1872,6 +1874,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onBlur={props.onBlur}
       onConflict={() => props.onDocumentConflict?.()}
       onError={(message) => props.onDocumentError?.(message)}
+      onSaveStateChange={props.onSaveStateChange}
       onRecoveryStorageError={(message) => props.onRecoveryStorageError?.(message)}
       onRecoveryStorageRecovered={() => props.onRecoveryStorageRecovered?.()}
       onAnnotationActivate={(annotation) => {

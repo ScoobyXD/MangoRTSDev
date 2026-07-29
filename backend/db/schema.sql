@@ -37,6 +37,7 @@ end $$;
 
 alter type information_type add value if not exists 'Text block chat';
 alter type information_type add value if not exists 'Attached email';
+alter type information_type add value if not exists 'Saved version';
 
 create table if not exists users (
   user_id uuid not null,

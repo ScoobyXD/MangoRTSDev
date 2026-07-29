@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/editorLifecycle.js";
 import {
   createEmptyMangoTiptapDocument,
+  normalizeMangoTiptapDocument,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
   validateMangoTiptapDocument,
@@ -161,6 +162,45 @@ test("strict Mango Tiptap contract covers rich features and fails closed", () =>
   assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, true);
   if (typedOrderedList.document.content?.[0]?.attrs) typedOrderedList.document.content[0].attrs.type = "disc";
   assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, false);
+});
+
+test("pasted CSS values are normalized without losing text", () => {
+  const pasted: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: "This pasted text must survive",
+          marks: [
+            { type: "textStyle", attrs: { fontSize: "11pt", color: "rgb(31, 78, 121)" } },
+            { type: "highlight", attrs: { color: "#ff06" } },
+          ],
+        }],
+      }],
+    },
+  };
+  assert.equal(validateMangoTiptapDocument(pasted).valid, false);
+  const normalized = normalizeMangoTiptapDocument(pasted);
+  assert.equal(validateMangoTiptapDocument(normalized).valid, true);
+  const text = normalized.document.content?.[0]?.content?.[0];
+  assert.equal(text?.text, "This pasted text must survive");
+  assert.deepEqual(text?.marks?.[0]?.attrs, { fontSize: "15px", color: "#1f4e79" });
+  assert.deepEqual(text?.marks?.[1]?.attrs, { color: "#ffff00" });
+
+  const unsupported = normalizeMangoTiptapDocument({
+    ...pasted,
+    document: {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "keep me", marks: [{ type: "textStyle", attrs: { fontSize: "calc(1rem)", color: "paint(evil)" } }] }] }],
+    },
+  });
+  assert.equal(unsupported.document.content?.[0]?.content?.[0]?.text, "keep me");
+  assert.deepEqual(unsupported.document.content?.[0]?.content?.[0]?.marks?.[0]?.attrs, {});
+  assert.equal(validateMangoTiptapDocument(unsupported).valid, true);
 });
 
 test("Tiptap validation and serialization accept documents beyond the former two MiB cap", () => {

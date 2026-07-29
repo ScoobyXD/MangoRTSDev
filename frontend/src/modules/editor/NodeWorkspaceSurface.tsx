@@ -80,6 +80,7 @@ import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import { groupNodeTimelineEventsByTextBlock } from "./nodeTimelineOrdering";
+import { EditorSaveStatusBadge, type EditorSaveState } from "./EditorSaveStatusBadge.js";
 
 import {
   AttachedEmailOrganizerPane,
@@ -528,6 +529,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
+  const [textBlockSaveStates, setTextBlockSaveStates] = useState<Record<string, EditorSaveState>>({});
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [nodeResourceAttachments, setNodeResourceAttachments] = useState<MangoResourceAttachment[]>([]);
@@ -1545,7 +1547,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     };
     setBlocks((current) => current.map((block) => {
       if (block.id !== blockID) return block;
-      return { ...block, ...nextContent, updatedTimestamp: new Date().toISOString() };
+      return { ...block, ...nextContent };
     }));
     if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) scheduleTextBlockSave(blockID, nextContent);
   }, [canEdit, scheduleTextBlockSave]);
@@ -3871,6 +3873,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           <TextEditorIcon color={accent} />
                           <span>Editor</span>
                         </button>
+                        <EditorSaveStatusBadge state={textBlockSaveStates[block.id] ?? (block.pending ? { status: "saving" } : { status: "saved", updatedTimestamp: block.updatedTimestamp })} compact />
                         <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
                           Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                         </span>
@@ -3975,6 +3978,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
                             onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
                             onDocumentError={onError}
+                            onSaveStateChange={(state) => {
+                              setTextBlockSaveStates((current) => ({ ...current, [block.id]: state }));
+                              if (state.status === "saved" && state.updatedTimestamp) {
+                                setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, updatedTimestamp: state.updatedTimestamp! } : item));
+                              }
+                            }}
                             onRecoveryStorageError={onError}
                             onRecoveryStorageRecovered={() => onError("")}
                             onChangeSeen={onMarkChangeSeen}

@@ -13,7 +13,7 @@ export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }>
   { id: "outline-styles", label: "Outline Styles" },
   { id: "metadata", label: "Metadata" },
   { id: "history", label: "History" },
-  { id: "save-settings", label: "Save Settings" },
+  { id: "save-settings", label: "Saved Versions" },
 ];
 
 export type EditorDocumentIsolationState = {

@@ -1,6 +1,7 @@
 import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import {
+  normalizeMangoTiptapDocument,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
   type MangoTiptapDocument,
@@ -19,6 +20,15 @@ export type MangoTiptapSnapshot = {
   document: MangoTiptapDocument;
   annotations?: MangoTiptapPersistedAnnotation[];
   deleted?: boolean;
+  updated_timestamp?: string;
+  committed_at?: string;
+};
+
+export type MangoTiptapSaveState = {
+  status: "pending" | "saving" | "saved" | "failed";
+  updatedTimestamp?: string;
+  revision?: number;
+  message?: string;
 };
 
 export type MangoTiptapConflict = {
@@ -56,6 +66,7 @@ export type MangoTiptapSyncOptions = {
   onAnnotations?: (annotations: readonly MangoTiptapPersistedAnnotation[], source: "canonical" | "recovery") => void;
   onSnapshot?: (document: MangoTiptapDocument, serialized: string, annotations: readonly MangoTiptapPersistedAnnotation[]) => void;
   onPendingChange?: (pendingCount: number) => void;
+  onSaveStateChange?: (state: MangoTiptapSaveState) => void;
   onConflict?: (conflict: MangoTiptapConflict) => void;
   onError?: (cause: unknown) => void;
   onRecoveryStorageError?: (message: string) => void;
@@ -200,6 +211,7 @@ export class MangoTiptapSync {
     if (this.stopped || this.conflicted) return;
     this.snapshotProvider = typeof document === "function" ? document : () => document;
     this.annotationProvider = annotations;
+    this.options.onSaveStateChange?.({ status: "pending" });
     this.armDrain(immediate);
   }
 
@@ -213,10 +225,14 @@ export class MangoTiptapSync {
     let pendingDocument: MangoTiptapDocument;
     let annotations: MangoTiptapPersistedAnnotation[];
     try {
-      pendingDocument = provider();
+      pendingDocument = normalizeMangoTiptapDocument(provider());
       serialized = serializeMangoTiptapDocument(pendingDocument);
       annotations = [...(annotationProvider?.() ?? [])];
     } catch (cause) {
+      this.options.onSaveStateChange?.({
+        status: "failed",
+        message: cause instanceof Error ? cause.message : "Unable to prepare this text box for saving",
+      });
       this.options.onError?.(cause);
       return this.persistence;
     }
@@ -305,6 +321,13 @@ export class MangoTiptapSync {
       this.pending = this.pending.map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
     }
     this.options.onPendingChange?.(this.pending.length);
+    this.options.onSaveStateChange?.(this.pending.length > 0
+      ? { status: "pending" }
+      : {
+        status: "saved",
+        updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
+        revision: canonical.revision,
+      });
     if (canonical.deleted) {
       this.pending = [];
       this.options.onPendingChange?.(0);
@@ -412,6 +435,7 @@ export class MangoTiptapSync {
       while (this.pending.length > 0 && !this.conflicted) {
         const commit = this.pending[0];
         try {
+          this.options.onSaveStateChange?.({ status: "saving" });
           if (!commit.attempted) {
             commit.attempted = true;
             await this.persistPendingBestEffort();
@@ -437,6 +461,13 @@ export class MangoTiptapSync {
           // The server acknowledgement is canonical even when local browser storage
           // cleanup fails. Release virtualization pins before best-effort cleanup.
           this.options.onPendingChange?.(this.pending.length);
+          this.options.onSaveStateChange?.(this.pending.length > 0 || this.snapshotProvider
+            ? { status: "pending" }
+            : {
+              status: "saved",
+              updatedTimestamp: response.committed_at ?? response.updated_timestamp,
+              revision: response.revision,
+            });
           this.options.onAnnotations?.(response.annotations ?? commit.annotations ?? [], "canonical");
           await this.persistPendingBestEffort();
         } catch (cause) {
@@ -446,6 +477,10 @@ export class MangoTiptapSync {
           } else {
             this.armRetry();
           }
+          this.options.onSaveStateChange?.({
+            status: "failed",
+            message: cause instanceof Error ? cause.message : "Unable to save this text box",
+          });
           throw cause;
         }
       }
