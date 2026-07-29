@@ -2438,6 +2438,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 indentGuideColor={PROJECT_SUMMARY_RULE}
                                 scrollbarTrack="rgba(15, 23, 42, 0.08)"
                                 formattingControllerRef={projectFormattingControllerRef}
+                                formattingControllerActive={activeRichTextBlockID === block.id}
                                 onFocus={() => {
                                   setActiveRowBlockID(block.id);
                                   setFocusedTextBlockID(block.id);

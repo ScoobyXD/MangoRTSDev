@@ -132,6 +132,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/attachmentCountDropdown.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/gvicAssignmentHover.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/gvicAssignmentHover.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatNavigation.test.js"),
   },

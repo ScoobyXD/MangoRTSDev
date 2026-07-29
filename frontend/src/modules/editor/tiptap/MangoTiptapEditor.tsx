@@ -53,7 +53,10 @@ import {
 } from "./mangoTiptapDocument.js";
 import {
   createMangoTiptapExtensions,
+  indentMangoTiptapSelection,
   MangoAttachmentImage,
+  outdentMangoTiptapSelection,
+  readMangoTiptapSelectionState,
   type MangoAttachmentImageAttributes,
 } from "./mangoTiptapExtensions.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
@@ -112,6 +115,7 @@ export type MangoTiptapEditorProps = {
   formattingControllerRef?:
     | React.MutableRefObject<EditorDocumentFormattingController | null>
     | React.MutableRefObject<MangoTiptapFormattingController | null>;
+  formattingControllerActive?: boolean;
   onChange?: (serialized: string) => void;
   onFlush?: (serialized: string) => void;
   onFocus?: () => void;
@@ -567,19 +571,6 @@ function attachmentNodeViewExtension(
   });
 }
 
-function selectionState(editor: Editor) {
-  const fontSizeValue = String(editor.getAttributes("textStyle").fontSize || "15").replace("px", "");
-  const alignment = editor.getAttributes("paragraph").textAlign || editor.getAttributes("heading").textAlign || "left";
-  return {
-    fontSize: Number(fontSizeValue) || 15,
-    highlightColor: (editor.getAttributes("highlight").color || null) as EditorHighlightColor | null,
-    textAlignment: (["left", "center", "right"].includes(alignment) ? alignment : "left") as EditorTextAlignment,
-    bold: editor.isActive("bold"),
-    underline: editor.isActive("underline"),
-    italic: editor.isActive("italic"),
-    strikethrough: editor.isActive("strike"),
-  };
-}
 
 export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   value,
@@ -601,6 +592,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   target,
   onTargetHandled,
   formattingControllerRef,
+  formattingControllerActive = true,
   onChange,
   onFlush,
   onFocus,
@@ -625,6 +617,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const initial = initialRef.current;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  const formattingControllerInstanceRef = useRef<MangoTiptapFormattingController | null>(null);
+  const formattingControllerActiveRef = useRef(formattingControllerActive);
   const syncRef = useRef<MangoTiptapSync | null>(null);
   const syncStartedRef = useRef(false);
   const syncPreparationRef = useRef<Promise<void> | null>(null);
@@ -675,6 +669,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   };
   attachmentContextRef.current = attachmentContext;
   imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
+  formattingControllerActiveRef.current = formattingControllerActive;
   currentDocumentRef.current = document;
   ownerAnnotationsRef.current = annotations;
 
@@ -699,7 +694,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, []);
 
   const updateSelectionState = useCallback((editor: Editor) => {
-    const state = selectionState(editor);
+    const state = readMangoTiptapSelectionState(editor);
     setTableActive(editor.isActive("table"));
     callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
     callbacksRef.current.onSelectionHighlightColorChange?.(state.highlightColor);
@@ -1058,8 +1053,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-tiptap-entity-menu="true"]')) return false;
           const current = editorRef.current;
           if (!current) return false;
+          if (current.isActive("table")) return false;
           event.preventDefault();
-          return event.shiftKey ? formattingControllerRef?.current?.outdent() ?? false : formattingControllerRef?.current?.indent() ?? false;
+          return event.shiftKey ? outdentMangoTiptapSelection(current) : indentMangoTiptapSelection(current);
         },
         handleClickOn: (_view, _pos, node, _nodePos, event) => {
           if (node.type.name !== "mangoEntityLink") return false;
@@ -1075,13 +1071,19 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onContentError: ({ error: contentError }) => {
         setError(`The JSON document is invalid and was not opened: ${contentError.message}`);
       },
-      onFocus: () => callbacksRef.current.onFocus?.(),
+      onFocus: ({ editor: focusedEditor }) => {
+        const controller = formattingControllerInstanceRef.current;
+        if (formattingControllerRef && controller) formattingControllerRef.current = controller;
+        updateSelectionState(focusedEditor);
+        callbacksRef.current.onFocus?.();
+      },
       onBlur: () => {
         callbacksRef.current.onBlur?.();
         void syncRef.current?.flush().then(() => callbacksRef.current.onFlush?.(currentSerializedRef.current)).catch(() => undefined);
       },
       onSelectionUpdate: ({ editor: activeEditor }) => updateSelectionState(activeEditor),
       onTransaction: ({ editor: transactionEditor, transaction }) => {
+        if (!transaction.docChanged || !transaction.selectionSet) updateSelectionState(transactionEditor);
         if (!transaction.docChanged) return;
         incrementEditorRuntimeMetric("transactions");
         mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
@@ -1108,7 +1110,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       applyFontSizeValue: (fontSize) => editor.chain().focus().setFontSize(`${Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(fontSize)))}px`).run(),
       adjustFontSize: (delta) => {
-        const next = selectionState(editor).fontSize + delta;
+        const next = readMangoTiptapSelectionState(editor).fontSize + delta;
         return editor.chain().focus().setFontSize(`${Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(next)))}px`).run();
       },
       toggleInlineFormat: (command) => {
@@ -1126,25 +1128,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         ? editor.chain().focus().toggleTaskList().run()
         : editor.chain().focus().toggleBulletList().run(),
       toggleNumberedList: () => editor.chain().focus().toggleOrderedList().run(),
-      indent: () => {
-        if (editor.isActive("taskItem")) return editor.chain().focus().sinkListItem("taskItem").run();
-        if (editor.isActive("listItem")) return editor.chain().focus().sinkListItem("listItem").run();
-        const current = Number(editor.getAttributes("paragraph").indentLevel || editor.getAttributes("heading").indentLevel || 0);
-        return editor.chain().focus().updateAttributes(editor.isActive("heading") ? "heading" : "paragraph", { indentLevel: Math.min(12, current + 1) }).run();
-      },
-      outdent: () => {
-        if (editor.isActive("taskItem")) return editor.chain().focus().liftListItem("taskItem").run();
-        if (editor.isActive("listItem")) return editor.chain().focus().liftListItem("listItem").run();
-        const current = Number(editor.getAttributes("paragraph").indentLevel || editor.getAttributes("heading").indentLevel || 0);
-        return editor.chain().focus().updateAttributes(editor.isActive("heading") ? "heading" : "paragraph", { indentLevel: Math.max(0, current - 1) }).run();
-      },
+      indent: () => indentMangoTiptapSelection(editor),
+      outdent: () => outdentMangoTiptapSelection(editor),
       insertTable: () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
-      readFormatState: () => selectionState(editor),
+      readFormatState: () => readMangoTiptapSelectionState(editor),
     };
-    if (formattingControllerRef) formattingControllerRef.current = controller;
+    formattingControllerInstanceRef.current = controller;
+    if (formattingControllerRef && formattingControllerActiveRef.current) formattingControllerRef.current = controller;
     updateSelectionState(editor);
     return () => {
       if (formattingControllerRef?.current === controller) formattingControllerRef.current = null;
+      if (formattingControllerInstanceRef.current === controller) formattingControllerInstanceRef.current = null;
       editorRef.current = null;
       setActiveEditor((current) => current === editor ? null : current);
       editor.destroy();
@@ -1158,6 +1152,16 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     if (lifecycle.state !== "dirty") return undefined;
     return trackEditorRuntimeResource("dirty_editors");
   }, [lifecycle.state]);
+
+  useEffect(() => {
+    const controller = formattingControllerInstanceRef.current;
+    if (!formattingControllerRef || !controller) return undefined;
+    if (formattingControllerActive) formattingControllerRef.current = controller;
+    else if (formattingControllerRef.current === controller) formattingControllerRef.current = null;
+    return () => {
+      if (formattingControllerRef.current === controller) formattingControllerRef.current = null;
+    };
+  }, [activeEditor, formattingControllerActive, formattingControllerRef]);
 
   useEffect(() => {
     const positionSource = editorRef.current
@@ -1203,13 +1207,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, [activate, target]);
 
   useEffect(() => () => {
-    if (formattingControllerRef) formattingControllerRef.current = null;
     const sync = syncRef.current;
     syncRef.current = null;
     syncStartedRef.current = false;
     syncPreparationRef.current = null;
     void sync?.shutdown();
-  }, [formattingControllerRef]);
+  }, []);
 
   useEffect(() => {
     const root = rootRef.current;

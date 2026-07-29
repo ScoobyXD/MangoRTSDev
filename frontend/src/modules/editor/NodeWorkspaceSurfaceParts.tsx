@@ -1867,6 +1867,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       target={target}
       onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}
       formattingControllerRef={props.formattingControllerRef}
+      formattingControllerActive={props.formattingControllerActive ?? !props.formattingControllerRef}
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       onConflict={() => props.onDocumentConflict?.()}
@@ -1985,6 +1986,12 @@ const CHAT_COMPOSER_TEXT_METRICS: React.CSSProperties = {
   letterSpacing: 0,
 };
 
+type ChatComposerDraftSegment = {
+  text: string;
+  mention: boolean;
+  entity?: EditorChatEntityLink;
+};
+
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   editable,
@@ -2061,8 +2068,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [activeMentionDraft, companyUsers]);
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
   const entityMenuOpen = editable && activeEntityDraft !== null && Boolean(entityRequestJSON && companyID) && (entitySearchPending || Boolean(entitySearchError) || entityOptions.length > 0);
-  const composerMentionSegments = useMemo(() => splitTextByMentions(draft, companyUsers), [companyUsers, draft]);
-  const composerHasMentionEntities = composerMentionSegments.some((segment) => segment.mention);
+  const composerDraftSegments = useMemo(() => splitEditorChatTextByEntityLinks(draft, draftEntityLinks).flatMap<ChatComposerDraftSegment>((segment) => (
+    segment.entity
+      ? [{ text: segment.text, mention: false, entity: segment.entity }]
+      : splitTextByMentions(segment.text, companyUsers).map((mentionSegment) => ({ ...mentionSegment, entity: undefined }))
+  )), [companyUsers, draft, draftEntityLinks]);
+  const composerHasInlineEntities = composerDraftSegments.some((segment) => segment.mention || segment.entity);
   const hasEmailPane = Boolean(emailPane);
   const showingEmail = hasEmailPane && activeTab === "email";
   const messageFocusRequestKey = messageFocusRequest?.messageID.trim()
@@ -2648,7 +2659,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             >
               <PlusIcon color={accent} />
             </button>
-            {composerHasMentionEntities && (
+            {composerHasInlineEntities && (
               <div
                 ref={composerMentionOverlayRef}
                 aria-hidden="true"
@@ -2674,7 +2685,26 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   zIndex: 0,
                 }}
               >
-                {composerMentionSegments.map((segment, index) => segment.mention ? (
+                {composerDraftSegments.map((segment, index) => segment.entity ? (
+                  <span
+                    key={`${segment.text}:${index}`}
+                    data-mango-chat-composer-entity-link="true"
+                    data-mango-entity-type={segment.entity.entityType}
+                    data-mango-entity-id={segment.entity.entityID}
+                    style={{
+                      background: "rgba(224,242,254,0.92)",
+                      color: "#075985",
+                      border: 0,
+                      borderRadius: 6,
+                      padding: 0,
+                      fontWeight: "inherit",
+                      boxDecorationBreak: "clone",
+                      boxShadow: "0 0 0 1px rgba(224,242,254,0.94), 0 0 0 2px rgba(14,165,233,0.34), inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)",
+                    }}
+                  >
+                    {segment.text}
+                  </span>
+                ) : segment.mention ? (
                   <span
                     key={`${segment.text}:${index}`}
                     data-mango-chat-composer-mention="true"
@@ -2817,7 +2847,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasMentionEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasMentionEntities ? "transparent" : surfaceText, background: composerHasMentionEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasInlineEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasInlineEntities ? "transparent" : surfaceText, background: composerHasInlineEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"

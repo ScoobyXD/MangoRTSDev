@@ -164,6 +164,12 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /background:\s*linear-gradient\(135deg, rgba\(254, 255, 102, 0\.72\), rgba\(250, 232, 28, 0\.58\)\)/);
   assert.match(presentationCSS, /data-mango-legacy-leading-date-heading="true"/);
   assert.match(presentationCSS, /margin-top:\s*20px/);
+  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*lower-alpha/s);
+  assert.match(presentationCSS, /ol ol ol > li::marker[^}]+counter\(list-item\) "\)  "/s);
+  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, lower-alpha\) "\)  "/s);
+  assert.match(presentationCSS, /li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror table[^}]+border-collapse:\s*collapse/s);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+border:\s*1px solid #94a3b8/s);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {
@@ -272,6 +278,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
   const lifecyclePins: boolean[] = [];
   const changes: string[] = [];
+  const selectionFontSizes: number[] = [];
+  const selectionInlineFormats: Array<{ bold: boolean; underline: boolean; italic: boolean; strikethrough: boolean }> = [];
   let canonicalReads = 0;
   let canonicalRevision = 0;
   let canonicalDocument = value;
@@ -354,6 +362,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           }}
           annotations={annotations}
           formattingControllerRef={controllerRef}
+          onSelectionFontSizeChange={(fontSize) => selectionFontSizes.push(fontSize)}
+          onSelectionInlineFormatChange={(format) => selectionInlineFormats.push(format)}
           onChange={(next) => changes.push(next)}
           onConflict={() => { conflictCallbacks += 1; }}
           onError={(message) => documentErrors.push(message)}
@@ -404,6 +414,29 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
+
+    await act(async () => { assert.equal(controllerRef.current?.adjustFontSize(1), true); });
+    await waitFor(() => selectionFontSizes.at(-1) === 16, "the plus command must immediately update the toolbar number");
+    await act(async () => { assert.equal(controllerRef.current?.toggleInlineFormat("bold"), true); });
+    await waitFor(() => selectionInlineFormats.at(-1)?.bold === true, "bold must immediately report its active toolbar state");
+    await act(async () => { assert.equal(controllerRef.current?.toggleInlineFormat("underline"), true); });
+    await waitFor(() => selectionInlineFormats.at(-1)?.underline === true, "underline must immediately report its active toolbar state");
+    await act(async () => { assert.equal(controllerRef.current?.toggleInlineFormat("italic"), true); });
+    await waitFor(() => selectionInlineFormats.at(-1)?.italic === true, "italic must execute and immediately report its active toolbar state");
+    await act(async () => {
+      controllerRef.current?.toggleInlineFormat("italic");
+      controllerRef.current?.toggleInlineFormat("underline");
+      controllerRef.current?.toggleInlineFormat("bold");
+      controllerRef.current?.adjustFontSize(-1);
+    });
+    await waitFor(
+      () => selectionFontSizes.at(-1) === 15
+        && selectionInlineFormats.at(-1)?.bold === false
+        && selectionInlineFormats.at(-1)?.underline === false
+        && selectionInlineFormats.at(-1)?.italic === false,
+      "toolbar commands should return to the caret's original format state",
+    );
+
     const activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
     await act(async () => {
