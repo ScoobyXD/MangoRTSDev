@@ -13,8 +13,6 @@ import {
 } from "../../../../frontend/src/pages/home/emailCollaborationRows.js";
 import {
   condenseEmailThreadMessages,
-  emailMessageRowKey,
-  emailThreadKey,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 
 function message(id: string, overrides: Partial<EmailMessage> = {}): EmailMessage {
@@ -89,7 +87,7 @@ test("collaboration snapshots project stable row identity and source annotations
   })), null);
 });
 
-test("collaboration snapshots do not replace missing rows from an authoritative provider mailbox", () => {
+test("collaboration snapshots never manufacture My Triage or Shared Triage rows", () => {
   const shared = collaboration("shared-collaboration", {
     scope_type: "shared",
     shared_inbox_id: "shared-1",
@@ -102,7 +100,7 @@ test("collaboration snapshots do not replace missing rows from an authoritative 
 
   assert.deepEqual(
     mergeEmailCollaborationsForView([], [shared, personal], "my-triage", new Set(["shared-1"])).map((item) => item.collaboration_id),
-    ["personal-collaboration"],
+    [],
   );
   assert.deepEqual(
     mergeEmailCollaborationsForView([], [shared, personal], "shared:shared-1", new Set(["shared-1"])).map((item) => item.collaboration_id),
@@ -126,11 +124,11 @@ test("collaboration snapshots do not replace missing rows from an authoritative 
   );
   assert.deepEqual(
     mergeEmailCollaborationsForView([], [shared], "my-triage", new Set()).map((item) => item.collaboration_id),
-    ["shared-collaboration"],
+    [],
   );
 });
 
-test("personal virtual rows never dedupe across account scopes and matching merges stay immutable", () => {
+test("foreign collaboration snapshots stay out while matching provider rows gain immutable annotations", () => {
   const provider = message("provider-message", {
     thread_id: "thread-1",
     subject: "Provider subject",
@@ -139,6 +137,7 @@ test("personal virtual rows never dedupe across account scopes and matching merg
   });
   const otherAccount = collaboration("other-account", {
     account_email: "other@example.test",
+    personal_user_id: "user-2",
     latest_message: message("provider-message", {
       thread_id: "thread-1",
       subject: "Other account snapshot",
@@ -155,11 +154,9 @@ test("personal virtual rows never dedupe across account scopes and matching merg
     "provider-scope",
     "user-1",
   );
-  assert.equal(crossAccount.length, 2);
-  assert.deepEqual(new Set(crossAccount.map((item) => item.collaboration_id ?? "provider")), new Set(["provider", "other-account"]));
-  assert.equal(new Set(crossAccount.map(emailMessageRowKey)).size, 2);
-  assert.equal(new Set(crossAccount.map(emailThreadKey)).size, 2);
-  assert.equal(condenseEmailThreadMessages(crossAccount).length, 2);
+  assert.equal(crossAccount.length, 1);
+  assert.equal(crossAccount[0]?.collaboration_id, undefined);
+  assert.equal(condenseEmailThreadMessages(crossAccount).length, 1);
 
   const matchingAccount = collaboration("matching-account", {
     account_email: " OWNER@Example.Test ",
