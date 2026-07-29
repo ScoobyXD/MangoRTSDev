@@ -4586,9 +4586,6 @@ create table if not exists node_textboxes (
   document_json jsonb not null,
   plain_text text not null default '',
   content_revision bigint not null default 0,
-  collaboration_epoch uuid not null,
-  latest_update_sequence bigint not null default 0,
-  materialized_through_sequence bigint not null default 0,
   created_by_user_id uuid,
   updated_by_user_id uuid,
   created_timestamp timestamptz not null default now(),
@@ -4602,12 +4599,7 @@ create table if not exists node_textboxes (
     and jsonb_typeof(document_json->'document') = 'object'
     and document_json->'document'->>'type' = 'doc'
   ),
-  constraint node_textboxes_revision_chk check (
-    content_revision >= 0
-    and latest_update_sequence >= 0
-    and materialized_through_sequence >= 0
-    and materialized_through_sequence <= latest_update_sequence
-  ),
+  constraint node_textboxes_revision_chk check (content_revision >= 0),
   constraint node_textboxes_source_identity_chk check (
     source_information_id is null or source_information_id = textbox_id
   ),
@@ -4633,88 +4625,6 @@ create index if not exists idx_node_textboxes_node_deleted
   on node_textboxes(company_id, node_id, deleted_timestamp, textbox_id)
   where deleted_timestamp is not null;
 
-create table if not exists node_textbox_yjs_updates (
-  company_id uuid not null,
-  node_id uuid not null,
-  textbox_id uuid not null,
-  update_sequence bigint generated always as identity,
-  update_id uuid not null,
-  update_sha256 text not null,
-  collaboration_epoch uuid not null,
-  client_id text not null,
-  actor_user_id uuid,
-  update_payload bytea not null,
-  received_timestamp timestamptz not null default now(),
-  checkpointed_timestamp timestamptz,
-  retain_until timestamptz,
-  constraint node_textbox_yjs_updates_client_chk check (
-    btrim(client_id) <> '' and octet_length(client_id) <= 160
-  ),
-  constraint node_textbox_yjs_updates_checksum_chk check (update_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint node_textbox_yjs_updates_payload_chk check (octet_length(update_payload) > 0),
-  constraint node_textbox_yjs_updates_retention_chk check (
-    (checkpointed_timestamp is null and retain_until is null)
-    or (checkpointed_timestamp is not null and retain_until is not null and retain_until >= checkpointed_timestamp)
-  ),
-  primary key (company_id, node_id, textbox_id, update_sequence),
-  unique (company_id, node_id, textbox_id, update_id),
-  unique (company_id, node_id, textbox_id, collaboration_epoch, update_sha256),
-  foreign key (company_id, node_id, textbox_id)
-    references node_textboxes(company_id, node_id, textbox_id) on delete cascade,
-  foreign key (actor_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_node_textbox_yjs_updates_replay
-  on node_textbox_yjs_updates(company_id, node_id, textbox_id, collaboration_epoch, update_sequence);
-
-create index if not exists idx_node_textbox_yjs_updates_cleanup
-  on node_textbox_yjs_updates(retain_until, update_sequence)
-  where checkpointed_timestamp is not null;
-
-create table if not exists node_textbox_yjs_checkpoints (
-  company_id uuid not null,
-  node_id uuid not null,
-  textbox_id uuid not null,
-  checkpoint_id uuid not null,
-  collaboration_epoch uuid not null,
-  through_update_sequence bigint not null,
-  checkpoint_payload bytea not null,
-  state_vector bytea not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  plain_text text not null default '',
-  checkpoint_reason text not null,
-  created_timestamp timestamptz not null default now(),
-  retain_until timestamptz not null,
-  constraint node_textbox_yjs_checkpoints_sequence_chk check (through_update_sequence >= 0),
-  constraint node_textbox_yjs_checkpoints_payload_chk check (
-    octet_length(checkpoint_payload) > 0 and octet_length(state_vector) > 0
-  ),
-  constraint node_textbox_yjs_checkpoints_schema_chk check (document_schema_version = 1),
-  constraint node_textbox_yjs_checkpoints_document_chk check (
-    jsonb_typeof(document_json) = 'object'
-    and document_json->>'format' = 'mango-tiptap-json'
-    and document_json->>'schema_version' = '1'
-    and jsonb_typeof(document_json->'document') = 'object'
-    and document_json->'document'->>'type' = 'doc'
-  ),
-  constraint node_textbox_yjs_checkpoints_reason_chk check (
-    checkpoint_reason in ('migration_seed', 'operation_count', 'update_bytes', 'idle', 'manual_recovery')
-  ),
-  constraint node_textbox_yjs_checkpoints_retention_chk check (retain_until > created_timestamp),
-  primary key (company_id, node_id, textbox_id, checkpoint_id),
-  unique (company_id, node_id, textbox_id, collaboration_epoch, through_update_sequence),
-  foreign key (company_id, node_id, textbox_id)
-    references node_textboxes(company_id, node_id, textbox_id) on delete cascade
-);
-
-create index if not exists idx_node_textbox_yjs_checkpoints_latest
-  on node_textbox_yjs_checkpoints(
-    company_id, node_id, textbox_id, collaboration_epoch, through_update_sequence desc, checkpoint_id desc
-  );
-
-create index if not exists idx_node_textbox_yjs_checkpoints_cleanup
-  on node_textbox_yjs_checkpoints(retain_until, checkpoint_id);
 
 create table if not exists node_textbox_comment_threads (
   company_id uuid not null,
@@ -4727,8 +4637,6 @@ create table if not exists node_textbox_comment_threads (
   anchor_after_text text not null default '',
   anchor_format text not null default 'none',
   anchor_status text not null default 'unanchored',
-  anchor_start bytea,
-  anchor_end bytea,
   legacy_start_offset integer,
   legacy_end_offset integer,
   created_by_user_id uuid,
@@ -4738,17 +4646,15 @@ create table if not exists node_textbox_comment_threads (
   resolved_timestamp timestamptz,
   constraint node_textbox_comment_threads_creator_name_chk check (btrim(created_by_display_name) <> ''),
   constraint node_textbox_comment_threads_anchor_format_chk check (
-    anchor_format in ('none', 'legacy_offsets_v1', 'yjs_relative_v1')
+    anchor_format in ('none', 'legacy_offsets_v1')
   ),
   constraint node_textbox_comment_threads_anchor_status_chk check (
     anchor_status in ('anchored', 'uniquely_recovered', 'ambiguous', 'unanchored', 'deleted_range')
   ),
   constraint node_textbox_comment_threads_anchor_payload_chk check (
-    (anchor_format = 'yjs_relative_v1' and anchor_start is not null and anchor_end is not null)
-    or (anchor_format = 'legacy_offsets_v1' and legacy_start_offset is not null and legacy_end_offset is not null
+    (anchor_format = 'legacy_offsets_v1' and legacy_start_offset is not null and legacy_end_offset is not null
       and legacy_start_offset >= 0 and legacy_end_offset >= legacy_start_offset)
-    or (anchor_format = 'none' and anchor_start is null and anchor_end is null
-      and legacy_start_offset is null and legacy_end_offset is null)
+    or (anchor_format = 'none' and legacy_start_offset is null and legacy_end_offset is null)
   ),
   constraint node_textbox_comment_threads_resolution_chk check (
     (resolved_timestamp is null and resolved_by_user_id is null)
@@ -5210,11 +5116,7 @@ create index if not exists idx_editor_document_migrations_status
   on editor_document_migrations(company_id, migration_run_id, status, source_owner_type, source_document_id);
 
 comment on table node_textboxes is
-  'Inactive Node v2 owner-specific materialized Tiptap documents. Ordinary typing persists Yjs updates, not full JSON snapshots.';
-comment on table node_textbox_yjs_updates is
-  'Operational Yjs update tail. Delete only after a durable checkpoint covers the update and its recovery retention has elapsed.';
-comment on table node_textbox_yjs_checkpoints is
-  'Operational Yjs recovery checkpoints. Retain at least the latest two valid checkpoints and honor retain_until.';
+  'Inactive Node v2 owner-specific materialized Tiptap documents. Current editors persist revisioned Tiptap JSON snapshots.';
 comment on table node_timeline_items is
   'Rebuildable ordered Node timeline index containing exactly textbox creation, Node movement, and verification stamps.';
 comment on table editor_migration_runs is
@@ -5356,157 +5258,6 @@ create table if not exists logic_gate_editor_documents (
 create index if not exists idx_logic_gate_editor_documents_gate
   on logic_gate_editor_documents(company_id, logic_gate_id, updated_timestamp desc, document_id);
 
--- EDITOR_OWNER_YJS_DELTAS_BEGIN
--- Project and Logic Gate editors use the same checkpoint-plus-delta durability
--- model as Node V2. The migration tool pre-seeds every converted document;
--- the collaboration service can also seed an existing row during deployment.
-
-alter table project_editor_documents
-  add column if not exists collaboration_epoch uuid not null default gen_random_uuid(),
-  add column if not exists latest_update_sequence bigint not null default 0,
-  add column if not exists materialized_through_sequence bigint not null default 0;
-
-alter table logic_gate_editor_documents
-  add column if not exists collaboration_epoch uuid not null default gen_random_uuid(),
-  add column if not exists latest_update_sequence bigint not null default 0,
-  add column if not exists materialized_through_sequence bigint not null default 0;
-
-alter table project_editor_documents
-  drop constraint if exists project_editor_documents_yjs_sequences_chk;
-alter table project_editor_documents
-  add constraint project_editor_documents_yjs_sequences_chk check (
-    latest_update_sequence >= 0
-    and materialized_through_sequence >= 0
-    and materialized_through_sequence <= latest_update_sequence
-  );
-
-alter table logic_gate_editor_documents
-  drop constraint if exists logic_gate_editor_documents_yjs_sequences_chk;
-alter table logic_gate_editor_documents
-  add constraint logic_gate_editor_documents_yjs_sequences_chk check (
-    latest_update_sequence >= 0
-    and materialized_through_sequence >= 0
-    and materialized_through_sequence <= latest_update_sequence
-  );
-
-create table if not exists editor_owner_yjs_updates (
-  company_id uuid not null references companies(company_id) on delete cascade,
-  owner_type text not null,
-  owner_id uuid not null,
-  document_id text not null,
-  update_sequence bigint generated always as identity,
-  update_id uuid not null,
-  update_sha256 text not null,
-  collaboration_epoch uuid not null,
-  client_id text not null,
-  actor_user_id uuid references users(user_id) on delete set null,
-  update_payload bytea not null,
-  created_timestamp timestamptz not null default now(),
-  checkpointed_timestamp timestamptz,
-  retain_until timestamptz,
-  primary key (company_id, owner_type, owner_id, document_id, update_sequence),
-  unique (company_id, owner_type, owner_id, document_id, update_id),
-  unique (company_id, owner_type, owner_id, document_id, collaboration_epoch, update_sha256),
-  constraint editor_owner_yjs_updates_owner_chk check (owner_type in ('project','logic_gate')),
-  constraint editor_owner_yjs_updates_document_chk check (btrim(document_id) <> '' and length(document_id) <= 500),
-  constraint editor_owner_yjs_updates_client_chk check (btrim(client_id) <> '' and octet_length(client_id) <= 160),
-  constraint editor_owner_yjs_updates_sha_chk check (update_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint editor_owner_yjs_updates_payload_chk check (octet_length(update_payload) between 1 and 8388608)
-);
-
-create index if not exists idx_editor_owner_yjs_updates_replay
-  on editor_owner_yjs_updates(company_id, owner_type, owner_id, document_id, collaboration_epoch, update_sequence);
-
-create table if not exists editor_owner_yjs_checkpoints (
-  company_id uuid not null references companies(company_id) on delete cascade,
-  owner_type text not null,
-  owner_id uuid not null,
-  document_id text not null,
-  checkpoint_id uuid not null,
-  collaboration_epoch uuid not null,
-  through_update_sequence bigint not null,
-  checkpoint_payload bytea not null,
-  state_vector bytea not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  plain_text text not null default '',
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  checkpoint_reason text not null,
-  created_timestamp timestamptz not null default now(),
-  retain_until timestamptz not null,
-  primary key (company_id, owner_type, owner_id, document_id, checkpoint_id),
-  unique (company_id, owner_type, owner_id, document_id, collaboration_epoch, through_update_sequence),
-  constraint editor_owner_yjs_checkpoints_owner_chk check (owner_type in ('project','logic_gate')),
-  constraint editor_owner_yjs_checkpoints_document_chk check (btrim(document_id) <> '' and length(document_id) <= 500),
-  constraint editor_owner_yjs_checkpoints_sequence_chk check (through_update_sequence >= 0),
-  constraint editor_owner_yjs_checkpoints_schema_chk check (document_schema_version = 1),
-  constraint editor_owner_yjs_checkpoints_reason_chk check (checkpoint_reason in ('migration_seed','operation_count','update_bytes','idle','manual_recovery')),
-  constraint editor_owner_yjs_checkpoints_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-    and jsonb_typeof(canonical_annotations)='array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  ),
-  constraint editor_owner_yjs_checkpoints_payload_chk check (octet_length(checkpoint_payload) > 0 and octet_length(state_vector) > 0)
-);
-
-create index if not exists idx_editor_owner_yjs_checkpoints_replay
-  on editor_owner_yjs_checkpoints(company_id, owner_type, owner_id, document_id, collaboration_epoch, through_update_sequence desc);
-
-create or replace function delete_project_editor_yjs_history()
-returns trigger
-language plpgsql
-as $$
-begin
-  delete from editor_owner_yjs_updates
-   where company_id=old.company_id and owner_type='project'
-     and owner_id=old.project_id and document_id=old.document_id;
-  delete from editor_owner_yjs_checkpoints
-   where company_id=old.company_id and owner_type='project'
-     and owner_id=old.project_id and document_id=old.document_id;
-  return old;
-end;
-$$;
-
-create or replace function delete_logic_gate_editor_yjs_history()
-returns trigger
-language plpgsql
-as $$
-begin
-  delete from editor_owner_yjs_updates
-   where company_id=old.company_id and owner_type='logic_gate'
-     and owner_id=old.logic_gate_id and document_id=old.document_id;
-  delete from editor_owner_yjs_checkpoints
-   where company_id=old.company_id and owner_type='logic_gate'
-     and owner_id=old.logic_gate_id and document_id=old.document_id;
-  return old;
-end;
-$$;
-
-drop trigger if exists trg_project_editor_document_yjs_cleanup on project_editor_documents;
-create trigger trg_project_editor_document_yjs_cleanup
-after delete on project_editor_documents
-for each row execute function delete_project_editor_yjs_history();
-
-drop trigger if exists trg_project_editor_document_yjs_epoch_cleanup on project_editor_documents;
-create trigger trg_project_editor_document_yjs_epoch_cleanup
-after update of collaboration_epoch on project_editor_documents
-for each row when (old.collaboration_epoch is distinct from new.collaboration_epoch)
-execute function delete_project_editor_yjs_history();
-
-drop trigger if exists trg_logic_gate_editor_document_yjs_cleanup on logic_gate_editor_documents;
-create trigger trg_logic_gate_editor_document_yjs_cleanup
-after delete on logic_gate_editor_documents
-for each row execute function delete_logic_gate_editor_yjs_history();
-
-drop trigger if exists trg_logic_gate_editor_document_yjs_epoch_cleanup on logic_gate_editor_documents;
-create trigger trg_logic_gate_editor_document_yjs_epoch_cleanup
-after update of collaboration_epoch on logic_gate_editor_documents
-for each row when (old.collaboration_epoch is distinct from new.collaboration_epoch)
-execute function delete_logic_gate_editor_yjs_history();
-
--- EDITOR_OWNER_YJS_DELTAS_END
 
 create table if not exists project_editor_document_operations (
   company_id uuid not null,
@@ -5785,98 +5536,6 @@ create table if not exists editor_rollback_exports (
 create index if not exists idx_editor_rollback_exports_latest
   on editor_rollback_exports(company_id, owner_type, owner_id, document_id, source_revision desc);
 
-create table if not exists node_verification_content_pins (
-  company_id uuid not null,
-  node_id uuid not null,
-  verification_request_id uuid not null,
-  textbox_id uuid not null,
-  collaboration_epoch uuid not null,
-  checkpoint_id uuid not null,
-  checkpoint_through_sequence bigint not null,
-  head_update_sequence bigint not null,
-  content_revision bigint not null,
-  pinned_timestamp timestamptz not null default now(),
-  primary key (company_id, node_id, verification_request_id, textbox_id),
-  foreign key (company_id, node_id, verification_request_id)
-    references node_verification_requests(company_id, node_id, verification_request_id) on delete cascade,
-  foreign key (company_id, node_id, textbox_id, checkpoint_id)
-    references node_textbox_yjs_checkpoints(company_id, node_id, textbox_id, checkpoint_id) on delete restrict,
-  constraint node_verification_content_pins_sequence_chk check (
-    checkpoint_through_sequence >= 0 and head_update_sequence >= checkpoint_through_sequence and content_revision >= 0
-  )
-);
-
-create table if not exists node_verification_update_pins (
-  company_id uuid not null,
-  node_id uuid not null,
-  verification_request_id uuid not null,
-  textbox_id uuid not null,
-  update_sequence bigint not null,
-  primary key (company_id, node_id, verification_request_id, textbox_id, update_sequence),
-  foreign key (company_id, node_id, verification_request_id, textbox_id)
-    references node_verification_content_pins(company_id, node_id, verification_request_id, textbox_id) on delete cascade,
-  foreign key (company_id, node_id, textbox_id, update_sequence)
-    references node_textbox_yjs_updates(company_id, node_id, textbox_id, update_sequence) on delete restrict
-);
-
-create or replace function mangorts_cleanup_node_v2_yjs_retention(p_limit integer default 1000)
-returns jsonb
-language plpgsql
-as $$
-declare
-  deleted_updates integer := 0;
-  deleted_checkpoints integer := 0;
-begin
-  if p_limit < 1 or p_limit > 10000 then
-    raise exception 'invalid Node V2 cleanup limit';
-  end if;
-
-  with candidates as (
-    select update_row.company_id, update_row.node_id, update_row.textbox_id, update_row.update_sequence
-    from node_textbox_yjs_updates update_row
-    where update_row.checkpointed_timestamp is not null
-      and update_row.retain_until < clock_timestamp()
-      and not exists (
-        select 1 from node_verification_update_pins pin
-        where (pin.company_id,pin.node_id,pin.textbox_id,pin.update_sequence)
-          =(update_row.company_id,update_row.node_id,update_row.textbox_id,update_row.update_sequence)
-      )
-    order by update_row.retain_until, update_row.update_sequence
-    limit p_limit
-  )
-  delete from node_textbox_yjs_updates update_row
-  using candidates candidate
-  where (update_row.company_id,update_row.node_id,update_row.textbox_id,update_row.update_sequence)
-    =(candidate.company_id,candidate.node_id,candidate.textbox_id,candidate.update_sequence);
-  get diagnostics deleted_updates = row_count;
-
-  with candidates as (
-    select checkpoint.company_id, checkpoint.node_id, checkpoint.textbox_id, checkpoint.checkpoint_id
-    from node_textbox_yjs_checkpoints checkpoint
-    where checkpoint.retain_until < clock_timestamp()
-      and not exists (
-        select 1 from node_verification_content_pins pin
-        where (pin.company_id,pin.node_id,pin.textbox_id,pin.checkpoint_id)
-          =(checkpoint.company_id,checkpoint.node_id,checkpoint.textbox_id,checkpoint.checkpoint_id)
-      )
-      and exists (
-        select 1 from node_textbox_yjs_checkpoints newer
-        where (newer.company_id,newer.node_id,newer.textbox_id,newer.collaboration_epoch)
-          =(checkpoint.company_id,checkpoint.node_id,checkpoint.textbox_id,checkpoint.collaboration_epoch)
-          and newer.through_update_sequence > checkpoint.through_update_sequence
-      )
-    order by checkpoint.retain_until, checkpoint.checkpoint_id
-    limit p_limit
-  )
-  delete from node_textbox_yjs_checkpoints checkpoint
-  using candidates candidate
-  where (checkpoint.company_id,checkpoint.node_id,checkpoint.textbox_id,checkpoint.checkpoint_id)
-    =(candidate.company_id,candidate.node_id,candidate.textbox_id,candidate.checkpoint_id);
-  get diagnostics deleted_checkpoints = row_count;
-
-  return jsonb_build_object('deleted_updates',deleted_updates,'deleted_checkpoints',deleted_checkpoints);
-end;
-$$;
 
 create or replace function mangorts_prepare_company_editor_purge(p_company_id uuid)
 returns jsonb
@@ -5942,12 +5601,10 @@ comment on table editor_rollout_gates is
   'Inactive-by-default owner-specific rollout gate. Only reviewed migration tooling may mutate it.';
 comment on table editor_rollback_exports is
   'Post-cutover JSON-to-HTML exports. Rollback cannot proceed until current revisions are exported.';
-comment on table node_verification_content_pins is
-  'Pins the checkpoint and exact tail boundary needed to reconstruct verified content despite retention.';
 -- NODE_V2_PHASE3_ENGINEERING_END
--- One aggregate current-text limit per editor owner. Attachment object bytes,
--- historical document versions, and Yjs update history are separate storage
--- and deliberately do not count toward this limit.
+-- One aggregate current-text limit per editor owner. Attachment object bytes
+-- and historical document versions are separate storage and deliberately do
+-- not count toward this limit.
 create or replace function mangorts_enforce_generic_editor_owner_text_limit()
 returns trigger
 language plpgsql

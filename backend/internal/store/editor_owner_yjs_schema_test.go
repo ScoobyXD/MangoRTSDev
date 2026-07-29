@@ -6,51 +6,48 @@ import (
 	"testing"
 )
 
-const (
-	editorOwnerYJSBegin = "-- EDITOR_OWNER_YJS_DELTAS_BEGIN"
-	editorOwnerYJSEnd   = "-- EDITOR_OWNER_YJS_DELTAS_END"
-)
-
-func editorOwnerYJSBlock(t *testing.T, path string) string {
+func readEditorSchemaFile(t *testing.T, path string) string {
 	t.Helper()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	text := strings.ReplaceAll(string(body), "\r\n", "\n")
-	start := strings.Index(text, editorOwnerYJSBegin)
-	end := strings.Index(text, editorOwnerYJSEnd)
-	if start < 0 || end < start {
-		t.Fatalf("%s is missing editor owner Yjs markers", path)
-	}
-	return strings.TrimSpace(text[start : end+len(editorOwnerYJSEnd)])
+	return strings.ToLower(strings.ReplaceAll(string(body), "\r\n", "\n"))
 }
 
-func TestEditorOwnerYJSMigrationMatchesCanonicalSchema(t *testing.T) {
-	migration := editorOwnerYJSBlock(t, "../../db/migrations/20260728_editor_owner_yjs_deltas.sql")
-	canonical := editorOwnerYJSBlock(t, "../../db/schema.sql")
-	if migration != canonical {
-		t.Fatal("editor owner Yjs migration and canonical schema blocks differ")
-	}
-}
-
-func TestEditorOwnerYJSSchemaStoresDeltasAndEpochs(t *testing.T) {
-	sqlText := strings.ToLower(editorOwnerYJSBlock(t, "../../db/migrations/20260728_editor_owner_yjs_deltas.sql"))
+func TestRetiredYJSStorageHasForwardCleanup(t *testing.T) {
+	sqlText := readEditorSchemaFile(t, "../../db/migrations/20260728_zz_retire_yjs_storage.sql")
 	for _, required := range []string{
+		"drop table if exists editor_owner_yjs_updates",
+		"drop table if exists editor_owner_yjs_checkpoints",
+		"drop table if exists node_textbox_yjs_updates",
+		"drop table if exists node_textbox_yjs_checkpoints",
+		"drop function if exists mangorts_cleanup_node_v2_yjs_retention(integer)",
+		"drop column if exists collaboration_epoch",
+		"drop column if exists latest_update_sequence",
+		"drop column if exists materialized_through_sequence",
+	} {
+		if !strings.Contains(sqlText, required) {
+			t.Errorf("Yjs retirement migration missing %q", required)
+		}
+	}
+
+	canonical := readEditorSchemaFile(t, "../../db/schema.sql")
+	for _, forbidden := range []string{
+		"create table if not exists editor_owner_yjs_updates",
+		"create table if not exists editor_owner_yjs_checkpoints",
+		"create table if not exists node_textbox_yjs_updates",
+		"create table if not exists node_textbox_yjs_checkpoints",
+		"create or replace function mangorts_cleanup_node_v2_yjs_retention",
+		"create table if not exists node_verification_content_pins",
+		"create table if not exists node_verification_update_pins",
 		"collaboration_epoch uuid not null",
 		"latest_update_sequence bigint not null",
 		"materialized_through_sequence bigint not null",
-		"create table if not exists editor_owner_yjs_updates",
-		"update_payload bytea not null",
-		"create table if not exists editor_owner_yjs_checkpoints",
-		"checkpoint_payload bytea not null",
-		"unique (company_id, owner_type, owner_id, document_id, collaboration_epoch, update_sha256)",
+		"yjs",
 	} {
-		if !strings.Contains(sqlText, required) {
-			t.Errorf("editor owner Yjs schema missing %q", required)
+		if strings.Contains(canonical, forbidden) {
+			t.Errorf("canonical schema still contains retired Yjs storage %q", forbidden)
 		}
-	}
-	if strings.Contains(sqlText, "document_json jsonb not null,\n  created_timestamp") {
-		t.Fatal("ordinary update rows must not store full document JSON")
 	}
 }
