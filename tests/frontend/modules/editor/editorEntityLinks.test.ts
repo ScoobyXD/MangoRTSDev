@@ -412,8 +412,8 @@ test("@ mention menu reads people loaded after editor creation and inserts an at
     const menu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-mention-menu="true"]');
     const option = menu?.querySelector<HTMLElement>('[role="option"]');
     assert.equal(menu?.dataset.side, "bottom");
-    assert.equal(menu?.dataset.visibleRows, "4");
-    assert.equal(menu?.style.maxHeight, "191px");
+    assert.equal(menu?.dataset.visibleRows, "5");
+    assert.equal(menu?.style.maxHeight, "236px");
     assert.equal(menu?.classList.contains("mango-tiptap-suggestion-menu"), true);
     assert.equal(option?.classList.contains("mango-tiptap-suggestion-option--person"), true);
     assert.equal(option?.querySelector(".mango-tiptap-suggestion-label")?.textContent, "Christina Phan");

@@ -82,6 +82,7 @@ import {
 } from "./editorImages";
 import {
   buildMentionOptions,
+  EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
   EDITOR_MENTION_BACKGROUND,
   EDITOR_MENTION_COLOR,
   EDITOR_URGENT_MENTION_BACKGROUND,
@@ -2578,7 +2579,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   zIndex: 20,
                   display: "grid",
                   gap: 3,
-                  maxHeight: 191,
+                  maxHeight: EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
                   overflowY: "auto",
                   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                   borderRadius: 12,

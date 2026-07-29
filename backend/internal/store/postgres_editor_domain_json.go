@@ -109,9 +109,9 @@ func getPostgresEditorDomainSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef)
 	}
 	snapshot := EditorJSONSnapshot{Document: ref, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...), UpdatedTimestamp: time.Now().UTC()}
 	var raw, annotationsRaw []byte
-	query := fmt.Sprintf(`select revision,document_schema_version,collaboration_epoch::text,document_json,canonical_annotations,is_deleted,updated_timestamp
+	query := fmt.Sprintf(`select revision,document_schema_version,document_json,canonical_annotations,is_deleted,updated_timestamp
 		from %s where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
-	err = tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &snapshot.CollaborationEpoch, &raw, &annotationsRaw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
+	err = tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID).Scan(&snapshot.Revision, &snapshot.SchemaVersion, &raw, &annotationsRaw, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EditorJSONSnapshot{}, err
 	}
@@ -342,7 +342,7 @@ func deletePostgresEditorDomainDocument(r *PostgresRepo, input EditorJSONDeleteI
 	if _, err := tx.ExecContext(ctx, insertVersion, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, nextRevision, raw, annotationsRaw, input.OperationID, input.ActorUserID, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	updateCurrent := fmt.Sprintf(`update %s set revision=$4,is_deleted=true,collaboration_epoch=gen_random_uuid(),latest_update_sequence=0,materialized_through_sequence=0,updated_timestamp=$5 where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
+	updateCurrent := fmt.Sprintf(`update %s set revision=$4,is_deleted=true,updated_timestamp=$5 where company_id=$1::uuid and %s=$2::uuid and document_id=$3`, storage.currentTable, storage.ownerColumn)
 	if _, err := tx.ExecContext(ctx, updateCurrent, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
