@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useState } from "react";
 import {
   getKanbanCardColorRailStyle,
   hexToRgba,
@@ -95,6 +95,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   requestedStatusAction,
   bylineText,
 }) => {
+  const [hovered, setHovered] = useState(false);
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
@@ -125,6 +126,8 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       draggable={!editingTitle}
       tabIndex={0}
       onMouseDown={onMouseDown}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -159,8 +162,8 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           dragAfter ? `0 3px 0 ${accent}` : "",
           emailTransferTarget ? `0 0 0 2px ${accent}, 0 0 0 5px ${hexToRgba(accent, 0.20)}, 0 12px 24px ${hexToRgba(accent, 0.18)}` : "",
         ].filter(Boolean).join(", ") || undefined,
-        transform: emailTransferTarget ? "translateY(-1px)" : undefined,
-        transition: "box-shadow 150ms ease, transform 150ms ease, background 150ms ease",
+        transform: emailTransferTarget ? "translateY(-1px)" : hovered ? "translateY(-2px)" : "translateY(0)",
+        transition: "box-shadow 150ms ease, transform 120ms ease, background 150ms ease",
       }}
       >
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}
