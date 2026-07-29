@@ -240,7 +240,7 @@ When editing this module, prefer comments that summarize intent and feature resp
 
 ## Contextual editor menus and selection actions (2026-07-28)
 
-- The `@` and `!` people menus share compact 42-pixel rows and show four rows before scrolling. The `#` entity menu uses the same row geometry, shows five rows before scrolling, and displays smaller product icons.
+- The `@`, `!`, and `#` suggestion menus share compact 42-pixel rows and show five rows before scrolling. Fixed overlay menus recalculate from their caret anchor during page or nested-editor scrolling, so they move with the document instead of remaining pinned to the viewport. The `#` menu displays smaller product icons.
 - Entity results are grouped in stable Nodes, Logic Gates, then Projects order while preserving server relevance within each group.
 - Text-selection Chat/Create Node actions are elevated at the highlight's top-right and include the editor's nested scroll offset. Image-selection actions use the same elevated surface immediately outside the image's right edge.
 

@@ -87,6 +87,7 @@ import {
   buildMentionOptions,
   createEditorMentionElement,
   EDITOR_MENTION_ATTRIBUTE,
+  EDITOR_MENTION_MENU_VISIBLE_ROWS,
   mentionUserDisplayName,
   mentionUserOptionLabel,
   mentionUserProfileColor,
@@ -3046,8 +3047,9 @@ const EDITOR_SUGGESTION_ROW_HEIGHT_PX = 42;
 const EDITOR_SUGGESTION_ROW_GAP_PX = 3;
 const EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX = 12;
 const EDITOR_SUGGESTION_MENU_BORDER_PX = 2;
-const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = (4 * EDITOR_SUGGESTION_ROW_HEIGHT_PX)
-  + (3 * EDITOR_SUGGESTION_ROW_GAP_PX) + EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX + EDITOR_SUGGESTION_MENU_BORDER_PX;
+const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = (EDITOR_MENTION_MENU_VISIBLE_ROWS * EDITOR_SUGGESTION_ROW_HEIGHT_PX)
+  + ((EDITOR_MENTION_MENU_VISIBLE_ROWS - 1) * EDITOR_SUGGESTION_ROW_GAP_PX)
+  + EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX + EDITOR_SUGGESTION_MENU_BORDER_PX;
 const EDITOR_ENTITY_MENU_MAX_HEIGHT_PX = (5 * EDITOR_SUGGESTION_ROW_HEIGHT_PX)
   + (4 * EDITOR_SUGGESTION_ROW_GAP_PX) + EDITOR_SUGGESTION_MENU_VERTICAL_PADDING_PX + EDITOR_SUGGESTION_MENU_BORDER_PX;
 const EDITOR_MENTION_MENU_MARGIN_PX = 8;
@@ -4502,6 +4504,20 @@ export function useEditorDocumentSurfaceHandlers({
       setEntitySearchError("");
     }
   }, [mentionMenuPosition, mentionUsers.length, resolvedEntityLinkContext]);
+
+  useEffect(() => {
+    if (mentionMenuPosition !== "fixed" || (!mentionMenuOpen && !entityMenuOpen)) return undefined;
+    const root = activeMentionRootRef.current ?? activeEntityRootRef.current;
+    const ownerWindow = root?.ownerDocument.defaultView;
+    if (!root || !ownerWindow) return undefined;
+    const reposition = () => refreshMentionDraft(root);
+    ownerWindow.addEventListener("scroll", reposition, true);
+    ownerWindow.addEventListener("resize", reposition);
+    return () => {
+      ownerWindow.removeEventListener("scroll", reposition, true);
+      ownerWindow.removeEventListener("resize", reposition);
+    };
+  }, [entityMenuOpen, mentionMenuOpen, mentionMenuPosition, refreshMentionDraft]);
 
   const syncActiveSelectionFormat = useCallback((root: HTMLElement) => {
     const pendingFontSize = pendingEditorFontSizeRef.current;

@@ -44,8 +44,9 @@ test("@, !, and # menus stay above a Node modal and directly below the caret row
     domGlobals.Range.prototype.getBoundingClientRect = () => new DOMRectConstructor(40, 30, 0, 20);
   }
   const previousElementRect = HTMLElementConstructor.prototype.getBoundingClientRect;
+  let decorationTop = 30;
   HTMLElementConstructor.prototype.getBoundingClientRect = function () {
-    if (this.hasAttribute("data-decoration-id")) return new DOMRectConstructor(40, 30, 0, 20);
+    if (this.hasAttribute("data-decoration-id")) return new DOMRectConstructor(40, decorationTop, 0, 20);
     return previousElementRect.call(this);
   };
 
@@ -67,6 +68,7 @@ test("@, !, and # menus stay above a Node modal and directly below the caret row
       { trigger: "#", selector: '[data-mango-tiptap-entity-menu="true"]' },
     ];
     for (const item of cases) {
+      decorationTop = 30;
       editor.commands.clearContent();
       editor.commands.focus();
       editor.commands.insertContent(item.trigger);
@@ -78,9 +80,13 @@ test("@, !, and # menus stay above a Node modal and directly below the caret row
       if (!menu) throw new Error(`Expected ${item.trigger} suggestion menu to open`);
       assert.equal(menu.parentElement, modalLayer);
       assert.equal(menu.dataset.side, "bottom");
+      assert.equal(menu.dataset.visibleRows, "5");
       assert.equal(menu.style.position, "fixed");
       assert.equal(menu.style.left, "40px");
       assert.equal(menu.style.top, "57px");
+      decorationTop = -70;
+      editor.view.dom.dispatchEvent(new domGlobals.Event("scroll"));
+      assert.equal(menu.style.top, "-43px", "the overlay should follow its caret when a nested editor scrolls");
       editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", {
         key: "Escape",
         bubbles: true,

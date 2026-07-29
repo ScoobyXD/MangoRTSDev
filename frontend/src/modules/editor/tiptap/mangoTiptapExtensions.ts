@@ -10,7 +10,7 @@ import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
 import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
-import { mentionUserProfileColor } from "../editorMentions.js";
+import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -241,6 +241,22 @@ function createSuggestionMenu(label: string, dataAttribute: string): HTMLDivElem
   menu.style.zIndex = "2100";
   return menu;
 }
+
+function followSuggestionMenuAnchor(
+  menu: HTMLDivElement,
+  visibleRows: number,
+  readClientRect: () => DOMRect | null,
+): () => void {
+  const ownerWindow = menu.ownerDocument.defaultView;
+  if (!ownerWindow) return () => undefined;
+  const reposition = () => positionSuggestionMenu(menu, visibleRows, readClientRect);
+  ownerWindow.addEventListener("scroll", reposition, true);
+  ownerWindow.addEventListener("resize", reposition);
+  return () => {
+    ownerWindow.removeEventListener("scroll", reposition, true);
+    ownerWindow.removeEventListener("resize", reposition);
+  };
+}
 export type MangoTiptapExtensionOptions = {
   editable: boolean;
   onImageFiles?: (files: File[], position: number | null) => void;
@@ -332,7 +348,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           let menu: HTMLDivElement | null = null;
           let selectedIndex = 0;
           let current: { items: MangoMentionSuggestionItem[]; command: (item: unknown) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
+          let stopFollowingAnchor: () => void = () => undefined;
           const close = () => {
+            stopFollowingAnchor();
+            stopFollowingAnchor = () => undefined;
             menu?.remove();
             menu = null;
             current = null;
@@ -376,7 +395,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               });
               menu?.appendChild(button);
             });
-            positionSuggestionMenu(menu, 4, current.clientRect);
+            positionSuggestionMenu(menu, EDITOR_MENTION_MENU_VISIBLE_ROWS, current.clientRect);
           };
           return {
             onStart: (props) => {
@@ -386,6 +405,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               menu = createSuggestionMenu(kind === "urgent" ? "Urgently mention people" : "Mention people", "data-mango-tiptap-mention-menu");
               menu.classList.add(`mango-tiptap-suggestion-menu--${kind}`);
               suggestionMenuPortalTarget(props, document).appendChild(menu);
+              stopFollowingAnchor = followSuggestionMenuAnchor(
+                menu,
+                EDITOR_MENTION_MENU_VISIBLE_ROWS,
+                () => current?.clientRect?.() ?? null,
+              );
               paint();
             },
             onUpdate: (props) => {
@@ -513,7 +537,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           let menu: HTMLDivElement | null = null;
           let selectedIndex = 0;
           let current: { items: EditorEntityLink[]; command: (item: EditorEntityLink) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
+          let stopFollowingAnchor: () => void = () => undefined;
           const close = () => {
+            stopFollowingAnchor();
+            stopFollowingAnchor = () => undefined;
             menu?.remove();
             menu = null;
             current = null;
@@ -557,6 +584,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
               menu = createSuggestionMenu("Link a Node, Logic Gate, or Project", "data-mango-tiptap-entity-menu");
               menu.classList.add("mango-tiptap-suggestion-menu--entity");
               suggestionMenuPortalTarget(props, document).appendChild(menu);
+              stopFollowingAnchor = followSuggestionMenuAnchor(
+                menu,
+                5,
+                () => current?.clientRect?.() ?? null,
+              );
               paint();
             },
             onUpdate: (props) => {

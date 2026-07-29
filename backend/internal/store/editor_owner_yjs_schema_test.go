@@ -51,3 +51,17 @@ func TestRetiredYJSStorageHasForwardCleanup(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectAndLogicGateRuntimeDoesNotReferenceRetiredYJSColumns(t *testing.T) {
+	runtimeSource := readEditorSchemaFile(t, "postgres_editor_domain_json.go")
+	for _, forbidden := range []string{
+		"collaboration_epoch::text",
+		"collaboration_epoch=gen_random_uuid()",
+		"latest_update_sequence=0",
+		"materialized_through_sequence=0",
+	} {
+		if strings.Contains(runtimeSource, forbidden) {
+			t.Errorf("Project/Logic Gate editor runtime still references retired Yjs storage %q", forbidden)
+		}
+	}
+}
