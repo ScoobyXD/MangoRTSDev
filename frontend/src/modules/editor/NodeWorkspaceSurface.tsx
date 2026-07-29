@@ -80,7 +80,7 @@ import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import { groupNodeTimelineEventsByTextBlock } from "./nodeTimelineOrdering";
-import { EditorSaveStatusBadge, type EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { EditorSaveStatusBadge, editorSaveNeedsFailureAttention, type EditorSaveState } from "./EditorSaveStatusBadge.js";
 
 import {
   AttachedEmailOrganizerPane,
@@ -3835,6 +3835,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               return next;
             });
           };
+          const blockSaveState = textBlockSaveStates[block.id] ?? (block.pending ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp });
+          const blockSaveNeedsFailureAttention = editorSaveNeedsFailureAttention(blockSaveState);
           return (
             <React.Fragment key={block.id}>
               {timelineEventsByBlockIndex[index]?.map(renderNodeTimelineEvent)}
@@ -3844,7 +3846,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <div style={{ minWidth: 0, height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, minHeight: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
                 <div
                   data-node-text-box-row={block.id}
-                  className="mango-fixed-editor-row"
+                  className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
                   style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderWidth: 1, borderStyle: "solid", borderColor: textBlockIsFocused ? "transparent" : blockEmailAccent || EDITOR_NEU_SOFT_BORDER, borderLeftWidth: blockEmailAccent ? 4 : 1, borderLeftColor: blockEmailAccent || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER), borderRadius: 14, background: blockEmailAccent ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div
@@ -3873,7 +3875,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           <TextEditorIcon color={accent} />
                           <span>Editor</span>
                         </button>
-                        <EditorSaveStatusBadge state={textBlockSaveStates[block.id] ?? (block.pending ? { status: "saving" } : { status: "saved", updatedTimestamp: block.updatedTimestamp })} compact />
+                        <EditorSaveStatusBadge state={blockSaveState} compact />
                         <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
                           Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                         </span>

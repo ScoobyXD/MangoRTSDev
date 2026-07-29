@@ -117,44 +117,111 @@ export function normalizeMangoTiptapFontSize(value: unknown): string | null {
   return `${Math.max(10, Math.min(28, Math.round(pixels)))}px`;
 }
 
-function normalizeMangoTiptapJSONContent(value: JSONContent): JSONContent {
-  const normalized: JSONContent = { ...value };
-  if (value.attrs) {
-    const attrs = { ...value.attrs };
-    if (value.type === "tableCell" || value.type === "tableHeader") {
+function supportedAttributeValue(value: unknown): value is string | number | boolean | null | number[] {
+  return value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || typeof value === "number" && Number.isFinite(value)
+    || Array.isArray(value) && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function normalizeNodeAttributes(type: string | undefined, value: unknown): Record<string, unknown> | undefined {
+  if (!type || !isRecord(value)) return undefined;
+  const allowed = nodeAttributes[type];
+  if (!allowed) return undefined;
+  const attrs: Record<string, unknown> = {};
+  for (const [name, attribute] of Object.entries(value)) {
+    if (allowed.has(name) && supportedAttributeValue(attribute)) attrs[name] = Array.isArray(attribute) ? [...attribute] : attribute;
+  }
+  if (attrs.blockId !== undefined && attrs.blockId !== null && (typeof attrs.blockId !== "string" || !attrs.blockId.trim() || attrs.blockId.length > 160)) delete attrs.blockId;
+  if (attrs.indentLevel !== undefined && (!Number.isInteger(attrs.indentLevel) || Number(attrs.indentLevel) < 0 || Number(attrs.indentLevel) > 12)) delete attrs.indentLevel;
+  if (attrs.textAlign !== undefined && attrs.textAlign !== null && !["left", "center", "right"].includes(String(attrs.textAlign))) delete attrs.textAlign;
+  if (type === "heading" && !positiveInteger(attrs.level, 6)) attrs.level = 1;
+  if (type === "orderedList" && attrs.start !== undefined && attrs.start !== null && !positiveInteger(attrs.start)) delete attrs.start;
+  if (type === "orderedList" && attrs.type !== undefined && attrs.type !== null && !["1", "a", "A", "i", "I"].includes(String(attrs.type))) delete attrs.type;
+  if (type === "taskItem" && attrs.checked !== undefined && attrs.checked !== null && typeof attrs.checked !== "boolean") delete attrs.checked;
+  if (type === "table" && attrs.style !== undefined && attrs.style !== null && !["auto", "fixed"].includes(String(attrs.style))) delete attrs.style;
+  if (type === "tableCell" || type === "tableHeader") {
+    if (attrs.colspan !== undefined && attrs.colspan !== null && !positiveInteger(attrs.colspan, 1_000)) delete attrs.colspan;
+    if (attrs.rowspan !== undefined && attrs.rowspan !== null && !positiveInteger(attrs.rowspan, 1_000)) delete attrs.rowspan;
+    if (attrs.colwidth !== undefined && attrs.colwidth !== null && (!Array.isArray(attrs.colwidth) || !attrs.colwidth.every((item) => positiveInteger(item)))) delete attrs.colwidth;
+    if (attrs.align !== undefined && attrs.align !== null && !["left", "center", "right"].includes(String(attrs.align))) delete attrs.align;
+    if (attrs.backgroundColor !== undefined && attrs.backgroundColor !== null) {
       const color = normalizeMangoTiptapColor(attrs.backgroundColor);
-      if (attrs.backgroundColor !== undefined && attrs.backgroundColor !== null) {
-        if (color) attrs.backgroundColor = color;
-        else delete attrs.backgroundColor;
+      if (color) attrs.backgroundColor = color;
+      else delete attrs.backgroundColor;
+    }
+  }
+  if (type === "mangoAttachmentImage") {
+    for (const name of ["width", "height", "displayWidth", "displayHeight"] as const) {
+      if (attrs[name] !== undefined && attrs[name] !== null && !positiveInteger(attrs[name])) delete attrs[name];
+    }
+    if (attrs.alignment !== undefined && attrs.alignment !== null && !["left", "center", "right"].includes(String(attrs.alignment))) delete attrs.alignment;
+    if (attrs.position !== undefined && attrs.position !== null && !["inline", "break"].includes(String(attrs.position))) delete attrs.position;
+    if (attrs.layout !== undefined && attrs.layout !== null && !["content", "wide"].includes(String(attrs.layout))) delete attrs.layout;
+    if (attrs.linkHref !== undefined && attrs.linkHref !== null && attrs.linkHref !== "" && !safeMangoTiptapLink(attrs.linkHref)) {
+      delete attrs.linkHref;
+      delete attrs.linkTarget;
+      delete attrs.linkRel;
+      delete attrs.linkTitle;
+    }
+    if (attrs.linkTarget !== undefined && attrs.linkTarget !== null && attrs.linkTarget !== "" && !["_blank", "_self"].includes(String(attrs.linkTarget))) delete attrs.linkTarget;
+  }
+  return Object.keys(attrs).length > 0 ? attrs : undefined;
+}
+
+function safeMangoTiptapLink(value: unknown): value is string {
+  return typeof value === "string" && /^(https?:|mailto:|tel:|\/|#)/i.test(value.trim());
+}
+
+function normalizeMarks(type: string | undefined, value: unknown): NonNullable<JSONContent["marks"]> | undefined {
+  // ProseMirror may carry active marks onto a pasted hard break. Those marks are
+  // cosmetic and do not belong in Mango's durable schema, so discard them rather
+  // than rejecting the entire visible document.
+  if (type !== "text" && type !== "mention" || !Array.isArray(value)) return undefined;
+  const normalized: NonNullable<JSONContent["marks"]> = [];
+  for (const candidate of value) {
+    if (!isRecord(candidate) || typeof candidate.type !== "string") continue;
+    const allowed = markAttributes[candidate.type];
+    if (!allowed) continue;
+    const attrs: Record<string, unknown> = {};
+    if (isRecord(candidate.attrs)) {
+      for (const [name, attribute] of Object.entries(candidate.attrs)) {
+        if (allowed.has(name) && supportedAttributeValue(attribute)) attrs[name] = Array.isArray(attribute) ? [...attribute] : attribute;
       }
     }
-    normalized.attrs = attrs;
-  }
-  if (value.marks) {
-    normalized.marks = value.marks.map((mark) => {
-      if (!mark.attrs) return { ...mark };
-      const attrs = { ...mark.attrs };
-      if (mark.type === "textStyle") {
-        if (attrs.fontSize !== undefined && attrs.fontSize !== null) {
-          const fontSize = normalizeMangoTiptapFontSize(attrs.fontSize);
-          if (fontSize) attrs.fontSize = fontSize;
-          else delete attrs.fontSize;
-        }
-        if (attrs.color !== undefined && attrs.color !== null) {
-          const color = normalizeMangoTiptapColor(attrs.color);
-          if (color) attrs.color = color;
-          else delete attrs.color;
-        }
+    if (candidate.type === "textStyle") {
+      if (attrs.fontSize !== undefined && attrs.fontSize !== null) {
+        const fontSize = normalizeMangoTiptapFontSize(attrs.fontSize);
+        if (fontSize) attrs.fontSize = fontSize;
+        else delete attrs.fontSize;
       }
-      if (mark.type === "highlight" && attrs.color !== undefined && attrs.color !== null) {
+      if (attrs.color !== undefined && attrs.color !== null) {
         const color = normalizeMangoTiptapColor(attrs.color);
         if (color) attrs.color = color;
         else delete attrs.color;
       }
-      return { ...mark, attrs };
-    });
+      if (Object.keys(attrs).length === 0) continue;
+    }
+    if (candidate.type === "highlight" && attrs.color !== undefined && attrs.color !== null) {
+      const color = normalizeMangoTiptapColor(attrs.color);
+      if (color) attrs.color = color;
+      else delete attrs.color;
+    }
+    if (candidate.type === "link" && !safeMangoTiptapLink(attrs.href)) continue;
+    normalized.push(Object.keys(attrs).length > 0 ? { type: candidate.type, attrs } : { type: candidate.type });
   }
-  if (value.content) normalized.content = value.content.map(normalizeMangoTiptapJSONContent);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeMangoTiptapJSONContent(value: JSONContent): JSONContent {
+  const normalized: JSONContent = { type: value.type };
+  const attrs = normalizeNodeAttributes(value.type, value.attrs);
+  if (attrs) normalized.attrs = attrs;
+  if (value.text !== undefined) normalized.text = value.text;
+  const marks = normalizeMarks(value.type, value.marks);
+  if (marks) normalized.marks = marks;
+  if (Array.isArray(value.content)) normalized.content = value.content.map(normalizeMangoTiptapJSONContent);
   return normalized;
 }
 
@@ -362,7 +429,7 @@ export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidat
 
 export function serializeMangoTiptapDocument(value: MangoTiptapDocument): string {
   incrementEditorRuntimeMetric("full_document_serializations");
-  const result = validateMangoTiptapDocumentStructure(value);
+  const result = validateMangoTiptapDocumentStructure(normalizeMangoTiptapDocument(value));
   if (!result.valid) throw new Error(result.error);
   const serialized = JSON.stringify(result.value);
   return serialized;

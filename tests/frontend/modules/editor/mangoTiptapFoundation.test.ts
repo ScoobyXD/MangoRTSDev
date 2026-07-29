@@ -18,6 +18,7 @@ import {
   MangoTiptapSync,
   mangoTiptapPendingStorageKey,
   readExactMangoTiptapPending,
+  type MangoTiptapSaveState,
   type MangoTiptapSnapshot,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapSync.js";
 import {
@@ -199,8 +200,37 @@ test("pasted CSS values are normalized without losing text", () => {
     },
   });
   assert.equal(unsupported.document.content?.[0]?.content?.[0]?.text, "keep me");
-  assert.deepEqual(unsupported.document.content?.[0]?.content?.[0]?.marks?.[0]?.attrs, {});
+  assert.equal(unsupported.document.content?.[0]?.content?.[0]?.marks, undefined);
   assert.equal(validateMangoTiptapDocument(unsupported).valid, true);
+
+  const pastedLineBreak: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { textAlign: "justify", indentLevel: 1.5, clipboardOnly: "discard me" },
+        content: [
+          { type: "text", text: "first line", marks: [{ type: "bold" }] },
+          { type: "hardBreak", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontSize: "10.5pt", color: "rgba(1, 2, 3, 0.5)" } }] },
+          { type: "text", text: "second line", marks: [{ type: "clipboardOnly", attrs: { anything: "discard me" } }, { type: "link", attrs: { href: "javascript:alert(1)" } }] },
+        ],
+      }],
+    },
+  };
+  assert.equal(validateMangoTiptapDocument(pastedLineBreak).valid, false);
+  const serializedLineBreak = serializeMangoTiptapDocument(pastedLineBreak);
+  const parsedLineBreak = parseMangoTiptapDocument(serializedLineBreak);
+  assert.equal(parsedLineBreak.valid, true, parsedLineBreak.valid ? "" : parsedLineBreak.error);
+  if (!parsedLineBreak.valid) return;
+  const savedParagraph = parsedLineBreak.value.document.content?.[0];
+  assert.equal(savedParagraph?.content?.[0]?.text, "first line");
+  assert.equal(savedParagraph?.content?.[1]?.type, "hardBreak");
+  assert.equal(savedParagraph?.content?.[1]?.marks, undefined);
+  assert.equal(savedParagraph?.content?.[2]?.text, "second line");
+  assert.equal(savedParagraph?.content?.[2]?.marks, undefined);
+  assert.deepEqual(savedParagraph?.attrs, undefined);
 });
 
 test("Tiptap validation and serialization accept documents beyond the former two MiB cap", () => {
@@ -216,6 +246,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     window: globalThis.window,
     document: globalThis.document,
     Node: globalThis.Node,
+    ClipboardEvent: globalThis.ClipboardEvent,
     HTMLElement: globalThis.HTMLElement,
     MutationObserver: globalThis.MutationObserver,
     requestAnimationFrame: globalThis.requestAnimationFrame,
@@ -226,6 +257,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
   Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
   Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
   Object.defineProperty(globalThis, "Node", { configurable: true, value: domGlobals.Node });
+  Object.defineProperty(globalThis, "ClipboardEvent", { configurable: true, value: domGlobals.Event });
   Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
   Object.defineProperty(globalThis, "MutationObserver", { configurable: true, value: domGlobals.MutationObserver });
   Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) });
@@ -263,6 +295,24 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       format: "mango-tiptap-json", schema_version: 1, document: editor.getJSON(),
     });
     assert.equal(validation.valid, true, validation.valid ? "" : validation.error);
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    assert.equal(editor.view.pasteHTML('<p><strong><span style="font-size: 10.5pt; color: rgb(31, 78, 121)">first line<br>second line</span></strong></p>'), true);
+    const parsedClipboardDocument: MangoTiptapDocument = {
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: editor.getJSON(),
+    };
+    const parsedClipboardBreak = parsedClipboardDocument.document.content?.[0]?.content?.find((node) => node.type === "hardBreak");
+    assert.equal(parsedClipboardBreak?.type, "hardBreak");
+    assert.ok((parsedClipboardBreak?.marks?.length ?? 0) > 0, "the real Tiptap HTML parser carries pasted formatting onto the line break");
+    const safeClipboardDocument = normalizeMangoTiptapDocument(parsedClipboardDocument);
+    const safeClipboardBreak = safeClipboardDocument.document.content?.[0]?.content?.find((node) => node.type === "hardBreak");
+    const safeClipboardValidation = validateMangoTiptapDocument(safeClipboardDocument);
+    assert.equal(safeClipboardValidation.valid, true, safeClipboardValidation.valid ? "" : safeClipboardValidation.error);
+    assert.equal(safeClipboardBreak?.marks, undefined, "cosmetic line-break marks are discarded instead of blocking the text save");
+    assert.equal(safeClipboardDocument.document.content?.[0]?.content?.filter((node) => node.type === "text").map((node) => node.text).join(""), "first linesecond line");
 
     editor.commands.setContent({
       type: "doc",
@@ -671,6 +721,7 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
   let firstAcceptedOperationID = "";
   let loseFirstAcknowledgement = true;
   let conflicts = 0;
+  const saveStates: MangoTiptapSaveState[] = [];
   const lifecycle = new MangoEditorLifecycle();
   lifecycle.activate();
   lifecycle.markDirty();
@@ -711,6 +762,7 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     onDocument: () => undefined,
     onConflict: () => { conflicts += 1; },
     onPendingChange: (count: number) => lifecycle.setPendingCount(count),
+    onSaveStateChange: (state: MangoTiptapSaveState) => saveStates.push(state),
     batchMs: 60_000,
     maxBatchMs: 60_000,
   };
@@ -720,6 +772,8 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     await sync.start();
     sync.schedule(operationADocument, false, () => operationAAnnotations);
     await assert.rejects(() => sync.flush(), /response was lost/);
+    assert.equal(saveStates[saveStates.length - 1]?.status, "failed");
+    assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, true);
     const pendingAfterA = await readExactMangoTiptapPending(storageKey);
     assert.equal(pendingAfterA?.commits.length, 1);
     assert.equal(pendingAfterA?.commits[0]?.attempted, true);
@@ -741,6 +795,9 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     assert.equal(await readExactMangoTiptapPending(storageKey), null);
     assert.equal(lifecycle.getSnapshot().pendingCount, 0);
     assert.equal(lifecycle.getSnapshot().pinned, false);
+    assert.ok(saveStates.some((state) => state.status === "saving" && state.unresolvedFailure), "the red failure attention remains while retrying");
+    assert.equal(saveStates[saveStates.length - 1]?.status, "saved");
+    assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, false);
   } finally {
     await sync.shutdown();
     for (const [key, value] of Object.entries(previous)) {

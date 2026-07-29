@@ -1600,3 +1600,17 @@ test("the shared revisioned JSON editor keeps movable image controls", () => {
   assert.match(editorContent, /linkMangoResourceAttachment\(requestJSON/);
   assert.match(editorContent, /relationshipKind: "inline_image"[\s\S]{0,120}informationID/);
 });
+test("failed saves pulse the complete Node, Project, and Logic Gate editor frames until acknowledgement", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const saveStatus = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorSaveStatusBadge.tsx"), "utf8");
+  const editorStyles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+
+  assert.match(saveStatus, /state\?\.status === "failed" \|\| Boolean\(state\?\.unresolvedFailure\)/);
+  assert.match(nodeSurface, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
+  assert.match(projectSummary, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
+  assert.match(editorContent, /className=\{editorSaveNeedsFailureAttention\(logicGateSaveState\) \? "mango-editor-save-failed-frame"/);
+  assert.match(editorStyles, /mango-editor-save-failed-frame-pulse 2s ease-in-out infinite/);
+  assert.match(editorStyles, /prefers-reduced-motion: reduce/);
+});
