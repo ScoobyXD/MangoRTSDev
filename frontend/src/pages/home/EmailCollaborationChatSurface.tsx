@@ -46,6 +46,7 @@ import {
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
+import { upsertProjectRelationship } from "../../modules/project-management/projectManagementApi";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { EmailCollaborationParticipantRoster } from "./EmailCollaborationParticipantRoster";
 import {
@@ -220,6 +221,7 @@ export function EmailCollaborationChatSurface({
   const collaborationRef = React.useRef<CommunicationsEmailCollaboration | null>(null);
   const sourceLoadKeyRef = React.useRef("");
   const requestedCollaborationIDRef = React.useRef("");
+  const handledDestinationRequestRef = React.useRef<NonNullable<EmailCollaborationActionRequest> | null>(null);
   const messageCollaborationID = message.collaboration_id?.trim() ?? "";
   const messageCollaborationIDRef = React.useRef(messageCollaborationID);
   messageCollaborationIDRef.current = messageCollaborationID;
@@ -233,7 +235,7 @@ export function EmailCollaborationChatSurface({
   React.useEffect(() => {
     if (!actionRequest) return;
     setPendingAction(actionRequest.action);
-    setPriorityMenuOpen(actionRequest.action !== "chat");
+    setPriorityMenuOpen(!actionRequest.destination && actionRequest.action !== "chat");
     setCreateStep("priority");
     setSelectedPriority(null);
     setLogicGateSearch("");
@@ -626,6 +628,7 @@ export function EmailCollaborationChatSurface({
       onActionRequestHandled();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, includeChat ? "Failed to import this email chat into the node." : "Failed to import this email into the node."));
+      onActionRequestHandled();
     } finally {
       setSubmitting(false);
     }
@@ -750,13 +753,15 @@ export function EmailCollaborationChatSurface({
     return activeBlockID;
   }, [author.name, author.userID, companyID, draft, draftAttachments, ensureLinkedEmailTextBlock, message.id, onClearSelection, onError, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selection]);
 
-  const createEmailNode = React.useCallback(async (priorityOverride?: number, logicGateID = "") => {
+  const createEmailNode = React.useCallback(async (priorityOverride?: number, logicGateID = "", projectID = "") => {
     if (submitting) return;
     setSubmitting(true);
     try {
+      const cleanLogicGateID = logicGateID.trim();
+      const cleanProjectID = projectID.trim();
+      if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Logic Gate.");
       const created = await ensureCollaboration(priorityOverride);
       const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
-      const cleanLogicGateID = logicGateID.trim();
       if (cleanLogicGateID) {
         await assignNodeToLogicGateStatus({
           apiBase,
@@ -768,17 +773,48 @@ export function EmailCollaborationChatSurface({
           nodeTitle: message.subject?.trim() || undefined,
         });
       }
+      if (cleanProjectID) {
+        await upsertProjectRelationship({
+          companyID,
+          projectID: cleanProjectID,
+          resourceType: "node",
+          resourceID: created.node_id,
+        });
+      }
       await saveCurrentDraftToCollaboration(created, linkedTextBlockID);
       setPriorityMenuOpen(false);
       onSuccess();
-      onActionSuccess("Node was created.");
+      onActionSuccess(cleanProjectID
+        ? "Email Node was sent to project."
+        : cleanLogicGateID ? "Email Node was sent to Logic Gate." : "Node was created.");
       onActionRequestHandled();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to create a node for this email."));
+      onActionRequestHandled();
     } finally {
       setSubmitting(false);
     }
   }, [apiBase, companyID, ensureCollaboration, ensureLinkedEmailTextBlock, message.subject, onActionRequestHandled, onActionSuccess, onError, onSuccess, saveCurrentDraftToCollaboration, selectedPriority, submitting]);
+
+  React.useEffect(() => {
+    const request = actionRequest;
+    const destination = request?.destination;
+    if (!request || !destination || loading || submitting || handledDestinationRequestRef.current === request) return;
+    handledDestinationRequestRef.current = request;
+    if (destination.kind === "node") {
+      void importIntoExistingNode(destination.nodeID, false);
+      return;
+    }
+    if (destination.kind === "logic_gate") {
+      void createEmailNode(destination.priority, destination.logicGateID);
+      return;
+    }
+    if (destination.kind === "project") {
+      void createEmailNode(destination.priority, destination.logicGateID, destination.projectID);
+      return;
+    }
+    void createEmailNode(destination.priority);
+  }, [actionRequest, createEmailNode, importIntoExistingNode, loading, submitting]);
 
   const submit = React.useCallback(async (priorityOverride?: number) => {
     const cleanDraft = draft.trim();

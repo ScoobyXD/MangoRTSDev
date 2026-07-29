@@ -8,8 +8,9 @@ import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./home
 import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
+import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
 import { emailMessageRowKey } from "./homeUtils";
-import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailCollaborationActionRequest, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailCollaborationPanelAction } from "./emailCollaborationChat";
+import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailCollaborationActionRequest, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 import {
@@ -412,10 +413,6 @@ export function HomeMailWorkspace({
     emailNavigationSequenceRef.current += 1;
     setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
   }, []);
-  const requestEmailPanelAction = React.useCallback((action: EmailCollaborationPanelAction) => {
-    if (!emailChatKey) return;
-    setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, action));
-  }, [emailChatKey]);
   const toggleEmailChat = React.useCallback(() => {
     if (!emailChatKey) return;
     if (!emailChatVisible) {
@@ -424,20 +421,11 @@ export function HomeMailWorkspace({
     }
     setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
   }, [emailChatKey, emailChatVisible, selectedMessage]);
-  const createNodeFromEmail = React.useCallback(() => {
-    if (!selectedMessage) return;
-    if (selectedMessage.collaboration_node_id?.trim()) {
-      onOpenCollaborationNode(selectedMessage);
-      return;
-    }
-    setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
-    requestEmailPanelAction("create");
-  }, [onOpenCollaborationNode, requestEmailPanelAction, selectedMessage]);
-  const addEmailToNode = React.useCallback(() => {
+  const sendEmailToNodeDestination = React.useCallback((destination: EmailNodeDestination) => {
     if (!selectedMessage) return;
     setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
-    requestEmailPanelAction("import");
-  }, [requestEmailPanelAction, selectedMessage]);
+    setEmailActionRequest((current) => nextEmailNodeDestinationRequest(current, destination));
+  }, [selectedMessage]);
   const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
     if (!emailChatKey) return;
     setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
@@ -950,9 +938,19 @@ export function HomeMailWorkspace({
                 chatAvailable={emailChatAvailable}
                 chatOpen={emailChatVisible}
                 actionNotice={emailActionNotice?.message ?? ""}
+                emailNodeDestinationSearch={(
+                  <EmailNodeDestinationSearch
+                    companyID={companyID}
+                    nodes={nodes}
+                    logicGates={logicGates}
+                    currentNodeID={selectedMessage.collaboration_node_id}
+                    busy={!!busy || Boolean(emailActionRequest?.destination)}
+                    onSubmit={sendEmailToNodeDestination}
+                    onOpenCurrentNode={() => onOpenCollaborationNode(selectedMessage)}
+                    onError={setEmailCollaborationError}
+                  />
+                )}
                 onToggleChat={toggleEmailChat}
-                onCreateEmailNode={createNodeFromEmail}
-                onAddEmailToNode={addEmailToNode}
                 onLoadMessageBody={onLoadMessageBody}
                 onReply={onOpenReply}
                 onReplyAll={onOpenReplyAll}

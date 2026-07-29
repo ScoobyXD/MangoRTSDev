@@ -6298,7 +6298,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, actionNotice = "", selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onCreateEmailNode, onAddEmailToNode, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, actionNotice = "", emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6312,14 +6312,13 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   chatAvailable: boolean;
   chatOpen: boolean;
   actionNotice?: string;
+  emailNodeDestinationSearch: React.ReactNode;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
   onCreateSharedDraft: (message: EmailMessage) => void;
   onToggleChat: () => void;
-  onCreateEmailNode: () => void;
-  onAddEmailToNode: () => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -6481,12 +6480,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         </div>
         {chatAvailable && (
           <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", flex: "0 0 auto", display: "flex", flexWrap: "nowrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)", whiteSpace: "nowrap" }}>
-            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onCreateEmailNode}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ExplorerRowIcon kind="node" />{message.collaboration_node_id?.trim() ? "Open Email Node" : "Create Node From Email"}</span>
-            </button>
-            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onAddEmailToNode}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ExplorerRowIcon kind="node" />Add Email to Node</span>
-            </button>
+            {emailNodeDestinationSearch}
             <button
               type="button"
               aria-controls="email-collaboration-chat"
