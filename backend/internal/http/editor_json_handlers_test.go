@@ -75,9 +75,12 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 		"base_revision": 0, "schema_version": 1, "document": document,
 		"annotations": []any{map[string]any{"id": "comment-1", "kind": "comment", "from": 2, "to": 6}},
 	})
-	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), "\"revision\":1") ||
-		!strings.Contains(created.Body.String(), "\"annotations\":[{\"id\":\"comment-1\"") {
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), "\"operation_id\":\"json-operation-1\"") ||
+		!strings.Contains(created.Body.String(), "\"revision\":1") {
 		t.Fatalf("created status=%d body=%s", created.Code, created.Body.String())
+	}
+	if strings.Contains(created.Body.String(), "\"document\"") || strings.Contains(created.Body.String(), "\"annotations\"") || strings.Contains(created.Body.String(), "\"schema_version\"") {
+		t.Fatalf("save acknowledgement returned a complete document: %s", created.Body.String())
 	}
 	metadata := doJSON(http.MethodPatch, jsonPath, map[string]any{
 		"title": "JSON image", "attachments": []any{},

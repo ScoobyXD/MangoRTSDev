@@ -8,7 +8,6 @@ import { JSDOM } from "jsdom";
 import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/editorLifecycle.js";
 import {
   createEmptyMangoTiptapDocument,
-  normalizeMangoTiptapDocument,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
   validateMangoTiptapDocument,
@@ -92,6 +91,15 @@ function richDocument(text = "Mango"): MangoTiptapDocument {
   };
 }
 
+function saveAcknowledgement(operationID: string, revision: number, deduplicated = false) {
+  return {
+    operation_id: operationID,
+    revision,
+    committed_at: "2026-07-29T18:00:00Z",
+    ...(deduplicated ? { deduplicated: true } : {}),
+  };
+}
+
 test("editor lifecycle pins dirty work until persistence is confirmed", () => {
   const lifecycle = new MangoEditorLifecycle();
   assert.equal(lifecycle.getSnapshot().state, "sleeping");
@@ -114,58 +122,17 @@ test("editor lifecycle pins dirty work until persistence is confirmed", () => {
   assert.equal(lifecycle.getSnapshot().state, "sleeping");
 });
 
-test("strict Mango Tiptap contract covers rich features and fails closed", () => {
+test("Mango validates only the versioned document envelope before Tiptap opens it", () => {
   assert.equal(validateMangoTiptapDocument(richDocument()).valid, true);
   assert.equal(parseMangoTiptapDocument(JSON.stringify(richDocument())).valid, true);
   assert.equal(parseMangoTiptapDocument("<p>legacy HTML</p>").valid, false);
-  const unknown = richDocument();
-  unknown.document.content?.push({ type: "legacyHTML", attrs: { html: "<p>old</p>" } });
-  assert.equal(validateMangoTiptapDocument(unknown).valid, false);
-  const transient = richDocument();
-  const image = transient.document.content?.[2];
-  if (image?.attrs) image.attrs.alt = "blob:temporary";
-  assert.equal(validateMangoTiptapDocument(transient).valid, false);
   const wrongVersion = { ...createEmptyMangoTiptapDocument(), schema_version: 2 };
   assert.equal(validateMangoTiptapDocument(wrongVersion).valid, false);
-  const invalidNesting = richDocument();
-  invalidNesting.document.content = [{ type: "tableRow", content: [] }];
-  assert.equal(validateMangoTiptapDocument(invalidNesting).valid, false);
-  const unsafeColor = richDocument();
-  const markedText = unsafeColor.document.content?.[0]?.content?.[1];
-  const textStyle = markedText?.marks?.find((mark) => mark.type === "textStyle");
-  if (textStyle?.attrs) textStyle.attrs.color = "red;background:url(https://example.test)";
-  assert.equal(validateMangoTiptapDocument(unsafeColor).valid, false);
-  const oversizedImage = richDocument();
-  const oversizedImageNode = oversizedImage.document.content?.[2];
-  if (oversizedImageNode?.attrs) oversizedImageNode.attrs.displayWidth = 1_000_000;
-  assert.equal(validateMangoTiptapDocument(oversizedImage).valid, false);
-  const linkedImage = richDocument();
-  const linkedImageNode = linkedImage.document.content?.[2];
-  if (linkedImageNode?.attrs) {
-    linkedImageNode.attrs.linkHref = "https://example.com/image";
-    linkedImageNode.attrs.linkTarget = "_blank";
-    linkedImageNode.attrs.linkRel = "noopener noreferrer";
-    linkedImageNode.attrs.linkTitle = "Open source";
-  }
-  assert.equal(validateMangoTiptapDocument(linkedImage).valid, true);
-  if (linkedImageNode?.attrs) linkedImageNode.attrs.linkHref = "javascript:alert(1)";
-  assert.equal(validateMangoTiptapDocument(linkedImage).valid, false);
-  const typedOrderedList = richDocument();
-  typedOrderedList.document.content = [{
-    type: "orderedList",
-    attrs: { blockId: "ordered-list", start: 1, type: "A" },
-    content: [{
-      type: "listItem",
-      attrs: { blockId: "ordered-item" },
-      content: [{ type: "paragraph", attrs: { blockId: "ordered-paragraph", textAlign: null, indentLevel: 0 }, content: [{ type: "text", text: "Alpha" }] }],
-    }],
-  }];
-  assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, true);
-  if (typedOrderedList.document.content?.[0]?.attrs) typedOrderedList.document.content[0].attrs.type = "disc";
-  assert.equal(validateMangoTiptapDocument(typedOrderedList).valid, false);
+  const wrongRoot = { ...createEmptyMangoTiptapDocument(), document: { type: "paragraph" } };
+  assert.equal(validateMangoTiptapDocument(wrongRoot).valid, false);
 });
 
-test("pasted CSS values are normalized without losing text", () => {
+test("cosmetic formatting survives serialization without Mango normalization", () => {
   const pasted: MangoTiptapDocument = {
     format: "mango-tiptap-json",
     schema_version: 1,
@@ -173,66 +140,22 @@ test("pasted CSS values are normalized without losing text", () => {
       type: "doc",
       content: [{
         type: "paragraph",
-        content: [{
-          type: "text",
-          text: "This pasted text must survive",
-          marks: [
-            { type: "textStyle", attrs: { fontSize: "11pt", color: "rgb(31, 78, 121)" } },
-            { type: "highlight", attrs: { color: "#ff06" } },
-          ],
-        }],
-      }],
-    },
-  };
-  assert.equal(validateMangoTiptapDocument(pasted).valid, false);
-  const normalized = normalizeMangoTiptapDocument(pasted);
-  assert.equal(validateMangoTiptapDocument(normalized).valid, true);
-  const text = normalized.document.content?.[0]?.content?.[0];
-  assert.equal(text?.text, "This pasted text must survive");
-  assert.deepEqual(text?.marks?.[0]?.attrs, { fontSize: "15px", color: "#1f4e79" });
-  assert.deepEqual(text?.marks?.[1]?.attrs, { color: "#ffff00" });
-
-  const unsupported = normalizeMangoTiptapDocument({
-    ...pasted,
-    document: {
-      type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "keep me", marks: [{ type: "textStyle", attrs: { fontSize: "calc(1rem)", color: "paint(evil)" } }] }] }],
-    },
-  });
-  assert.equal(unsupported.document.content?.[0]?.content?.[0]?.text, "keep me");
-  assert.equal(unsupported.document.content?.[0]?.content?.[0]?.marks, undefined);
-  assert.equal(validateMangoTiptapDocument(unsupported).valid, true);
-
-  const pastedLineBreak: MangoTiptapDocument = {
-    format: "mango-tiptap-json",
-    schema_version: 1,
-    document: {
-      type: "doc",
-      content: [{
-        type: "paragraph",
-        attrs: { textAlign: "justify", indentLevel: 1.5, clipboardOnly: "discard me" },
+        attrs: { textAlign: "justify", indentLevel: 1.5, clipboardOnly: "ignored by Tiptap" },
         content: [
-          { type: "text", text: "first line", marks: [{ type: "bold" }] },
-          { type: "hardBreak", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontSize: "10.5pt", color: "rgba(1, 2, 3, 0.5)" } }] },
-          { type: "text", text: "second line", marks: [{ type: "clipboardOnly", attrs: { anything: "discard me" } }, { type: "link", attrs: { href: "javascript:alert(1)" } }] },
+          { type: "text", text: "first line", marks: [{ type: "textStyle", attrs: { fontSize: "10.5pt", color: "rgb(31, 78, 121)" } }] },
+          { type: "hardBreak", marks: [{ type: "bold" }, { type: "highlight", attrs: { color: "color(display-p3 1 0.8 0.1)" } }] },
+          { type: "text", text: "second line" },
         ],
       }],
     },
   };
-  assert.equal(validateMangoTiptapDocument(pastedLineBreak).valid, false);
-  const serializedLineBreak = serializeMangoTiptapDocument(pastedLineBreak);
-  const parsedLineBreak = parseMangoTiptapDocument(serializedLineBreak);
-  assert.equal(parsedLineBreak.valid, true, parsedLineBreak.valid ? "" : parsedLineBreak.error);
-  if (!parsedLineBreak.valid) return;
-  const savedParagraph = parsedLineBreak.value.document.content?.[0];
-  assert.equal(savedParagraph?.content?.[0]?.text, "first line");
-  assert.equal(savedParagraph?.content?.[1]?.type, "hardBreak");
-  assert.equal(savedParagraph?.content?.[1]?.marks, undefined);
-  assert.equal(savedParagraph?.content?.[2]?.text, "second line");
-  assert.equal(savedParagraph?.content?.[2]?.marks, undefined);
-  assert.deepEqual(savedParagraph?.attrs, undefined);
+  const serialized = serializeMangoTiptapDocument(pasted);
+  const parsed = parseMangoTiptapDocument(serialized);
+  assert.equal(parsed.valid, true, parsed.valid ? "" : parsed.error);
+  if (!parsed.valid) return;
+  assert.deepEqual(parsed.value, pasted);
+  assert.equal(parsed.value.document.content?.[0]?.content?.map((node) => node.text ?? "").join(""), "first linesecond line");
 });
-
 test("Tiptap validation and serialization accept documents beyond the former two MiB cap", () => {
   const document = richDocument("x".repeat(2 * 1024 * 1024 + 4096));
   const serialized = JSON.stringify(document);
@@ -307,13 +230,10 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     const parsedClipboardBreak = parsedClipboardDocument.document.content?.[0]?.content?.find((node) => node.type === "hardBreak");
     assert.equal(parsedClipboardBreak?.type, "hardBreak");
     assert.ok((parsedClipboardBreak?.marks?.length ?? 0) > 0, "the real Tiptap HTML parser carries pasted formatting onto the line break");
-    const safeClipboardDocument = normalizeMangoTiptapDocument(parsedClipboardDocument);
-    const safeClipboardBreak = safeClipboardDocument.document.content?.[0]?.content?.find((node) => node.type === "hardBreak");
-    const safeClipboardValidation = validateMangoTiptapDocument(safeClipboardDocument);
-    assert.equal(safeClipboardValidation.valid, true, safeClipboardValidation.valid ? "" : safeClipboardValidation.error);
-    assert.equal(safeClipboardBreak?.marks, undefined, "cosmetic line-break marks are discarded instead of blocking the text save");
-    assert.equal(safeClipboardDocument.document.content?.[0]?.content?.filter((node) => node.type === "text").map((node) => node.text).join(""), "first linesecond line");
-
+    const clipboardValidation = validateMangoTiptapDocument(parsedClipboardDocument);
+    assert.equal(clipboardValidation.valid, true, clipboardValidation.valid ? "" : clipboardValidation.error);
+    assert.ok((parsedClipboardBreak?.marks?.length ?? 0) > 0, "cosmetic line-break marks remain in the valid ProseMirror document");
+    assert.equal(parsedClipboardDocument.document.content?.[0]?.content?.filter((node) => node.type === "text").map((node) => node.text).join(""), "first linesecond line");
     editor.commands.setContent({
       type: "doc",
       content: [{
@@ -453,11 +373,11 @@ test("real insert/delete transactions persist moved comment, change, and chat po
     resourceID: "resource-annotation-edit", documentID: "document-annotation-edit",
     requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       if (init?.method !== "POST") return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
-      const body = init.json as { document: MangoTiptapDocument; annotations: typeof canonicalAnnotations };
+      const body = init.json as { operation_id: string; document: MangoTiptapDocument; annotations: typeof canonicalAnnotations };
       revision += 1;
       canonical = body.document;
       canonicalAnnotations = body.annotations;
-      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+      return saveAcknowledgement(body.operation_id, revision) as T;
     },
     onDocument: () => undefined,
     batchMs: 60_000,
@@ -580,8 +500,9 @@ test("Tiptap sync durably records one exact document before network completion",
       return canonical as T;
     }
     postStarted = true;
+    const body = init.json as { operation_id: string };
     await new Promise<void>((resolve) => { releaseCommit = resolve; });
-    return { revision: 1, schema_version: 1, document: next } as T;
+    return saveAcknowledgement(body.operation_id, 1) as T;
   };
   const options = {
     companyID: "company-durable", resourceType: "node" as const,
@@ -609,8 +530,8 @@ test("Tiptap sync durably records one exact document before network completion",
     assert.equal(getEditorRuntimeMetrics().indexeddb_writes, 1, "a transaction burst writes one pending IndexedDB record");
     const key = mangoTiptapPendingStorageKey(options);
     const pending = await readExactMangoTiptapPending(key);
-    assert.equal(pending?.commits.length, 1);
-    assert.deepEqual(pending?.commits[0]?.document, next);
+    assert.ok((pending?.generation ?? 0) > 0);
+    assert.deepEqual(pending?.document, next);
     releaseCommit?.();
     await sync.flush();
     assert.equal(await readExactMangoTiptapPending(key), null);
@@ -657,7 +578,7 @@ test("lost acknowledgement recovery replays the stable operation before conflict
       annotations: typeof annotations;
     };
     if (body.operation_id === acceptedOperationID) {
-      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations, deduplicated: true } as T;
+      return saveAcknowledgement(body.operation_id, revision, true) as T;
     }
     assert.equal(body.base_revision, revision);
     acceptedOperationID = body.operation_id;
@@ -668,7 +589,7 @@ test("lost acknowledgement recovery replays the stable operation before conflict
       loseFirstAcknowledgement = false;
       throw new Error("connection closed after commit");
     }
-    return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    return saveAcknowledgement(body.operation_id, revision) as T;
   };
   const options = {
     companyID: "company-lost-ack", resourceType: "node" as const,
@@ -740,7 +661,7 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     const acceptedPayload = acceptedPayloads.get(body.operation_id);
     if (acceptedPayload !== undefined) {
       assert.equal(payload, acceptedPayload, "a retry must preserve every stable-operation payload field");
-      return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations, deduplicated: true } as T;
+      return saveAcknowledgement(body.operation_id, revision, true) as T;
     }
     assert.equal(body.base_revision, revision);
     acceptedPayloads.set(body.operation_id, payload);
@@ -753,7 +674,7 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
       firstAcceptedOperationID = body.operation_id;
       throw new Error("operation A response was lost after commit");
     }
-    return { revision, schema_version: 1, document: canonical, annotations: canonicalAnnotations } as T;
+    return saveAcknowledgement(body.operation_id, revision) as T;
   };
   const options = {
     companyID: "company-lost-ack-later-typing", resourceType: "node" as const,
@@ -775,10 +696,10 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     assert.equal(saveStates[saveStates.length - 1]?.status, "failed");
     assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, true);
     const pendingAfterA = await readExactMangoTiptapPending(storageKey);
-    assert.equal(pendingAfterA?.commits.length, 1);
-    assert.equal(pendingAfterA?.commits[0]?.attempted, true);
-    assert.equal(pendingAfterA?.commits[0]?.operation_id, firstAcceptedOperationID);
-    assert.deepEqual(pendingAfterA?.commits[0]?.document, operationADocument);
+    assert.ok((pendingAfterA?.generation ?? 0) > 0);
+    assert.equal(pendingAfterA?.operation_id, firstAcceptedOperationID);
+
+    assert.deepEqual(pendingAfterA?.document, operationADocument);
 
     sync.schedule(operationBDocument, false, () => operationBAnnotations);
     await sync.flush();
@@ -795,7 +716,7 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     assert.equal(await readExactMangoTiptapPending(storageKey), null);
     assert.equal(lifecycle.getSnapshot().pendingCount, 0);
     assert.equal(lifecycle.getSnapshot().pinned, false);
-    assert.ok(saveStates.some((state) => state.status === "saving" && state.unresolvedFailure), "the red failure attention remains while retrying");
+    assert.ok(saveStates.some((state) => state.status === "pending" && state.unresolvedFailure), "newer typing remains Pending while retaining red failure attention");
     assert.equal(saveStates[saveStates.length - 1]?.status, "saved");
     assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, false);
   } finally {
@@ -806,6 +727,73 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     }
   }
 });
+test("automatic retry captures newer typing after the failed operation succeeds", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  const initial = createEmptyMangoTiptapDocument();
+  const operationADocument = richDocument("operation A");
+  const operationBDocument = richDocument("newer typing after operation A failed");
+  let revision = 0;
+  let canonical = initial;
+  let firstOperationID = "";
+  let firstOperationAttempts = 0;
+  const acceptedOperationIDs: string[] = [];
+  const request = async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (init?.method !== "POST") return { revision, schema_version: 1, document: canonical, annotations: [] } as T;
+    const body = init.json as { operation_id: string; base_revision: number; document: MangoTiptapDocument };
+    if (!firstOperationID) firstOperationID = body.operation_id;
+    if (body.operation_id === firstOperationID) {
+      firstOperationAttempts += 1;
+      if (firstOperationAttempts === 1) throw new Error("temporary network failure");
+    }
+    assert.equal(body.base_revision, revision);
+    acceptedOperationIDs.push(body.operation_id);
+    revision += 1;
+    canonical = body.document;
+    return saveAcknowledgement(body.operation_id, revision) as T;
+  };
+  const options = {
+    companyID: "company-automatic-retry", resourceType: "node" as const,
+    resourceID: "resource-automatic-retry", documentID: "document-automatic-retry",
+    requestJSON: request,
+    onDocument: () => undefined,
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  };
+  const sync = new MangoTiptapSync(options);
+  try {
+    await sync.start();
+    sync.schedule(operationADocument);
+    await assert.rejects(() => sync.flush(), /temporary network failure/);
+    sync.schedule(operationBDocument);
+
+    const deadline = Date.now() + 2_500;
+    while (canonical !== operationBDocument && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.equal(firstOperationAttempts, 2, "the failed stable operation is retried once");
+    assert.equal(revision, 2);
+    assert.deepEqual(canonical, operationBDocument);
+    assert.equal(acceptedOperationIDs.length, 2);
+    assert.equal(acceptedOperationIDs[0], firstOperationID);
+    assert.notEqual(acceptedOperationIDs[1], firstOperationID, "newer typing is captured as a new operation");
+    assert.equal(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(options)), null);
+  } finally {
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
 test("IndexedDB failure is explicit while server acknowledgement still releases pending work", async () => {
   const previous = {
     indexedDB: globalThis.indexedDB,
@@ -822,8 +810,9 @@ test("IndexedDB failure is explicit while server acknowledgement still releases 
     resourceID: "resource-idb-failure", documentID: "document-idb-failure",
     requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
       if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      const body = init.json as { operation_id: string };
       revision += 1;
-      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+      return saveAcknowledgement(body.operation_id, revision) as T;
     },
     onDocument: () => undefined,
     onPendingChange: (count) => pendingCounts.push(count),
@@ -834,7 +823,7 @@ test("IndexedDB failure is explicit while server acknowledgement still releases 
   try {
     await sync.start();
     sync.schedule(edited);
-    await sync.recover();
+    await sync.flush();
     assert.equal(revision, 1, "canonical backend save still succeeds");
     assert.ok(storageErrors.some((message) => message.startsWith("Browser recovery storage failed:")));
     assert.ok(pendingCounts.includes(1));
@@ -872,8 +861,9 @@ test("IndexedDB quota write failure is visible and does not block acknowledgemen
     resourceID: "resource-idb-quota", documentID: "document-idb-quota",
     requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }) => {
       if (init?.method !== "POST") return { revision, schema_version: 1, document: createEmptyMangoTiptapDocument(), annotations: [] } as T;
+      const body = init.json as { operation_id: string };
       revision += 1;
-      return { revision, schema_version: 1, document: edited, annotations: [] } as T;
+      return saveAcknowledgement(body.operation_id, revision) as T;
     },
     onDocument: () => undefined,
     onPendingChange: (count) => pendingCounts.push(count),
@@ -931,12 +921,12 @@ test("IndexedDB cleanup failure after acknowledgement unpins and clears after st
       if (init?.method !== "POST") return { revision, schema_version: 1, document: canonical, annotations: [] } as T;
       const body = init.json as { operation_id: string; document: MangoTiptapDocument };
       if (body.operation_id === acceptedOperationID) {
-        return { revision, schema_version: 1, document: canonical, annotations: [], deduplicated: true } as T;
+        return saveAcknowledgement(body.operation_id, revision, true) as T;
       }
       acceptedOperationID = body.operation_id;
       revision += 1;
       canonical = body.document;
-      return { revision, schema_version: 1, document: canonical, annotations: [] } as T;
+      return saveAcknowledgement(body.operation_id, revision) as T;
     },
     onDocument: () => undefined,
     onPendingChange: (count: number) => pendingCounts.push(count),
@@ -1007,10 +997,17 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
     assert.doesNotMatch(read(runtimePath).toLowerCase(), /hocuspocus|from ["']yjs["']|tiptap-cloud/);
   }
   const sync = read("frontend/src/modules/editor/tiptap/mangoTiptapSync.ts");
-  assert.match(sync, /store\.get\(storage_key\)/);
+  assert.match(sync, /store\.get\(storageKey\)/);
   assert.doesNotMatch(sync, /getAll\(/);
+  assert.doesNotMatch(sync, /commits:/);
+  assert.doesNotMatch(sync, /JSON\.stringify/);
+  const extensions = read("frontend/src/modules/editor/tiptap/mangoTiptapExtensions.ts");
+  assert.match(extensions, /newState\.doc\.nodesBetween\(from, to, assignMissingID\)/);
+  assert.doesNotMatch(extensions, /newState\.doc\.descendants/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
   assert.match(editor, /data-mango-editor-sync-mode="revisioned-json"/);
+  assert.doesNotMatch(editor, /JSON\.stringify/);
+  assert.doesNotMatch(editor, /onSaveStateChange\?\.\(\{ status: "pending"/);
   assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);
   assert.match(editor, /useLayoutEffect\(\(\) => \{\s*if \(!isActive \|\| editorRef\.current\) return undefined;/);
   assert.match(editor, /\{isActive && activeEditor \? <EditorContent editor=\{activeEditor\}/);

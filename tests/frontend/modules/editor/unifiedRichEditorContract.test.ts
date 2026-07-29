@@ -883,7 +883,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /data-mango-editor-header-overflow-action=\{action\.id\}/);
   assert.match(editorTabBar, /data-mango-editor-save-version="true"/);
   assert.match(editorTabBar, /flexWrap: singleLine \? "nowrap" : "wrap"[\s\S]*minWidth: singleLine \? "max-content" : undefined/);
-  assert.match(editorTabBar, /data-mango-editor-header-overflow="true"[\s\S]*marginLeft: saveState \|\| onSaveCurrentVersion \|\| singleLine \? 0 : "auto"/);
+  assert.match(editorTabBar, /data-mango-editor-header-overflow="true"[\s\S]*marginLeft: saveState \|\| saveStateStorageKey \|\| onSaveCurrentVersion \|\| singleLine \? 0 : "auto"/);
   assert.match(editorTabBar, /const toggleHeaderMenu = \(menu: "outline" \| "highlight" \| "overflow"\)[\s\S]*setOutlineMenuOpen\(menu === "outline" && opening\)[\s\S]*setHighlightMenuOpen\(menu === "highlight" && opening\)[\s\S]*setOverflowMenuOpen\(menu === "overflow" && opening\)/);
   assert.match(editorTabBar, /toggleHeaderMenu\("highlight"\)[\s\S]*toggleHeaderMenu\("outline"\)[\s\S]*toggleHeaderMenu\("overflow"\)/);
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
@@ -1604,13 +1604,20 @@ test("failed saves pulse the complete Node, Project, and Logic Gate editor frame
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
-  const saveStatus = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorSaveStatusBadge.tsx"), "utf8");
+  const saveStatus = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorSaveStatusIcon.tsx"), "utf8");
+  const saveStatusStore = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorSaveStatusStore.ts"), "utf8");
   const editorStyles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
 
   assert.match(saveStatus, /state\?\.status === "failed" \|\| Boolean\(state\?\.unresolvedFailure\)/);
+  assert.match(saveStatus, /React\.useSyncExternalStore\(subscribe, getSnapshot, getSnapshot\)/);
+  assert.match(saveStatus, /state\?\.status === "saved" && state\.updatedTimestamp/);
+  assert.match(saveStatusStore, /if \(sameSaveState\(states\.get\(storageKey\), state\)\) return false/);
+  assert.match(nodeSurface, /EditorSavedTimestamp storageKey=\{blockSaveStorageKey\}/);
+  assert.match(projectSummary, /EditorSavedTimestamp storageKey=\{blockSaveStorageKey\}/);
   assert.match(nodeSurface, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
   assert.match(projectSummary, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
-  assert.match(editorContent, /className=\{editorSaveNeedsFailureAttention\(logicGateSaveState\) \? "mango-editor-save-failed-frame"/);
+  assert.match(editorContent, /className=\{logicGateSaveFailed \? "mango-editor-save-failed-frame"/);
+  assert.match(editorContent, /setLogicGateSaveFailed\(\(current\) => \{ const failed = editorSaveNeedsFailureAttention\(state\)/);
   assert.match(editorStyles, /mango-editor-save-failed-frame-pulse 2s ease-in-out infinite/);
   assert.match(editorStyles, /prefers-reduced-motion: reduce/);
 });

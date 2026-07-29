@@ -51,7 +51,8 @@ import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUse
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
-import { EditorSaveStatusBadge, editorSaveNeedsFailureAttention, type EditorSaveState } from "../editor/EditorSaveStatusBadge.js";
+import { EditorSavedTimestamp, EditorSaveStatusIcon, editorSaveNeedsFailureAttention } from "../editor/EditorSaveStatusIcon.js";
+import { mangoTiptapPendingStorageKey } from "../editor/tiptap/mangoTiptapSync.js";
 import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
 import {
   editorChatAttachmentsReadyForSubmit,
@@ -412,7 +413,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectTitleEditing, setProjectTitleEditing] = useState(false);
   const [projectTitleDraft, setProjectTitleDraft] = useState("");
   const [blocks, setBlocks] = useState<ProjectTextBlockDraft[]>([]);
-  const [textBlockSaveStates, setTextBlockSaveStates] = useState<Record<string, EditorSaveState>>({});
+  const [textBlockSaveFailures, setTextBlockSaveFailures] = useState<Record<string, boolean>>({});
   const [projectSavedVersions, setProjectSavedVersions] = useState<ProjectSavedVersion[]>([]);
   const [projectSavedVersionsOpen, setProjectSavedVersionsOpen] = useState(false);
   const [selectedProjectSavedVersionID, setSelectedProjectSavedVersionID] = useState("");
@@ -2574,8 +2575,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   chatOpen ? `${projectSidePaneWidths.chat}px` : "",
                 ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
                 const minimumWidth = (emailOpen ? projectSidePaneWidths.email + 8 : 0) + (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
-                const blockSaveState = textBlockSaveStates[block.id] ?? (savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp });
-                const blockSaveNeedsFailureAttention = editorSaveNeedsFailureAttention(blockSaveState);
+                const blockSaveStorageKey = mangoTiptapPendingStorageKey({ companyID, resourceType: "project", resourceID: projectID, documentID: block.id });
+                const blockSaveFallback = savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp };
+                const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
                 return (
                   <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
                     <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
@@ -2603,10 +2605,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
-                            <EditorSaveStatusBadge state={blockSaveState} compact />
-                            <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
-                              Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
-                            </span>
+                            <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />
+                            <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
                             <label title="Add attachment" aria-label="Add attachment" style={projectTextBlockIconButtonStyle(accent, false)}>
                               <PaperclipIcon color={accent} />
                               <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
@@ -2716,10 +2716,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}
                                 onDocumentError={setError}
                                 onSaveStateChange={(state) => {
-                                  setTextBlockSaveStates((current) => ({ ...current, [block.id]: state }));
-                                  if (state.status === "saved" && state.updatedTimestamp) {
-                                    setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, updatedTimestamp: state.updatedTimestamp! } : item));
-                                  }
+                                  const failed = editorSaveNeedsFailureAttention(state);
+                                  setTextBlockSaveFailures((current) => current[block.id] === failed ? current : { ...current, [block.id]: failed });
                                 }}
                                 onRecoveryStorageError={setError}
                                 onRecoveryStorageRecovered={() => setError("")}

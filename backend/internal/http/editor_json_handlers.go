@@ -286,7 +286,12 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.wakeRealtimeSpine()
-		writeJSON(w, http.StatusOK, commit)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"operation_id": commit.OperationID,
+			"revision":     commit.Revision,
+			"committed_at": commit.CommittedAt,
+			"deduplicated": commit.Deduplicated,
+		})
 	case http.MethodPatch:
 		if ref.ResourceType != store.EntityTypeNode && ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject {
 			writeError(w, http.StatusMethodNotAllowed, "editor_metadata_not_supported")
@@ -336,7 +341,12 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.wakeRealtimeSpine()
-		writeJSON(w, http.StatusOK, commit)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"operation_id": commit.OperationID,
+			"revision":     commit.Revision,
+			"committed_at": commit.CommittedAt,
+			"deduplicated": commit.Deduplicated,
+		})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}

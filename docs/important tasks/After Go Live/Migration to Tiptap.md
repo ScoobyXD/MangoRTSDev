@@ -8,7 +8,7 @@ This document is the project charter and decision record for that future migrati
 
 ## Plain-language summary
 
-Mango uses open-source Tiptap as the actual editor on the gated JSON path. Tiptap is built on ProseMirror. The browser holds and displays a structured JSON document containing paragraphs, text, formatting, lists, tables, mentions, and image references. Tiptap transactions are batched locally; Mango durably records the latest accepted local JSON before sending a validated snapshot with an exact base revision. Mango does not send a complete document after every character.
+Mango uses open-source Tiptap as the actual editor on the gated JSON path. Tiptap is built on ProseMirror. The browser holds and displays a structured JSON document containing paragraphs, text, formatting, lists, tables, mentions, and image references. Tiptap transactions are batched locally; Mango stores one latest-unsaved JSON object per document in IndexedDB, then sends one complete document with an exact base revision after the quiet or maximum batch timer fires. The normal save path does not normalize, stringify, or recursively revalidate the complete document before recovery storage. Mango does not send a complete document after every character.
 
 Mango will **not** use Tiptap Cloud, Tiptap's hosted collaboration service, a Tiptap document server, or any other third-party network API to make basic editing work. No Mango document will be sent to Tiptap's servers. Tiptap and ProseMirror will be installed open-source frontend libraries that execute locally as part of Mango's own browser application.
 
@@ -35,7 +35,7 @@ This decision does not invalidate the immediate work to restore Mango's existing
 1. Tiptap on ProseMirror will become the actual browser editor, not merely a JSON converter behind Mango's existing custom editor.
 2. Tiptap/ProseMirror JSON will become the single authoritative saved description of editor content after migration.
 3. For Node, Project, and Logic Gate rich documents, HTML remains an import, clipboard, publishing, and legacy-conversion format but will not remain a second authoritative editable document after migration. Email compose, reply, forward, attached-email reply, drafts, signatures, and display remain authoritative rich HTML and do not use Tiptap JSON.
-4. Normal typing and formatting use local ProseMirror transactions and a bounded debounce. The implemented Mango wire contract sends a strict complete JSON snapshot per batch with an exact base revision; it does not send one snapshot per character.
+4. Normal typing and formatting use local ProseMirror transactions and one bounded batching timer owner. The implemented Mango wire contract sends one complete JSON snapshot per batch with an exact base revision; it does not send one snapshot per character.
 5. The complete Document JSON will be loaded on initial open, refresh, reconnect, detected gaps, and explicit recovery.
 6. Mango's own backend and database will accept, order, store, authorize, and publish changes. No Tiptap-hosted service will participate.
 7. Mango's existing direct-browser-to-S3 attachment architecture will remain in place.
@@ -47,7 +47,7 @@ This decision does not invalidate the immediate work to restore Mango's existing
 
 ## Current inactive implementation status and remaining proof
 
-The 2026-07-19 refinement corrected the first foundation pass: email was removed from the JSON resource/API/schema inventory; transaction bursts now produce one validated full snapshot and one exact IndexedDB write at a roughly 180 ms quiet boundary with a 1.5-second maximum; static sleeping documents render comment/change/chat decorations; exact document realtime scopes exist only while the textbox intersects the viewport; and dirty Node/Project rows publish a real pin to the outer virtualizer until acknowledgement. The backend remains canonical and revision-protected, and IndexedDB contains only unacknowledged pending work.
+The 2026-07-29 save-pipeline simplification keeps email outside the JSON resource/API/schema inventory; transaction bursts now use one roughly 180 ms quiet timer with a 1.5-second maximum, capture Tiptap JSON once, and overwrite one exact latest-unsaved IndexedDB record. Save state is published once and rendered by the textbox status icon without ordinary Pending, Saving, or Saved transitions rerendering the complete Node, Project, or Logic Gate surface. Only failure attention reaches the outer frame. The backend remains canonical and revision-protected, and IndexedDB contains only the latest unacknowledged work.
 
 For JSON-mode annotations, `from`, `to`, selection endpoints, deep-link positions, comment/change positions, and chat highlight endpoints are ProseMirror positions in the exact versioned document. They are not plain-text character offsets and must never be adjusted arithmetically. ProseMirror transaction mappings move them through structured edits. In legacy HTML mode, existing offset contracts remain unchanged. The later conversion must translate legacy stored offsets against the converted document and validate the result. Durable writeback of every mapped existing annotation, complete Word/Google/PDF paste fixtures, and full production-path browser/PostgreSQL parity remain acceptance work; the transition is not complete merely because the inactive component route exists.
 
@@ -124,7 +124,7 @@ The Tiptap migration must reach or exceed the behavior of the working Mango edit
 - Inline and block images, image resizing, alignment or float behavior, alt text, filename, selection controls, comments, download, preview, and Mango actions such as creating or linking a Node where currently supported.
 - Unicode, emoji, international text, and correct caret behavior.
 
-The exact allowed document elements and attributes must be written down before migration code is accepted. If the Tiptap default does not support an existing Mango feature, Mango must add a local extension or make an explicit product decision. Unsupported content must not disappear silently.
+The configured document node and mark types, durable identity attributes, and safety boundaries must be written down before migration code is accepted. Cosmetic attributes are governed by the configured Tiptap schema rather than a second Mango allowlist. If Tiptap does not support an existing Mango feature, Mango must add a local extension or make an explicit product decision. Unsupported cosmetics from external paste may be ignored, but supported text and structure must not disappear silently.
 
 ## Illustrative Document JSON
 
@@ -179,16 +179,16 @@ Tiptap runs in the user's browser and ProseMirror owns the current JSON and tran
 1. The user edits the Tiptap editor in their browser.
 2. Tiptap/ProseMirror immediately updates the local visible document.
 3. The frontend-backend textbox sync coalesces transactions for roughly 180 milliseconds of quiet, with a 1.5-second maximum batch window during continuous typing.
-4. Before network submission, Mango writes the strict JSON snapshot, stable operation ID, client ID, and exact base revision to the document's exact IndexedDB record.
-5. The browser submits that batch to Mango's exact company/resource/document API.
-6. The Go API authorizes the actor, validates the complete versioned JSON schema and size, deduplicates the operation, requires the exact base revision, and atomically commits the canonical JSONB document, operation/version history, and realtime outbox event.
-7. The exact document realtime scope tells other mounted subscribers to recover the canonical snapshot. Unrelated scopes do not wake.
-8. A successful acknowledgement removes the durable local record. A lost acknowledgement is safe because retrying the stable operation ID is idempotent.
+4. When the timer fires, the status icon becomes Saving. Mango obtains the Tiptap JSON object once and overwrites the document's one IndexedDB recovery record with that object, the local edit generation, stable operation ID, client ID, timestamp, and exact base revision.
+5. The browser serializes the complete JSON once in the shared HTTP request helper and submits that batch to Mango's exact company/resource/document API.
+6. The Go API authorizes the actor, enforces the minimum Tiptap envelope and concrete safety/durability rules, deduplicates the operation, requires the exact base revision, and atomically commits the canonical JSONB document, operation/version history, and realtime outbox event. Cosmetic formatting values do not reject the document.
+7. The server returns only the operation ID, revision, committed timestamp, and deduplication flag. The exact document realtime scope tells other mounted subscribers to fetch the canonical snapshot; a subscriber with Pending, Saving, or Failed local edits does not replace its editor. Unrelated scopes do not wake.
+8. A successful acknowledgement removes the durable local record and shows Saved only when it matches the latest local generation. Newer typing remains Pending. A lost acknowledgement is safe because retrying the stable operation ID is idempotent.
 9. A stale base revision raises a visible keep-local/use-canonical decision. Mango never merges the two documents automatically and never silently overwrites the accepted revision.
 
 ## Backend implementation decision
 
-The Go backend does not reimplement ProseMirror step algorithms. It validates a strict, versioned Mango JSON document and enforces one aggregate 1 GiB current editor-text limit per Node, Project, or Logic Gate, stores one canonical JSONB snapshot per accepted batch, records immutable operations/versions, and uses exact optimistic revisions. Attachment object bytes and editor/Yjs history are separate and do not count toward that 1 GiB. The general API request-body ceiling remains separate. This is safe without a JavaScript document server because automatic simultaneous-edit merging is shelved. The browser still avoids per-character snapshots through transaction batching.
+The Go backend does not reimplement ProseMirror step algorithms. Tiptap's configured schema owns ordinary document validity. The backend checks the versioned envelope, supported structural node/mark names, safe links, durable attachment IDs, absence of blob URLs or embedded image bytes, bounded shape, and the aggregate 1 GiB current editor-text limit per Node, Project, or Logic Gate. It stores one canonical JSONB snapshot per accepted batch, records immutable operations/versions, and uses exact optimistic revisions. Cosmetic font, color, and highlight values are not Mango allowlists and cannot reject the complete save. Attachment object bytes and editor history are separate from the 1 GiB text limit. The general API request-body ceiling remains separate.
 
 ## Images and attachments
 
