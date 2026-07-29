@@ -134,6 +134,8 @@ test("foreign collaboration snapshots stay out while matching provider rows gain
     subject: "Provider subject",
     date: 200,
     from: [{ name: "Provider sender", email: "sender@example.test" }],
+    collaboration_id: undefined,
+    collaboration_node_id: undefined,
   });
   const otherAccount = collaboration("other-account", {
     account_email: "other@example.test",
@@ -179,6 +181,7 @@ test("foreign collaboration snapshots stay out while matching provider rows gain
   assert.equal(deduped.length, 1);
   assert.equal(deduped[0]?.subject, "Provider subject");
   assert.equal(deduped[0]?.collaboration_id, "matching-account");
+  assert.equal(deduped[0]?.collaboration_node_id, "node-matching-account");
   assert.notEqual(deduped[0], provider);
   deduped[0]!.from![0]!.name = "Local mutation";
   assert.equal(provider.from?.[0]?.name, "Provider sender");

@@ -615,6 +615,14 @@ export function EmailCollaborationChatSurface({
           });
         }
       }
+      const importedCollaboration = await resolveEmailCollaboration({
+        companyID,
+        messageID: emailMessageID,
+        threadID: message.thread_id,
+        sharedInboxID,
+        accountEmail,
+      });
+      if (importedCollaboration) acceptCollaboration(importedCollaboration);
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
       setDraft("");
       setDraftAttachments([]);
@@ -632,7 +640,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();

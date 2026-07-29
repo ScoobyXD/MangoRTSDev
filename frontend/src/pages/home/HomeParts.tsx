@@ -6438,9 +6438,9 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
     padding: singleMessage ? 4 : "8px 10px 18px 2px",
   };
   return (
-    <div style={detailStyle}>
+    <div style={{ ...detailStyle, position: "relative" }}>
       {actionNotice && (
-        <div role="status" data-email-action-success="true" style={{ margin: "7px 9px 0", border: "1px solid rgba(34,197,94,0.36)", borderRadius: 9, background: "rgba(240,253,244,0.96)", color: "#166534", padding: "7px 10px", fontSize: 11.5, fontWeight: 850, boxShadow: "0 8px 18px rgba(22,101,52,0.10)", animation: "mango-pane-enter 180ms ease-out" }}>
+        <div role="status" aria-live="polite" aria-atomic="true" data-email-action-success="true" style={{ position: "absolute", zIndex: 85, top: 4, right: 9, maxWidth: "min(420px, calc(100% - 18px))", border: "1px solid rgba(34,197,94,0.36)", borderRadius: 9, background: "rgba(240,253,244,0.96)", color: "#166534", padding: "7px 10px", fontSize: 11.5, fontWeight: 850, boxShadow: "0 8px 18px rgba(22,101,52,0.10)", animation: "mango-pane-enter 180ms ease-out", pointerEvents: "none" }}>
           {actionNotice}
         </div>
       )}

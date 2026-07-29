@@ -200,8 +200,13 @@ export function EmailNodeDestinationSearch({
     setOpen(true);
   }, []);
 
-  const runOption = React.useCallback((option: EmailNodeDestinationSearchOption) => {
+  const runOption = React.useCallback((
+    option: EmailNodeDestinationSearchOption,
+    overrides: { priority?: number; projectLogicGateID?: string } = {},
+  ) => {
     if (busy) return;
+    const activePriority = overrides.priority ?? selectedPriority;
+    const activeProjectLogicGateID = overrides.projectLogicGateID ?? projectLogicGateID;
     if (option.kind === "current") {
       resetSearch();
       onOpenCurrentNode();
@@ -212,17 +217,17 @@ export function EmailNodeDestinationSearch({
       onSubmit({ kind: "node", nodeID: option.id });
       return;
     }
-    if (!Number.isInteger(selectedPriority) || selectedPriority < 1 || selectedPriority > 5) {
+    if (!Number.isInteger(activePriority) || activePriority < 1 || activePriority > 5) {
       chooseOption(option);
       return;
     }
     if (option.kind === "logic_gate") {
       resetSearch();
-      onSubmit({ kind: "logic_gate", logicGateID: option.id, priority: selectedPriority });
+      onSubmit({ kind: "logic_gate", logicGateID: option.id, priority: activePriority });
       return;
     }
     if (option.kind === "project") {
-      if (!projectLogicGateID) {
+      if (!activeProjectLogicGateID) {
         chooseOption(option);
         return;
       }
@@ -230,13 +235,13 @@ export function EmailNodeDestinationSearch({
       onSubmit({
         kind: "project",
         projectID: option.id,
-        logicGateID: projectLogicGateID,
-        priority: selectedPriority,
+        logicGateID: activeProjectLogicGateID,
+        priority: activePriority,
       });
       return;
     }
     resetSearch();
-    onSubmit({ kind: "standalone", priority: selectedPriority });
+    onSubmit({ kind: "standalone", priority: activePriority });
   }, [busy, chooseOption, onOpenCurrentNode, onSubmit, projectLogicGateID, resetSearch, selectedPriority]);
 
   const submitCurrentSearch = React.useCallback(() => {
@@ -372,7 +377,7 @@ export function EmailNodeDestinationSearch({
           }}
         >
           <div style={{ color: "#64748b", fontSize: 10, fontWeight: 800, lineHeight: 1.35 }}>
-            Type after #, choose a destination, then press Enter or the arrow.
+            Click a Node to send. New destinations send when their required choices are complete.
           </div>
           <div className="editor-document-scroll" style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
             {options.map((option, index) => {
@@ -387,9 +392,9 @@ export function EmailNodeDestinationSearch({
                   role="option"
                   aria-selected={selected}
                   onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => chooseOption(option)}
-                  onDoubleClick={() => {
+                  onClick={() => {
                     if (option.kind === "current" || option.kind === "node") runOption(option);
+                    else chooseOption(option);
                   }}
                   style={{
                     minHeight: 43,
@@ -426,7 +431,15 @@ export function EmailNodeDestinationSearch({
             <div data-email-node-destination-details="true" style={{ display: "grid", gridTemplateColumns: selectedOption.kind === "project" ? "minmax(0, 1fr) minmax(0, 1.25fr)" : "minmax(0, 1fr)", gap: 6 }}>
               <label style={{ minWidth: 0, display: "grid", gap: 3, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
                 Priority
-                <select aria-label="Email Node priority" value={priority} onChange={(event) => setPriority(event.currentTarget.value)} style={compactSelectStyle}>
+                <select aria-label="Email Node priority" value={priority} onChange={(event) => {
+                  const nextPriorityValue = event.currentTarget.value;
+                  const nextPriority = Number(nextPriorityValue);
+                  setPriority(nextPriorityValue);
+                  if (selectedOption && Number.isInteger(nextPriority) && nextPriority >= 1 && nextPriority <= 5
+                    && (selectedOption.kind !== "project" || Boolean(projectLogicGateID))) {
+                    runOption(selectedOption, { priority: nextPriority });
+                  }
+                }} style={compactSelectStyle}>
                   <option value="">Choose priority</option>
                   {INBOX_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </select>
@@ -434,7 +447,14 @@ export function EmailNodeDestinationSearch({
               {selectedOption.kind === "project" && (
                 <label style={{ minWidth: 0, display: "grid", gap: 3, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
                   Logic Gate
-                  <select aria-label="Project Logic Gate" value={projectLogicGateID} onChange={(event) => setProjectLogicGateID(event.currentTarget.value)} style={compactSelectStyle}>
+                  <select aria-label="Project Logic Gate" value={projectLogicGateID} onChange={(event) => {
+                    const nextLogicGateID = event.currentTarget.value;
+                    setProjectLogicGateID(nextLogicGateID);
+                    if (selectedOption.kind === "project" && nextLogicGateID
+                      && Number.isInteger(selectedPriority) && selectedPriority >= 1 && selectedPriority <= 5) {
+                      runOption(selectedOption, { projectLogicGateID: nextLogicGateID });
+                    }
+                  }} style={compactSelectStyle}>
                     <option value="">Required for project</option>
                     {logicGates.map((logicGate) => (
                       <option key={logicGate.logic_gate_id} value={logicGate.logic_gate_id}>{logicGate.header || logicGate.logic_gate_id}</option>
