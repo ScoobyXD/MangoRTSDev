@@ -107,7 +107,7 @@ import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNo
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, shouldAutoMarkEmailSelectionRead, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
-import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, mergeEmailMessageWithCollaboration, sharedInboxIDForHomeView } from "./emailCollaborationRows";
+import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageMatchesNodeAttachment, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, mergeEmailMessageWithCollaboration, mergeEmailMessageWithNodeAttachment, sharedInboxIDForHomeView, type EmailNodeAttachmentChange } from "./emailCollaborationRows";
 import { forwardedAttachmentsForCopy, forwardedProviderAttachmentID, withForwardedAttachmentCopy } from "./emailForwarding";
 import { emailMessageRowKey } from "./homeUtils";
 
@@ -3407,6 +3407,18 @@ export function HomePage({
       return next;
     });
   }, [activeMailAccountEmail, activeViewID, currentUserID]);
+  const applyEmailNodeAttachmentChange = useCallback((attachment: EmailNodeAttachmentChange) => {
+    const matches = (candidate: EmailMessage) => emailMessageMatchesNodeAttachment(candidate, attachment);
+    setMessages((current) => current.map((candidate) => (
+      matches(candidate) ? mergeEmailMessageWithNodeAttachment(candidate, attachment) : candidate
+    )));
+    setSelectedMessage((current) => {
+      if (!current || !matches(current)) return current;
+      const next = mergeEmailMessageWithNodeAttachment(current, attachment);
+      selectedMessageRef.current = next;
+      return next;
+    });
+  }, []);
   const openSharedDraft = async (sourceMessage: EmailMessage) => {
     const sourceSharedInboxID = sourceMessage.collaboration_shared_inbox_id?.trim()
       || sharedInboxIDForHomeView(activeViewIDRef.current);
@@ -6103,6 +6115,7 @@ export function HomePage({
             }}
             onEmailCollaborationChange={applyEmailCollaborationChange}
             onOpenCollaborationNode={openEmailCollaborationNode}
+            onEmailNodeAttachmentChange={applyEmailNodeAttachmentChange}
           />
           {showLocalEntityRail && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
           {showLocalEntityRail && (

@@ -54,6 +54,7 @@ import {
   resolveEmailCollaborationChatPlacement,
   type EmailCollaborationActionRequest,
 } from "./emailCollaborationChat";
+import type { EmailNodeAttachmentChange } from "./emailCollaborationRows";
 import { INBOX_PRIORITIES } from "./homeConstants";
 
 export type EmailCollaborationSelection = {
@@ -82,6 +83,7 @@ type EmailCollaborationChatSurfaceProps = {
   onClearSelection: () => void;
   onNavigateToEmailSelection: (selection: EmailCollaborationSelection) => void;
   onCollaborationChange?: (collaboration: CommunicationsEmailCollaboration) => void;
+  onNodeAttachmentChange?: (attachment: EmailNodeAttachmentChange) => void;
   onError: (message: string) => void;
   onSuccess: () => void;
   onActionSuccess: (message: string) => void;
@@ -192,6 +194,7 @@ export function EmailCollaborationChatSurface({
   onClearSelection,
   onNavigateToEmailSelection,
   onCollaborationChange,
+  onNodeAttachmentChange,
   onError,
   onSuccess,
   onActionSuccess,
@@ -526,6 +529,7 @@ export function EmailCollaborationChatSurface({
       const createdTimestamp = new Date().toISOString();
       const subject = message.subject?.trim() || "Email";
       const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
+      let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
       const existingTextBlockProjections = listEditorTextBlockProjections(targetProjections);
       const existingLinkedProjection = existingTextBlockProjections.find((projection) => (
         parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === emailMessageID
@@ -582,7 +586,7 @@ export function EmailCollaborationChatSurface({
         };
       }
       if (shouldAttachEmail) {
-        await convertTriageMessagesToExplorerTarget({
+        const conversionResult = await convertTriageMessagesToExplorerTarget({
           companyID,
           sharedInboxID,
           accountEmail: sharedInboxID?.trim() ? undefined : accountEmail,
@@ -591,6 +595,8 @@ export function EmailCollaborationChatSurface({
           linkedTextBlock: textBlockWrite,
           initialChat: initialChatWrite,
         });
+        attachedEmailInformationID = conversionResult.attached_email_information_ids?.find((informationID) => informationID.trim())?.trim()
+          || attachedEmailInformationID;
       } else {
         if (textBlockWrite) {
           await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
@@ -615,13 +621,19 @@ export function EmailCollaborationChatSurface({
           });
         }
       }
+      onNodeAttachmentChange?.({
+        nodeID: cleanNodeID,
+        messageID: emailMessageID,
+        threadID: message.thread_id,
+        informationID: attachedEmailInformationID,
+      });
       const importedCollaboration = await resolveEmailCollaboration({
         companyID,
         messageID: emailMessageID,
         threadID: message.thread_id,
         sharedInboxID,
         accountEmail,
-      });
+      }).catch(() => null);
       if (importedCollaboration) acceptCollaboration(importedCollaboration);
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
       setDraft("");
@@ -640,7 +652,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, collaboration?.attached_email_information_id, companyID, detectedNodeID, draft, draftAttachments, message.id, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();

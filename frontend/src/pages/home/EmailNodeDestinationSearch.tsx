@@ -45,18 +45,39 @@ const searchInputStyle: React.CSSProperties = {
   fontWeight: 750,
 };
 
-const compactSelectStyle: React.CSSProperties = {
+const choiceGroupStyle: React.CSSProperties = {
   minWidth: 0,
-  height: 30,
+  display: "grid",
+  gap: 5,
   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 8,
-  background: EDITOR_NEU_SURFACE,
-  color: "#334155",
-  padding: "0 8px",
-  fontSize: 10.5,
-  fontWeight: 750,
-  boxShadow: EDITOR_NEU_SHADOW,
+  borderRadius: 10,
+  background: "rgba(248,250,252,0.72)",
+  padding: 6,
+  boxShadow: "inset 2px 2px 5px rgba(174,174,192,0.12), inset -2px -2px 5px rgba(255,255,255,0.84)",
 };
+
+function destinationChoiceStyle(selected: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "25px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 7,
+    border: selected ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+    borderRadius: 8,
+    background: selected
+      ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`
+      : EDITOR_NEU_SURFACE,
+    color: selected ? "#4f46e5" : "#334155",
+    padding: "4px 7px",
+    textAlign: "left",
+    cursor: "pointer",
+    boxShadow: selected
+      ? "inset 2px 2px 5px rgba(174,174,192,0.12), inset -2px -2px 5px rgba(255,255,255,0.88)"
+      : EDITOR_NEU_SHADOW,
+  };
+}
 
 function SendArrowIcon() {
   return (
@@ -365,7 +386,9 @@ export function EmailNodeDestinationSearch({
             zIndex: 70,
             top: "calc(100% + 7px)",
             right: 0,
-            width: "min(360px, calc(100vw - 32px))",
+            width: "min(390px, calc(100vw - 32px))",
+            maxHeight: "min(72vh, 540px)",
+            overflowY: "auto",
             display: "grid",
             gap: 7,
             border: "1px solid transparent",
@@ -379,7 +402,7 @@ export function EmailNodeDestinationSearch({
           <div style={{ color: "#64748b", fontSize: 10, fontWeight: 800, lineHeight: 1.35 }}>
             Click a Node to send. New destinations send when their required choices are complete.
           </div>
-          <div className="editor-document-scroll" style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
+          <div className="editor-document-scroll" style={{ maxHeight: selectedOption ? 154 : 220, overflowY: "auto", display: "grid", gap: 4 }}>
             {options.map((option, index) => {
               const selected = option.key === selectedKey;
               const highlighted = index === highlightedIndex;
@@ -428,39 +451,63 @@ export function EmailNodeDestinationSearch({
           </div>
 
           {selectedOption && selectedOption.kind !== "current" && selectedOption.kind !== "node" && (
-            <div data-email-node-destination-details="true" style={{ display: "grid", gridTemplateColumns: selectedOption.kind === "project" ? "minmax(0, 1fr) minmax(0, 1.25fr)" : "minmax(0, 1fr)", gap: 6 }}>
-              <label style={{ minWidth: 0, display: "grid", gap: 3, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
-                Priority
-                <select aria-label="Email Node priority" value={priority} onChange={(event) => {
-                  const nextPriorityValue = event.currentTarget.value;
-                  const nextPriority = Number(nextPriorityValue);
-                  setPriority(nextPriorityValue);
-                  if (selectedOption && Number.isInteger(nextPriority) && nextPriority >= 1 && nextPriority <= 5
-                    && (selectedOption.kind !== "project" || Boolean(projectLogicGateID))) {
-                    runOption(selectedOption, { priority: nextPriority });
-                  }
-                }} style={compactSelectStyle}>
-                  <option value="">Choose priority</option>
-                  {INBOX_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
-              </label>
+            <div data-email-node-destination-details="true" style={{ display: "grid", gridTemplateColumns: selectedOption.kind === "project" ? "minmax(0, 0.9fr) minmax(0, 1.1fr)" : "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
+              <section aria-label="Email Node priority" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
+                <span>Choose priority</span>
+                <div data-email-node-priority-choices="pre-open" role="group" aria-label="Email Node priority choices" style={choiceGroupStyle}>
+                  {INBOX_PRIORITIES.map((item) => {
+                    const selected = priority === String(item.value);
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        data-email-node-priority-option={item.value}
+                        aria-pressed={selected}
+                        onClick={() => {
+                          const nextPriority = item.value;
+                          setPriority(String(nextPriority));
+                          if (selectedOption.kind !== "project" || Boolean(projectLogicGateID)) {
+                            runOption(selectedOption, { priority: nextPriority });
+                          }
+                        }}
+                        style={destinationChoiceStyle(selected)}
+                      >
+                        <span style={{ width: 23, height: 23, borderRadius: 7, display: "grid", placeItems: "center", background: selected ? "rgba(79,70,229,0.12)" : "rgba(226,232,240,0.68)", color: selected ? "#4f46e5" : "#64748b", fontSize: 10, fontWeight: 900 }}>{item.value}</span>
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.25, fontWeight: 800 }}>{item.label.replace(/^\d+\s*/, "")}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
               {selectedOption.kind === "project" && (
-                <label style={{ minWidth: 0, display: "grid", gap: 3, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
-                  Logic Gate
-                  <select aria-label="Project Logic Gate" value={projectLogicGateID} onChange={(event) => {
-                    const nextLogicGateID = event.currentTarget.value;
-                    setProjectLogicGateID(nextLogicGateID);
-                    if (selectedOption.kind === "project" && nextLogicGateID
-                      && Number.isInteger(selectedPriority) && selectedPriority >= 1 && selectedPriority <= 5) {
-                      runOption(selectedOption, { projectLogicGateID: nextLogicGateID });
-                    }
-                  }} style={compactSelectStyle}>
-                    <option value="">Required for project</option>
-                    {logicGates.map((logicGate) => (
-                      <option key={logicGate.logic_gate_id} value={logicGate.logic_gate_id}>{logicGate.header || logicGate.logic_gate_id}</option>
-                    ))}
-                  </select>
-                </label>
+                <section aria-label="Project Logic Gate" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
+                  <span>Choose Logic Gate</span>
+                  <div className="editor-document-scroll" data-email-project-logic-gate-choices="pre-open" role="group" aria-label="Project Logic Gate choices" style={{ ...choiceGroupStyle, maxHeight: 174, overflowY: "auto" }}>
+                    {logicGates.map((logicGate) => {
+                      const selected = projectLogicGateID === logicGate.logic_gate_id;
+                      return (
+                        <button
+                          key={logicGate.logic_gate_id}
+                          type="button"
+                          data-email-project-logic-gate-option={logicGate.logic_gate_id}
+                          aria-pressed={selected}
+                          onClick={() => {
+                            const nextLogicGateID = logicGate.logic_gate_id;
+                            setProjectLogicGateID(nextLogicGateID);
+                            if (Number.isInteger(selectedPriority) && selectedPriority >= 1 && selectedPriority <= 5) {
+                              runOption(selectedOption, { projectLogicGateID: nextLogicGateID });
+                            }
+                          }}
+                          style={destinationChoiceStyle(selected)}
+                        >
+                          <ExplorerRowIcon kind="logic_gate" />
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.25, fontWeight: 800 }}>{logicGate.header || logicGate.logic_gate_id}</span>
+                        </button>
+                      );
+                    })}
+                    {logicGates.length === 0 && <span style={{ padding: 6, color: "#94a3b8", fontSize: 10 }}>No Logic Gates available</span>}
+                  </div>
+                </section>
               )}
             </div>
           )}

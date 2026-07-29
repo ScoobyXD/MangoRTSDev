@@ -6195,6 +6195,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
           {message.collaboration_node_id?.trim() && onOpenCollaborationNode && (
             <button
               type="button"
+              data-email-node-indicator="message-header"
               title="Open existing email node"
               aria-label={`Open node for this reply from ${formatAddressList(message.from) || "Unknown sender"}`}
               onClick={() => onOpenCollaborationNode(message)}
