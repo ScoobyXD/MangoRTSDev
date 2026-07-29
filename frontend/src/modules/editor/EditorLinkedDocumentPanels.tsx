@@ -1201,6 +1201,11 @@ function GVICRoleEditor({
               aria-expanded={singleUserOnly ? undefined : assignedOpen}
               aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
               disabled={singleUserOnly && !canEdit}
+              onMouseEnter={() => {
+                if (singleUserOnly) return;
+                setAssignedOpen(true);
+                setOpen(false);
+              }}
               onClick={() => {
                 if (singleUserOnly) {
                   const assignment = assignments[0];

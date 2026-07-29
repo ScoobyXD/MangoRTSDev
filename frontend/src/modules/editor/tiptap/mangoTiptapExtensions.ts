@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type AnyExtension, type Extensions } from "@tiptap/core";
+import { Extension, Node, mergeAttributes, type AnyExtension, type Editor, type Extensions } from "@tiptap/core";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import Highlight from "@tiptap/extension-highlight";
 import Mention from "@tiptap/extension-mention";
@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
+import { normalizeEditorHighlightColor } from "../richTextEditing.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -29,6 +30,43 @@ function parsedNumberAttribute(element: HTMLElement, name: string): number | nul
   if (raw === null || raw.trim() === "") return null;
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function readMangoTiptapSelectionState(editor: Editor) {
+  const selection = editor.state.selection;
+  const caretMarks = selection.empty
+    ? (editor.state.storedMarks ?? selection.$from.nodeBefore?.marks ?? selection.$from.marks())
+    : null;
+  const caretMark = (name: string) => caretMarks?.find((mark) => mark.type.name === name);
+  const markAttributes = (name: string) => caretMark(name)?.attrs ?? editor.getAttributes(name);
+  const fontSizeValue = String(markAttributes("textStyle").fontSize || "15").replace("px", "");
+  const alignment = editor.getAttributes("paragraph").textAlign || editor.getAttributes("heading").textAlign || "left";
+  return {
+    fontSize: Number(fontSizeValue) || 15,
+    highlightColor: normalizeEditorHighlightColor(String(markAttributes("highlight").color || "")),
+    textAlignment: ["left", "center", "right"].includes(alignment) ? alignment as "left" | "center" | "right" : "left" as const,
+    bold: caretMarks ? Boolean(caretMark("bold")) : editor.isActive("bold"),
+    underline: caretMarks ? Boolean(caretMark("underline")) : editor.isActive("underline"),
+    italic: caretMarks ? Boolean(caretMark("italic")) : editor.isActive("italic"),
+    strikethrough: caretMarks ? Boolean(caretMark("strike")) : editor.isActive("strike"),
+  };
+}
+
+export function indentMangoTiptapSelection(editor: Editor): boolean {
+  if (editor.isActive("taskItem")) return editor.chain().focus().sinkListItem("taskItem").run();
+  if (editor.isActive("listItem")) return editor.chain().focus().sinkListItem("listItem").run();
+  return editor.chain().focus().command(({ tr, state, dispatch }) => {
+    if (dispatch) dispatch(tr.insertText("\t", state.selection.from, state.selection.to).scrollIntoView());
+    return true;
+  }).run();
+}
+
+export function outdentMangoTiptapSelection(editor: Editor): boolean {
+  if (editor.isActive("taskItem")) return editor.chain().focus().liftListItem("taskItem").run();
+  if (editor.isActive("listItem")) return editor.chain().focus().liftListItem("listItem").run();
+  const { from, empty } = editor.state.selection;
+  if (!empty || from <= 1 || editor.state.doc.textBetween(from - 1, from, "\n", "\n") !== "\t") return false;
+  return editor.chain().focus().deleteRange({ from: from - 1, to: from }).run();
 }
 
 export type MangoAttachmentImageAttributes = {

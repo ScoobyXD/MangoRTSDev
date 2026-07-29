@@ -25,7 +25,10 @@ import {
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
 import {
   createMangoTiptapExtensions,
+  indentMangoTiptapSelection,
   MangoTiptapEditorEngine,
+  outdentMangoTiptapSelection,
+  readMangoTiptapSelectionState,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 import {
   MangoTiptapAnnotations,
@@ -220,6 +223,83 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       format: "mango-tiptap-json", schema_version: 1, document: editor.getJSON(),
     });
     assert.equal(validation.valid, true, validation.valid ? "" : validation.error);
+
+    editor.commands.setContent({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { indentLevel: 0 },
+        content: [
+          { type: "text", text: "left", marks: [
+            { type: "bold" },
+            { type: "underline" },
+            { type: "italic" },
+            { type: "textStyle", attrs: { fontSize: "18px" } },
+          ] },
+          { type: "text", text: "right" },
+        ],
+      }],
+    });
+    editor.commands.setTextSelection(5);
+    assert.deepEqual(
+      readMangoTiptapSelectionState(editor),
+      {
+        fontSize: 18,
+        highlightColor: null,
+        textAlignment: "left",
+        bold: true,
+        underline: true,
+        italic: true,
+        strikethrough: false,
+      },
+      "a caret reflects the formatting of the character immediately to its left",
+    );
+    editor.commands.setTextSelection(6);
+    const unformattedCaretState = readMangoTiptapSelectionState(editor);
+    assert.deepEqual(
+      {
+        fontSize: unformattedCaretState.fontSize,
+        bold: unformattedCaretState.bold,
+        underline: unformattedCaretState.underline,
+        italic: unformattedCaretState.italic,
+      },
+      { fontSize: 15, bold: false, underline: false, italic: false },
+      "moving past the first unformatted character clears the toolbar state",
+    );
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", attrs: { indentLevel: 0 }, content: [{ type: "text", text: "plain" }] }] });
+    editor.commands.setTextSelection(3);
+    assert.equal(indentMangoTiptapSelection(editor), true);
+    assert.equal(editor.state.doc.textContent, "pl\tain");
+    assert.equal(editor.getAttributes("paragraph").indentLevel, 0, "plain Tab must not indent the entire paragraph block");
+    assert.equal(outdentMangoTiptapSelection(editor), true);
+    assert.equal(editor.state.doc.textContent, "plain");
+
+    editor.commands.setContent({
+      type: "doc",
+      content: [{ type: "bulletList", content: [
+        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
+        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "after" }] }] },
+      ] }],
+    });
+    editor.commands.setTextSelection(6);
+    assert.equal(editor.commands.splitListItem("listItem"), true, "Enter creates the next bullet row");
+    assert.equal(editor.commands.insertContent("child"), true);
+    assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created bullet row");
+    assert.equal((JSON.stringify(editor.getJSON()).match(/"type":"bulletList"/g) ?? []).length, 2);
+
+    editor.commands.setContent({
+      type: "doc",
+      content: [{ type: "taskList", content: [
+        { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
+        { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "after" }] }] },
+      ] }],
+    });
+    editor.commands.setTextSelection(6);
+    assert.equal(editor.commands.splitListItem("taskItem"), true, "Enter creates the next checklist row");
+    assert.equal(editor.commands.insertContent("child"), true);
+    assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created checklist row");
+    assert.equal((JSON.stringify(editor.getJSON()).match(/"type":"taskList"/g) ?? []).length, 2);
   } finally {
     editor.destroy();
     dom.window.close();

@@ -1867,6 +1867,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       target={target}
       onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}
       formattingControllerRef={props.formattingControllerRef}
+      formattingControllerActive={props.formattingControllerActive ?? !props.formattingControllerRef}
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       onConflict={() => props.onDocumentConflict?.()}
