@@ -89,7 +89,7 @@ test("collaboration snapshots project stable row identity and source annotations
   })), null);
 });
 
-test("shared collaboration rows stay in a navigable source inbox and otherwise fall back to My Triage", () => {
+test("collaboration snapshots do not replace missing rows from an authoritative provider mailbox", () => {
   const shared = collaboration("shared-collaboration", {
     scope_type: "shared",
     shared_inbox_id: "shared-1",
@@ -106,7 +106,19 @@ test("shared collaboration rows stay in a navigable source inbox and otherwise f
   );
   assert.deepEqual(
     mergeEmailCollaborationsForView([], [shared, personal], "shared:shared-1", new Set(["shared-1"])).map((item) => item.collaboration_id),
-    ["shared-collaboration"],
+    [],
+  );
+  assert.deepEqual(
+    mergeEmailCollaborationsForView(
+      [],
+      [shared, personal],
+      "my-triage",
+      new Set(["shared-1"]),
+      "owner@example.test",
+      "provider-scope",
+      "user-1",
+    ),
+    [],
   );
   assert.deepEqual(
     mergeEmailCollaborationsForView([], [shared, personal], "shared:shared-2", new Set(["shared-1", "shared-2"])),

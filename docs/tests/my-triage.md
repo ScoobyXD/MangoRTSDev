@@ -1,4 +1,4 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-28
 
 # My Triage Tests
 
@@ -7,6 +7,7 @@ Coverage Status:
 - Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact personal/shared targets, cache-only first/reconnect acceptance, zero-read local mutation echoes, external metadata/detail reconciliation, coalescing, queued-final work, and obsolete-navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers the draft retention/purge matrix, scope generations/revisions, out-of-order loads, edits/deletes during load, multiple personal accounts, and durable draft preparation before attachment upload. Unified-editor, send-time attachment, draft API, body-marking, and cache tests cover the remaining named paths; rule IDs are not fully mapped to automated tests yet.)
 
 - Automatic personal signature insertion, rich-body deduplication, compose-scope wiring, unified signature mounting, exact flush behavior, and stale-load/save ordering are covered by `tests/frontend/pages/home/homeCommands.test.ts` and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
+- Provider-authoritative list membership for Node/email-collaboration rows, exact personal/shared source isolation, and inaccessible-source fallback behavior are covered by `tests/frontend/pages/home/emailCollaborationRows.test.ts`.
 
 ## Business Logic
 
@@ -187,6 +188,10 @@ MT157 - My Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top pos
 
 MT158 - Once a My Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens the existing Node rather than creating another one and carries the clicked provider message ID so the left email pane expands and scrolls to that exact reply. Before creation, Create Node From Email shows only priority then an adjacent Logic Gate search, Add Email to Node shows only Node search, and neither opens chat or duplicate create/import buttons. Priority, Logic Gate, and Node-search menus all use the standard neutral elevated neomorphic surface with the shared cyan-to-violet highlight; priority/gate semantics never introduce orange or green panel themes. Successful create/add stays on the email under a temporary green banner. The created Node has its durable thread route, exact message-linked text box, shared accent, and no transient `not_found` card.
 MT159 - In a personal email collaboration, every chat comment authored by the current user has an inline Edit action after it is sent. Other participants' comments have no Edit action. Saving preserves the comment's email/message linkage, reply/source context, attachments, original author/creation time, and thread position; it updates mention participation through the established atomic collaboration path and displays Edited after canonical reconciliation.
+MT160 - For a connected personal account, the canonical provider message page for the exact company, user, normalized account, mailbox, search, unread filter, and page token is authoritative for list membership. A Node/email-collaboration snapshot may annotate a matching provider message or thread with Node/chat identity, but it must never manufacture a My Triage row when that exact provider result contains no match.
+MT161 - After normal Archive or Archive page and go next removes a personal message from the displayed page, no same-source collaboration snapshot, stale Inbox/unread metadata, cached detail, prefetch result, selection change, or list merge may reinsert it. The row may reappear only when a later canonical provider list actually returns it, including after a real archive-job failure; the user must never need to click the stale row to make it disappear.
+MT162 - Attaching an email or thread to a Node changes collaboration metadata and chat access, not provider mailbox membership. If the provider still returns another unarchived message in the same thread, that canonical message may carry the Node indicator; the stored collaboration snapshot alone is never proof that any message remains in Inbox.
+MT163 - Standalone collaboration snapshots are permitted only as the established fallback when the participant cannot access or navigate the immutable source mailbox. That fallback must not override an active connected personal account's canonical result. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-account isolation, and preservation of the inaccessible-source fallback.
 
 ## Scenarios
 
@@ -866,3 +871,29 @@ Expected:
 - The row shows Edited after success, and a failed save keeps the draft available for retry.
 
 Shared UI coverage lives in `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx`; collaboration persistence is covered by `backend/internal/http/chat_comment_edit_test.go`.
+
+### Scenario MT-S24: Archived Node-Linked Email Stays Out Of My Triage
+
+Business logic covered:
+- MT24
+- MT28
+- MT42
+- MT149
+- MT160
+- MT161
+- MT162
+- MT163
+
+Given:
+- The exact connected personal Inbox page contains one ordinary message and one message or thread attached to a Node.
+- The collaboration record retains an older provider-independent snapshot whose folder metadata still says Inbox.
+- The next provider page has already been prefetched.
+
+When:
+- The user archives the Node-linked row normally or uses Archive page and go next, and the background archive job succeeds.
+- The next page is displayed, the collaboration list is merged, the user changes selection, and the Inbox is later refreshed canonically.
+
+Expected:
+- The provider page alone decides Inbox membership. The stale collaboration snapshot cannot reinsert the archived message during the page swap, merge, selection, or refresh.
+- No second click is required to remove the row, and Node attachment does not make an archived message persistent.
+- A matching provider row still receives its Node/chat metadata when present, while a participant without source-mailbox access keeps only the documented collaboration fallback.

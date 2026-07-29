@@ -1,4 +1,4 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-28
 
 # Shared Triage Tests
 
@@ -8,6 +8,7 @@ Coverage Status:
 
 - Automatic shared-inbox signature insertion, cross-mailbox scope isolation, rich-body deduplication, compose-scope wiring, unified signature mounting, exact flush behavior, and stale-load/save ordering are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
 - Shared conversion persistence of `shared_inbox_id` and `account_email` is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
+- Provider-authoritative list membership for Node/email-collaboration rows, exact personal/shared source isolation, and inaccessible-source fallback behavior are covered by `tests/frontend/pages/home/emailCollaborationRows.test.ts`.
 
 ## Business Logic
 
@@ -214,6 +215,10 @@ ST184 - Shared Triage keeps Inbox, Starred, Sent, and All/Spam in four equal top
 
 ST185 - Once a Shared Triage conversation has an email Node, its row and every associated reply card show an accessible Node indicator. Activating it opens that existing Node and carries the clicked provider message ID without leaking outside established shared-inbox/participant authorization. Before creation, Create Node From Email shows only priority then adjacent Logic Gate search, Add Email to Node shows only Node search, and neither opens chat or duplicate create/import buttons. Priority, Logic Gate, and Node-search menus all use the standard neutral elevated neomorphic surface with the shared cyan-to-violet highlight; priority/gate semantics never introduce orange or green panel themes. Successful create/add stays on the email under a temporary green banner. The created Node has its authorized durable thread route, exact message-linked text box, shared accent, and no transient `not_found` card.
 ST186 - In a shared-inbox email collaboration, every chat comment authored by the current user has an inline Edit action after it is sent. Other participants' comments have no Edit action even when they share Node Edit access. Saving stays inside the exact shared-inbox/collaboration authorization boundary, preserves the source email/message linkage and attachment/reply metadata, applies newly resolved mentions atomically, and displays Edited after canonical reconciliation.
+ST187 - For a navigable Shared Triage mailbox, the canonical provider message page for the exact company, `shared_inbox_id`, mailbox, search, unread filter, and page token is authoritative for list membership. A Node/email-collaboration snapshot may annotate a matching provider message or thread with Node/chat identity, but it must never manufacture a Shared Triage row when that exact provider result contains no match.
+ST188 - After normal Archive or Archive page and go next removes a shared-inbox message from the displayed page, no same-source collaboration snapshot, stale Inbox/unread metadata, cached detail, prefetch result, selection change, or list merge may reinsert it. The row may reappear only when a later canonical provider list actually returns it, including after a real archive-job failure; the user must never need to click the stale row to make it disappear.
+ST189 - Attaching a shared-inbox email or thread to a Node changes collaboration metadata and chat access, not provider mailbox membership. If the provider still returns another unarchived message in the same thread, that canonical message may carry the Node indicator; the stored collaboration snapshot alone is never proof that any message remains in Inbox.
+ST190 - The collaboration-only My Triage fallback remains available to a permanent participant who cannot navigate the immutable source shared inbox, but it must never override the canonical result inside a navigable source Shared Triage mailbox. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-shared-inbox isolation, and preservation of the inaccessible-source fallback.
 
 ## Scenarios
 
@@ -1025,3 +1030,29 @@ Expected:
 - Failure retains the author's draft without displaying an uncommitted value as canonical.
 
 Shared UI/realtime coverage lives in `tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx` and `tests/frontend/modules/realtime/realtimeWebSocket.test.ts`; backend authorization is covered by `backend/internal/http/chat_comment_edit_test.go`.
+
+### Scenario ST-S29: Archived Node-Linked Email Stays Out Of Shared Triage
+
+Business logic covered:
+- ST46
+- ST58
+- ST64
+- ST175
+- ST187
+- ST188
+- ST189
+- ST190
+
+Given:
+- One navigable shared Inbox page contains an ordinary message and a message or thread attached to a Node.
+- The collaboration record retains an older provider-independent snapshot whose folder metadata still says Inbox.
+- The next exact-shared-inbox provider page has already been prefetched.
+
+When:
+- An authorized editor archives the Node-linked row normally or uses Archive page and go next, and the background archive job succeeds through the exact shared grant.
+- The next page is displayed, collaboration rows are merged, selection changes, and the shared Inbox is later refreshed canonically.
+
+Expected:
+- The exact shared provider page alone decides Inbox membership. The stale collaboration snapshot cannot reinsert the archived message during the page swap, merge, selection, or refresh.
+- No second click is required to remove the row, and Node attachment does not make an archived shared message persistent.
+- A matching provider row still receives its Node/chat metadata when present, while a permanent participant without source-inbox navigation retains only the documented My Triage collaboration fallback.
