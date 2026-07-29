@@ -163,7 +163,7 @@ The latest successful proof measured:
 
 The same proof covers invalid update rejection, failed-write acknowledgement suppression, lost-ack deduplication, failed-compaction atomic rollback/recovery, exact delete-set snapshot proof, three-owner conversion, resumable retry, three shadow matches, inactive-gate rejection, activation, stale rollback-export rejection, and restoration of post-cutover edits, creates, and deletes.
 
-The production-path harness provisions disposable PostgreSQL, the real Go API, the production collaboration service, Vite/React in Strict Mode, Chromium, and an S3-compatible fixture. It exercises real typing/save/reload, navigation, offline close/reopen recovery, comments, email/chat, archive/restore, attachments, and inline-image actions. `node scripts/run_all_tests.mjs` remains the final repository gate.
+The repository gate retains frontend unit/contract tests, the production build, backend Go tests, and infrastructure contracts. The dedicated production-path realtime runner and former Go API/Vite/Chromium/S3 workflow harness were removed from CI on 2026-07-28; typing/save/reload, navigation, offline recovery, comments, email/chat, archive/restore, attachments, and inline-image workflows require manual browser acceptance until replacement automation is added. `node scripts/run_all_tests.mjs` remains the final non-browser repository gate.
 
 ## Manual browser acceptance before any real conversion
 

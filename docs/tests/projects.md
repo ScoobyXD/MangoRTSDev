@@ -4,7 +4,7 @@ Last updated: 2026-07-23
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. Project relationship rule tests cover one Logic Gate per node, one Project per node, implicit per-Project Logic Gate relationships, and the same Logic Gate remaining related to multiple Projects. `scripts/run_realtime_production_path_tests.mjs` proves real-browser Project-document isolation through the production HTTP/WebSocket/outbox path; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
+- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. Project relationship rule tests cover one Logic Gate per node, one Project per node, implicit per-Project Logic Gate relationships, and the same Logic Gate remaining related to multiple Projects. the dedicated production-path realtime runner and its real-browser Project workflow were removed from CI on 2026-07-28; focused frontend and backend suites remain, while visible Project workflow acceptance is manual until replacement automation is added; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
 
 ## Business Logic
 

@@ -14,14 +14,6 @@ test("GitHub CI installs and exports the PostgreSQL server tools required by the
   );
 });
 
-test("GitHub CI installs the matching Playwright Chromium before the production-path gate", () => {
-  assert.match(workflow, /npx --no-install playwright-core install --with-deps chromium/);
-  assert.ok(
-    workflow.indexOf("Install frontend dependencies") < workflow.indexOf("Install Chromium for production-path tests"),
-    "Playwright must be installed before its browser binary",
-  );
-  assert.ok(
-    workflow.indexOf("Install Chromium for production-path tests") < workflow.indexOf("Run repo tests"),
-    "Chromium must be available before the full repository gate",
-  );
+test("GitHub CI does not install browser automation", () => {
+  assert.doesNotMatch(workflow, /playwright|chromium/i);
 });
