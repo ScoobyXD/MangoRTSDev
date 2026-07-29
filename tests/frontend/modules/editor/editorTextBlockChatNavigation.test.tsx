@@ -699,6 +699,15 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     assert.equal(acceptEntity.defaultPrevented, true);
     assert.equal(entityComposer.value, "#Gate One ");
     assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 9, entityType: "logic_gate", entityID: "gate-1", label: "Gate One" }]);
+    const draftEntityChip = container.querySelector<HTMLElement>('[data-mango-chat-composer-entity-link="true"]');
+    assert.ok(draftEntityChip, "an accepted # entity is visibly rendered as a chip before the chat is sent");
+    assert.equal(draftEntityChip.textContent, "#Gate One");
+    assert.equal(draftEntityChip.dataset.mangoEntityType, "logic_gate");
+    assert.equal(draftEntityChip.dataset.mangoEntityId, "gate-1");
+    assert.equal(draftEntityChip.style.padding, "0px", "the draft entity chip keeps its glyph width aligned with the native caret");
+    assert.equal(draftEntityChip.style.fontWeight, "inherit");
+    assert.match(draftEntityChip.style.boxShadow, /0 0 0 2px/, "the unsent entity stays visibly outlined like an accepted mention");
+    assert.equal(entityComposer.style.color, "transparent", "the overlay paints the entity without duplicating the textarea text");
 
     const linkedMessage = message({ id: "linked-entity", message: "See #Project One", entityLinks: [{ start: 4, end: 16, entityType: "project", entityID: "project-1", label: "Project One" }] });
     await act(async () => root.render(<ChatPane {...chatProps} messages={[linkedMessage]} draft="" messageFocusRequest={null} />));
