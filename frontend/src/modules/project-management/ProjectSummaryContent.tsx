@@ -51,6 +51,7 @@ import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUse
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { EDITOR_PRIMARY_HEADER_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
+import { EditorSaveStatusBadge, type EditorSaveState } from "../editor/EditorSaveStatusBadge.js";
 import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
 import {
   editorChatAttachmentsReadyForSubmit,
@@ -126,6 +127,7 @@ import {
   upsertProjectRelationship,
   type ProjectCriticalPathStep,
   type ProjectHealth,
+  type ProjectInformation,
   type ProjectProjection,
   type ProjectRecord,
   type ProjectRelationshipProjection,
@@ -189,6 +191,110 @@ type ProjectTextBlockDraft = {
   attachments: EditorChatAttachment[];
   createdTimestamp: string;
   updatedTimestamp: string;
+};
+
+const PROJECT_SAVED_VERSION_TYPE = "Saved version";
+const PROJECT_SAVED_VERSION_PREFIX = "MANGO_PROJECT_SAVE_V1:";
+
+type ProjectSavedVersionSnapshot = {
+  name: string;
+  blocks: ProjectTextBlockDraft[];
+};
+
+type ProjectSavedVersion = {
+  item: ProjectInformation;
+  snapshot: ProjectSavedVersionSnapshot;
+};
+
+function parseProjectSavedVersion(item: ProjectInformation): ProjectSavedVersion | null {
+  if (item.type !== PROJECT_SAVED_VERSION_TYPE || !item.information.startsWith(PROJECT_SAVED_VERSION_PREFIX)) return null;
+  try {
+    const snapshot = JSON.parse(item.information.slice(PROJECT_SAVED_VERSION_PREFIX.length)) as ProjectSavedVersionSnapshot;
+    if (!snapshot || !Array.isArray(snapshot.blocks)) return null;
+    return { item, snapshot };
+  } catch {
+    return null;
+  }
+}
+
+function projectSavedDocumentText(serialized: string): string {
+  try {
+    const envelope = JSON.parse(serialized) as { document?: unknown };
+    const parts: string[] = [];
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      const node = value as { text?: unknown; content?: unknown };
+      if (typeof node.text === "string") parts.push(node.text);
+      if (Array.isArray(node.content)) {
+        for (const child of node.content) visit(child);
+        if (node.content.length > 0) parts.push("\n");
+      }
+    };
+    visit(envelope.document);
+    return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+  } catch {
+    return serialized.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+}
+
+const ProjectSavedVersionsDialog: React.FC<{
+  versions: ProjectSavedVersion[];
+  selectedID: string;
+  saving: boolean;
+  restoring: boolean;
+  onSelect: (id: string) => void;
+  onExitPreview: () => void;
+  onSave: () => void;
+  onRestore: (version: ProjectSavedVersion) => void;
+  onClose: () => void;
+}> = ({ versions, selectedID, saving, restoring, onSelect, onExitPreview, onSave, onRestore, onClose }) => {
+  const selected = versions.find((version) => version.item.information_id === selectedID) ?? null;
+  return (
+    <AppModalPortal>
+      <div role="dialog" aria-modal="true" aria-label="Project saved versions" style={{ position: "fixed", inset: 0, zIndex: 1800, display: "grid", placeItems: "center", padding: 24, background: "rgba(15,23,42,0.48)" }}>
+        <div style={{ width: "min(1120px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: "#f8fafc", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}>
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+            <div><strong>Project saved versions</strong><div style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>Manual snapshots stored in project information</div></div>
+            <div style={{ display: "flex", gap: 7 }}>
+              <button type="button" disabled={saving} onClick={onSave} style={{ minHeight: 30, border: "1px solid #60a5fa", borderRadius: 8, background: "#eff6ff", color: "#1d4ed8", padding: "0 10px", fontWeight: 900, cursor: saving ? "default" : "pointer" }}>{saving ? "Saving version" : "Save version"}</button>
+              <button type="button" onClick={onClose} style={{ minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "#ffffff", padding: "0 10px", fontWeight: 850, cursor: "pointer" }}>Close</button>
+            </div>
+          </header>
+          <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 12, padding: 12, alignContent: "start" }}>
+            {versions.length === 0 ? <div style={{ padding: 18, border: `1px dashed ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10 }}>No project versions saved yet.</div> : (
+              <div style={{ minWidth: 680, display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 8 }}>
+                {versions.map((version) => {
+                  const preview = version.snapshot.blocks.map((block) => projectSavedDocumentText(block.document)).filter(Boolean).join("\n\n");
+                  const active = selected?.item.information_id === version.item.information_id;
+                  return (
+                    <button key={version.item.information_id} type="button" onClick={() => onSelect(version.item.information_id)} style={{ height: 128, minWidth: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr) auto", gap: 5, border: `2px solid ${active ? "#2563eb" : EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: active ? "#eff6ff" : "#ffffff", padding: 8, textAlign: "left", cursor: "pointer", overflow: "hidden" }}>
+                      <strong style={{ fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{new Date(version.item.created_timestamp).toLocaleString()}</strong>
+                      <span style={{ overflow: "hidden", whiteSpace: "pre-wrap", background: "#f8fafc", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 5, padding: 5, font: "9px/1.25 ui-monospace, Consolas, monospace" }}>{preview || "Empty project snapshot"}</span>
+                      <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 850 }}>{version.snapshot.blocks.length} text box{version.snapshot.blocks.length === 1 ? "" : "es"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {selected && (
+              <section style={{ display: "grid", gap: 9, border: "4px solid #f59e0b", borderRadius: 12, background: "#fffbeb", padding: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div><strong style={{ color: "#92400e" }}>Viewing an old project snapshot</strong><div style={{ color: "#92400e", fontSize: 10.5, fontWeight: 750 }}>Read-only. The current project is unchanged.</div></div>
+                  <div style={{ display: "flex", gap: 7 }}>
+                    <button type="button" onClick={onExitPreview} style={{ minHeight: 30, border: "1px solid #d97706", borderRadius: 8, background: "#ffffff", color: "#92400e", padding: "0 10px", fontWeight: 900, cursor: "pointer" }}>Exit preview</button>
+                    <button type="button" disabled={restoring} onClick={() => onRestore(selected)} style={{ minHeight: 30, border: "1px solid #b45309", borderRadius: 8, background: "#f59e0b", color: "#451a03", padding: "0 10px", fontWeight: 950, cursor: restoring ? "default" : "pointer" }}>{restoring ? "Overwriting current" : "Overwrite current with this"}</button>
+                  </div>
+                </div>
+                <div style={{ maxHeight: 420, overflow: "auto", display: "grid", gap: 8 }}>
+                  {selected.snapshot.blocks.map((block, index) => <pre key={block.id} style={{ margin: 0, minHeight: 80, whiteSpace: "pre-wrap", overflowWrap: "anywhere", border: "1px solid #f59e0b", borderRadius: 8, background: "#ffffff", padding: 10, font: "11px/1.45 ui-monospace, Consolas, monospace" }}>Text box {index + 1}{"\n"}{projectSavedDocumentText(block.document) || "Empty text box"}</pre>)}
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+      </div>
+    </AppModalPortal>
+  );
 };
 
 type ProjectSummaryWorkspaceSnapshot = {
@@ -306,6 +412,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectTitleEditing, setProjectTitleEditing] = useState(false);
   const [projectTitleDraft, setProjectTitleDraft] = useState("");
   const [blocks, setBlocks] = useState<ProjectTextBlockDraft[]>([]);
+  const [textBlockSaveStates, setTextBlockSaveStates] = useState<Record<string, EditorSaveState>>({});
+  const [projectSavedVersions, setProjectSavedVersions] = useState<ProjectSavedVersion[]>([]);
+  const [projectSavedVersionsOpen, setProjectSavedVersionsOpen] = useState(false);
+  const [selectedProjectSavedVersionID, setSelectedProjectSavedVersionID] = useState("");
+  const [projectVersionSaving, setProjectVersionSaving] = useState(false);
+  const [projectVersionRestoring, setProjectVersionRestoring] = useState(false);
+  const [projectDocumentRemountRevision, setProjectDocumentRemountRevision] = useState(0);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [relationships, setRelationships] = useState<ProjectRelationshipProjection[]>([]);
@@ -541,6 +654,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setProject(view.project);
       setProjectTitleDraft(view.project.name || "");
+      setProjectSavedVersions((view.information ?? [])
+        .map(parseProjectSavedVersion)
+        .filter((version): version is ProjectSavedVersion => version !== null)
+        .sort((left, right) => right.item.created_timestamp.localeCompare(left.item.created_timestamp)));
       setRelationships(foldCommittedEntityTitlesSince(
         view.relationships ?? [], companyID, titleVersionAtStart,
         (current, update) => reconcileProjectResourceDisplayTitles(current, update, companyID),
@@ -951,6 +1068,123 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     await projectTextBlockSaveController.saveLatestContent(blockID);
   }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
+
+  const saveProjectVersion = useCallback(async () => {
+    if (!companyID || !projectID || projectVersionSaving) return;
+    setProjectVersionSaving(true);
+    setError("");
+    try {
+      await Promise.all(blocks.map((block) => flushMangoTiptapDocument({
+        companyID,
+        resourceType: "project",
+        resourceID: projectID,
+        documentID: block.id,
+      })));
+      await projectTextBlockSaveController.flushChangedBlocks();
+      const snapshotBlocks = await Promise.all(blocks.map(async (block) => {
+        const latest = projectTextBlockContentRef.current.get(block.id);
+        const path = `/v1/editor-json/project/${projectID}/documents/${block.id}?company_id=${encodeURIComponent(companyID)}`;
+        const committed = await attachmentRequestJSON<{ document: unknown; updated_timestamp?: string }>(path);
+        return {
+          ...block,
+          title: latest?.title ?? block.title,
+          document: JSON.stringify(committed.document),
+          attachments: latest?.attachments ?? block.attachments,
+          updatedTimestamp: committed.updated_timestamp ?? block.updatedTimestamp,
+        };
+      }));
+      await addProjectInformation({
+        companyID,
+        projectID,
+        informationID: generateStableInformationID(),
+        type: PROJECT_SAVED_VERSION_TYPE,
+        information: PROJECT_SAVED_VERSION_PREFIX + JSON.stringify({
+          name: project?.name || projectID,
+          blocks: snapshotBlocks,
+        } satisfies ProjectSavedVersionSnapshot),
+      });
+      await loadProject({ showLoading: false });
+      setProjectSavedVersionsOpen(true);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save project version");
+    } finally {
+      setProjectVersionSaving(false);
+    }
+  }, [attachmentRequestJSON, blocks, companyID, loadProject, project?.name, projectID, projectTextBlockSaveController, projectVersionSaving]);
+
+  const restoreProjectVersion = useCallback(async (version: ProjectSavedVersion) => {
+    if (!companyID || !projectID || projectVersionRestoring) return;
+    if (!window.confirm("Overwrite the current project text boxes with this saved version?")) return;
+    const format = editorDataFormat.gate?.editor_format;
+    if (format !== "tiptap_json") {
+      setError("Saved-version restore requires the JSON editor format.");
+      return;
+    }
+    setProjectVersionRestoring(true);
+    setError("");
+    try {
+      await Promise.all(blocks.map((block) => flushMangoTiptapDocument({
+        companyID,
+        resourceType: "project",
+        resourceID: projectID,
+        documentID: block.id,
+      })));
+      const desiredIDs = new Set(version.snapshot.blocks.map((block) => block.id));
+      for (const current of blocks) {
+        if (desiredIDs.has(current.id)) continue;
+        const path = `/v1/editor-json/project/${projectID}/documents/${current.id}?company_id=${encodeURIComponent(companyID)}`;
+        const currentSnapshot = await attachmentRequestJSON<{ revision: number }>(path);
+        await attachmentRequestJSON(path, {
+          method: "DELETE",
+          body: JSON.stringify({
+            operation_id: generateStableInformationID(),
+            client_id: "project-save-version-restore",
+            base_revision: currentSnapshot.revision,
+          }),
+        });
+      }
+      for (const saved of version.snapshot.blocks) {
+        let documentID = saved.id;
+        let path = `/v1/editor-json/project/${projectID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
+        await attachmentRequestJSON(path, {
+          method: "PATCH",
+          body: JSON.stringify({ title: saved.title, attachments: saved.attachments ?? [] }),
+        });
+        let currentSnapshot = await attachmentRequestJSON<{ revision: number; deleted?: boolean; annotations?: unknown[] }>(path);
+        if (currentSnapshot.deleted) {
+          documentID = generateStableInformationID();
+          path = `/v1/editor-json/project/${projectID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
+          await attachmentRequestJSON(path, {
+            method: "PATCH",
+            body: JSON.stringify({ title: saved.title, attachments: saved.attachments ?? [] }),
+          });
+          currentSnapshot = await attachmentRequestJSON<{ revision: number; annotations?: unknown[] }>(path);
+        }
+        const envelope = saved.document.trim()
+          ? JSON.parse(saved.document)
+          : { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph" }] } };
+        await attachmentRequestJSON(path, {
+          method: "POST",
+          body: JSON.stringify({
+            operation_id: generateStableInformationID(),
+            client_id: "project-save-version-restore",
+            base_revision: currentSnapshot.revision,
+            schema_version: 1,
+            document: envelope,
+            annotations: [],
+          }),
+        });
+      }
+      setSelectedProjectSavedVersionID("");
+      setProjectSavedVersionsOpen(false);
+      setProjectDocumentRemountRevision((current) => current + 1);
+      await loadProject({ showLoading: false });
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "Failed to restore project version");
+    } finally {
+      setProjectVersionRestoring(false);
+    }
+  }, [attachmentRequestJSON, blocks, companyID, editorDataFormat.gate?.editor_format, loadProject, projectID, projectVersionRestoring]);
 
   const addTextBlock = useCallback(() => {
     if (!editorDataFormat.gate) {
@@ -2237,6 +2471,22 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           }}
         />
       ) : null}
+      {projectSavedVersionsOpen ? (
+        <ProjectSavedVersionsDialog
+          versions={projectSavedVersions}
+          selectedID={selectedProjectSavedVersionID}
+          saving={projectVersionSaving}
+          restoring={projectVersionRestoring}
+          onSelect={setSelectedProjectSavedVersionID}
+          onExitPreview={() => setSelectedProjectSavedVersionID("")}
+          onSave={() => { void saveProjectVersion(); }}
+          onRestore={(version) => { void restoreProjectVersion(version); }}
+          onClose={() => {
+            setSelectedProjectSavedVersionID("");
+            setProjectSavedVersionsOpen(false);
+          }}
+        />
+      ) : null}
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
       <div ref={bodyRef} className="mango-project-summary-body" style={summaryBodyStyle}>
         <section className="mango-project-summary-timeline" style={textColumnStyle(summarySplitPct)}>
@@ -2273,9 +2523,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 onOutlineStyleFocus={refreshProjectSelectionFormat}
                 onOutlineStyleChange={setOutlineStyle}
                 onInsertTable={() => runProjectFormatCommand((controller) => controller.insertTable())}
+                onSaveCurrentVersion={() => { void saveProjectVersion(); }}
+                saveCurrentVersionBusy={projectVersionSaving}
+                saveCurrentVersionDisabled={projectVersionRestoring}
                 reserveHeaderOffset={false}
                 visibleTabIDs={EDITOR_PRIMARY_HEADER_TAB_IDS}
                 secondaryActions={[
+                  { id: "saved-versions", label: "Saved versions", onSelect: () => setProjectSavedVersionsOpen(true) },
                   { id: "assignments", label: "Assignments", onSelect: () => setAssignmentsOpen(true) },
                   ...(onOpenInNewTab
                     ? [{ id: "open-project-tab", label: "Open project in new tab", onSelect: () => onOpenInNewTab() }]
@@ -2347,10 +2601,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
+                            <EditorSaveStatusBadge state={textBlockSaveStates[block.id] ?? (savingID === block.id ? { status: "saving" } : { status: "saved", updatedTimestamp: block.updatedTimestamp })} compact />
                             <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
                               Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                             </span>
-                            {savingID === block.id ? <span style={savingStyle}>Saving</span> : null}
                             <label title="Add attachment" aria-label="Add attachment" style={projectTextBlockIconButtonStyle(accent, false)}>
                               <PaperclipIcon color={accent} />
                               <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
@@ -2414,6 +2668,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                           {editorOpen && (
                             <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
                               <NodeTextBlockEditor
+                                key={`${block.id}:${projectDocumentRemountRevision}`}
                                 blockID={block.id}
                                 surfaceKind="project"
                                 editable
@@ -2458,6 +2713,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentConflict={() => setError("Mango is recovering this project text box from its committed snapshot.")}
                                 onDocumentError={setError}
+                                onSaveStateChange={(state) => {
+                                  setTextBlockSaveStates((current) => ({ ...current, [block.id]: state }));
+                                  if (state.status === "saved" && state.updatedTimestamp) {
+                                    setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, updatedTimestamp: state.updatedTimestamp! } : item));
+                                  }
+                                }}
                                 onRecoveryStorageError={setError}
                                 onRecoveryStorageRecovered={() => setError("")}
                                 onChangeSeen={() => undefined}
@@ -4904,11 +5165,6 @@ const projectEmailAttachButtonStyle: React.CSSProperties = {
   boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.78)",
 };
 
-const savingStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "#64748b",
-  fontWeight: 700,
-};
 
 const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   minHeight: 0,

@@ -61,7 +61,7 @@ import {
 } from "./mangoTiptapExtensions.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
-import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType } from "./mangoTiptapSync.js";
+import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType, type MangoTiptapSaveState } from "./mangoTiptapSync.js";
 
 export type MangoTiptapFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -122,6 +122,7 @@ export type MangoTiptapEditorProps = {
   onBlur?: () => void;
   onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
   onError?: (message: string) => void;
+  onSaveStateChange?: (state: MangoTiptapSaveState) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
   onAnnotationActivate?: (annotation: { id: string; kind: string }) => void;
@@ -599,6 +600,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onBlur,
   onConflict,
   onError,
+  onSaveStateChange,
   onRecoveryStorageError,
   onRecoveryStorageRecovered,
   onAnnotationActivate,
@@ -652,7 +654,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
-    onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onChange, onFlush, onFocus, onBlur, onConflict, onError, onSaveStateChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -660,7 +662,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onTargetHandled,
   });
   callbacksRef.current = {
-    onChange, onFlush, onFocus, onBlur, onConflict, onError,
+    onChange, onFlush, onFocus, onBlur, onConflict, onError, onSaveStateChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -796,6 +798,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           void deactivate();
         }
       },
+      onSaveStateChange: (state) => callbacksRef.current.onSaveStateChange?.(state),
       onSnapshot: (snapshot, serialized, snapshotAnnotations) => {
         if (serialized !== currentSerializedRef.current) {
           setDocument(snapshot);
@@ -1090,6 +1093,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onUpdate: ({ editor: activeEditor }) => {
         lifecycleRef.current.markDirty();
+        callbacksRef.current.onSaveStateChange?.({ status: "pending" });
         syncRef.current?.schedule(() => ({
           format: "mango-tiptap-json",
           schema_version: 1,

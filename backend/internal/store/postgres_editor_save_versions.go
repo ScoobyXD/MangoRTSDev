@@ -320,12 +320,20 @@ func (r *PostgresRepo) createEditorSaveVersion(input EditorSaveVersionInput, res
 }
 
 func selectCurrentEditorTextProjectionsTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) ([]domain.EditorSaveVersionItem, error) {
-	query := `select information_id::text, type::text, information, created_timestamp, updated_timestamp
+	query := `select information_id::text, type::text, information, created_timestamp, updated_timestamp,
+		       coalesce((select d.canonical_document::text from editor_json_documents d
+		                  where d.company_id=node_projection_table.company_id and d.resource_type='node'
+		                    and d.resource_id=node_projection_table.node_id::text
+		                    and d.document_id=node_projection_table.information_id::text and not d.is_deleted), '')
 		  from node_projection_table
 		 where company_id=$1::uuid and node_id=$2::uuid and type='Text box'::information_type and not is_deleted
 		 order by created_timestamp asc, information_id asc`
 	if resourceType == EntityTypeLogicGate {
-		query = `select information_id::text, type::text, information, created_timestamp, updated_timestamp
+		query = `select information_id::text, type::text, information, created_timestamp, updated_timestamp,
+			       coalesce((select d.canonical_document::text from editor_json_documents d
+			                  where d.company_id=logic_gate_projection_table.company_id and d.resource_type='logic_gate'
+			                    and d.resource_id=logic_gate_projection_table.logic_gate_id::text
+			                    and d.document_id=logic_gate_projection_table.information_id::text and not d.is_deleted), '')
 			  from logic_gate_projection_table
 			 where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text box'::information_type and not is_deleted
 			 order by updated_timestamp desc, created_timestamp desc, information_id desc`
@@ -339,8 +347,12 @@ func selectCurrentEditorTextProjectionsTx(ctx context.Context, tx *sql.Tx, compa
 	items := make([]domain.EditorSaveVersionItem, 0)
 	for rows.Next() {
 		var item domain.EditorSaveVersionItem
-		if err := rows.Scan(&item.SourceInformationID, &item.Type, &item.Information, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+		var jsonDocument string
+		if err := rows.Scan(&item.SourceInformationID, &item.Type, &item.Information, &item.CreatedTimestamp, &item.UpdatedTimestamp, &jsonDocument); err != nil {
 			return nil, err
+		}
+		if strings.TrimSpace(jsonDocument) != "" {
+			item.Information = editorProjectionInformationWithDocument(item.Information, jsonDocument)
 		}
 		item.InformationID = item.SourceInformationID
 		items = append(items, item)

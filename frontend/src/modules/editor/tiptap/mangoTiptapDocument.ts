@@ -69,6 +69,102 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function safeColor(value: unknown): boolean {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 }
+const CSS_NAMED_COLORS: Readonly<Record<string, string>> = {
+  black: "#000000", silver: "#c0c0c0", gray: "#808080", white: "#ffffff",
+  maroon: "#800000", red: "#ff0000", purple: "#800080", fuchsia: "#ff00ff",
+  green: "#008000", lime: "#00ff00", olive: "#808000", yellow: "#ffff00",
+  navy: "#000080", blue: "#0000ff", teal: "#008080", aqua: "#00ffff",
+  orange: "#ffa500", pink: "#ffc0cb", brown: "#a52a2a", violet: "#ee82ee",
+  indigo: "#4b0082", gold: "#ffd700", transparent: "",
+};
+
+function byteHex(value: number): string {
+  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+}
+
+function percentOrByte(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return null;
+  return value.trim().endsWith("%") ? parsed * 2.55 : parsed;
+}
+
+/** Canonicalize browser/clipboard CSS colors to the durable editor #RRGGBB form. */
+export function normalizeMangoTiptapColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const clean = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(clean)) return clean;
+  if (/^#[0-9a-f]{3}$/.test(clean)) return `#${clean.slice(1).split("").map((part) => `${part}${part}`).join("")}`;
+  if (/^#[0-9a-f]{8}$/.test(clean)) return clean.slice(0, 7);
+  if (/^#[0-9a-f]{4}$/.test(clean)) return `#${clean.slice(1, 4).split("").map((part) => `${part}${part}`).join("")}`;
+  const rgb = /^rgba?\(\s*([^,\s]+)[,\s]+([^,\s]+)[,\s]+([^,\s/]+)(?:\s*[,/]\s*[^)]+)?\s*\)$/.exec(clean);
+  if (rgb) {
+    const channels = rgb.slice(1, 4).map(percentOrByte);
+    if (channels.every((channel): channel is number => channel !== null)) {
+      return `#${channels.map(byteHex).join("")}`;
+    }
+  }
+  return CSS_NAMED_COLORS[clean] || null;
+}
+
+/** Convert pasted CSS font sizes to a rounded, supported pixel size. */
+export function normalizeMangoTiptapFontSize(value: unknown): string | null {
+  const clean = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim().toLowerCase() : "";
+  const match = /^(-?\d+(?:\.\d+)?)(px|pt|rem|em)?$/.exec(clean);
+  if (!match) return null;
+  const scalar = Number(match[1]);
+  if (!Number.isFinite(scalar)) return null;
+  const pixels = scalar * (match[2] === "pt" ? 4 / 3 : match[2] === "em" || match[2] === "rem" ? 16 : 1);
+  return `${Math.max(10, Math.min(28, Math.round(pixels)))}px`;
+}
+
+function normalizeMangoTiptapJSONContent(value: JSONContent): JSONContent {
+  const normalized: JSONContent = { ...value };
+  if (value.attrs) {
+    const attrs = { ...value.attrs };
+    if (value.type === "tableCell" || value.type === "tableHeader") {
+      const color = normalizeMangoTiptapColor(attrs.backgroundColor);
+      if (attrs.backgroundColor !== undefined && attrs.backgroundColor !== null) {
+        if (color) attrs.backgroundColor = color;
+        else delete attrs.backgroundColor;
+      }
+    }
+    normalized.attrs = attrs;
+  }
+  if (value.marks) {
+    normalized.marks = value.marks.map((mark) => {
+      if (!mark.attrs) return { ...mark };
+      const attrs = { ...mark.attrs };
+      if (mark.type === "textStyle") {
+        if (attrs.fontSize !== undefined && attrs.fontSize !== null) {
+          const fontSize = normalizeMangoTiptapFontSize(attrs.fontSize);
+          if (fontSize) attrs.fontSize = fontSize;
+          else delete attrs.fontSize;
+        }
+        if (attrs.color !== undefined && attrs.color !== null) {
+          const color = normalizeMangoTiptapColor(attrs.color);
+          if (color) attrs.color = color;
+          else delete attrs.color;
+        }
+      }
+      if (mark.type === "highlight" && attrs.color !== undefined && attrs.color !== null) {
+        const color = normalizeMangoTiptapColor(attrs.color);
+        if (color) attrs.color = color;
+        else delete attrs.color;
+      }
+      return { ...mark, attrs };
+    });
+  }
+  if (value.content) normalized.content = value.content.map(normalizeMangoTiptapJSONContent);
+  return normalized;
+}
+
+/**
+ * Makes externally pasted rich text safe to persist. Unsupported visual values are
+ * removed, but the pasted text and document structure are never discarded.
+ */
+export function normalizeMangoTiptapDocument(value: MangoTiptapDocument): MangoTiptapDocument {
+  return { ...value, document: normalizeMangoTiptapJSONContent(value.document) };
+}
 
 function positiveInteger(value: unknown, maximum = 100_000): boolean {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= maximum;

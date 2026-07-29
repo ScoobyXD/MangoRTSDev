@@ -5,6 +5,7 @@ import type { EditorOutlineStyleID } from "./plainTextEditing";
 import { EDITOR_HIGHLIGHT_COLOR_ITEMS, normalizeEditorHighlightColor, type EditorHighlightColor } from "./richTextEditing";
 import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
 import type { EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
+import { EditorSaveStatusBadge, type EditorSaveState } from "./EditorSaveStatusBadge.js";
 
 const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
@@ -143,6 +144,7 @@ type EditorTabBarProps = {
   onSaveCurrentVersion?: () => void;
   saveCurrentVersionDisabled?: boolean;
   saveCurrentVersionBusy?: boolean;
+  saveState?: EditorSaveState;
   onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
   secondaryActions?: readonly EditorHeaderOverflowAction[];
   reserveHeaderOffset?: boolean;
@@ -197,6 +199,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onSaveCurrentVersion,
   saveCurrentVersionDisabled = false,
   saveCurrentVersionBusy = false,
+  saveState,
   onRelationshipTabAnchorChange,
   secondaryActions = [],
   reserveHeaderOffset = true,
@@ -233,7 +236,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
   const primaryTabs = visibleTabs.filter((tab) => EDITOR_PRIMARY_HEADER_TAB_IDS.includes(tab.id));
   const overflowTabs = visibleTabs.filter((tab) => EDITOR_OVERFLOW_HEADER_TAB_IDS.includes(tab.id));
-  const hasOverflowActions = overflowTabs.length > 0 || secondaryActions.length > 0 || Boolean(onSaveCurrentVersion) || Boolean(onCreateRelatedNode);
+  const hasOverflowActions = overflowTabs.length > 0 || secondaryActions.length > 0 || Boolean(onCreateRelatedNode);
   const formatControlsDisabled = disabled || formattingDisabled;
 
   useEffect(() => {
@@ -833,8 +836,24 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           </button>
         );
       })}
+      {(saveState || onSaveCurrentVersion) && (
+        <div style={{ marginLeft: singleLine ? 0 : "auto", display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+          {saveState && <EditorSaveStatusBadge state={saveState} compact />}
+          {onSaveCurrentVersion && (
+            <button
+              type="button"
+              data-mango-editor-save-version="true"
+              disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
+              onClick={onSaveCurrentVersion}
+              style={{ flex: "0 0 auto", height: 24, border: `1px solid ${strokeColor}`, borderRadius: 8, background: tabBackground, color: accent, cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer", padding: "0 9px", fontSize: 10, fontWeight: 850, opacity: saveCurrentVersionDisabled ? 0.55 : 1 }}
+            >
+              {saveCurrentVersionBusy ? "Saving version" : "Save version"}
+            </button>
+          )}
+        </div>
+      )}
       {hasOverflowActions && (
-        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: singleLine ? 0 : "auto" }}>
+        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: saveState || onSaveCurrentVersion || singleLine ? 0 : "auto" }}>
           <button
             ref={(element) => {
               overflowTriggerRef.current = element;
@@ -946,21 +965,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   {action.label}
                 </button>
               ))}
-              {onSaveCurrentVersion && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
-                  data-mango-editor-header-overflow-action="save-version"
-                  onClick={() => runOverflowAction(onSaveCurrentVersion)}
-                  style={{ width: "100%", minHeight: 30, border: 0, borderRadius: 5, background: "transparent", color: saveCurrentVersionDisabled || saveCurrentVersionBusy ? colorWithAlpha(surfaceText, 0.46) : accent, cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer", textAlign: "left", padding: "6px 9px", fontSize: 11, fontWeight: 750 }}
-                >
-                  {saveCurrentVersionBusy ? "Saving version" : "Save version"}
-                </button>
-              )}
+
               {onCreateRelatedNode && (
                 <>
-                  {(overflowTabs.length > 0 || secondaryActions.length > 0 || onSaveCurrentVersion) && <div role="separator" style={{ height: 1, margin: "3px 5px", background: colorWithAlpha(strokeColor, 0.72) }} />}
+                  {(overflowTabs.length > 0 || secondaryActions.length > 0) && <div role="separator" style={{ height: 1, margin: "3px 5px", background: colorWithAlpha(strokeColor, 0.72) }} />}
               {[
                 ["parent", "Create parent node"],
                 ["peer", "Create peer node"],
