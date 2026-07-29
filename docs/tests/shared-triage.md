@@ -8,7 +8,7 @@ Coverage Status:
 
 - Automatic shared-inbox signature insertion, cross-mailbox scope isolation, rich-body deduplication, compose-scope wiring, unified signature mounting, exact flush behavior, and stale-load/save ordering are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
 - Shared conversion persistence of `shared_inbox_id` and `account_email` is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
-- Provider-authoritative list membership for Node/email-collaboration rows, exact personal/shared source isolation, and inaccessible-source fallback behavior are covered by `tests/frontend/pages/home/emailCollaborationRows.test.ts`.
+- Provider-only list membership for Node/email-collaboration rows, exact personal/shared source isolation, and suppression of standalone collaboration snapshots are covered by `tests/frontend/pages/home/emailCollaborationRows.test.ts`.
 
 ## Business Logic
 
@@ -180,8 +180,8 @@ ST150 - Shared read-on-open timers, optimistic overlays, and mutation responses 
 ST151 - Shared Triage email cards use the same compact triage-row implementation as My Triage. Horizontal card padding is no more than 6 CSS pixels per side, and the left indicator rail is no more than 20 CSS pixels wide while retaining the approximately 9-pixel unread dot, thread indicator, keyboard focus, and drag hit behavior.
 ST152 - The top sender/subject line reserves only the actual width of its top-right timestamp/action metadata. The body/snippet line flows beneath that metadata across the remaining card width to within 8 CSS pixels of the right edge; no fixed empty right metadata column or decorative spacer may shorten every line.
 ST153 - Compact spacing preserves the shared-inbox card contract: unread dot/frame, selected pressed surface, conditional thread icon, ellipsis, scope-correct commands, and pointer/keyboard/drag affordances remain distinct and usable.
-ST154 - A shared-source collaboration appears as one ordinary conversation row in its source Shared Triage for a permanent participant who can navigate that mailbox. Mention participation alone does not grant navigation, listing, folder, or unrelated-message access to the shared inbox; a participant without that access receives only the collaboration thread through the guaranteed My Triage fallback.
-ST155 - A provider-owned source row and its virtual collaboration representation dedupe by exact shared inbox plus provider thread/message identity. The newest canonical message and rolled-up unread/starred/attachment/thread state remain authoritative, and no collaboration row crosses into another shared inbox.
+ST154 - Shared Triage email rows come only from the selected shared inbox's canonical provider list. Mention participation alone grants Node/chat access; it does not grant mailbox navigation or create a Shared Triage or My Triage email row for a participant whose accessible provider mailbox did not return the message.
+ST155 - When a canonical Shared Triage provider row matches a collaboration by exact shared inbox plus provider thread/message identity, Mango annotates that provider row with collaboration/Node identity. Provider unread/starred/attachment/thread state remains authoritative, and no collaboration snapshot may become a separate, fallback, or cross-inbox row.
 ST156 - Opening a collaboration-capable shared row leaves Shared Triage detail at full width until global or per-message Chat explicitly opens the full-height right rail. Create/Add never opens that rail. Reading/highlighting/abandoning creates nothing. If the exact shared-inbox thread is not already in a Node, first nonempty chat submit preserves its draft and requires priority followed by the adjacent Logic Gate search; a gate selection creates the Node in `requested`, while the explicit no-gate choice leaves it unassigned. Exact-shared-inbox validation and acknowledged save precede clearing the draft. Shared Triage and Node use the same canonical message-linked ChatPane history.
 ST157 - Selected email text creates an exact message/quote/offset chat anchor, while each reply card exposes an unanchored per-message Chat icon immediately before its three-dot menu. Chat is message-linked rather than thread-wide: Enter resolves or creates the text box for that exact provider message. Activating an anchor navigates to the correct card without adding a second conversation scrollbar or changing source content.
 ST158 - Reply All exposes Create Shared Draft for the exact selected source message. Every permanent participant can see the resulting revisioned shared draft in Drafts/My Drafts with its source shared inbox identified, but only collaboration participation authorizes that draft and no participant gains unrelated shared-inbox access.
@@ -218,7 +218,7 @@ ST186 - In a shared-inbox email collaboration, every chat comment authored by th
 ST187 - For a navigable Shared Triage mailbox, the canonical provider message page for the exact company, `shared_inbox_id`, mailbox, search, unread filter, and page token is authoritative for list membership. A Node/email-collaboration snapshot may annotate a matching provider message or thread with Node/chat identity, but it must never manufacture a Shared Triage row when that exact provider result contains no match.
 ST188 - After normal Archive or Archive page and go next removes a shared-inbox message from the displayed page, no same-source collaboration snapshot, stale Inbox/unread metadata, cached detail, prefetch result, selection change, or list merge may reinsert it. The row may reappear only when a later canonical provider list actually returns it, including after a real archive-job failure; the user must never need to click the stale row to make it disappear.
 ST189 - Attaching a shared-inbox email or thread to a Node changes collaboration metadata and chat access, not provider mailbox membership. If the provider still returns another unarchived message in the same thread, that canonical message may carry the Node indicator; the stored collaboration snapshot alone is never proof that any message remains in Inbox.
-ST190 - The collaboration-only My Triage fallback remains available to a permanent participant who cannot navigate the immutable source shared inbox, but it must never override the canonical result inside a navigable source Shared Triage mailbox. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-shared-inbox isolation, and preservation of the inaccessible-source fallback.
+ST190 - No collaboration-only My Triage fallback exists for a participant who cannot navigate the immutable source shared inbox. The participant retains collaboration Node/chat and stored-thread access without receiving an email-list row. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-shared-inbox isolation, and suppression outside the selected provider mailbox.
 
 ## Scenarios
 
@@ -841,7 +841,7 @@ Expected:
 - Top-line text reserves only actual timestamp/action width.
 - Snippet/body preview continues beneath the timestamp to within 8 CSS pixels of the right edge and no fixed empty right column remains.
 
-### Scenario ST-S19: Shared-Source Collaboration And Draft Fallback
+### Scenario ST-S19: Shared-Source Collaboration And Draft Access
 
 Business logic covered:
 - ST147
@@ -862,7 +862,7 @@ Given:
 - A viewer first opens the source email without opening Chat, then explicitly opens the rail; an ensure or first-chat request may fail before a retry succeeds.
 
 Expected:
-- The navigable source Shared Triage shows one deduplicated ordinary conversation row; the participant without mailbox navigation sees the thread only through My Triage fallback.
+- The navigable source Shared Triage shows one provider-owned conversation row annotated with collaboration identity. The participant without mailbox navigation receives no My Triage or Shared Triage email row and opens the stored thread through the collaboration Node.
 - Collaboration participation does not reveal the shared folder tree, unrelated messages, or another shared inbox.
 - Opening the source row keeps email detail full width and Chat closed. Only the explicit accessible Chat control mounts the right-hand rail; closing it or changing exact message/mailbox/view makes no collaboration mutation.
 - The open rail renders the same ChatPane and Node chat rows used by the standalone collaboration Node, and its header shows the canonical deduplicated participant/group-provenance roster rather than provider recipients or current group members. Posted chat images include the same right-side original download and shared fullscreen double-click preview.
@@ -1055,4 +1055,4 @@ When:
 Expected:
 - The exact shared provider page alone decides Inbox membership. The stale collaboration snapshot cannot reinsert the archived message during the page swap, merge, selection, or refresh.
 - No second click is required to remove the row, and Node attachment does not make an archived shared message persistent.
-- A matching provider row still receives its Node/chat metadata when present, while a permanent participant without source-inbox navigation retains only the documented My Triage collaboration fallback.
+- A matching provider row still receives its Node/chat metadata when present, while a permanent participant without source-inbox navigation receives no email-list row and retains Node/chat access through the collaboration Node.

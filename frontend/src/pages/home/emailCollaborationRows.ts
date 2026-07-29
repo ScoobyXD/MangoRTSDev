@@ -128,9 +128,6 @@ export function mergeEmailCollaborationsForView(
     activeSharedInboxID ? "shared" : "personal",
     activeSharedInboxID || providerAccountEmail.trim().toLowerCase() || "mailbox",
   ]);
-  const activeProviderMailboxIsAuthoritative = activeSharedInboxID
-    ? navigableSharedInboxIDs.has(activeSharedInboxID)
-    : Boolean(providerAccountEmail.trim());
   const merged = providerMessages.map((message) => ({
     ...message,
     client_source_scope_key: message.client_source_scope_key?.trim() || activeProviderSourceScopeKey,
@@ -150,14 +147,6 @@ export function mergeEmailCollaborationsForView(
           client_source_scope_key: merged[existingIndex].client_source_scope_key,
         };
       }
-    } else if (
-      !activeProviderMailboxIsAuthoritative
-      || !emailMessageUsesActiveProviderScope(collaborationMessage, viewID, providerPersonalUserID, providerAccountEmail)
-    ) {
-      merged.push({
-        ...collaborationMessage,
-        client_source_scope_key: collaborationMessage.client_source_scope_key?.trim() || collaborationSourceScopeKey(collaboration),
-      });
     }
   }
   return sortEmailMessagesByDateDescending(merged);
