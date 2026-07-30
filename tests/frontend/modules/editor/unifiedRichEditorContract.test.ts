@@ -1597,8 +1597,10 @@ test("revisioned JSON save bookkeeping stays off the typing render path", () => 
   assert.ok(tiptap.includes("setEditorActive((current) => current === active ? current : active)"));
   assert.ok(tiptap.includes("root.dataset.mangoEditorState = snapshot.state"));
   assert.ok(tiptap.includes("delete root.dataset.mangoEditorPinned"));
-  assert.ok(nodeSurface.includes("onPinChange={(pinned) => React.startTransition"));
-  assert.ok(projectSummary.includes("onPinChange={(pinned) => React.startTransition"));
+  assert.equal(nodeSurface.includes("onPinChange={(pinned) => React.startTransition"), false);
+  assert.equal(projectSummary.includes("onPinChange={(pinned) => React.startTransition"), false);
+  assert.ok(nodeSurface.includes("onPinChange={(pinned) => setTiptapPinnedBlockIDs"));
+  assert.ok(projectSummary.includes("onPinChange={(pinned) => setTiptapPinnedBlockIDs"));
 });
 
 test("the shared revisioned JSON editor keeps movable image controls", () => {

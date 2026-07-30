@@ -2703,15 +2703,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   window.setTimeout(refreshProjectSelectionFormat, 0);
                                 }}
                                 onBlur={() => undefined}
-                                onPinChange={(pinned) => React.startTransition(() => {
-                                  setTiptapPinnedBlockIDs((current) => {
-                                    const has = current.has(block.id);
-                                    if (has === pinned) return current;
-                                    const next = new Set(current);
-                                    if (pinned) next.add(block.id);
-                                    else next.delete(block.id);
-                                    return next;
-                                  });
+                                onPinChange={(pinned) => setTiptapPinnedBlockIDs((current) => {
+                                  const has = current.has(block.id);
+                                  if (has === pinned) return current;
+                                  const next = new Set(current);
+                                  if (pinned) next.add(block.id);
+                                  else next.delete(block.id);
+                                  return next;
                                 })}
                                 onDocumentChange={(document) => applyProjectSyncedDocument(block.id, document)}
                                 onDocumentFlush={(document) => applyProjectSyncedDocument(block.id, document)}

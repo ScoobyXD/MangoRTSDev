@@ -3969,15 +3969,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             }}
                             onBlur={() => undefined}
                             onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
-                            onPinChange={(pinned) => React.startTransition(() => {
-                              setTiptapPinnedBlockIDs((current) => {
-                                const has = current.has(block.id);
-                                if (has === pinned) return current;
-                                const next = new Set(current);
-                                if (pinned) next.add(block.id);
-                                else next.delete(block.id);
-                                return next;
-                              });
+                            onPinChange={(pinned) => setTiptapPinnedBlockIDs((current) => {
+                              const has = current.has(block.id);
+                              if (has === pinned) return current;
+                              const next = new Set(current);
+                              if (pinned) next.add(block.id);
+                              else next.delete(block.id);
+                              return next;
                             })}
                             onDocumentFlush={(document) => updateTextBlockContent(block.id, { document })}
                             onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
