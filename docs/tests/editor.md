@@ -1,4 +1,4 @@
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 # Unified Editor Tests
 
@@ -10,6 +10,12 @@ Coverage Status:
 - ED88 selected-text chat cancellation is covered by unifiedRichEditorContract.test.ts, including both the quote X and whole-chat close paths.
 
 ## Business Logic
+
+### 2026-07-30 Async Tiptap Paste Target Guard
+
+- Potential future bug: a user starts a slow image paste in document A and switches the same panel to document B before the upload finishes. If a future host reuses the same live Tiptap editor instance for both document IDs, the completed paste could be inserted into document B unless completion verifies the original document identity.
+- This is not a current known bug. Every active Node, Project, and Logic Gate host keys `MangoTiptapEditor` with its company/resource/document identity, so switching targets destroys document A's editor. The pending rich-paste callback checks `editor.isDestroyed` and refuses the stale insertion.
+- Future Codex changes must preserve that document-keyed remount behavior or add an explicit company/resource/document identity check before an asynchronous paste or upload inserts content. Do not rely on a reusable editor instance without one of those guards.
 
 ### 2026-07-10 Node Text-Box Lifecycle Boundary
 
