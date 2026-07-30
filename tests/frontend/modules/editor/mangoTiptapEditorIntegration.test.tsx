@@ -294,9 +294,14 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   const storageErrors: string[] = [];
   let storageRecoveries = 0;
   const remoteImageImports: Array<{ path: string; body: unknown }> = [];
+  let holdRemoteImageImport = false;
+  let releaseRemoteImageImport: (() => void) | undefined;
   const requestJSON = async <T,>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
     if (_path === "/v1/attachments/imports/remote-image") {
       remoteImageImports.push({ path: _path, body: init?.json });
+      if (holdRemoteImageImport) {
+        await new Promise<void>((resolve) => { releaseRemoteImageImport = resolve; });
+      }
       const attachment = {
         company_id: "company-1",
         attachment_id: "google-docs-paste-image",
@@ -507,6 +512,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     } as unknown as DataTransfer;
     const richPasteEvent = new dom.window.Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(richPasteEvent, "clipboardData", { configurable: true, value: richClipboardData });
+    holdRemoteImageImport = true;
     await act(async () => {
       activeProseMirror.dispatchEvent(richPasteEvent);
     });
@@ -524,6 +530,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
         editor_surface: "node",
       },
     });
+    await act(async () => {
+      assert.equal(controllerRef.current?.applyTextAlignment("right"), true, "editing while the remote image imports must remain available");
+    });
+    releaseRemoteImageImport?.();
+    releaseRemoteImageImport = undefined;
+    holdRemoteImageImport = false;
     await waitFor(
       () => Boolean(activeProseMirror.querySelector('[data-mango-attachment-id="google-docs-paste-image"]'))
         && (activeProseMirror.textContent ?? "").includes("Google Docs text before")
@@ -785,6 +797,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(subscriptions, 2);
     assert.equal(unsubscriptions, 2, "unmount cleanup releases the active visible subscription");
   } finally {
+    releaseRemoteImageImport?.();
     releasePost?.();
     if (pageHostRoot) await act(async () => pageHostRoot?.unmount());
     if (mountedRoot) await act(async () => mountedRoot?.unmount());

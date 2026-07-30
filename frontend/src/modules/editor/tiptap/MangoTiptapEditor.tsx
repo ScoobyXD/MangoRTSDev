@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
-import { TextSelection } from "@tiptap/pm/state";
+import { TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
   downloadMangoAttachment,
   loadMangoAttachmentObjectURL,
@@ -988,8 +988,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     const imageFiles = Array.from(clipboardData.files).filter((file) => /^image\/(jpeg|png|gif|webp)$/i.test(file.type));
     const matchingFiles = imageFiles.length === imageCount ? imageFiles : [];
     const alignment = readMangoTiptapInsertionAlignment(editor);
-    const selection = { from: editor.state.selection.from, to: editor.state.selection.to };
-    const documentAtStart = editor.state.doc;
+    let insertionBookmark = editor.state.selection.getBookmark();
+    const mapInsertionBookmark = ({ transaction }: { transaction: Transaction }) => {
+      if (transaction.docChanged) insertionBookmark = insertionBookmark.map(transaction.mapping);
+    };
+    editor.on("transaction", mapInsertionBookmark);
     root.setAttribute("data-mango-rich-paste-importing", "true");
     void prepareMangoTiptapRichClipboardHTML(
       root.ownerDocument,
@@ -1002,10 +1005,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       ),
     ).then((result) => {
       if (editor.isDestroyed) return;
-      if (!editor.state.doc.eq(documentAtStart)) {
-        throw new Error("The document changed while pasted images were importing. Paste that selection again.");
-      }
-      if (result.html.trim()) editor.chain().focus().insertContentAt(selection, result.html).run();
+      const selection = insertionBookmark.resolve(editor.state.doc);
+      editor.off("transaction", mapInsertionBookmark);
+      if (result.html.trim()) editor.chain().focus().insertContentAt({ from: selection.from, to: selection.to }, result.html).run();
       if (result.failedImageCount > 0) {
         const noun = result.failedImageCount === 1 ? "image" : "images";
         throw new Error(String(result.failedImageCount) + " pasted " + noun + " could not be imported. The text and " + String(result.importedImageCount) + " imported images were kept.");
@@ -1017,6 +1019,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       const context = attachmentContextRef.current;
       (context?.onError ?? callbacksRef.current.onError)?.(message);
     }).finally(() => {
+      editor.off("transaction", mapInsertionBookmark);
       root.removeAttribute("data-mango-rich-paste-importing");
     });
     return true;

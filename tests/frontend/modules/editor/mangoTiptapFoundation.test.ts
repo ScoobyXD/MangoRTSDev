@@ -7,6 +7,10 @@ import { JSDOM } from "jsdom";
 
 import { MangoEditorLifecycle } from "../../../../frontend/src/modules/editor/editorLifecycle.js";
 import {
+  publishEditorSaveState,
+  readEditorSaveState,
+} from "../../../../frontend/src/modules/editor/editorSaveStatusStore.js";
+import {
   createEmptyMangoTiptapDocument,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
@@ -51,6 +55,26 @@ class MemoryStorage implements Storage {
   removeItem(key: string): void { this.values.delete(key); }
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
+
+test("an image failure remains visible after ordinary text later saves", () => {
+  const storageKey = "node:sticky-image-failure";
+  const failure: MangoTiptapSaveState = {
+    status: "failed",
+    message: "Unable to import a pasted image",
+    unresolvedFailure: true,
+  };
+
+  assert.deepEqual(publishEditorSaveState(storageKey, failure), failure);
+  assert.deepEqual(publishEditorSaveState(storageKey, { status: "pending" }), failure);
+  assert.deepEqual(publishEditorSaveState(storageKey, { status: "saving" }), failure);
+  assert.deepEqual(publishEditorSaveState(storageKey, {
+    status: "saved",
+    revision: 2,
+    updatedTimestamp: "2026-07-30T00:00:00Z",
+    unresolvedFailure: false,
+  }), failure);
+  assert.deepEqual(readEditorSaveState(storageKey), failure);
+});
 
 
 function richDocument(text = "Mango"): MangoTiptapDocument {
@@ -695,6 +719,8 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     await assert.rejects(() => sync.flush(), /response was lost/);
     assert.equal(saveStates[saveStates.length - 1]?.status, "failed");
     assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, true);
+    const statesAfterFailure = saveStates.length;
+    const failureMessage = saveStates[saveStates.length - 1]?.message;
     const pendingAfterA = await readExactMangoTiptapPending(storageKey);
     assert.ok((pendingAfterA?.generation ?? 0) > 0);
     assert.equal(pendingAfterA?.operation_id, firstAcceptedOperationID);
@@ -716,9 +742,11 @@ test("an attempted lost-ack operation stays immutable while later typing becomes
     assert.equal(await readExactMangoTiptapPending(storageKey), null);
     assert.equal(lifecycle.getSnapshot().pendingCount, 0);
     assert.equal(lifecycle.getSnapshot().pinned, false);
-    assert.ok(saveStates.some((state) => state.status === "pending" && state.unresolvedFailure), "newer typing remains Pending while retaining red failure attention");
-    assert.equal(saveStates[saveStates.length - 1]?.status, "saved");
-    assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, false);
+    assert.equal(saveStates.length, statesAfterFailure, "successful text saves must not clear or replace the visible failure state");
+    assert.equal(saveStates[saveStates.length - 1]?.status, "failed");
+    assert.equal(saveStates[saveStates.length - 1]?.message, failureMessage);
+    assert.equal(saveStates[saveStates.length - 1]?.unresolvedFailure, true);
+    assert.deepEqual(readEditorSaveState(storageKey), saveStates[saveStates.length - 1], "the status icon keeps the same failure until refresh");
   } finally {
     await sync.shutdown();
     for (const [key, value] of Object.entries(previous)) {
