@@ -1,5 +1,4 @@
-## Active JSON Typing and Saving Process
-~~~text
+# Editor Process Map
 You type
 ↓
 ProseMirror updates the document and visible text immediately
@@ -43,7 +42,6 @@ The Node/Project unpin state updates at normal immediate React priority
 The Node/Project component may rerender immediately
 ↓
 If the textbox is offscreen or closed, virtualization may now remove it
-~~~
 Last updated: 2026-07-30
 
 # Unified Editor Tests
