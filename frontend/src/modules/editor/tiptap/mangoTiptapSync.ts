@@ -563,15 +563,15 @@ export class MangoTiptapSync {
   }
 
   private emitSaveState(state: MangoTiptapSaveState): void {
+    const published = publishEditorSaveState(this.storageKey, state);
     const previous = this.lastSaveState;
-    if (previous?.status === state.status
-      && previous.updatedTimestamp === state.updatedTimestamp
-      && previous.revision === state.revision
-      && previous.message === state.message
-      && previous.unresolvedFailure === state.unresolvedFailure) return;
-    this.lastSaveState = state;
-    publishEditorSaveState(this.storageKey, state);
-    this.options.onSaveStateChange?.(state);
+    if (previous?.status === published.status
+      && previous.updatedTimestamp === published.updatedTimestamp
+      && previous.revision === published.revision
+      && previous.message === published.message
+      && previous.unresolvedFailure === published.unresolvedFailure) return;
+    this.lastSaveState = published;
+    this.options.onSaveStateChange?.(published);
   }
 
   private publishPendingCount(): void {

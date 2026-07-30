@@ -11,11 +11,26 @@ function sameSaveState(left: MangoTiptapSaveState | undefined, right: MangoTipta
     && left.unresolvedFailure === right.unresolvedFailure;
 }
 
-export function publishEditorSaveState(storageKey: string, state: MangoTiptapSaveState): boolean {
-  if (sameSaveState(states.get(storageKey), state)) return false;
-  states.set(storageKey, state);
+function needsFailureAttention(state: MangoTiptapSaveState | undefined): boolean {
+  return state?.status === "failed" || Boolean(state?.unresolvedFailure);
+}
+
+function pageSessionSaveState(
+  previous: MangoTiptapSaveState | undefined,
+  incoming: MangoTiptapSaveState,
+): MangoTiptapSaveState {
+  if (needsFailureAttention(previous)) return previous!;
+  if (!needsFailureAttention(incoming)) return incoming;
+  return { ...incoming, status: "failed", unresolvedFailure: true };
+}
+
+export function publishEditorSaveState(storageKey: string, state: MangoTiptapSaveState): MangoTiptapSaveState {
+  const previous = states.get(storageKey);
+  const published = pageSessionSaveState(previous, state);
+  if (sameSaveState(previous, published)) return published;
+  states.set(storageKey, published);
   listeners.get(storageKey)?.forEach((listener) => listener());
-  return true;
+  return published;
 }
 
 export function readEditorSaveState(storageKey: string): MangoTiptapSaveState | undefined {

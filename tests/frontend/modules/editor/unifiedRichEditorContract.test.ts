@@ -1600,7 +1600,7 @@ test("the shared revisioned JSON editor keeps movable image controls", () => {
   assert.match(editorContent, /linkMangoResourceAttachment\(requestJSON/);
   assert.match(editorContent, /relationshipKind: "inline_image"[\s\S]{0,120}informationID/);
 });
-test("failed saves pulse the complete Node, Project, and Logic Gate editor frames until acknowledgement", () => {
+test("failed saves pulse the complete Node, Project, and Logic Gate editor frames until refresh", () => {
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
@@ -1611,7 +1611,8 @@ test("failed saves pulse the complete Node, Project, and Logic Gate editor frame
   assert.match(saveStatus, /state\?\.status === "failed" \|\| Boolean\(state\?\.unresolvedFailure\)/);
   assert.match(saveStatus, /React\.useSyncExternalStore\(subscribe, getSnapshot, getSnapshot\)/);
   assert.match(saveStatus, /state\?\.status === "saved" && state\.updatedTimestamp/);
-  assert.match(saveStatusStore, /if \(sameSaveState\(states\.get\(storageKey\), state\)\) return false/);
+  assert.match(saveStatusStore, /if \(needsFailureAttention\(previous\)\) return previous!/);
+  assert.match(saveStatusStore, /return \{ \.\.\.incoming, status: "failed", unresolvedFailure: true \}/);
   assert.match(nodeSurface, /EditorSavedTimestamp storageKey=\{blockSaveStorageKey\}/);
   assert.match(projectSummary, /EditorSavedTimestamp storageKey=\{blockSaveStorageKey\}/);
   assert.match(nodeSurface, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
