@@ -669,7 +669,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   attachmentContextRef.current = attachmentContext;
   imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
   formattingControllerActiveRef.current = formattingControllerActive;
-  currentDocumentRef.current = document;
   ownerAnnotationsRef.current = annotations;
 
   useEffect(() => lifecycleRef.current.subscribe((snapshot) => {
@@ -681,6 +680,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const deactivate = useCallback(async (): Promise<boolean> => {
     if (!lifecycleRef.current.requestSleep()) return false;
+    setDocument(currentDocumentRef.current);
+    setRenderedAnnotations((current) => mangoTiptapAnnotationsEqual(current, mappedAnnotationsRef.current)
+      ? current
+      : mappedAnnotationsRef.current);
     const sync = syncRef.current;
     syncRef.current = null;
     syncStartedRef.current = false;
@@ -749,8 +752,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     const changed = !mangoTiptapAnnotationsEqual(mappedAnnotationsRef.current, merged);
     mappedAnnotationsRef.current = merged;
     setRenderedAnnotations((current) => mangoTiptapAnnotationsEqual(current, merged) ? current : merged);
-    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
-    if (changed) callbacksRef.current.onAnnotationsChange?.(merged);
+    if (changed) {
+      if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
+      callbacksRef.current.onAnnotationsChange?.(merged);
+    }
   }, []);
 
   const prepare = useCallback((): Promise<void> => {
@@ -792,9 +797,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onSaveStateChange: (state) => callbacksRef.current.onSaveStateChange?.(state),
       onSnapshot: (snapshot, snapshotAnnotations) => {
-        setDocument(snapshot);
         currentDocumentRef.current = snapshot;
-        publishAnnotationPositions(snapshotAnnotations);
+        persistedAnnotationsRef.current = [...snapshotAnnotations];
       },
       onConflict: (conflict) => {
         setError("This text box changed elsewhere. Choose which version to keep before editing.");

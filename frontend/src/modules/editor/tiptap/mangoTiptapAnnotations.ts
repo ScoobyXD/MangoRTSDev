@@ -66,24 +66,20 @@ function normalizedAnnotations(annotations: readonly MangoTiptapAnnotation[], do
 }
 
 function createDecorations(document: Parameters<typeof DecorationSet.create>[0], annotations: readonly MangoTiptapAnnotation[]): DecorationSet {
-  const decorations = annotations.map((annotation) => Decoration.inline(
-    annotation.from,
-    annotation.to,
-    {
+  if (annotations.length === 0) return DecorationSet.empty;
+  const decorations: Decoration[] = [];
+  annotations.forEach((annotation) => {
+    const attributes = {
       class: `mango-tiptap-annotation mango-tiptap-annotation--${annotation.kind}${annotation.active ? " is-active" : ""}`,
       "data-mango-annotation-id": annotation.id,
       "data-mango-annotation-kind": annotation.kind,
-    },
-    { mangoAnnotationId: annotation.id },
-  ));
-  document.descendants((node, position) => {
-    if (!node.isAtom) return;
-    annotations.filter((item) => item.from <= position && item.to >= position + node.nodeSize).forEach((annotation) => {
-      decorations.push(Decoration.node(position, position + node.nodeSize, {
-        class: `mango-tiptap-annotation mango-tiptap-annotation--${annotation.kind}${annotation.active ? " is-active" : ""}`,
-        "data-mango-annotation-id": annotation.id,
-        "data-mango-annotation-kind": annotation.kind,
-      }, { mangoAnnotationId: annotation.id }));
+    };
+    const spec = { mangoAnnotationId: annotation.id, mangoAnnotationKind: annotation.kind };
+    decorations.push(Decoration.inline(annotation.from, annotation.to, attributes, spec));
+    document.nodesBetween(annotation.from, annotation.to, (node, position) => {
+      if (node.isAtom && annotation.from <= position && annotation.to >= position + node.nodeSize) {
+        decorations.push(Decoration.node(position, position + node.nodeSize, attributes, spec));
+      }
     });
   });
   return DecorationSet.create(document, decorations);
@@ -100,6 +96,7 @@ export const MangoTiptapAnnotations = new Plugin<AnnotationPluginState>({
         return { annotations, decorations: createDecorations(newState.doc, annotations) };
       }
       if (!transaction.docChanged) return previous;
+      if (previous.annotations.length === 0) return previous;
       const mapped = previous.annotations.flatMap((annotation) => {
         const from = transaction.mapping.mapResult(annotation.from, 1);
         const to = transaction.mapping.mapResult(annotation.to, -1);
@@ -107,7 +104,18 @@ export const MangoTiptapAnnotations = new Plugin<AnnotationPluginState>({
           ? []
           : [{ ...annotation, from: from.pos, to: to.pos }];
       });
-      return { annotations: mapped, decorations: createDecorations(newState.doc, mapped) };
+      if (mapped.length === 0) return { annotations: [], decorations: DecorationSet.empty };
+      let decorations = previous.decorations.map(transaction.mapping, newState.doc);
+      if (mapped.length !== previous.annotations.length) {
+        const remaining = new Set(mapped.map((annotation) => `${annotation.kind}:${annotation.id}`));
+        const removed = decorations.find(
+          undefined,
+          undefined,
+          (spec) => !remaining.has(`${String(spec.mangoAnnotationKind)}:${String(spec.mangoAnnotationId)}`),
+        );
+        if (removed.length > 0) decorations = decorations.remove(removed);
+      }
+      return { annotations: mapped, decorations };
     },
   },
   props: {

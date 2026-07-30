@@ -30,3 +30,15 @@ test("every node attachment refresh invalidates canonical metadata before increm
   const nodeWorkspace = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   assert.match(nodeWorkspace, /const refreshNodeAttachments = useCallback\(\(\) => \{\s+invalidateMangoResourceAttachmentsCache\(requestJSON, \{[\s\S]*?resourceType: "node",[\s\S]*?resourceID: nodeID,[\s\S]*?\}\);\s+setNodeAttachmentsRefreshKey/);
 });
+
+test("Tiptap annotation work stays outside the ordinary save and whole-document paths", () => {
+  const annotations = source("frontend/src/modules/editor/tiptap/mangoTiptapAnnotations.ts");
+  const editor = source("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
+  assert.doesNotMatch(annotations, /document\.descendants\(/);
+  assert.match(annotations, /if \(annotations\.length === 0\) return DecorationSet\.empty/);
+  assert.match(annotations, /document\.nodesBetween\(annotation\.from, annotation\.to/);
+  assert.match(annotations, /previous\.decorations\.map\(transaction\.mapping, newState\.doc\)/);
+  assert.match(editor, /if \(changed\) \{\s+if \(editorRef\.current\) updateMangoTiptapAnnotations/);
+  assert.match(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+currentDocumentRef\.current = snapshot;\s+persistedAnnotationsRef\.current = \[\.\.\.snapshotAnnotations\];\s+\}/);
+  assert.doesNotMatch(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+setDocument\(snapshot\)/);
+});
