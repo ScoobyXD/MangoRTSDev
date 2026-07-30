@@ -48,7 +48,6 @@ import {
   createEmptyMangoTiptapDocument,
   needsMangoTiptapLegacyDateHeadingBreak,
   parseMangoTiptapDocument,
-  serializeMangoTiptapDocument,
   type MangoTiptapDocument,
 } from "./mangoTiptapDocument.js";
 import {
@@ -72,7 +71,6 @@ import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType
 
 export type MangoTiptapFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
-  flush: () => string;
 };
 
 export type MangoTiptapTarget = {
@@ -123,8 +121,6 @@ export type MangoTiptapEditorProps = {
     | React.MutableRefObject<EditorDocumentFormattingController | null>
     | React.MutableRefObject<MangoTiptapFormattingController | null>;
   formattingControllerActive?: boolean;
-  onChange?: (serialized: string) => void;
-  onFlush?: (serialized: string) => void;
   onFocus?: () => void;
   onBlur?: () => void;
   onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
@@ -601,8 +597,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onTargetHandled,
   formattingControllerRef,
   formattingControllerActive = true,
-  onChange,
-  onFlush,
   onFocus,
   onBlur,
   onConflict,
@@ -637,10 +631,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const mentionUsersRef = useRef(normalizedMentionUsers(mentionUsers));
   mentionUsersRef.current = normalizedMentionUsers(mentionUsers);
   const currentDocumentRef = useRef(initial.document);
-  const currentSerializedRef = useRef("");
-  if (!currentSerializedRef.current) {
-    currentSerializedRef.current = serializeMangoTiptapDocument(initial.document);
-  }
   const ownerAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
   const mappedAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
   const persistedAnnotationsRef = useRef<readonly MangoTiptapPersistedAnnotation[]>([]);
@@ -661,7 +651,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [tableActive, setTableActive] = useState(false);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
-    onChange, onFlush, onFocus, onBlur, onConflict, onError, onSaveStateChange,
+    onFocus, onBlur, onConflict, onError, onSaveStateChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -669,7 +659,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onTargetHandled,
   });
   callbacksRef.current = {
-    onChange, onFlush, onFocus, onBlur, onConflict, onError, onSaveStateChange,
+    onFocus, onBlur, onConflict, onError, onSaveStateChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -786,15 +776,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         });
       }),
       onDocument: (canonical) => {
-        const serialized = serializeMangoTiptapDocument(canonical);
-        if (serialized !== currentSerializedRef.current) {
-          setDocument(canonical);
-          currentDocumentRef.current = canonical;
-          currentSerializedRef.current = serialized;
-          callbacksRef.current.onChange?.(serialized);
-          if (editorRef.current) {
-            editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
-          }
+        setDocument(canonical);
+        currentDocumentRef.current = canonical;
+        if (editorRef.current) {
+          editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
         }
         setError("");
       },
@@ -806,13 +791,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         }
       },
       onSaveStateChange: (state) => callbacksRef.current.onSaveStateChange?.(state),
-      onSnapshot: (snapshot, serialized, snapshotAnnotations) => {
-        if (serialized !== currentSerializedRef.current) {
-          setDocument(snapshot);
-          currentDocumentRef.current = snapshot;
-          currentSerializedRef.current = serialized;
-          callbacksRef.current.onChange?.(serialized);
-        }
+      onSnapshot: (snapshot, snapshotAnnotations) => {
+        setDocument(snapshot);
+        currentDocumentRef.current = snapshot;
         publishAnnotationPositions(snapshotAnnotations);
       },
       onConflict: (conflict) => {
@@ -990,6 +971,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })().catch((cause) => {
       const message = cause instanceof Error ? cause.message : "Unable to attach image";
       context.onError?.(message);
+      syncRef.current?.reportFailure(message);
       callbacksRef.current.onError?.(message);
     });
   }, []);
@@ -1027,6 +1009,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     }).catch((cause) => {
       const message = cause instanceof Error ? cause.message : "Unable to import pasted images";
       setError(message);
+      syncRef.current?.reportFailure(message);
       const context = attachmentContextRef.current;
       (context?.onError ?? callbacksRef.current.onError)?.(message);
     }).finally(() => {
@@ -1123,7 +1106,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onBlur: () => {
         callbacksRef.current.onBlur?.();
-        void syncRef.current?.flush().then(() => callbacksRef.current.onFlush?.(currentSerializedRef.current)).catch(() => undefined);
+        void syncRef.current?.flush().catch(() => undefined);
       },
       onSelectionUpdate: ({ editor: activeEditor }) => updateSelectionState(activeEditor),
       onTransaction: ({ editor: transactionEditor, transaction }) => {
@@ -1134,7 +1117,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       },
       onUpdate: ({ editor: activeEditor }) => {
         lifecycleRef.current.markDirty();
-        callbacksRef.current.onSaveStateChange?.({ status: "pending" });
         syncRef.current?.schedule(() => ({
           format: "mango-tiptap-json",
           schema_version: 1,
@@ -1148,11 +1130,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     setActiveEditor(editor);
     const controller: MangoTiptapFormattingController = {
       focus: () => { editor.commands.focus(); },
-      flush: () => {
-        void syncRef.current?.flush();
-        callbacksRef.current.onFlush?.(currentSerializedRef.current);
-        return currentSerializedRef.current;
-      },
       applyFontSizeValue: (fontSize) => editor.chain().focus().setFontSize(`${Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(fontSize)))}px`).run(),
       adjustFontSize: (delta) => {
         const next = readMangoTiptapSelectionState(editor).fontSize + delta;

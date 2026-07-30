@@ -1,4 +1,5 @@
 import React from "react";
+import { readEditorSaveState, subscribeEditorSaveState } from "./editorSaveStatusStore.js";
 import type { MangoTiptapSaveState } from "./tiptap/mangoTiptapSync.js";
 
 export type EditorSaveState = MangoTiptapSaveState;
@@ -33,10 +34,27 @@ const SaveStateIcon: React.FC<{ status: EditorSaveState["status"] }> = ({ status
   return <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor" }} />;
 };
 
-export const EditorSaveStatusBadge: React.FC<{
+export const EditorSaveStatusIcon: React.FC<{
   state?: EditorSaveState;
+  storageKey?: string;
   compact?: boolean;
-}> = ({ state = { status: "saved" }, compact = false }) => {
+}> = ({ state: stateProp = { status: "saved" }, storageKey = "", compact = false }) => {
+  const fallbackState = React.useMemo(() => stateProp, [
+    stateProp.message,
+    stateProp.revision,
+    stateProp.status,
+    stateProp.unresolvedFailure,
+    stateProp.updatedTimestamp,
+  ]);
+  const subscribe = React.useCallback(
+    (listener: () => void) => storageKey ? subscribeEditorSaveState(storageKey, listener) : () => undefined,
+    [storageKey],
+  );
+  const getSnapshot = React.useCallback(
+    () => storageKey ? readEditorSaveState(storageKey) ?? fallbackState : fallbackState,
+    [fallbackState, storageKey],
+  );
+  const state = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const view = presentation[state.status];
   const title = state.message || (
     state.status === "saved" && state.updatedTimestamp
@@ -68,6 +86,31 @@ export const EditorSaveStatusBadge: React.FC<{
     >
       <SaveStateIcon status={state.status} />
       {view.label}
+    </span>
+  );
+};
+export const EditorSavedTimestamp: React.FC<{
+  storageKey: string;
+  fallbackUpdatedTimestamp?: string | number;
+  createdTimestamp?: string | number;
+  formatTimestamp: (value: string | number | undefined) => string;
+}> = ({ storageKey, fallbackUpdatedTimestamp, createdTimestamp, formatTimestamp }) => {
+  const subscribe = React.useCallback(
+    (listener: () => void) => subscribeEditorSaveState(storageKey, listener),
+    [storageKey],
+  );
+  const getSnapshot = React.useCallback(() => readEditorSaveState(storageKey), [storageKey]);
+  const state = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const updatedTimestamp = state?.status === "saved" && state.updatedTimestamp
+    ? state.updatedTimestamp
+    : fallbackUpdatedTimestamp;
+  const label = `Last Updated: ${formatTimestamp(updatedTimestamp)} | Created: ${formatTimestamp(createdTimestamp)}`;
+  return (
+    <span
+      title={label}
+      style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}
+    >
+      {label}
     </span>
   );
 };

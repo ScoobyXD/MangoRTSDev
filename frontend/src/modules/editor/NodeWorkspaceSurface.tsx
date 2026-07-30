@@ -78,9 +78,10 @@ import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
 import { openEditorEntityLink } from "./editorEntityLinks";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
+import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
 import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import { groupNodeTimelineEventsByTextBlock } from "./nodeTimelineOrdering";
-import { EditorSaveStatusBadge, editorSaveNeedsFailureAttention, type EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { EditorSavedTimestamp, EditorSaveStatusIcon, editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
 
 import {
   AttachedEmailOrganizerPane,
@@ -529,7 +530,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
-  const [textBlockSaveStates, setTextBlockSaveStates] = useState<Record<string, EditorSaveState>>({});
+  const [textBlockSaveFailures, setTextBlockSaveFailures] = useState<Record<string, boolean>>({});
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [nodeResourceAttachments, setNodeResourceAttachments] = useState<MangoResourceAttachment[]>([]);
@@ -3835,8 +3836,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               return next;
             });
           };
-          const blockSaveState = textBlockSaveStates[block.id] ?? (block.pending ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp });
-          const blockSaveNeedsFailureAttention = editorSaveNeedsFailureAttention(blockSaveState);
+          const blockSaveStorageKey = mangoTiptapPendingStorageKey({ companyID, resourceType: "node", resourceID: nodeID, documentID: block.id });
+          const blockSaveFallback = block.pending ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp };
+          const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
           return (
             <React.Fragment key={block.id}>
               {timelineEventsByBlockIndex[index]?.map(renderNodeTimelineEvent)}
@@ -3875,10 +3877,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           <TextEditorIcon color={accent} />
                           <span>Editor</span>
                         </button>
-                        <EditorSaveStatusBadge state={blockSaveState} compact />
-                        <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.58, fontSize: 10, fontWeight: 800 }}>
-                          Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)} | Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
-                        </span>
+                        <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />
+                        <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
                         <AttachmentCountDropdown
                           items={blockAttachmentDropdownItems}
                           apiBase={apiBase}
@@ -3981,10 +3981,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             onDocumentConflict={() => onError("Mango is recovering this text box from its committed snapshot.")}
                             onDocumentError={onError}
                             onSaveStateChange={(state) => {
-                              setTextBlockSaveStates((current) => ({ ...current, [block.id]: state }));
-                              if (state.status === "saved" && state.updatedTimestamp) {
-                                setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, updatedTimestamp: state.updatedTimestamp! } : item));
-                              }
+                              const failed = editorSaveNeedsFailureAttention(state);
+                              setTextBlockSaveFailures((current) => current[block.id] === failed ? current : { ...current, [block.id]: failed });
                             }}
                             onRecoveryStorageError={onError}
                             onRecoveryStorageRecovered={() => onError("")}

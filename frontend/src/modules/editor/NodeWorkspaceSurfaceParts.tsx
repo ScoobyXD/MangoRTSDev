@@ -22,7 +22,7 @@ import {
 } from "./chatEntityLinks.js";
 import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest } from "./editorEntityLinks.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
-import type { EditorSaveState } from "./EditorSaveStatusBadge.js";
+import type { EditorSaveState } from "./EditorSaveStatusIcon.js";
 import { resolveTextBlockImageActionLayout } from "./nodeTextBlockImageActions.js";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";

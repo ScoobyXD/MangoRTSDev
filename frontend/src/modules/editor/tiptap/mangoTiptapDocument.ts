@@ -1,5 +1,5 @@
-import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 import type { JSONContent } from "@tiptap/core";
+import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 
 export const MANGO_TIPTAP_FORMAT = "mango-tiptap-json" as const;
 export const MANGO_TIPTAP_SCHEMA_VERSION = 1 as const;
@@ -14,383 +14,8 @@ export type MangoTiptapValidationResult =
   | { valid: true; value: MangoTiptapDocument }
   | { valid: false; error: string };
 
-const nodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
-  doc: new Set(),
-  paragraph: new Set(["blockId", "textAlign", "indentLevel"]),
-  heading: new Set(["blockId", "level", "textAlign", "indentLevel"]),
-  blockquote: new Set(["blockId"]),
-  codeBlock: new Set(["blockId", "language"]),
-  horizontalRule: new Set(["blockId"]),
-  text: new Set(),
-  hardBreak: new Set(),
-  bulletList: new Set(["blockId"]),
-  orderedList: new Set(["blockId", "start", "type"]),
-  listItem: new Set(["blockId"]),
-  taskList: new Set(["blockId"]),
-  taskItem: new Set(["blockId", "checked"]),
-  table: new Set(["blockId", "style"]),
-  tableRow: new Set(),
-  tableHeader: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
-  tableCell: new Set(["colspan", "rowspan", "colwidth", "align", "backgroundColor"]),
-  mention: new Set(["userId", "label", "kind"]),
-  mangoEntityLink: new Set(["entityType", "entityId", "label"]),
-  mangoAttachmentImage: new Set([
-    "attachmentId", "filename", "mimeType", "width", "height", "displayWidth",
-    "displayHeight", "alignment", "position", "layout", "alt", "title",
-    "linkHref", "linkTarget", "linkRel", "linkTitle",
-  ]),
-};
-
-const markAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
-  bold: new Set(),
-  italic: new Set(),
-  underline: new Set(),
-  strike: new Set(),
-  code: new Set(),
-  textStyle: new Set(["fontSize", "color"]),
-  highlight: new Set(["color"]),
-  link: new Set(["href", "target", "rel", "class", "title"]),
-};
-
-const inlineNodes = new Set(["text", "hardBreak", "mention", "mangoEntityLink"]);
-const textContainers = new Set(["paragraph", "heading"]);
-const blockNodes = new Set([
-  "paragraph", "heading", "blockquote", "codeBlock", "horizontalRule", "bulletList",
-  "orderedList", "taskList", "table", "mangoAttachmentImage",
-]);
-const blockContainers = new Set(["doc", "blockquote", "tableCell", "tableHeader"]);
-const listContainers = new Set(["bulletList", "orderedList", "taskList"]);
-const atomNodes = new Set(["text", "hardBreak", "horizontalRule", "mention", "mangoEntityLink", "mangoAttachmentImage"]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function safeColor(value: unknown): boolean {
-  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
-}
-const CSS_NAMED_COLORS: Readonly<Record<string, string>> = {
-  black: "#000000", silver: "#c0c0c0", gray: "#808080", white: "#ffffff",
-  maroon: "#800000", red: "#ff0000", purple: "#800080", fuchsia: "#ff00ff",
-  green: "#008000", lime: "#00ff00", olive: "#808000", yellow: "#ffff00",
-  navy: "#000080", blue: "#0000ff", teal: "#008080", aqua: "#00ffff",
-  orange: "#ffa500", pink: "#ffc0cb", brown: "#a52a2a", violet: "#ee82ee",
-  indigo: "#4b0082", gold: "#ffd700", transparent: "",
-};
-
-function byteHex(value: number): string {
-  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
-}
-
-function percentOrByte(value: string): number | null {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed)) return null;
-  return value.trim().endsWith("%") ? parsed * 2.55 : parsed;
-}
-
-/** Canonicalize browser/clipboard CSS colors to the durable editor #RRGGBB form. */
-export function normalizeMangoTiptapColor(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const clean = value.trim().toLowerCase();
-  if (/^#[0-9a-f]{6}$/.test(clean)) return clean;
-  if (/^#[0-9a-f]{3}$/.test(clean)) return `#${clean.slice(1).split("").map((part) => `${part}${part}`).join("")}`;
-  if (/^#[0-9a-f]{8}$/.test(clean)) return clean.slice(0, 7);
-  if (/^#[0-9a-f]{4}$/.test(clean)) return `#${clean.slice(1, 4).split("").map((part) => `${part}${part}`).join("")}`;
-  const rgb = /^rgba?\(\s*([^,\s]+)[,\s]+([^,\s]+)[,\s]+([^,\s/]+)(?:\s*[,/]\s*[^)]+)?\s*\)$/.exec(clean);
-  if (rgb) {
-    const channels = rgb.slice(1, 4).map(percentOrByte);
-    if (channels.every((channel): channel is number => channel !== null)) {
-      return `#${channels.map(byteHex).join("")}`;
-    }
-  }
-  return CSS_NAMED_COLORS[clean] || null;
-}
-
-/** Convert pasted CSS font sizes to a rounded, supported pixel size. */
-export function normalizeMangoTiptapFontSize(value: unknown): string | null {
-  const clean = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim().toLowerCase() : "";
-  const match = /^(-?\d+(?:\.\d+)?)(px|pt|rem|em)?$/.exec(clean);
-  if (!match) return null;
-  const scalar = Number(match[1]);
-  if (!Number.isFinite(scalar)) return null;
-  const pixels = scalar * (match[2] === "pt" ? 4 / 3 : match[2] === "em" || match[2] === "rem" ? 16 : 1);
-  return `${Math.max(10, Math.min(28, Math.round(pixels)))}px`;
-}
-
-function supportedAttributeValue(value: unknown): value is string | number | boolean | null | number[] {
-  return value === null
-    || typeof value === "string"
-    || typeof value === "boolean"
-    || typeof value === "number" && Number.isFinite(value)
-    || Array.isArray(value) && value.every((item) => typeof item === "number" && Number.isFinite(item));
-}
-
-function normalizeNodeAttributes(type: string | undefined, value: unknown): Record<string, unknown> | undefined {
-  if (!type || !isRecord(value)) return undefined;
-  const allowed = nodeAttributes[type];
-  if (!allowed) return undefined;
-  const attrs: Record<string, unknown> = {};
-  for (const [name, attribute] of Object.entries(value)) {
-    if (allowed.has(name) && supportedAttributeValue(attribute)) attrs[name] = Array.isArray(attribute) ? [...attribute] : attribute;
-  }
-  if (attrs.blockId !== undefined && attrs.blockId !== null && (typeof attrs.blockId !== "string" || !attrs.blockId.trim() || attrs.blockId.length > 160)) delete attrs.blockId;
-  if (attrs.indentLevel !== undefined && (!Number.isInteger(attrs.indentLevel) || Number(attrs.indentLevel) < 0 || Number(attrs.indentLevel) > 12)) delete attrs.indentLevel;
-  if (attrs.textAlign !== undefined && attrs.textAlign !== null && !["left", "center", "right"].includes(String(attrs.textAlign))) delete attrs.textAlign;
-  if (type === "heading" && !positiveInteger(attrs.level, 6)) attrs.level = 1;
-  if (type === "orderedList" && attrs.start !== undefined && attrs.start !== null && !positiveInteger(attrs.start)) delete attrs.start;
-  if (type === "orderedList" && attrs.type !== undefined && attrs.type !== null && !["1", "a", "A", "i", "I"].includes(String(attrs.type))) delete attrs.type;
-  if (type === "taskItem" && attrs.checked !== undefined && attrs.checked !== null && typeof attrs.checked !== "boolean") delete attrs.checked;
-  if (type === "table" && attrs.style !== undefined && attrs.style !== null && !["auto", "fixed"].includes(String(attrs.style))) delete attrs.style;
-  if (type === "tableCell" || type === "tableHeader") {
-    if (attrs.colspan !== undefined && attrs.colspan !== null && !positiveInteger(attrs.colspan, 1_000)) delete attrs.colspan;
-    if (attrs.rowspan !== undefined && attrs.rowspan !== null && !positiveInteger(attrs.rowspan, 1_000)) delete attrs.rowspan;
-    if (attrs.colwidth !== undefined && attrs.colwidth !== null && (!Array.isArray(attrs.colwidth) || !attrs.colwidth.every((item) => positiveInteger(item)))) delete attrs.colwidth;
-    if (attrs.align !== undefined && attrs.align !== null && !["left", "center", "right"].includes(String(attrs.align))) delete attrs.align;
-    if (attrs.backgroundColor !== undefined && attrs.backgroundColor !== null) {
-      const color = normalizeMangoTiptapColor(attrs.backgroundColor);
-      if (color) attrs.backgroundColor = color;
-      else delete attrs.backgroundColor;
-    }
-  }
-  if (type === "mangoAttachmentImage") {
-    for (const name of ["width", "height", "displayWidth", "displayHeight"] as const) {
-      if (attrs[name] !== undefined && attrs[name] !== null && !positiveInteger(attrs[name])) delete attrs[name];
-    }
-    if (attrs.alignment !== undefined && attrs.alignment !== null && !["left", "center", "right"].includes(String(attrs.alignment))) delete attrs.alignment;
-    if (attrs.position !== undefined && attrs.position !== null && !["inline", "break"].includes(String(attrs.position))) delete attrs.position;
-    if (attrs.layout !== undefined && attrs.layout !== null && !["content", "wide"].includes(String(attrs.layout))) delete attrs.layout;
-    if (attrs.linkHref !== undefined && attrs.linkHref !== null && attrs.linkHref !== "" && !safeMangoTiptapLink(attrs.linkHref)) {
-      delete attrs.linkHref;
-      delete attrs.linkTarget;
-      delete attrs.linkRel;
-      delete attrs.linkTitle;
-    }
-    if (attrs.linkTarget !== undefined && attrs.linkTarget !== null && attrs.linkTarget !== "" && !["_blank", "_self"].includes(String(attrs.linkTarget))) delete attrs.linkTarget;
-  }
-  return Object.keys(attrs).length > 0 ? attrs : undefined;
-}
-
-function safeMangoTiptapLink(value: unknown): value is string {
-  return typeof value === "string" && /^(https?:|mailto:|tel:|\/|#)/i.test(value.trim());
-}
-
-function normalizeMarks(type: string | undefined, value: unknown): NonNullable<JSONContent["marks"]> | undefined {
-  // ProseMirror may carry active marks onto a pasted hard break. Those marks are
-  // cosmetic and do not belong in Mango's durable schema, so discard them rather
-  // than rejecting the entire visible document.
-  if (type !== "text" && type !== "mention" || !Array.isArray(value)) return undefined;
-  const normalized: NonNullable<JSONContent["marks"]> = [];
-  for (const candidate of value) {
-    if (!isRecord(candidate) || typeof candidate.type !== "string") continue;
-    const allowed = markAttributes[candidate.type];
-    if (!allowed) continue;
-    const attrs: Record<string, unknown> = {};
-    if (isRecord(candidate.attrs)) {
-      for (const [name, attribute] of Object.entries(candidate.attrs)) {
-        if (allowed.has(name) && supportedAttributeValue(attribute)) attrs[name] = Array.isArray(attribute) ? [...attribute] : attribute;
-      }
-    }
-    if (candidate.type === "textStyle") {
-      if (attrs.fontSize !== undefined && attrs.fontSize !== null) {
-        const fontSize = normalizeMangoTiptapFontSize(attrs.fontSize);
-        if (fontSize) attrs.fontSize = fontSize;
-        else delete attrs.fontSize;
-      }
-      if (attrs.color !== undefined && attrs.color !== null) {
-        const color = normalizeMangoTiptapColor(attrs.color);
-        if (color) attrs.color = color;
-        else delete attrs.color;
-      }
-      if (Object.keys(attrs).length === 0) continue;
-    }
-    if (candidate.type === "highlight" && attrs.color !== undefined && attrs.color !== null) {
-      const color = normalizeMangoTiptapColor(attrs.color);
-      if (color) attrs.color = color;
-      else delete attrs.color;
-    }
-    if (candidate.type === "link" && !safeMangoTiptapLink(attrs.href)) continue;
-    normalized.push(Object.keys(attrs).length > 0 ? { type: candidate.type, attrs } : { type: candidate.type });
-  }
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function normalizeMangoTiptapJSONContent(value: JSONContent): JSONContent {
-  const normalized: JSONContent = { type: value.type };
-  const attrs = normalizeNodeAttributes(value.type, value.attrs);
-  if (attrs) normalized.attrs = attrs;
-  if (value.text !== undefined) normalized.text = value.text;
-  const marks = normalizeMarks(value.type, value.marks);
-  if (marks) normalized.marks = marks;
-  if (Array.isArray(value.content)) normalized.content = value.content.map(normalizeMangoTiptapJSONContent);
-  return normalized;
-}
-
-/**
- * Makes externally pasted rich text safe to persist. Unsupported visual values are
- * removed, but the pasted text and document structure are never discarded.
- */
-export function normalizeMangoTiptapDocument(value: MangoTiptapDocument): MangoTiptapDocument {
-  return { ...value, document: normalizeMangoTiptapJSONContent(value.document) };
-}
-
-function positiveInteger(value: unknown, maximum = 100_000): boolean {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= maximum;
-}
-
-function validateAttributes(
-  kind: string,
-  value: unknown,
-  allowed: ReadonlySet<string>,
-  path: string,
-): string | null {
-  if (value === undefined) return null;
-  if (!isRecord(value)) return `${path}.attrs must be an object`;
-  for (const [name, attribute] of Object.entries(value)) {
-    if (!allowed.has(name)) return `${path}.attrs.${name} is not supported for ${kind}`;
-    if (
-      attribute !== null
-      && typeof attribute !== "string"
-      && typeof attribute !== "number"
-      && typeof attribute !== "boolean"
-      && !Array.isArray(attribute)
-    ) return `${path}.attrs.${name} has an invalid value`;
-    if (Array.isArray(attribute) && !attribute.every((item) => typeof item === "number" && Number.isFinite(item))) {
-      return `${path}.attrs.${name} must contain only numbers`;
-    }
-  }
-  const attrs = value as Record<string, unknown>;
-  if (kind === "mention" && (typeof attrs.userId !== "string" || !attrs.userId.trim())) {
-    return `${path}.attrs.userId is required`;
-  }
-  if (kind === "mention" && !["normal", "urgent"].includes(String(attrs.kind))) {
-    return `${path}.attrs.kind must be normal or urgent`;
-  }
-  if (kind === "mangoEntityLink") {
-    if (!["node", "logic_gate", "project"].includes(String(attrs.entityType))) return `${path}.attrs.entityType is invalid`;
-    if (typeof attrs.entityId !== "string" || !attrs.entityId.trim() || attrs.entityId.length > 160) return `${path}.attrs.entityId is required`;
-    if (typeof attrs.label !== "string" || !attrs.label.trim() || attrs.label.length > 500) return `${path}.attrs.label is required`;
-  }
-  if (kind === "mangoAttachmentImage") {
-    if (typeof attrs.attachmentId !== "string" || !attrs.attachmentId.trim()) return `${path}.attrs.attachmentId is required`;
-    if (Object.values(attrs).some((attribute) => typeof attribute === "string" && /^(blob:|data:)/i.test(attribute))) {
-      return `${path} cannot store transient Blob or data URLs`;
-    }
-  }
-  if (kind === "link") {
-    const href = attrs.href;
-    if (typeof href !== "string" || !href.trim()) return `${path}.attrs.href is required`;
-    if (!/^(https?:|mailto:|tel:|\/|#)/i.test(href.trim())) return `${path}.attrs.href uses an unsafe protocol`;
-  }
-  if (attrs.blockId !== undefined && attrs.blockId !== null && (typeof attrs.blockId !== "string" || !attrs.blockId.trim() || attrs.blockId.length > 160)) {
-    return `${path}.attrs.blockId is invalid`;
-  }
-  if (attrs.indentLevel !== undefined && (!Number.isInteger(attrs.indentLevel) || Number(attrs.indentLevel) < 0 || Number(attrs.indentLevel) > 12)) {
-    return `${path}.attrs.indentLevel must be an integer from 0 through 12`;
-  }
-  if (attrs.textAlign !== undefined && attrs.textAlign !== null && !["left", "center", "right"].includes(String(attrs.textAlign))) {
-    return `${path}.attrs.textAlign is invalid`;
-  }
-  if (kind === "heading" && !positiveInteger(attrs.level, 6)) return `${path}.attrs.level must be from 1 through 6`;
-  if (kind === "orderedList" && attrs.start !== undefined && attrs.start !== null && !positiveInteger(attrs.start)) return `${path}.attrs.start is invalid`;
-  if (kind === "orderedList" && attrs.type !== undefined && attrs.type !== null && !["1", "a", "A", "i", "I"].includes(String(attrs.type))) {
-    return `${path}.attrs.type is invalid`;
-  }
-  if (kind === "taskItem" && attrs.checked !== undefined && attrs.checked !== null && typeof attrs.checked !== "boolean") return `${path}.attrs.checked must be boolean`;
-  if (kind === "table" && attrs.style !== undefined && attrs.style !== null && !["auto", "fixed"].includes(String(attrs.style))) return `${path}.attrs.style is invalid`;
-  if (kind === "tableCell" || kind === "tableHeader") {
-    if (attrs.colspan !== undefined && attrs.colspan !== null && !positiveInteger(attrs.colspan, 1_000)) return `${path}.attrs.colspan is invalid`;
-    if (attrs.rowspan !== undefined && attrs.rowspan !== null && !positiveInteger(attrs.rowspan, 1_000)) return `${path}.attrs.rowspan is invalid`;
-    if (attrs.colwidth !== undefined && attrs.colwidth !== null && (!Array.isArray(attrs.colwidth) || !attrs.colwidth.every((item) => positiveInteger(item)))) return `${path}.attrs.colwidth is invalid`;
-    if (attrs.align !== undefined && attrs.align !== null && !["left", "center", "right"].includes(String(attrs.align))) return `${path}.attrs.align is invalid`;
-    if (attrs.backgroundColor !== undefined && attrs.backgroundColor !== null && !safeColor(attrs.backgroundColor)) return `${path}.attrs.backgroundColor is invalid`;
-  }
-  if (kind === "textStyle") {
-    if (attrs.fontSize !== undefined && attrs.fontSize !== null) {
-      const match = typeof attrs.fontSize === "string" ? /^(\d+)px$/.exec(attrs.fontSize) : null;
-      if (!match || Number(match[1]) < 10 || Number(match[1]) > 28) return `${path}.attrs.fontSize is invalid`;
-    }
-    if (attrs.color !== undefined && attrs.color !== null && !safeColor(attrs.color)) return `${path}.attrs.color is invalid`;
-  }
-  if (kind === "highlight" && attrs.color !== undefined && attrs.color !== null && !safeColor(attrs.color)) return `${path}.attrs.color is invalid`;
-  if (kind === "mangoAttachmentImage") {
-    if (typeof attrs.mimeType !== "string" || !/^image\/(jpeg|png|gif|webp)$/i.test(attrs.mimeType)) return `${path}.attrs.mimeType is invalid`;
-    for (const name of ["width", "height", "displayWidth", "displayHeight"] as const) {
-      if (attrs[name] !== undefined && attrs[name] !== null && !positiveInteger(attrs[name])) return `${path}.attrs.${name} is invalid`;
-    }
-    if (attrs.alignment !== undefined && attrs.alignment !== null && !["left", "center", "right"].includes(String(attrs.alignment))) return `${path}.attrs.alignment is invalid`;
-    if (attrs.position !== undefined && attrs.position !== null && !["inline", "break"].includes(String(attrs.position))) return `${path}.attrs.position is invalid`;
-    if (attrs.layout !== undefined && attrs.layout !== null && !["content", "wide"].includes(String(attrs.layout))) return `${path}.attrs.layout is invalid`;
-    if (attrs.linkHref !== undefined && attrs.linkHref !== null && attrs.linkHref !== "" && !/^(https?:|mailto:|tel:|\/|#)/i.test(String(attrs.linkHref))) {
-      return `${path}.attrs.linkHref uses an unsafe protocol`;
-    }
-    if (attrs.linkTarget !== undefined && attrs.linkTarget !== null && attrs.linkTarget !== "" && !["_blank", "_self"].includes(String(attrs.linkTarget))) {
-      return `${path}.attrs.linkTarget is invalid`;
-    }
-  }
-  return null;
-}
-
-function validateNode(value: unknown, path: string, depth: number, count: { value: number }): string | null {
-  if (depth > 100) return `${path} is nested too deeply`;
-  if (!isRecord(value)) return `${path} must be an object`;
-  count.value += 1;
-  if (count.value > 100_000) return "document contains too many nodes";
-  const type = value.type;
-  if (typeof type !== "string" || !(type in nodeAttributes)) return `${path}.type is unknown`;
-  for (const key of Object.keys(value)) {
-    if (!["type", "attrs", "content", "text", "marks"].includes(key)) return `${path} contains unsupported property ${key}`;
-  }
-  const attrError = validateAttributes(type, value.attrs, nodeAttributes[type], path);
-  if (attrError) return attrError;
-  if (type === "text") {
-    if (typeof value.text !== "string") return `${path}.text is required`;
-    if (value.content !== undefined) return `${path}.content is not valid on text`;
-  } else if (value.text !== undefined) {
-    return `${path}.text is only valid on text nodes`;
-  }
-  if (value.marks !== undefined) {
-    if (type !== "text" && type !== "mention" || !Array.isArray(value.marks)) return `${path}.marks is invalid`;
-    for (let index = 0; index < value.marks.length; index += 1) {
-      const mark = value.marks[index];
-      if (!isRecord(mark) || typeof mark.type !== "string" || !(mark.type in markAttributes)) {
-        return `${path}.marks[${index}] is unknown`;
-      }
-      for (const key of Object.keys(mark)) if (!["type", "attrs"].includes(key)) return `${path}.marks[${index}] contains unsupported property ${key}`;
-      const markError = validateAttributes(mark.type, mark.attrs, markAttributes[mark.type], `${path}.marks[${index}]`);
-      if (markError) return markError;
-    }
-  }
-  const content = value.content;
-  if (content !== undefined && !Array.isArray(content)) return `${path}.content must be an array`;
-  if (content === undefined) return type === "doc" ? `${path}.content is required` : null;
-  if (atomNodes.has(type)) return `${path}.content is not valid on ${type}`;
-  if (["doc", "blockquote", "bulletList", "orderedList", "taskList", "listItem", "taskItem", "table", "tableRow", "tableCell", "tableHeader"].includes(type) && content.length === 0) {
-    return `${path}.content cannot be empty for ${type}`;
-  }
-  for (let index = 0; index < content.length; index += 1) {
-    const child = content[index];
-    const childType = isRecord(child) ? child.type : undefined;
-    if (textContainers.has(type) && (typeof childType !== "string" || !inlineNodes.has(childType))) {
-      return `${path}.content[${index}] is not valid inside ${type}`;
-    }
-    if (type === "codeBlock" && childType !== "text") return `${path}.content[${index}] is not text`;
-    if (listContainers.has(type) && childType !== (type === "taskList" ? "taskItem" : "listItem")) {
-      return `${path}.content[${index}] is not a valid list item`;
-    }
-    if (type === "table" && childType !== "tableRow") return `${path}.content[${index}] is not a table row`;
-    if (type === "tableRow" && childType !== "tableCell" && childType !== "tableHeader") {
-      return `${path}.content[${index}] is not a table cell`;
-    }
-    if (blockContainers.has(type) && (typeof childType !== "string" || !blockNodes.has(childType))) {
-      return `${path}.content[${index}] is not a valid block`;
-    }
-    if ((type === "listItem" || type === "taskItem") && (typeof childType !== "string" || !blockNodes.has(childType) || (index === 0 && childType !== "paragraph"))) {
-      return `${path}.content[${index}] is not valid inside ${type}`;
-    }
-    const childError = validateNode(child, `${path}.content[${index}]`, depth + 1, count);
-    if (childError) return childError;
-  }
-  return null;
 }
 
 export function createEmptyMangoTiptapDocument(): MangoTiptapDocument {
@@ -401,21 +26,24 @@ export function createEmptyMangoTiptapDocument(): MangoTiptapDocument {
   };
 }
 
-function validateMangoTiptapDocumentStructure(value: unknown): MangoTiptapValidationResult {
+/**
+ * Checks only Mango's versioned envelope. Tiptap's configured ProseMirror schema
+ * is the authority for node, mark, and cosmetic formatting validity.
+ */
+export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidationResult {
   if (!isRecord(value)) return { valid: false, error: "document envelope must be an object" };
   for (const key of Object.keys(value)) {
-    if (!["format", "schema_version", "document"].includes(key)) return { valid: false, error: `document envelope contains unsupported property ${key}` };
+    if (key !== "format" && key !== "schema_version" && key !== "document") {
+      return { valid: false, error: `document envelope contains unsupported property ${key}` };
+    }
   }
   if (value.format !== MANGO_TIPTAP_FORMAT) return { valid: false, error: "document format is not mango-tiptap-json" };
   if (value.schema_version !== MANGO_TIPTAP_SCHEMA_VERSION) return { valid: false, error: "document schema version is not supported" };
   if (!isRecord(value.document) || value.document.type !== "doc") return { valid: false, error: "document root must be doc" };
-  const nodeError = validateNode(value.document, "document", 0, { value: 0 });
-  if (nodeError) return { valid: false, error: nodeError };
+  if (value.document.content !== undefined && !Array.isArray(value.document.content)) {
+    return { valid: false, error: "document content must be an array" };
+  }
   return { valid: true, value: value as MangoTiptapDocument };
-}
-
-export function validateMangoTiptapDocument(value: unknown): MangoTiptapValidationResult {
-  return validateMangoTiptapDocumentStructure(value);
 }
 
 export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidationResult {
@@ -427,12 +55,12 @@ export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidat
   }
 }
 
+/** Used only by explicit export/legacy boundaries, never by the normal save path. */
 export function serializeMangoTiptapDocument(value: MangoTiptapDocument): string {
-  incrementEditorRuntimeMetric("full_document_serializations");
-  const result = validateMangoTiptapDocumentStructure(normalizeMangoTiptapDocument(value));
+  const result = validateMangoTiptapDocument(value);
   if (!result.valid) throw new Error(result.error);
-  const serialized = JSON.stringify(result.value);
-  return serialized;
+  incrementEditorRuntimeMetric("full_document_serializations");
+  return JSON.stringify(result.value);
 }
 
 export function needsMangoTiptapLegacyDateHeadingBreak(value: MangoTiptapDocument): boolean {

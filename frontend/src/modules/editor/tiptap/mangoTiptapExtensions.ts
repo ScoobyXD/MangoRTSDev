@@ -219,12 +219,34 @@ export const MangoBlockIdentity = Extension.create({
     return [new Plugin({
       appendTransaction: (transactions, _oldState, newState) => {
         if (!transactions.some((transaction) => transaction.docChanged)) return null;
+        const changedRanges: Array<{ from: number; to: number }> = [];
+        transactions.forEach((changedTransaction, transactionIndex) => {
+          changedTransaction.mapping.maps.forEach((stepMap, stepIndex) => {
+            stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+              const laterSteps = changedTransaction.mapping.slice(stepIndex + 1);
+              let from = laterSteps.map(newStart, -1);
+              let to = laterSteps.map(newEnd, 1);
+              for (let laterIndex = transactionIndex + 1; laterIndex < transactions.length; laterIndex += 1) {
+                from = transactions[laterIndex].mapping.map(from, -1);
+                to = transactions[laterIndex].mapping.map(to, 1);
+              }
+              changedRanges.push({
+                from: Math.max(0, from - 1),
+                to: Math.min(newState.doc.content.size, Math.max(from + 1, to + 1)),
+              });
+            });
+          });
+        });
         const transaction = newState.tr;
-        newState.doc.descendants((node, position) => {
+        const assignedPositions = new Set<number>();
+        const assignMissingID: Parameters<typeof newState.doc.nodesBetween>[2] = (node, position) => {
           if (mangoBlockNodeNames.includes(node.type.name) && !node.attrs.blockId) {
+            if (assignedPositions.has(position)) return;
+            assignedPositions.add(position);
             transaction.setNodeMarkup(position, undefined, { ...node.attrs, blockId: newBlockID() });
           }
-        });
+        };
+        changedRanges.forEach(({ from, to }) => newState.doc.nodesBetween(from, to, assignMissingID));
         return transaction.steps.length > 0 ? transaction : null;
       },
     })];

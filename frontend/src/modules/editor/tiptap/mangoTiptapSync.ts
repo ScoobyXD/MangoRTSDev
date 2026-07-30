@@ -1,17 +1,9 @@
+import { publishEditorSaveState } from "../editorSaveStatusStore.js";
 import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
-import {
-  normalizeMangoTiptapDocument,
-  parseMangoTiptapDocument,
-  serializeMangoTiptapDocument,
-  type MangoTiptapDocument,
-} from "./mangoTiptapDocument.js";
+import { validateMangoTiptapDocument, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
-export type MangoTiptapResourceType =
-  | "node"
-  | "project"
-  | "logic_gate";
-
+export type MangoTiptapResourceType = "node" | "project" | "logic_gate";
 export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
 export type MangoTiptapSnapshot = {
@@ -22,6 +14,13 @@ export type MangoTiptapSnapshot = {
   deleted?: boolean;
   updated_timestamp?: string;
   committed_at?: string;
+};
+
+export type MangoTiptapSaveAcknowledgement = {
+  operation_id: string;
+  revision: number;
+  committed_at: string;
+  deduplicated?: boolean;
 };
 
 export type MangoTiptapSaveState = {
@@ -37,23 +36,19 @@ export type MangoTiptapConflict = {
   canonical: MangoTiptapSnapshot;
 };
 
-type PendingCommit = {
-  operation_id: string;
-  client_id: string;
-  base_revision: number;
-  document: MangoTiptapDocument;
-  annotations: MangoTiptapPersistedAnnotation[];
-  created_at: number;
-  attempted: boolean;
-};
-
-type PendingDocumentRecord = {
+export type MangoTiptapRecoveryRecord = {
   storage_key: string;
   company_id: string;
   resource_type: MangoTiptapResourceType;
   resource_id: string;
   document_id: string;
-  commits: PendingCommit[];
+  document: MangoTiptapDocument;
+  annotations: MangoTiptapPersistedAnnotation[];
+  generation: number;
+  operation_id: string;
+  client_id: string;
+  base_revision: number;
+  captured_at: number;
 };
 
 export type MangoTiptapSyncOptions = {
@@ -65,7 +60,7 @@ export type MangoTiptapSyncOptions = {
   initialRevision?: number;
   onDocument: (document: MangoTiptapDocument, source: "canonical" | "recovery") => void;
   onAnnotations?: (annotations: readonly MangoTiptapPersistedAnnotation[], source: "canonical" | "recovery") => void;
-  onSnapshot?: (document: MangoTiptapDocument, serialized: string, annotations: readonly MangoTiptapPersistedAnnotation[]) => void;
+  onSnapshot?: (document: MangoTiptapDocument, annotations: readonly MangoTiptapPersistedAnnotation[]) => void;
   onPendingChange?: (pendingCount: number) => void;
   onSaveStateChange?: (state: MangoTiptapSaveState) => void;
   onConflict?: (conflict: MangoTiptapConflict) => void;
@@ -134,27 +129,52 @@ async function withStore<T>(
   }
 }
 
-export async function readExactMangoTiptapPending(storage_key: string): Promise<PendingDocumentRecord | null> {
+export async function readExactMangoTiptapPending(storageKey: string): Promise<MangoTiptapRecoveryRecord | null> {
   incrementEditorRuntimeMetric("indexeddb_reads");
   return withStore("readonly", (store, resolve, reject) => {
-    const request = store.get(storage_key);
+    const request = store.get(storageKey);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve((request.result as PendingDocumentRecord | undefined) ?? null);
+    request.onsuccess = () => resolve((request.result as MangoTiptapRecoveryRecord | undefined) ?? null);
   });
 }
 
-async function writePending(record: PendingDocumentRecord): Promise<void> {
+async function writePending(record: MangoTiptapRecoveryRecord): Promise<void> {
   incrementEditorRuntimeMetric("indexeddb_writes");
   await withStore<void>("readwrite", (store, resolve, reject) => {
-    const request = record.commits.length > 0 ? store.put(record) : store.delete(record.storage_key);
+    const request = store.put(record);
     request.onerror = () => reject(request.error);
     store.transaction.oncomplete = () => resolve();
   });
 }
 
+async function deletePendingIfOperation(storageKey: string, operationID: string): Promise<void> {
+  incrementEditorRuntimeMetric("indexeddb_writes");
+  await withStore<void>("readwrite", (store, resolve, reject) => {
+    const read = store.get(storageKey);
+    read.onerror = () => reject(read.error);
+    read.onsuccess = () => {
+      const record = read.result as MangoTiptapRecoveryRecord | undefined;
+      if (record?.operation_id !== operationID) return;
+      try {
+        const deletion = store.delete(storageKey);
+        deletion.onerror = () => reject(deletion.error);
+      } catch (cause) {
+        reject(cause);
+      }
+    };
+    store.transaction.oncomplete = () => resolve();
+  });
+}
+
 function isConflict(cause: unknown): boolean {
-  return typeof cause === "object" && cause !== null && "status" in cause && Number((cause as { status?: unknown }).status) === 409
-    || cause instanceof Error && /conflict|revision|stale/i.test(cause.message);
+  return (typeof cause === "object" && cause !== null && "status" in cause && Number((cause as { status?: unknown }).status) === 409)
+    || (cause instanceof Error && /conflict|revision|stale/i.test(cause.message));
+}
+
+function requireSnapshotDocument(snapshot: MangoTiptapSnapshot): MangoTiptapDocument {
+  const validation = validateMangoTiptapDocument(snapshot.document);
+  if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
+  return validation.value;
 }
 
 export class MangoTiptapSync {
@@ -162,7 +182,10 @@ export class MangoTiptapSync {
   private readonly clientID: string;
   private readonly path: string;
   private revision: number;
-  private pending: PendingCommit[] = [];
+  private generation = 0;
+  private acknowledgedGeneration = 0;
+  private latest: MangoTiptapRecoveryRecord | null = null;
+  private inFlight: MangoTiptapRecoveryRecord | null = null;
   private persistence = Promise.resolve();
   private drainPromise: Promise<void> | undefined;
   private recoverPromise: Promise<void> | undefined;
@@ -176,8 +199,11 @@ export class MangoTiptapSync {
   private realtimeVisible = false;
   private stopped = false;
   private conflicted = false;
+  private initialRecoveryComplete = false;
   private recoveryStorageFailed = false;
   private unresolvedSaveFailureMessage: string | undefined;
+  private lastSaveState: MangoTiptapSaveState | undefined;
+  private lastPendingCount = -1;
 
   constructor(private readonly options: MangoTiptapSyncOptions) {
     this.storageKey = mangoTiptapPendingStorageKey(options);
@@ -189,6 +215,7 @@ export class MangoTiptapSync {
   async start(): Promise<void> {
     this.stopped = false;
     await this.recover();
+    this.initialRecoveryComplete = true;
   }
 
   setRealtimeVisible(visible: boolean): void {
@@ -211,67 +238,74 @@ export class MangoTiptapSync {
     annotations?: () => readonly MangoTiptapPersistedAnnotation[],
   ): void {
     if (this.stopped || this.conflicted) return;
+    this.generation += 1;
     this.snapshotProvider = typeof document === "function" ? document : () => document;
     this.annotationProvider = annotations;
-    this.options.onSaveStateChange?.({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
+    this.publishPendingCount();
+    this.emitSaveState({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
     this.armDrain(immediate);
   }
 
-  private captureScheduledSnapshot(): Promise<void> {
+  reportFailure(message: string): void {
+    const detail = message.trim() || "Unable to save this text box";
+    this.unresolvedSaveFailureMessage = detail;
+    this.emitSaveState({ status: "failed", message: detail, unresolvedFailure: true });
+  }
+
+  private async captureScheduledSnapshot(): Promise<void> {
     const provider = this.snapshotProvider;
     const annotationProvider = this.annotationProvider;
+    const generation = this.generation;
     this.snapshotProvider = undefined;
     this.annotationProvider = undefined;
-    if (!provider) return this.persistence;
-    let serialized: string;
-    let pendingDocument: MangoTiptapDocument;
+    if (!provider) {
+      await this.persistence;
+      return;
+    }
+    let document: MangoTiptapDocument;
     let annotations: MangoTiptapPersistedAnnotation[];
     try {
-      pendingDocument = normalizeMangoTiptapDocument(provider());
-      serialized = serializeMangoTiptapDocument(pendingDocument);
+      document = provider();
       annotations = [...(annotationProvider?.() ?? [])];
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Unable to prepare this text box for saving";
-      this.unresolvedSaveFailureMessage = message;
-      this.options.onSaveStateChange?.({
-        status: "failed",
-        message,
-        unresolvedFailure: true,
-      });
+      this.reportFailure(message);
       this.options.onError?.(cause);
-      return this.persistence;
+      return;
     }
-    this.options.onSnapshot?.(pendingDocument, serialized, annotations);
-    this.persistence = this.persistence.catch(() => undefined).then(async () => {
-      const last = this.pending[this.pending.length - 1];
-      if (last && !last.attempted) {
-        last.document = pendingDocument;
-        last.annotations = annotations;
-      } else {
-        this.pending.push({
-          operation_id: stableID(),
-          client_id: this.clientID,
-          base_revision: this.revision + this.pending.length,
-          document: pendingDocument,
-          annotations,
-          created_at: Date.now(),
-          attempted: this.pending.length === 0 && this.drainPromise === undefined,
-        });
-      }
-      this.options.onPendingChange?.(this.pending.length);
-      await this.persistPendingBestEffort();
-    });
-    return this.persistence;
+    const record: MangoTiptapRecoveryRecord = {
+      storage_key: this.storageKey,
+      company_id: this.options.companyID,
+      resource_type: this.options.resourceType,
+      resource_id: this.options.resourceID,
+      document_id: this.options.documentID,
+      document,
+      annotations,
+      generation,
+      operation_id: stableID(),
+      client_id: this.clientID,
+      base_revision: this.revision,
+      captured_at: Date.now(),
+    };
+    this.latest = record;
+    this.options.onSnapshot?.(document, annotations);
+    await this.persistRecordBestEffort(record);
+  }
+
+  private async retryFailedBeforeCapture(): Promise<void> {
+    if (this.latest && this.unresolvedSaveFailureMessage && this.snapshotProvider) await this.drain();
   }
 
   private async captureAndDrain(): Promise<void> {
     this.clearTimers();
+    await this.retryFailedBeforeCapture();
     await this.captureScheduledSnapshot();
     await this.drain();
   }
 
   async flush(): Promise<void> {
     this.clearTimers();
+    await this.retryFailedBeforeCapture();
     await this.captureScheduledSnapshot();
     await this.drain();
   }
@@ -300,14 +334,20 @@ export class MangoTiptapSync {
     return recovery;
   }
 
+  private hasUnsavedLocalEdits(): boolean {
+    return this.generation > this.acknowledgedGeneration
+      || Boolean(this.snapshotProvider || this.latest || this.inFlight || this.unresolvedSaveFailureMessage);
+  }
+
   private async performRecovery(): Promise<void> {
     incrementEditorRuntimeMetric("recovery_requests");
     await this.captureScheduledSnapshot();
+    if (this.initialRecoveryComplete && this.hasUnsavedLocalEdits()) return;
     let recoveryStorageAvailable = true;
     const [record, canonical] = await Promise.all([
-      readExactMangoTiptapPending(this.storageKey).then((record) => {
+      readExactMangoTiptapPending(this.storageKey).then((value) => {
         this.reportRecoveryStorageRecovered();
-        return record;
+        return value;
       }).catch((cause) => {
         recoveryStorageAvailable = false;
         this.reportRecoveryStorageFailure(cause);
@@ -315,94 +355,103 @@ export class MangoTiptapSync {
       }),
       this.options.requestJSON<MangoTiptapSnapshot>(this.path),
     ]);
-    const validation = parseMangoTiptapDocument(JSON.stringify(canonical.document));
-    if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
+    const canonicalDocument = requireSnapshotDocument(canonical);
     this.revision = canonical.revision;
-    if (recoveryStorageAvailable) {
-      this.pending = (record?.commits ?? []).map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
-    } else {
-      // Storage failure must not erase an in-memory operation that still needs its
-      // canonical backend acknowledgement during an active browser session.
-      this.pending = this.pending.map((commit) => ({ ...commit, annotations: commit.annotations ?? [], attempted: commit.attempted !== false }));
-    }
-    this.options.onPendingChange?.(this.pending.length);
-    this.options.onSaveStateChange?.(this.pending.length > 0
-      ? { status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) }
-      : this.unresolvedSaveFailureMessage
-        ? { status: "failed", message: this.unresolvedSaveFailureMessage, unresolvedFailure: true }
-        : {
-          status: "saved",
-          updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
-          revision: canonical.revision,
-          unresolvedFailure: false,
-        });
-    if (canonical.deleted) {
-      this.pending = [];
-      this.options.onPendingChange?.(0);
-      await this.persistPendingBestEffort();
-      this.options.onDocument(validation.value, "canonical");
-      this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
+    if (record) {
+      this.latest = { ...record, annotations: record.annotations ?? [] };
+      this.generation = Math.max(this.generation, record.generation);
+      this.acknowledgedGeneration = Math.min(this.acknowledgedGeneration, Math.max(0, record.generation - 1));
+      this.publishPendingCount();
+      this.emitSaveState({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
+      this.options.onDocument(record.document, "recovery");
+      this.options.onAnnotations?.(record.annotations ?? [], "recovery");
+      await this.drain();
       return;
     }
-    const recovered = this.pending[this.pending.length - 1];
-    this.options.onDocument(recovered?.document ?? validation.value, recovered ? "recovery" : "canonical");
-    this.options.onAnnotations?.(recovered?.annotations ?? canonical.annotations ?? [], recovered ? "recovery" : "canonical");
-    // Replay the exact stable operation before interpreting a revision mismatch. The
-    // backend deduplicates an already-accepted operation ID before its base check.
-    if (this.pending.length > 0) await this.drain();
+    if (!recoveryStorageAvailable && this.latest) return;
+    this.latest = null;
+    this.acknowledgedGeneration = this.generation;
+    this.publishPendingCount();
+    this.emitSaveState(this.unresolvedSaveFailureMessage
+      ? { status: "failed", message: this.unresolvedSaveFailureMessage, unresolvedFailure: true }
+      : {
+        status: "saved",
+        updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
+        revision: canonical.revision,
+        unresolvedFailure: false,
+      });
+    this.options.onDocument(canonicalDocument, "canonical");
+    this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
   }
 
   async resolveConflict(choice: "keep-local" | "use-canonical"): Promise<void> {
     const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
-    const validation = parseMangoTiptapDocument(JSON.stringify(canonical.document));
-    if (!validation.valid) throw new Error(`invalid_canonical_tiptap_document: ${validation.error}`);
-    const localCommit = this.pending[this.pending.length - 1];
+    const canonicalDocument = requireSnapshotDocument(canonical);
+    const local = this.latest;
     this.revision = canonical.revision;
-    this.pending = [];
     this.conflicted = false;
-    if (choice === "keep-local" && localCommit) {
-      this.pending.push({
+    if (choice === "keep-local" && local) {
+      this.generation = Math.max(this.generation + 1, local.generation + 1);
+      this.latest = {
+        ...local,
+        generation: this.generation,
         operation_id: stableID(),
         client_id: this.clientID,
         base_revision: canonical.revision,
-        document: localCommit.document,
-        annotations: localCommit.annotations ?? [],
-        created_at: Date.now(),
-        attempted: true,
-      });
-      this.options.onPendingChange?.(1);
-      await this.persistPendingBestEffort();
-      this.options.onDocument(localCommit.document, "recovery");
-      this.options.onAnnotations?.(localCommit.annotations ?? [], "recovery");
+        captured_at: Date.now(),
+      };
+      this.publishPendingCount();
+      this.emitSaveState({ status: "pending" });
+      await this.persistRecordBestEffort(this.latest);
+      this.options.onDocument(this.latest.document, "recovery");
+      this.options.onAnnotations?.(this.latest.annotations, "recovery");
       await this.drain();
       return;
     }
-    this.options.onPendingChange?.(0);
-    await this.persistPendingBestEffort();
-    this.options.onDocument(validation.value, "canonical");
+    this.latest = null;
+    this.inFlight = null;
+    this.generation = this.acknowledgedGeneration;
+    if (local) await this.deleteRecordBestEffort(local.operation_id);
+    this.publishPendingCount();
+    this.emitSaveState({
+      status: "saved",
+      updatedTimestamp: canonical.updated_timestamp ?? canonical.committed_at,
+      revision: canonical.revision,
+      unresolvedFailure: false,
+    });
+    this.options.onDocument(canonicalDocument, "canonical");
     this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
   }
 
-  private async persistPending(): Promise<void> {
-    await writePending({
-      storage_key: this.storageKey,
-      company_id: this.options.companyID,
-      resource_type: this.options.resourceType,
-      resource_id: this.options.resourceID,
-      document_id: this.options.documentID,
-      commits: this.pending,
+  private async persistRecordBestEffort(record: MangoTiptapRecoveryRecord): Promise<boolean> {
+    let succeeded = false;
+    const snapshot = { ...record, annotations: [...record.annotations] };
+    this.persistence = this.persistence.catch(() => undefined).then(async () => {
+      try {
+        await writePending(snapshot);
+        this.reportRecoveryStorageRecovered();
+        succeeded = true;
+      } catch (cause) {
+        this.reportRecoveryStorageFailure(cause);
+      }
     });
+    await this.persistence;
+    return succeeded;
   }
 
-  private async persistPendingBestEffort(): Promise<boolean> {
-    try {
-      await this.persistPending();
-      if (this.pending.length > 0) this.reportRecoveryStorageRecovered();
-      return true;
-    } catch (cause) {
-      this.reportRecoveryStorageFailure(cause);
-      return false;
-    }
+  private async deleteRecordBestEffort(operationID: string): Promise<boolean> {
+    let succeeded = false;
+    this.persistence = this.persistence.catch(() => undefined).then(async () => {
+      try {
+        await deletePendingIfOperation(this.storageKey, operationID);
+        this.reportRecoveryStorageRecovered();
+        succeeded = true;
+      } catch (cause) {
+        this.reportRecoveryStorageFailure(cause);
+      }
+    });
+    await this.persistence;
+    return succeeded;
   }
 
   private reportRecoveryStorageFailure(cause: unknown): void {
@@ -440,16 +489,16 @@ export class MangoTiptapSync {
   private async drain(): Promise<void> {
     if (this.drainPromise) return this.drainPromise;
     this.drainPromise = (async () => {
-      while (this.pending.length > 0 && !this.conflicted) {
-        const commit = this.pending[0];
+      while (this.latest && !this.conflicted) {
+        const commit = this.latest;
+        this.inFlight = commit;
+        if (commit.generation === this.generation && !this.snapshotProvider) {
+          this.emitSaveState({ status: "saving", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
+        }
         try {
-          this.options.onSaveStateChange?.({ status: "saving", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
-          if (!commit.attempted) {
-            commit.attempted = true;
-            await this.persistPendingBestEffort();
-          }
           incrementEditorRuntimeMetric("network_saves");
-          const response = await this.options.requestJSON<MangoTiptapSnapshot & { deduplicated?: boolean }>(this.path, {
+          incrementEditorRuntimeMetric("full_document_serializations");
+          const response = await this.options.requestJSON<MangoTiptapSaveAcknowledgement>(this.path, {
             method: "POST",
             json: {
               operation_id: commit.operation_id,
@@ -457,43 +506,49 @@ export class MangoTiptapSync {
               base_revision: commit.base_revision,
               schema_version: commit.document.schema_version,
               document: commit.document,
-              annotations: commit.annotations ?? [],
+              annotations: commit.annotations,
             },
           });
-          const validation = parseMangoTiptapDocument(JSON.stringify(response.document));
-          if (!validation.valid) throw new Error(`invalid_committed_tiptap_document: ${validation.error}`);
+          if (response.operation_id !== commit.operation_id || !Number.isFinite(response.revision) || !response.committed_at) {
+            throw new Error("invalid_editor_save_acknowledgement");
+          }
           this.revision = response.revision;
           this.retryAttempt = 0;
           this.unresolvedSaveFailureMessage = undefined;
-          this.pending.shift();
-          this.pending.forEach((next, index) => { if (!next.attempted) next.base_revision = this.revision + index; });
-          // The server acknowledgement is canonical even when local browser storage
-          // cleanup fails. Release virtualization pins before best-effort cleanup.
-          this.options.onPendingChange?.(this.pending.length);
-          this.options.onSaveStateChange?.(this.pending.length > 0 || this.snapshotProvider
-            ? { status: "pending" }
-            : {
+          this.acknowledgedGeneration = Math.max(this.acknowledgedGeneration, commit.generation);
+          if (this.latest?.operation_id === commit.operation_id) this.latest = null;
+          this.inFlight = null;
+          if (this.latest) {
+            this.latest = { ...this.latest, base_revision: this.revision };
+            await this.persistRecordBestEffort(this.latest);
+          }
+          const acknowledgementIsLatest = commit.generation === this.generation && !this.snapshotProvider && !this.latest;
+          if (acknowledgementIsLatest) {
+            await this.deleteRecordBestEffort(commit.operation_id);
+            this.emitSaveState({
               status: "saved",
-              updatedTimestamp: response.committed_at ?? response.updated_timestamp,
+              updatedTimestamp: response.committed_at,
               revision: response.revision,
               unresolvedFailure: false,
             });
-          this.options.onAnnotations?.(response.annotations ?? commit.annotations ?? [], "canonical");
-          await this.persistPendingBestEffort();
-        } catch (cause) {
-          if (isConflict(cause)) {
-            const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
-            this.raiseConflict(commit.document, canonical);
           } else {
+            this.emitSaveState({ status: "pending" });
+          }
+          this.publishPendingCount();
+        } catch (cause) {
+          this.inFlight = null;
+          if (isConflict(cause)) {
+            await this.captureScheduledSnapshot();
+            const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
+            requireSnapshotDocument(canonical);
+            this.raiseConflict(this.latest?.document ?? commit.document, canonical);
+          } else {
+            if (!this.latest) this.latest = commit;
             this.armRetry();
           }
           const message = cause instanceof Error ? cause.message : "Unable to save this text box";
-          this.unresolvedSaveFailureMessage = message;
-          this.options.onSaveStateChange?.({
-            status: "failed",
-            message,
-            unresolvedFailure: true,
-          });
+          this.reportFailure(message);
+          this.publishPendingCount();
           throw cause;
         }
       }
@@ -505,6 +560,25 @@ export class MangoTiptapSync {
     this.conflicted = true;
     incrementEditorRuntimeMetric("conflicts");
     this.options.onConflict?.({ local, canonical });
+  }
+
+  private emitSaveState(state: MangoTiptapSaveState): void {
+    const previous = this.lastSaveState;
+    if (previous?.status === state.status
+      && previous.updatedTimestamp === state.updatedTimestamp
+      && previous.revision === state.revision
+      && previous.message === state.message
+      && previous.unresolvedFailure === state.unresolvedFailure) return;
+    this.lastSaveState = state;
+    publishEditorSaveState(this.storageKey, state);
+    this.options.onSaveStateChange?.(state);
+  }
+
+  private publishPendingCount(): void {
+    const count = this.hasUnsavedLocalEdits() ? 1 : 0;
+    if (count === this.lastPendingCount) return;
+    this.lastPendingCount = count;
+    this.options.onPendingChange?.(count);
   }
 
   private clearTimer(which: "batch" | "max"): void {
@@ -522,12 +596,12 @@ export class MangoTiptapSync {
   }
 
   private armRetry(): void {
-    if (this.stopped || this.conflicted || this.retryTimer !== undefined || this.pending.length === 0) return;
+    if (this.stopped || this.conflicted || this.retryTimer !== undefined || !this.latest) return;
     const delay = Math.min(30_000, 1_000 * (2 ** Math.min(5, this.retryAttempt)));
     this.retryAttempt += 1;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
-      void this.drain().catch((cause) => this.options.onError?.(cause));
+      void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
     }, delay);
   }
 }

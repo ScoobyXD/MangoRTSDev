@@ -5,7 +5,7 @@ import type { EditorOutlineStyleID } from "./plainTextEditing";
 import { EDITOR_HIGHLIGHT_COLOR_ITEMS, normalizeEditorHighlightColor, type EditorHighlightColor } from "./richTextEditing";
 import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
 import type { EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
-import { EditorSaveStatusBadge, type EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { EditorSaveStatusIcon, type EditorSaveState } from "./EditorSaveStatusIcon.js";
 
 const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
@@ -145,6 +145,7 @@ type EditorTabBarProps = {
   saveCurrentVersionDisabled?: boolean;
   saveCurrentVersionBusy?: boolean;
   saveState?: EditorSaveState;
+  saveStateStorageKey?: string;
   onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
   secondaryActions?: readonly EditorHeaderOverflowAction[];
   reserveHeaderOffset?: boolean;
@@ -200,6 +201,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   saveCurrentVersionDisabled = false,
   saveCurrentVersionBusy = false,
   saveState,
+  saveStateStorageKey,
   onRelationshipTabAnchorChange,
   secondaryActions = [],
   reserveHeaderOffset = true,
@@ -836,9 +838,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           </button>
         );
       })}
-      {(saveState || onSaveCurrentVersion) && (
+      {(saveState || saveStateStorageKey || onSaveCurrentVersion) && (
         <div style={{ marginLeft: singleLine ? 0 : "auto", display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
-          {saveState && <EditorSaveStatusBadge state={saveState} compact />}
+          {(saveState || saveStateStorageKey) && <EditorSaveStatusIcon state={saveState} storageKey={saveStateStorageKey} compact />}
           {onSaveCurrentVersion && (
             <button
               type="button"
@@ -853,7 +855,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         </div>
       )}
       {hasOverflowActions && (
-        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: saveState || onSaveCurrentVersion || singleLine ? 0 : "auto" }}>
+        <div ref={overflowMenuRef} data-mango-editor-header-overflow="true" style={{ position: "relative", flex: "0 0 auto", marginLeft: saveState || saveStateStorageKey || onSaveCurrentVersion || singleLine ? 0 : "auto" }}>
           <button
             ref={(element) => {
               overflowTriggerRef.current = element;

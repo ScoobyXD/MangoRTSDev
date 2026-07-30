@@ -1,0 +1,33 @@
+import type { MangoTiptapSaveState } from "./tiptap/mangoTiptapSync.js";
+
+const states = new Map<string, MangoTiptapSaveState>();
+const listeners = new Map<string, Set<() => void>>();
+
+function sameSaveState(left: MangoTiptapSaveState | undefined, right: MangoTiptapSaveState): boolean {
+  return left?.status === right.status
+    && left.updatedTimestamp === right.updatedTimestamp
+    && left.revision === right.revision
+    && left.message === right.message
+    && left.unresolvedFailure === right.unresolvedFailure;
+}
+
+export function publishEditorSaveState(storageKey: string, state: MangoTiptapSaveState): boolean {
+  if (sameSaveState(states.get(storageKey), state)) return false;
+  states.set(storageKey, state);
+  listeners.get(storageKey)?.forEach((listener) => listener());
+  return true;
+}
+
+export function readEditorSaveState(storageKey: string): MangoTiptapSaveState | undefined {
+  return states.get(storageKey);
+}
+
+export function subscribeEditorSaveState(storageKey: string, listener: () => void): () => void {
+  const keyListeners = listeners.get(storageKey) ?? new Set<() => void>();
+  keyListeners.add(listener);
+  listeners.set(storageKey, keyListeners);
+  return () => {
+    keyListeners.delete(listener);
+    if (keyListeners.size === 0) listeners.delete(storageKey);
+  };
+}

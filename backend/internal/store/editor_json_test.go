@@ -81,28 +81,35 @@ func TestMangoTiptapJSONAcceptsDocumentsAndAnnotationPositionsBeyondTwoMiB(t *te
 	}
 }
 
-func TestMangoTiptapJSONRejectsUnknownSchemaHTMLAndTransientURLs(t *testing.T) {
-	cases := []json.RawMessage{
+func TestMangoTiptapJSONKeepsOnlyStructuralAndDurabilityRestrictions(t *testing.T) {
+	rejected := []json.RawMessage{
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":2,"document":{"type":"doc","content":[]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"legacyHTML","attrs":{"html":"<p>old</p>"}}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x","mimeType":"image/png","alt":"blob:secret"}}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"link","attrs":{"href":"javascript:alert(1)"}}]}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","marks":[{"type":"bold"}]}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"textStyle","attrs":{"color":"red;background:url(https://example.test)"}}]}]}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","displayWidth":1000000}}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","linkHref":"javascript:alert(1)"}}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","filename":"x.png","mimeType":"image/png","linkTarget":"popup"}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"filename":"missing-id.png","mimeType":"image/png"}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","linkHref":"javascript:alert(1)"}}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mention","attrs":{"userId":"","label":"Missing"}}]}]}}`),
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"folder","entityId":"folder-1","label":"Bad"}}]}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"node","entityId":"","label":"Missing"}}]}]}}`),
-		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"orderedList","attrs":{"start":1,"type":"invalid"},"content":[{"type":"listItem","content":[{"type":"paragraph"}]}]}]}}`),
 	}
-	for index, raw := range cases {
+	for index, raw := range rejected {
 		if _, err := ValidateMangoTiptapJSON(raw); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("case %d error=%v", index, err)
+			t.Fatalf("rejected case %d error=%v", index, err)
+		}
+	}
+
+	acceptedCosmeticFormatting := []json.RawMessage{
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"keep formatting","marks":[{"type":"textStyle","attrs":{"fontSize":"11pt","color":"rgb(31, 78, 121)","fontFamily":"Aptos"}},{"type":"highlight","attrs":{"color":"color(display-p3 1 0.8 0.1)"}}]}]}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"first"},{"type":"hardBreak","marks":[{"type":"textStyle","attrs":{"fontSize":"10.5pt","color":"rgba(1,2,3,.5)"}}]},{"type":"text","text":"second"}]}]}}`),
+		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"mangoAttachmentImage","attrs":{"attachmentId":"a","mimeType":"image/avif","displayWidth":1000000,"alignment":"unusual-but-cosmetic"}}]}}`),
+	}
+	for index, raw := range acceptedCosmeticFormatting {
+		if _, err := ValidateMangoTiptapJSON(raw); err != nil {
+			t.Fatalf("cosmetic case %d rejected: %v", index, err)
 		}
 	}
 }
-
 func TestEditorJSONExactRevisionDedupeConflictVersionsAndDelete(t *testing.T) {
 	repo, ref := editorJSONTestDocument(t, "11111111-1111-4111-8111-111111111111")
 	firstDocument := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"first"}]}]}}`)

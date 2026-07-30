@@ -46,7 +46,8 @@ import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
-import { editorSaveNeedsFailureAttention, type EditorSaveState } from "./EditorSaveStatusBadge.js";
+import { editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
+import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
@@ -618,7 +619,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [saveVersionSaving, setSaveVersionSaving] = useState(false);
   const [saveVersionRestoring, setSaveVersionRestoring] = useState(false);
   const [saveVersionStatus, setSaveVersionStatus] = useState("");
-  const [logicGateSaveState, setLogicGateSaveState] = useState<EditorSaveState>({ status: "saved" });
+  const [logicGateSaveFailed, setLogicGateSaveFailed] = useState(false);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -2819,7 +2820,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
-            saveState={linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" ? logicGateSaveState : undefined}
+            saveStateStorageKey={linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
             secondaryActions={linkedEntityKind === "logic_gate" ? [{
               id: "apply-gvic-to-assigned-nodes",
               label: logicGateGVICApplyToAssignedNodesBusy ? "Applying GVIC to assigned nodes" : "Apply GVIC to assigned nodes",
@@ -3045,7 +3046,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
             <LogicGateTiptapEditorSurface
               key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
-              className={editorSaveNeedsFailureAttention(logicGateSaveState) ? "mango-editor-save-failed-frame" : undefined}
+              className={logicGateSaveFailed ? "mango-editor-save-failed-frame" : undefined}
               value={documentDraftRef.current}
               editable={editorWriteEnabled}
               style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
@@ -3057,10 +3058,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               attachmentContext={editorImageAttachmentContext}
               mentionUsers={companyUsers}
               formattingControllerRef={logicFormattingControllerRef}
-              onChange={(next) => { documentDraftRef.current = next; }}
-              onFlush={(next) => { documentDraftRef.current = next; }}
               onError={setError}
-              onSaveStateChange={setLogicGateSaveState}
+              onSaveStateChange={(state) => setLogicGateSaveFailed((current) => { const failed = editorSaveNeedsFailureAttention(state); return current === failed ? current : failed; })}
               onRecoveryStorageError={setError}
               onRecoveryStorageRecovered={() => setError("")}
               onSelectionFontSizeChange={updateSelectionFontSize}

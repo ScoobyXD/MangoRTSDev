@@ -277,7 +277,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   const annotations = structuredAnnotations(value);
   const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
   const lifecyclePins: boolean[] = [];
-  const changes: string[] = [];
   const selectionFontSizes: number[] = [];
   const selectionInlineFormats: Array<{ bold: boolean; underline: boolean; italic: boolean; strikethrough: boolean }> = [];
   let canonicalReads = 0;
@@ -329,18 +328,13 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
     }
     postStarted = true;
-    postedDocument = init.json && typeof init.json === "object" && "document" in init.json
-      ? (init.json as { document: MangoTiptapDocument }).document
-      : null;
+    const body = init.json as { operation_id: string; document: MangoTiptapDocument; annotations?: typeof canonicalAnnotations };
+    postedDocument = body.document;
     await new Promise<void>((resolve) => { releasePost = resolve; });
     canonicalRevision += 1;
-    canonicalDocument = init.json && typeof init.json === "object" && "document" in init.json
-      ? (init.json as { document: MangoTiptapDocument }).document
-      : canonicalDocument;
-    canonicalAnnotations = init.json && typeof init.json === "object" && "annotations" in init.json
-      ? (init.json as { annotations: typeof canonicalAnnotations }).annotations
-      : canonicalAnnotations;
-    return { revision: canonicalRevision, schema_version: 1, document: canonicalDocument, annotations: canonicalAnnotations } as T;
+    canonicalDocument = body.document;
+    canonicalAnnotations = body.annotations ?? [];
+    return { operation_id: body.operation_id, revision: canonicalRevision, committed_at: "2026-07-29T18:00:00Z" } as T;
   };
 
   let mountedRoot: { unmount(): void } | null = null;
@@ -393,7 +387,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           formattingControllerRef={controllerRef}
           onSelectionFontSizeChange={(fontSize) => selectionFontSizes.push(fontSize)}
           onSelectionInlineFormatChange={(format) => selectionInlineFormats.push(format)}
-          onChange={(next) => changes.push(next)}
           onConflict={() => { conflictCallbacks += 1; }}
           onError={(message) => documentErrors.push(message)}
           onRecoveryStorageError={(message) => storageErrors.push(message)}
@@ -475,7 +468,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "center", "the selected image starts with its stored center alignment");
     await act(async () => { assert.equal(controllerRef.current?.applyTextAlignment("left"), true); });
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "left", "the selected image node attributes must receive the toolbar alignment");
-    assert.match(controllerRef.current?.flush() ?? "", /"attachmentId":"image-1"[^}]*"alignment":"left"/, "the toolbar alignment must be present in the serialized document");
     await waitFor(() => postStarted, "selected image alignment must use the normal durable document save");
     assert.match(JSON.stringify(postedDocument), /"attachmentId":"image-1"[^}]*"alignment":"left"/);
     releasePost?.();
@@ -551,7 +543,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     postedDocument = null;
     releasePost = undefined;
     resetEditorRuntimeMetricsForTests();
-    const changeCountBeforeTyping = changes.length;
     const alphaWalker = dom.window.document.createTreeWalker(activeProseMirror, dom.window.NodeFilter.SHOW_TEXT);
     let alphaText: Text | null = null;
     while (alphaWalker.nextNode()) {
@@ -604,14 +595,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => getEditorRuntimeMetrics().transactions >= 1, "normal typing should create an immediate ProseMirror transaction");
     assert.equal(getEditorRuntimeMetrics().full_document_serializations, 0, "typing must not serialize before the quiet-period batch");
     assert.equal(getEditorRuntimeMetrics().indexeddb_writes, 0, "typing must not persist recovery state before the quiet-period batch");
-    assert.equal(changes.length, changeCountBeforeTyping, "parent receives the batched snapshot instead of per-transaction JSON");
     assert.equal(editorRoot.dataset.mangoEditorPinned, "true", "dirty work pins the mounted editor immediately");
 
     await waitFor(() => postStarted, "normal typing alone must start one backend save after the quiet period");
     assert.match(JSON.stringify(postedDocument), /Alpha typed through the editor/, "the backend save must contain text entered through the normal editable surface");
     assert.equal(getEditorRuntimeMetrics().full_document_serializations, 1);
     assert.equal(getEditorRuntimeMetrics().indexeddb_writes, 1);
-    assert.equal(changes.length, changeCountBeforeTyping + 1);
     const pendingKey = mangoTiptapPendingStorageKey({
       companyID: "company-1", resourceType: "node", resourceID: "node-1", documentID: "document-1",
     });
@@ -622,7 +611,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const expectedMappedAnnotations = canonicalAnnotations.map((annotation) => annotation.from >= alphaAnnotation.to
       ? { ...annotation, from: annotation.from + typedText.length, to: annotation.to + typedText.length }
       : annotation);
-    assert.deepEqual(pendingRecord.commits[0]?.annotations, expectedMappedAnnotations, "typed text and shifted annotation positions share the exact pending save batch");
+    assert.deepEqual(pendingRecord.annotations, expectedMappedAnnotations, "typed text and shifted annotation positions share the exact recovery batch");
 
     exactObserver.trigger(false);
     await act(async () => { setHostVisible(false); });
@@ -682,8 +671,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
         } as T;
       }
       if (init?.method === "POST") {
-        const body = init.json as { document: MangoTiptapDocument; annotations?: typeof canonicalAnnotations };
-        return { revision: 1, schema_version: 1, document: body.document, annotations: body.annotations ?? [] } as T;
+        const body = init.json as { operation_id: string; document: MangoTiptapDocument; annotations?: typeof canonicalAnnotations };
+        return { operation_id: body.operation_id, revision: 1, committed_at: "2026-07-29T18:00:00Z" } as T;
       }
       return { revision: 0, schema_version: 1, document: pageHostDocument, annotations: [] } as T;
     };
