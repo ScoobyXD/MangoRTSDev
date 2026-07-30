@@ -62,6 +62,7 @@ import {
 } from "./mangoTiptapExtensions.js";
 import {
   createMangoTiptapAttachmentContent,
+  parseMangoTiptapRichClipboardContent,
   prepareMangoTiptapRichClipboardHTML,
   readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
@@ -1018,8 +1019,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (editor.isDestroyed) return;
       const selection = insertionBookmark.resolve(editor.state.doc);
       editor.off("transaction", mapInsertionBookmark);
-      if (result.html.trim() && !editor.chain().focus().insertContentAt({ from: selection.from, to: selection.to }, result.html).run()) {
-        throw new Error("Unable to insert the pasted text and images");
+      if (result.html.trim()) {
+        const content = parseMangoTiptapRichClipboardContent(editor, root.ownerDocument, result.html);
+        if (content.size > 0 && !editor.chain().focus().insertContentAt({ from: selection.from, to: selection.to }, content).run()) {
+          throw new Error("Unable to insert the pasted text and images");
+        }
       }
       if (result.failedImageCount > 0) {
         const noun = result.failedImageCount === 1 ? "image" : "images";

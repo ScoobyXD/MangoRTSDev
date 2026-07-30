@@ -1,4 +1,5 @@
 import type { Editor, JSONContent } from "@tiptap/core";
+import { DOMParser as ProseMirrorDOMParser, type Fragment } from "@tiptap/pm/model";
 
 import {
   fileFromDataURL,
@@ -235,6 +236,18 @@ export async function prepareMangoTiptapRichClipboardHTML(
     liftAttachmentElementOutOfTextBlock(attachmentElement);
   }
   return { ...prepared, html: template.innerHTML };
+}
+
+export function parseMangoTiptapRichClipboardContent(
+  editor: Editor,
+  ownerDocument: Document,
+  html: string,
+): Fragment {
+  const container = ownerDocument.createElement("div");
+  container.innerHTML = html;
+  return ProseMirrorDOMParser.fromSchema(editor.schema).parseSlice(container, {
+    preserveWhitespace: true,
+  }).content;
 }
 
 export function countMangoTiptapRichClipboardImages(ownerDocument: Document, html: string): number {

@@ -8,6 +8,7 @@ import {
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 import {
   createMangoTiptapAttachmentContent,
+  parseMangoTiptapRichClipboardContent,
   prepareMangoTiptapRichClipboardHTML,
   readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
@@ -116,8 +117,9 @@ test("new attachment image content follows the active alignment instead of defau
 });
 
 test("plain clipboard text and a file-backed image become one durable paste", async () => {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://mango.test/" });
+  const dom = new JSDOM("<!doctype html><html><body><div id=editor></div></body></html>", { url: "https://mango.test/" });
   const restore = installDOM(dom);
+  let editor: MangoTiptapEditorEngine | undefined;
   try {
     const image = { name: "tree.png", type: "image/png", size: 4 } as File;
     const paste = readMangoTiptapClipboardPaste(dom.window.document, {
@@ -146,7 +148,56 @@ test("plain clipboard text and a file-backed image become one durable paste", as
     assert.match(result.html, /Text before/);
     assert.match(result.html, /Text after/);
     assert.match(result.html, /data-attachment-id="file-image"/);
+
+    editor = new MangoTiptapEditorEngine({
+      element: dom.window.document.querySelector<HTMLElement>("#editor"),
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+      enableContentCheck: true,
+    });
+    const content = parseMangoTiptapRichClipboardContent(editor, dom.window.document, result.html);
+    assert.equal(editor.commands.insertContent(content), true);
+    assert.match(JSON.stringify(editor.getJSON()), /"attachmentId":"file-image"/);
   } finally {
+    editor?.destroy();
+    restore();
+    dom.window.close();
+  }
+});
+
+test("clipboard wrappers do not reject supported text and durable images", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=editor></div></body></html>", { url: "https://mango.test/" });
+  const restore = installDOM(dom);
+  let editor: MangoTiptapEditorEngine | undefined;
+  try {
+    const result = await prepareMangoTiptapRichClipboardHTML(
+      dom.window.document,
+      '<div style="text-align:left"><span>Text before</span><img src="https://images.example.test/tree"><span>Text after</span></div>',
+      "left",
+      async () => ({
+        src: "mango-attachment:tree-image",
+        attachmentID: "tree-image",
+        filename: "tree.png",
+        mimeType: "image/png",
+        width: 640,
+        height: 360,
+      }),
+    );
+
+    editor = new MangoTiptapEditorEngine({
+      element: dom.window.document.querySelector<HTMLElement>("#editor"),
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+      enableContentCheck: true,
+    });
+    const content = parseMangoTiptapRichClipboardContent(editor, dom.window.document, result.html);
+    assert.ok(content.size > 0);
+    assert.equal(editor.commands.insertContent(content), true);
+    assert.equal(editor.state.doc.textContent.includes("Text before"), true);
+    assert.equal(editor.state.doc.textContent.includes("Text after"), true);
+    assert.match(JSON.stringify(editor.getJSON()), /"attachmentId":"tree-image"/);
+  } finally {
+    editor?.destroy();
     restore();
     dom.window.close();
   }
