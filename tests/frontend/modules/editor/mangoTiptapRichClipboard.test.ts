@@ -9,6 +9,7 @@ import {
 import {
   createMangoTiptapAttachmentContent,
   prepareMangoTiptapRichClipboardHTML,
+  readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapRichClipboard.js";
 import { validateMangoTiptapDocument } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
@@ -112,4 +113,75 @@ test("new attachment image content follows the active alignment instead of defau
     created_timestamp: "2026-07-29T16:00:00Z",
   }, "right");
   assert.equal(content.attrs?.alignment, "right");
+});
+
+test("plain clipboard text and a file-backed image become one durable paste", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://mango.test/" });
+  const restore = installDOM(dom);
+  try {
+    const image = { name: "tree.png", type: "image/png", size: 4 } as File;
+    const paste = readMangoTiptapClipboardPaste(dom.window.document, {
+      files: [image] as unknown as FileList,
+      getData: (type) => type === "text/plain" ? "Text before\nText after" : "",
+    });
+    if (!paste) throw new Error("the text and image clipboard should be owned");
+    assert.equal(paste.imageCount, 1);
+    assert.equal(paste.matchingFiles[0], image);
+    assert.match(paste.html, /Text before/);
+    assert.match(paste.html, /Text after/);
+
+    const result = await prepareMangoTiptapRichClipboardHTML(
+      dom.window.document,
+      paste.html,
+      "left",
+      async (request) => ({
+        src: "mango-attachment:file-image",
+        attachmentID: "file-image",
+        filename: paste.matchingFiles[request.index]?.name ?? "missing.png",
+        mimeType: "image/png",
+        width: 640,
+        height: 360,
+      }),
+    );
+    assert.match(result.html, /Text before/);
+    assert.match(result.html, /Text after/);
+    assert.match(result.html, /data-attachment-id="file-image"/);
+  } finally {
+    restore();
+    dom.window.close();
+  }
+});
+
+test("one file can back the same inline image twice without losing the surrounding text", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://mango.test/" });
+  const restore = installDOM(dom);
+  try {
+    const image = { name: "tree.png", type: "image/png", size: 4 } as File;
+    const html = '<p>First point</p><p><img src="blob:copied-tree"></p><p>Second point</p><p><img src="blob:copied-tree"></p>';
+    const paste = readMangoTiptapClipboardPaste(dom.window.document, {
+      files: [image] as unknown as FileList,
+      getData: (type) => type === "text/html" ? html : "First point Second point",
+    });
+    if (!paste) throw new Error("the repeated inline image clipboard should be owned");
+    assert.deepEqual(paste.matchingFiles, [image, image]);
+    let uploads = 0;
+    const result = await prepareMangoTiptapRichClipboardHTML(dom.window.document, paste.html, "left", async () => {
+      uploads += 1;
+      return {
+        src: "mango-attachment:repeated-image",
+        attachmentID: "repeated-image",
+        filename: "tree.png",
+        mimeType: "image/png",
+        width: 640,
+        height: 360,
+      };
+    });
+    assert.equal(uploads, 1, "the repeated source uploads once");
+    assert.equal((result.html.match(/data-attachment-id="repeated-image"/g) ?? []).length, 2);
+    assert.match(result.html, /First point/);
+    assert.match(result.html, /Second point/);
+  } finally {
+    restore();
+    dom.window.close();
+  }
 });

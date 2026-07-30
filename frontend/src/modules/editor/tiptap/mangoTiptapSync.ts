@@ -37,6 +37,7 @@ export type MangoTiptapConflict = {
 };
 
 export type MangoTiptapRecoveryRecord = {
+  record_version: 2;
   storage_key: string;
   company_id: string;
   resource_type: MangoTiptapResourceType;
@@ -74,8 +75,26 @@ export type MangoTiptapSyncOptions = {
 
 const DB_NAME = "mango-tiptap-pending-v1";
 const DB_STORE = "pending_documents";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CLIENT_KEY = "mango-tiptap-client-v1";
+
+type LegacyPendingCommit = {
+  operation_id?: unknown;
+  client_id?: unknown;
+  base_revision?: unknown;
+  document?: unknown;
+  annotations?: unknown;
+  created_at?: unknown;
+};
+
+type LegacyPendingDocumentRecord = {
+  storage_key?: unknown;
+  company_id?: unknown;
+  resource_type?: unknown;
+  resource_id?: unknown;
+  document_id?: unknown;
+  commits?: unknown;
+};
 
 function stableID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -95,6 +114,71 @@ export function mangoTiptapPendingStorageKey(options: Pick<MangoTiptapSyncOption
   return [options.companyID, options.resourceType, options.resourceID, options.documentID]
     .map(encodeURIComponent)
     .join(":");
+}
+
+function requiredString(value: unknown, error: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(error);
+  return value;
+}
+
+function recoveryResourceType(value: unknown): MangoTiptapResourceType {
+  if (value === "node" || value === "project" || value === "logic_gate") return value;
+  throw new Error("invalid_tiptap_pending_resource_type");
+}
+
+function recoveryDocument(value: unknown): MangoTiptapDocument {
+  const validation = validateMangoTiptapDocument(value);
+  if (!validation.valid) throw new Error(`invalid_tiptap_pending_document: ${validation.error}`);
+  return validation.value;
+}
+
+function migrateRecoveryRecord(storageKey: string, value: unknown): { record: MangoTiptapRecoveryRecord; changed: boolean } {
+  if (!value || typeof value !== "object") throw new Error("invalid_tiptap_pending_record");
+  const raw = value as LegacyPendingDocumentRecord & Partial<MangoTiptapRecoveryRecord>;
+  const common = {
+    record_version: 2 as const,
+    storage_key: requiredString(raw.storage_key, "invalid_tiptap_pending_storage_key"),
+    company_id: requiredString(raw.company_id, "invalid_tiptap_pending_company"),
+    resource_type: recoveryResourceType(raw.resource_type),
+    resource_id: requiredString(raw.resource_id, "invalid_tiptap_pending_resource"),
+    document_id: requiredString(raw.document_id, "invalid_tiptap_pending_document_id"),
+  };
+  if (common.storage_key !== storageKey) throw new Error("invalid_tiptap_pending_storage_key");
+
+  if (Array.isArray(raw.commits)) {
+    const commit = [...raw.commits]
+      .reverse()
+      .find((candidate): candidate is LegacyPendingCommit => {
+        if (!candidate || typeof candidate !== "object") return false;
+        return validateMangoTiptapDocument((candidate as LegacyPendingCommit).document).valid;
+      });
+    if (!commit) throw new Error("invalid_tiptap_pending_legacy_record");
+    return {
+      changed: true,
+      record: {
+        ...common,
+        document: recoveryDocument(commit.document),
+        annotations: Array.isArray(commit.annotations) ? commit.annotations as MangoTiptapPersistedAnnotation[] : [],
+        generation: 1,
+        operation_id: requiredString(commit.operation_id, "invalid_tiptap_pending_operation"),
+        client_id: requiredString(commit.client_id, "invalid_tiptap_pending_client"),
+        base_revision: Number.isFinite(commit.base_revision) ? Math.max(0, Math.trunc(Number(commit.base_revision))) : 0,
+        captured_at: Number.isFinite(commit.created_at) ? Number(commit.created_at) : Date.now(),
+      },
+    };
+  }
+
+  const record: MangoTiptapRecoveryRecord = {
+    ...common,
+    document: recoveryDocument(raw.document),
+    annotations: Array.isArray(raw.annotations) ? raw.annotations : [],
+    generation: Number.isFinite(raw.generation) ? Math.max(1, Math.trunc(Number(raw.generation))) : 1,
+    operation_id: requiredString(raw.operation_id, "invalid_tiptap_pending_operation"),
+    client_id: requiredString(raw.client_id, "invalid_tiptap_pending_client"),
+    base_revision: Number.isFinite(raw.base_revision) ? Math.max(0, Math.trunc(Number(raw.base_revision))) : 0,
+    captured_at: Number.isFinite(raw.captured_at) ? Number(raw.captured_at) : Date.now(),
+  };
+  return { record, changed: raw.record_version !== 2 };
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -131,10 +215,27 @@ async function withStore<T>(
 
 export async function readExactMangoTiptapPending(storageKey: string): Promise<MangoTiptapRecoveryRecord | null> {
   incrementEditorRuntimeMetric("indexeddb_reads");
-  return withStore("readonly", (store, resolve, reject) => {
+  return withStore("readwrite", (store, resolve, reject) => {
     const request = store.get(storageKey);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve((request.result as MangoTiptapRecoveryRecord | undefined) ?? null);
+    request.onsuccess = () => {
+      if (request.result === undefined) {
+        resolve(null);
+        return;
+      }
+      try {
+        const migrated = migrateRecoveryRecord(storageKey, request.result);
+        if (!migrated.changed) {
+          resolve(migrated.record);
+          return;
+        }
+        const write = store.put(migrated.record);
+        write.onerror = () => reject(write.error);
+        store.transaction.oncomplete = () => resolve(migrated.record);
+      } catch (cause) {
+        reject(cause);
+      }
+    };
   });
 }
 
@@ -274,6 +375,7 @@ export class MangoTiptapSync {
       return;
     }
     const record: MangoTiptapRecoveryRecord = {
+      record_version: 2,
       storage_key: this.storageKey,
       company_id: this.options.companyID,
       resource_type: this.options.resourceType,

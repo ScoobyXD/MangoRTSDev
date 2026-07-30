@@ -518,6 +518,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     });
     assert.equal(richPasteEvent.defaultPrevented, true, "mixed Google Docs clipboard HTML must be owned by the durable image importer");
     await waitFor(() => remoteImageImports.length === 1, "the Google Docs image must use the remote durable attachment importer");
+    const pasteLoading = activeProseMirror.querySelector<HTMLElement>('[data-mango-tiptap-paste-loading="true"]');
+    assert.match(pasteLoading?.textContent ?? "", /Loading image/);
     assert.deepEqual(remoteImageImports[0], {
       path: "/v1/attachments/imports/remote-image",
       body: {
@@ -542,6 +544,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
         && (activeProseMirror.textContent ?? "").includes("Google Docs text after"),
       "the active editor must keep both pasted text and the imported Google Docs image",
     );
+    assert.equal(activeProseMirror.querySelector('[data-mango-tiptap-paste-loading="true"]'), null);
     const pastedImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="google-docs-paste-image"]');
     assert.ok(pastedImageFrame);
     assert.equal(pastedImageFrame.style.justifyContent, "flex-start", "a pasted image follows the default left toolbar alignment");

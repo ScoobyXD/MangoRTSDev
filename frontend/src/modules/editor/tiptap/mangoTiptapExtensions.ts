@@ -8,7 +8,8 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
-import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
@@ -252,6 +253,79 @@ export const MangoBlockIdentity = Extension.create({
     })];
   },
 });
+
+type MangoPasteLoadingMeta = {
+  add?: { id: string; position: number; previewURL?: string; imageCount: number };
+  remove?: string;
+};
+
+const mangoPasteLoadingKey = new PluginKey<DecorationSet>("mangoPasteLoading");
+
+const MangoPasteLoading = Extension.create({
+  name: "mangoPasteLoading",
+
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: mangoPasteLoadingKey,
+      state: {
+        init: () => DecorationSet.empty,
+        apply: (transaction, current) => {
+          let next = current.map(transaction.mapping, transaction.doc);
+          const meta = transaction.getMeta(mangoPasteLoadingKey) as MangoPasteLoadingMeta | undefined;
+          if (meta?.remove) {
+            next = next.remove(next.find(undefined, undefined, (spec) => spec.id === meta.remove));
+          }
+          if (meta?.add) {
+            const { id, previewURL, imageCount } = meta.add;
+            const position = Math.max(0, Math.min(meta.add.position, transaction.doc.content.size));
+            const widget = Decoration.widget(position, (view) => {
+              const ownerDocument = view.dom.ownerDocument;
+              const loading = ownerDocument.createElement("span");
+              loading.className = "mango-tiptap-paste-loading";
+              loading.contentEditable = "false";
+              loading.dataset.mangoTiptapPasteLoading = "true";
+              loading.setAttribute("role", "status");
+              if (previewURL) {
+                const preview = ownerDocument.createElement("img");
+                preview.src = previewURL;
+                preview.alt = "";
+                loading.append(preview);
+              }
+              const label = ownerDocument.createElement("span");
+              label.textContent = imageCount === 1 ? "Loading image…" : `Loading ${imageCount} images…`;
+              loading.append(label);
+              return loading;
+            }, { id, side: -1 });
+            next = next.add(transaction.doc, [widget]);
+          }
+          return next;
+        },
+      },
+      props: {
+        decorations: (state) => mangoPasteLoadingKey.getState(state),
+      },
+    })];
+  },
+});
+
+export function showMangoTiptapPasteLoading(
+  editor: Editor,
+  id: string,
+  position: number,
+  imageCount: number,
+  previewURL?: string,
+): void {
+  editor.view.dispatch(editor.state.tr.setMeta(mangoPasteLoadingKey, {
+    add: { id, position, imageCount, previewURL },
+  } satisfies MangoPasteLoadingMeta));
+}
+
+export function hideMangoTiptapPasteLoading(editor: Editor, id: string): void {
+  if (editor.isDestroyed) return;
+  editor.view.dispatch(editor.state.tr.setMeta(mangoPasteLoadingKey, {
+    remove: id,
+  } satisfies MangoPasteLoadingMeta));
+}
 
 type MangoMentionSuggestionItem = {
   id: string;
@@ -690,12 +764,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,
     MangoBlockIdentity,
+    MangoPasteLoading,
   ];
   if (options.onImageFiles) {
     extensions.push(FileHandler.configure({
       allowedMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
-      consumePasteEvent: true,
-      onPaste: (_editor, files) => options.onImageFiles?.(files, null),
       onDrop: (_editor, files, position) => options.onImageFiles?.(files, position),
     }));
   }

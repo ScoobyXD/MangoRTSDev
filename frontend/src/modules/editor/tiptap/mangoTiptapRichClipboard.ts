@@ -42,6 +42,13 @@ export type MangoTiptapImageAttachmentContext = {
 
 type EditorTextAlignment = "left" | "center" | "right";
 
+export type MangoTiptapClipboardPaste = {
+  html: string;
+  imageCount: number;
+  imageFiles: File[];
+  matchingFiles: Array<File | undefined>;
+};
+
 const MANGO_TIPTAP_TEXT_BLOCK_SELECTOR = "p,h1,h2,h3,h4,h5,h6";
 
 function clipboardImageFilename(mimeType: string): string {
@@ -232,6 +239,48 @@ export async function prepareMangoTiptapRichClipboardHTML(
 
 export function countMangoTiptapRichClipboardImages(ownerDocument: Document, html: string): number {
   return countEditorRichClipboardImages(ownerDocument, html);
+}
+
+export function readMangoTiptapClipboardPaste(
+  ownerDocument: Document,
+  clipboardData: Pick<DataTransfer, "files" | "getData">,
+): MangoTiptapClipboardPaste | null {
+  const imageFiles = Array.from(clipboardData.files)
+    .filter((file) => /^image\/(jpeg|png|gif|webp)$/i.test(file.type));
+  let html = clipboardData.getData("text/html");
+  let imageCount = countMangoTiptapRichClipboardImages(ownerDocument, html);
+
+  if (imageCount === 0 && imageFiles.length > 0) {
+    const template = ownerDocument.createElement("template");
+    if (html.trim()) {
+      template.innerHTML = html;
+    } else {
+      for (const line of clipboardData.getData("text/plain").split(/\r?\n/)) {
+        const paragraph = ownerDocument.createElement("p");
+        if (line) paragraph.textContent = line;
+        else paragraph.append(ownerDocument.createElement("br"));
+        template.content.append(paragraph);
+      }
+    }
+    imageFiles.forEach((file, index) => {
+      const paragraph = ownerDocument.createElement("p");
+      const image = ownerDocument.createElement("img");
+      image.setAttribute("src", `blob:mango-pasted-file-${index}`);
+      image.setAttribute("alt", file.name || "Pasted image");
+      paragraph.append(image);
+      template.content.append(paragraph);
+    });
+    html = template.innerHTML;
+    imageCount = imageFiles.length;
+  }
+
+  if (imageCount === 0) return null;
+  const matchingFiles = imageFiles.length === imageCount
+    ? imageFiles
+    : imageFiles.length === 1
+      ? Array.from({ length: imageCount }, () => imageFiles[0])
+      : [];
+  return { html, imageCount, imageFiles, matchingFiles };
 }
 
 export function readMangoTiptapInsertionAlignment(editor: Editor, position?: number | null): EditorTextAlignment {

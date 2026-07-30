@@ -54,20 +54,24 @@ import {
   createMangoTiptapExtensions,
   indentMangoTiptapSelection,
   MangoAttachmentImage,
+  hideMangoTiptapPasteLoading,
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
+  showMangoTiptapPasteLoading,
   type MangoAttachmentImageAttributes,
 } from "./mangoTiptapExtensions.js";
 import {
-  countMangoTiptapRichClipboardImages,
   createMangoTiptapAttachmentContent,
   prepareMangoTiptapRichClipboardHTML,
+  readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
   resolveMangoTiptapRichClipboardImage,
 } from "./mangoTiptapRichClipboard.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType, type MangoTiptapSaveState } from "./mangoTiptapSync.js";
+
+let pasteLoadingSequence = 0;
 
 export type MangoTiptapFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -980,34 +984,43 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     });
   }, []);
   const handleRichClipboardPaste = useCallback((editor: Editor, clipboardData: DataTransfer): boolean => {
-    const html = clipboardData.getData("text/html");
     const root = rootRef.current;
-    if (!root || !html.trim()) return false;
-    const imageCount = countMangoTiptapRichClipboardImages(root.ownerDocument, html);
-    if (imageCount === 0) return false;
-    const imageFiles = Array.from(clipboardData.files).filter((file) => /^image\/(jpeg|png|gif|webp)$/i.test(file.type));
-    const matchingFiles = imageFiles.length === imageCount ? imageFiles : [];
+    if (!root) return false;
+    const paste = readMangoTiptapClipboardPaste(root.ownerDocument, clipboardData);
+    if (!paste) return false;
     const alignment = readMangoTiptapInsertionAlignment(editor);
     let insertionBookmark = editor.state.selection.getBookmark();
     const mapInsertionBookmark = ({ transaction }: { transaction: Transaction }) => {
       if (transaction.docChanged) insertionBookmark = insertionBookmark.map(transaction.mapping);
     };
     editor.on("transaction", mapInsertionBookmark);
+    const loadingID = `paste-${Date.now()}-${pasteLoadingSequence += 1}`;
+    let previewURL: string | undefined;
+    try {
+      if (paste.imageFiles[0] && typeof URL.createObjectURL === "function") {
+        previewURL = URL.createObjectURL(paste.imageFiles[0]);
+      }
+    } catch {
+      previewURL = undefined;
+    }
+    showMangoTiptapPasteLoading(editor, loadingID, editor.state.selection.from, paste.imageCount, previewURL);
     root.setAttribute("data-mango-rich-paste-importing", "true");
     void prepareMangoTiptapRichClipboardHTML(
       root.ownerDocument,
-      html,
+      paste.html,
       alignment,
       (request) => resolveMangoTiptapRichClipboardImage(
         request,
-        matchingFiles[request.index],
+        paste.matchingFiles[request.index],
         attachmentContextRef.current,
       ),
     ).then((result) => {
       if (editor.isDestroyed) return;
       const selection = insertionBookmark.resolve(editor.state.doc);
       editor.off("transaction", mapInsertionBookmark);
-      if (result.html.trim()) editor.chain().focus().insertContentAt({ from: selection.from, to: selection.to }, result.html).run();
+      if (result.html.trim() && !editor.chain().focus().insertContentAt({ from: selection.from, to: selection.to }, result.html).run()) {
+        throw new Error("Unable to insert the pasted text and images");
+      }
       if (result.failedImageCount > 0) {
         const noun = result.failedImageCount === 1 ? "image" : "images";
         throw new Error(String(result.failedImageCount) + " pasted " + noun + " could not be imported. The text and " + String(result.importedImageCount) + " imported images were kept.");
@@ -1020,6 +1033,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       (context?.onError ?? callbacksRef.current.onError)?.(message);
     }).finally(() => {
       editor.off("transaction", mapInsertionBookmark);
+      hideMangoTiptapPasteLoading(editor, loadingID);
+      if (previewURL) URL.revokeObjectURL(previewURL);
       root.removeAttribute("data-mango-rich-paste-importing");
     });
     return true;

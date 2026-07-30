@@ -124,6 +124,30 @@ function saveAcknowledgement(operationID: string, revision: number, deduplicated
   };
 }
 
+async function writeRawMangoTiptapPending(record: Record<string, unknown>): Promise<void> {
+  const db = await new Promise<IDBDatabase>((resolveDB, reject) => {
+    const request = indexedDB.open("mango-tiptap-pending-v1", 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("pending_documents")) {
+        request.result.createObjectStore("pending_documents", { keyPath: "storage_key" });
+      }
+    };
+    request.onsuccess = () => resolveDB(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    await new Promise<void>((resolveWrite, reject) => {
+      const transaction = db.transaction("pending_documents", "readwrite");
+      transaction.objectStore("pending_documents").put(record);
+      transaction.oncomplete = () => resolveWrite();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 test("editor lifecycle pins dirty work until persistence is confirmed", () => {
   const lifecycle = new MangoEditorLifecycle();
   assert.equal(lifecycle.getSnapshot().state, "sleeping");
@@ -562,6 +586,58 @@ test("Tiptap sync durably records one exact document before network completion",
   } finally {
     releaseCommit?.();
     await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("old queued IndexedDB work becomes one latest whole-document recovery record", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  const storageKey = "company-legacy:node:resource-legacy:document-legacy";
+  const older = richDocument("older queued document");
+  const latest = richDocument("latest queued document");
+  try {
+    await writeRawMangoTiptapPending({
+      storage_key: storageKey,
+      company_id: "company-legacy",
+      resource_type: "node",
+      resource_id: "resource-legacy",
+      document_id: "document-legacy",
+      commits: [{
+        operation_id: "operation-older",
+        client_id: "client-legacy",
+        base_revision: 4,
+        document: older,
+        annotations: [],
+        created_at: 10,
+        attempted: true,
+      }, {
+        operation_id: "operation-latest",
+        client_id: "client-legacy",
+        base_revision: 4,
+        document: latest,
+        annotations: [{ id: "comment-latest", kind: "comment", from: 2, to: 8 }],
+        created_at: 20,
+        attempted: false,
+      }],
+    });
+
+    const recovered = await readExactMangoTiptapPending(storageKey);
+    assert.equal(recovered?.record_version, 2);
+    assert.equal(recovered?.operation_id, "operation-latest");
+    assert.equal(recovered?.base_revision, 4);
+    assert.deepEqual(recovered?.document, latest);
+    assert.deepEqual(recovered?.annotations, [{ id: "comment-latest", kind: "comment", from: 2, to: 8 }]);
+    assert.equal("commits" in (recovered ?? {}), false);
+    assert.deepEqual(await readExactMangoTiptapPending(storageKey), recovered, "the migrated whole-document record is stable on its next read");
+  } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
       else Object.defineProperty(globalThis, key, { configurable: true, value });

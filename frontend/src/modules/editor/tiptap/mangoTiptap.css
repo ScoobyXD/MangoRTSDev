@@ -25,6 +25,30 @@
   outline: none;
 }
 
+.mango-tiptap-paste-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  margin: 3px 0;
+  padding: 5px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.mango-tiptap-paste-loading img {
+  width: 48px;
+  height: 34px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
 [data-mango-editor-format="tiptap_json"][data-mango-editor-editable="true"] .mango-tiptap-static-document,
 .mango-tiptap-prosemirror[contenteditable="true"] {
   cursor: text;
