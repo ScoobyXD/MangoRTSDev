@@ -1,8 +1,9 @@
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 # Unified Editor Tests
 
 Coverage Status:
+- The active Node, Project, and Logic Gate Tiptap JSON path is covered by `mangoTiptapFoundation.test.ts`, `mangoTiptapRichClipboard.test.ts`, `mangoTiptapEditorIntegration.test.tsx`, `editorRowVirtualizationReact.test.tsx`, backend editor JSON store/HTTP tests, and the normal full-repository verification gate. These suites cover the bare-bones save batch, exact latest-record recovery, generation-safe acknowledgements, stable-operation retry, unusual cosmetic formatting, durable image import, mixed rich paste, edits made while images import, permanent page-session failure attention, annotation mapping, sleeping rows, revision conflicts, and compact save acknowledgements.
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial overall. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. The dedicated production-path realtime runner and browser-driven workflow coverage were removed from CI on 2026-07-28. Focused frontend, backend, and infrastructure suites remain; visible multi-user editor workflows require manual acceptance until replacement automation is added.
@@ -47,7 +48,7 @@ ED22 - The shared `ChatPane` used by node, project, My Triage, Shared Triage, an
 ED23 - Node and project email pickers are explicitly not compose editor surfaces; they may search, filter, scroll, drag, and attach existing email, but they must not contain compose, send, scheduled send, draft-save, or rich body editing behavior.
 ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1 unified editor contract unless they import a helper that is actively shared by a live non-map unified editor surface.
 ED25 - Shared editing behavior does not collapse all product domains into one table: Node, Logic Gate, and Project document identities remain distinct, while mail compose/draft/signature storage remains mailbox-owned. The shared collaboration engine, outbox spine, socket, health, and recovery protocol are reused only by the approved collaborative document surfaces.
-ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, copying an existing attachment-backed image links that attachment to the target editor resource before insertion, and email adapters convert those references to CID attachments only at the backend send boundary. An asynchronous image upload/link may commit only while the original editor root, document target, attachment resource context, and saved range remain current; a target switch or unmount must not mutate the next document.
+ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, copying an existing attachment-backed image links that attachment to the target editor resource before insertion, and email adapters convert those references to CID attachments only at the backend send boundary. An asynchronous image upload/link may commit only while the original editor root, document target, and attachment resource context remain current; a target switch or unmount must not mutate the next document. In the active Tiptap JSON editor, a saved insertion bookmark is mapped through intervening ProseMirror transactions so ordinary typing while image imports are running does not cancel or discard the paste.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
 ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, italic, strikethrough, highlight, left/center/right alignment, table insertion, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
 ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Every unified rich editor surface must use the same font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, Highlight, left/center/right alignment, table where supported, and outline-style controls instead of reimplementing a look-alike toolbar. Hover, focus, selected, and active styling belongs to the individual clickable hitbox, never the containing format group; hover uses a luminous cyan/light-blue-to-lavender wash with a crisp cyan edge, while active/selected uses the stronger saturated cyan-to-violet fill, persistent cyan ring, soft two-color glow, and dark high-contrast icon/text after the pointer leaves. Keyboard focus keeps a distinct cyan/violet indicator and disabled controls remain visibly subdued. Strikethrough renders as a crossed-out letter A and, like every control, retains a clear accessible name and tooltip, pressed state where applicable, and keyboard focus indicator.
@@ -118,6 +119,24 @@ ED91 - Every sent comment rendered by the shared `ChatPane` exposes Edit only to
 ED92 - The shared Node/Project `ChatPane` composer applies the workspace-entity `#` search contract alongside its existing `@` and `!` people picker. `#` queries the same company-scoped, permission-filtered Nodes/Logic Gates/Projects endpoint and ranking as the editor, Arrow Up/Down navigate, Enter or plain Tab accepts, Escape closes, and pointer selection matches the keyboard result. Acceptance inserts readable `#Name` text plus durable type/ID/label offsets in the existing chat payload; sent and reloaded comments render the correct product icon and open the same in-app deep route without a page reload. Ordinary composer edits remap intact references and discard a reference edited through its label. This adds no table, placement, or migration.
 ED93 - An editable JSON/Tiptap attachment image uses the hand-selection cursor and direct manipulation instead of a detached labeled action strip. Its body remains a native movable ProseMirror node; selection shows eight edge/corner resize handles, an image-anchored bottom-right download icon, and icon-only comment/create-node actions when supported. Double-click uses the shared fullscreen image modal, and native Delete/Backspace removes the selected image. Selecting, dragging without a drop, opening controls, or previewing does not create a document operation; committed move, resize, or deletion does.
 ED94 - PostgreSQL realtime audience resolution recognizes Project resources for exact Project editor scopes. Every Project JSON/HTML editor event rechecks the current candidate subscribers through the same effective Edit-access function as Node and Logic Gate events, so authorized remote Project edits fan out immediately without refresh while revoked, inaccessible, missing, and cross-company targets fail closed.
+ED95 - Node text boxes, Project text boxes, and Logic Gate editor bodies use the active Tiptap JSON save contract in ED95-ED112. Email compose, reply, forward, draft, signature, and rendered email bodies retain their separate rich-HTML persistence contract. Older HTML collaboration rules in this document do not override the active JSON contract for Node, Project, or Logic Gate documents.
+ED96 - The active JSON save architecture is deliberately bare-bones. One ProseMirror transaction changes the live editor, one batching owner captures the complete Tiptap JSON object, one latest-unsaved IndexedDB record protects it, and one full-document POST commits it. The ordinary path must not add Yjs, Hocuspocus, Tiptap Cloud, a Web Worker, another state-management framework, a second queue, a second debounce, a save-time normalization pass, a recursive frontend validator, a full-document equality stringify, a parse/stringify/reparse loop, or parent-owned complete-document state.
+ED97 - A document already open in the configured Tiptap/ProseMirror schema is valid for ordinary saving. Mango must not reject the complete document because a pasted font size is fractional or outside a Mango range, a color is RGB or Display-P3 instead of `#RRGGBB`, a highlight uses an unfamiliar cosmetic value, or another supported mark has unusual cosmetic attributes. Unsupported external cosmetics are ignored at the paste boundary while supported text and structure are retained. The durable boundary keeps only authentication, edit permission, company/resource scope, revision protection, stable operation IDs, request-size limits, safe link protocols, durable attachment identity, prohibition of persisted `blob:` URLs or embedded raw image bytes, and the minimum envelope/structure needed for the configured Tiptap schema to reopen the document.
+ED98 - Local editing is immediate and does not wait for IndexedDB, JSON capture, serialization, or the network. Every local document change increments a small generation, publishes Pending from the one sync owner, and resets one approximately 180 ms quiet timer. One approximately 1.5-second maximum timer ensures continuous typing is eventually captured. The timer owner performs no complete-document work until the batch fires.
+ED99 - When a batch fires, the status icon becomes Saving, the sync owner calls the active editor's JSON getter once, and that object is the batch snapshot. The same object is stored in structured IndexedDB and passed to the HTTP helper; no extra complete-document string is created for comparison, React parent state, validation, recovery storage, or reparsing. JSON serialization occurs once at the HTTP request boundary.
+ED100 - IndexedDB holds one latest-unsaved recovery record for the exact active company/resource/document key, not a pending commit queue and not every document's recovery state in memory. The record contains the Tiptap JSON object, mapped durable annotations, local generation, stable operation ID, base revision, and capture timestamp. A newer captured batch overwrites the older record. A failed request retains it. A latest-generation acknowledgement deletes it only when the stored operation ID still matches.
+ED101 - Every save attempt captures its generation. An acknowledgement may show Saved and clear the recovery record only when it acknowledges the latest local generation. If typing occurred after that request began, the older acknowledgement advances the base revision but must leave the newer generation Pending and schedule it. A lost acknowledgement is retried with the same operation ID so the backend can deduplicate the already-committed operation. A genuinely divergent base revision uses the existing conflict choice instead of overwriting either document.
+ED102 - The ordinary JSON save response contains only `operation_id`, `revision`, the server `committed_at` timestamp, and optional `deduplicated`; it does not echo the complete committed document. The originating browser already owns the submitted document. The server commits the document, revision/version state, stable operation result, and existing realtime revision event together. The Saved timestamp comes from `committed_at`.
+ED103 - Save status has one authoritative publisher and four user-facing states: Pending, Saving, Saved, and Save failed. Meaningfully identical states are not republished. Pending, Saving, Saved, and timestamp changes render only at the textbox-row/status-icon boundary and must not rerender the complete Node, Project, or Logic Gate surface. Only failure attention may update the outer textbox frame.
+ED104 - Failure attention is intentionally permanent for the current page session. The first Save failed, image upload failure, or rich-image import failure for a document latches the status icon and complete textbox frame in the failed state; the frame remains red and visibly pulses every two seconds until a full browser refresh. Later Pending, Saving, Saved, or acknowledgement states do not replace that visible failure. Saving, retry, acknowledgement, recovery cleanup, revision advancement, and dirty-row unpinning continue underneath the latched warning. This is intentionally conservative: after Mango has told the user that any part of their attempted work failed, a later unrelated success must never imply that the earlier failed content was recovered.
+ED105 - On refresh or reactivation, Mango reads only the exact active document's recovery key. A recovery record is loaded into the editor before the canonical server snapshot can erase it, and its stable operation ID is retried. Realtime or canonical refresh must not replace an editor with an unsaved generation, scheduled snapshot, retained failed operation, or in-flight request. A latched ED104 warning that remains after the failed work was later acknowledged is presentation state and does not manufacture unsaved work. A browser recovery-storage failure is stated explicitly; Mango must not claim crash recovery when IndexedDB was unavailable, rejected the write, exceeded quota, or failed cleanup.
+ED106 - Ordinary pasted or dropped image files upload and link to the exact resource before an image node is inserted into the Tiptap document. The inserted node stores a durable attachment ID and approved metadata, never an S3 signed URL, third-party URL, `blob:` URL, data URL, or raw bytes. If upload/linking fails, no pretend durable image is inserted and the permanent page-session failure state is raised. Each successfully inserted image then follows the same JSON batch, recovery, revision, and acknowledgement rules as typed text.
+ED107 - Mixed rich paste owns clipboard HTML containing images. Mango preserves supported paragraphs, headings, lists, checklists, tables, links, marks, and readable text; resolves matching clipboard files, existing Mango attachments, data/blob sources, or retrievable HTTP(S) sources into durable attachments; deduplicates repeated sources; limits unique image imports to the configured bounded concurrency; and preserves source order. Only after the durable image resolutions settle does Mango insert the prepared rich selection into Tiptap, producing the normal document save rather than a separate document-writing path.
+ED108 - A large mixed paste must not be rejected merely because the user types or formats something while its images are importing. The editor captures a ProseMirror selection bookmark and maps it through every intervening document transaction. When imports finish, the complete prepared text and successful images are inserted at the mapped range, while the intervening edits remain in the document. Destroying the editor or changing the document target still prevents stale insertion into another document.
+ED109 - A partial rich-image import preserves the paste. Supported text, formatting, structure, and every successfully imported image are inserted; each failed image becomes a safe visible fallback label. The failure is reported and latches permanent page-session failure attention, but it must not reject or remove the rest of the pasted selection. The saved JSON contains no failed third-party source, temporary URL, signed credential, or embedded bytes.
+ED110 - Block identity and annotation work are proportional to the change. Missing block IDs are assigned only inside changed transaction ranges, never by walking the complete document after each keystroke. With zero annotations, annotation code does not scan the document. Existing decorations map through the ProseMirror transaction; atom lookup uses `nodesBetween(annotation.from, annotation.to)`; and unchanged meaningful annotation values are not redispatched during saving.
+ED111 - Save processing does not synchronously push a complete document through Node, Project, or Logic Gate React state. The active editor remains the live authority while typing. A sleeping editor retains its latest document for static rendering, but that React state is updated after the browser has had a chance to paint or immediately before deactivation, not inside the critical save task. Dirty virtualized rows remain mounted until their pending document work is acknowledged.
+ED112 - Existing committed-snapshot realtime notifications remain the collaboration mechanism. The saving browser does not reload the document it just submitted. Another subscribed browser reacts to the compact revision event by fetching the complete committed Tiptap JSON only when it has no unsaved local edits. Pending, Saving, or failed local work is never replaced by that fetch; existing revision protection raises the conflict choice where appropriate.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1326,6 +1345,9 @@ Business logic covered:
 - ED6
 - ED12
 - ED26
+- ED107
+- ED108
+- ED109
 - ED75
 
 Given:
@@ -1333,11 +1355,11 @@ Given:
 - The clipboard may provide image files, data/blob image sources, existing Mango attachment references, or retrievable external HTTP(S) image URLs, and one image may fail to import.
 
 Expected:
-- Mango keeps the supported rich structure and image ordering, normalizes it through the shared sanitizer, and commits the pasted document once after all durable image resolutions settle.
+- Mango keeps the text, supported rich structure, and image ordering; ignores unsupported external cosmetics at the paste boundary; and inserts the prepared selection once after all durable image resolutions settle.
 - Repeated image sources create one imported attachment and multiple frames, no more than three unique images resolve concurrently, and every successful frame stores a durable Mango attachment reference.
-- The existing hydration owner immediately discovers those newly inserted frames, loads their display sources, and moves them from loading to ready without a browser reload or editor remount; saved HTML continues to contain durable Mango references rather than temporary display URLs.
+- The existing hydration owner immediately discovers those newly inserted frames, loads their display sources, and moves them from loading to ready without a browser reload or editor remount; saved editor content continues to contain durable Mango references rather than temporary display URLs.
 - An image failure leaves the text, formatting, lists, and successful images intact, inserts a safe image fallback label, reports the partial failure, and persists no third-party URL, blob URL, data URL, base64 bytes, credentials, or signed URL.
-- Switching targets, unmounting, losing the saved range, or editing the starting document before import completes prevents stale insertion into the current document.
+- In a Node, Project, or Logic Gate Tiptap JSON editor, typing or formatting while imports run maps the saved ProseMirror insertion bookmark and preserves both the intervening edit and the complete prepared paste. Switching targets, destroying the editor, or unmounting still prevents stale insertion into another document.
 
 ### Scenario ED-S15: Inline Images Stay Stable While Typing
 
@@ -1395,28 +1417,100 @@ Expected:
 - Double-clicking an unavailable frame starts fresh display hydration and a separately cancelable original-image load. The final dark overlay shows an explicit loading state, retries transient failures, and exposes a keyboard-accessible Retry button after terminal failure instead of attempting to render the internal attachment reference.
 - Closing the preview, replacing the document, or unmounting the virtualized row aborts obsolete requests and revokes owned object URLs without changing the durable attachment reference.
 
-### Scenario ED-S18: Atomic JSON-Native Tiptap Path
+### Scenario ED-S18: Bare-Bones Tiptap JSON Save And Recovery
 
-This scenario covers the inactive `tiptap_json` workspace mode added on 2026-07-18.
+Business logic covered:
+- ED95 through ED105
+- ED110 through ED112
 
-- The data-format request is one coherent company/workspace decision shared by Node, email-created Node non-email text documents, Project, and standalone Logic Gate/Editor. Email compose/reply/forward, attached-email reply, drafts, signatures, display, recovery, and send formatting remain exclusively on the rich-HTML path and never consult this gate.
-- Legacy mode never sends stored HTML to Tiptap. JSON-ready mode never mounts the legacy editor for a non-email rich document. An incomplete converted-document count is rejected instead of choosing a format per document.
-- A sleeping row uses the static JSON renderer and has no Tiptap instance, but renders current comment/change/chat annotations. A 600-pixel preparation margin may perform exact recovery; only literal viewport intersection registers the exact realtime document scope. Entering view subscribes and then refreshes canonical state. Leaving view unsubscribes even if the dirty row remains mounted to finish saving.
-- JSON-mode `from`, `to`, selection endpoints, annotation endpoints, and deep-link positions are genuine ProseMirror positions. Transaction mappings move them through paragraphs, lists, tables, formatting, and images, and decorations paint both active and static views. Durable comment/change/chat/highlight positions are accepted atomically with the matching document revision and survive save, unmount/remount, reload, recovery replay, realtime refresh, and static rendering. Ephemeral local selections remain browser-only. Legacy HTML offsets retain their existing semantics until Step 4 converts and validates them.
-- ProseMirror transactions apply immediately in memory. One batching owner resets a roughly 180 ms quiet timer and retains a 1.5-second maximum. When it fires, Mango obtains Tiptap JSON once, overwrites one latest-unsaved IndexedDB record using structured storage, and hands the object to the shared HTTP helper for one serialization. There is no complete-document save-time normalization, recursive frontend Mango validation, equality stringify, reparse, or pending queue. Blur, navigation, explicit flush, and impending unmount close the batch.
-- Recovery always replays the exact stable operation first. An operation already accepted by the backend is acknowledged and its pending record is cleared even when the original HTTP acknowledgement was lost; only a genuinely divergent operation becomes a conflict.
-- A dirty Node/Project row publishes only pending ownership to the outer virtualizer and remains pinned/mounted until the backend save is acknowledged. Pending, Saving, and Saved are published once and rendered by a textbox-local status icon, so those changes do not rerender the complete Node, Project, or Logic Gate surface. Save failed and image-save failures keep the complete textbox frame red and pulsing every two seconds until acknowledgement. IndexedDB unavailability, quota/write failure, or cleanup failure displays `Browser recovery storage failed` and does not claim recoverability.
-- `mangoTiptapFoundation.test.ts` exercises the minimum versioned envelope and structural/durability contract, acceptance of unusual cosmetic formatting, native marks/lists/tables/history, annotation mapping, changed-range block identity, exact latest-record IndexedDB recovery, generation-safe and lost-acknowledgement replay, unavailable/quota/cleanup-failed recovery storage, deterministic batched full-document metrics, visible-only sync lifetime, HTML-only email, and the absence of Hocuspocus/Yjs/Tiptap Cloud. `mangoTiptapEditorIntegration.test.tsx` mounts a large real React/Tiptap document through the Node, Project, and Logic Gate JSON host adapters and verifies multi-block/list/table/image static annotations, exact viewport subscription/re-entry recovery, zero eager serialization during a typing burst, one batched snapshot/IndexedDB write, durable mapped positions across remount, pending pinning, offscreen unsubscribe, acknowledgement unpin, recovery-record deletion, and the IndexedDB-failure fallback.
-- Backend store and HTTP tests exercise minimum structural and durability validation without cosmetic allowlists, compact save acknowledgements, the legacy-HTML two-MiB boundary, the JSON one-GiB-per-owner contract, exact base revisions, stable-operation replay before conflict detection, revision-bound annotation positions for Node/Project/Logic Gate, version history, delete behavior, ordinary-edit notification silence, normal/urgent mention notifications, the default legacy gate, partial-conversion rejection, legacy-route rejection after cutover, JSON-route rejection before cutover, and metadata projections that never contain canonical document content. The disposable-PostgreSQL gate applies the position migration to clean and legacy fixtures and proves JSONB canonicalization, atomic annotation/document/outbox rollback, snapshot/version persistence, and accepted stable-operation replay against the real store.
-- The Node v2 disposable PostgreSQL migration proof covers ED91 with one active and one deleted authoritative enveloped projection. It verifies body-only extraction, inventory totals, read-only dry run, identical bridge/permanent/checkpoint JSON, permanent inline-image/source-link identity, an untouched original chat attachment link, preserved deleted state, unchanged source projections, an injected checkpoint failure that leaves no partial bridge or permanent row, same-run recovery, and exact shadow matches. The database-enforced development dry run separately processed all 937 current Node textboxes with zero failures.
-- Communications tests continue to prove rich-HTML email draft/signature storage, autosave/recovery, mailbox scope, attachment references, reply/forward behavior, sanitization, and delivery formatting independently of the JSON workspace gate. JSON editor routes reject email draft/signature resource types.
-- Realtime tests cover the exact URL-encoded `editor-json:<resource-type>:<resource-id>:<document-id>` scope. One document's event must not wake another document.
-- Performance contracts expose counts for active/dirty instances, listeners, observers, recovery, IndexedDB reads/writes, image requests, transactions, network saves, and conflicts. Network/PostgreSQL timing is measured separately from browser main-thread work.
-- The production build must keep `MangoTiptapEditor` in a lazy chunk so legacy workspaces do not pay the editor-engine parse/mount cost.
+Given:
+- A user edits a Node, Project, or Logic Gate Tiptap document while a prior save may still be in flight.
+- The user may type continuously, pause briefly, navigate inside Mango, lose one HTTP acknowledgement, or receive a realtime revision from another browser.
+- The document may contain paragraphs, lists, tables, marks, durable images, workspace entities, and mapped annotations.
 
-The later HTML-to-JSON conversion is deliberately not part of this scenario. A cutover test environment must convert and validate the complete workspace before flipping the gate.
+When:
+- ProseMirror applies local transactions.
+- The quiet or maximum batch timer fires.
+- Mango persists and posts a generation, receives an acknowledgement, retries a lost acknowledgement, or reloads exact recovery state.
+- The row sleeps, remounts, or receives a committed realtime revision event.
 
-This scenario is not yet the complete migration acceptance suite. The permanent Word/Google/PDF paste fixture library, complete image-action parity in production hosts, and broader production-path browser/PostgreSQL JSON-mode tests remain required before Step 4 can be approved.
+Expected:
+- Characters and local formatting paint immediately; they never wait for JSON capture, IndexedDB, serialization, React parent state, or the network.
+- One timer owner captures the Tiptap JSON object once, overwrites one exact latest-unsaved IndexedDB record, and sends one complete-document POST with one serialization at the HTTP boundary.
+- No save-time normalization, recursive frontend validation, cosmetic allowlist, whole-document equality stringify, reparse, snapshot queue, or echoed full-document acknowledgement is introduced.
+- Acknowledgements clear recovery and show Saved only for the latest generation. Older acknowledgements cannot mark newer typing saved, and lost acknowledgements reuse the stable operation ID.
+- The status icon owns Pending, Saving, Saved, and Save failed without rerendering the complete parent surface. A failed page session remains visibly failed under ED104 even when later work commits.
+- Exact recovery wins over the canonical snapshot until replay/deduplication or an explicit conflict decision resolves it. IndexedDB failure is visible and never represented as safe recovery.
+- Realtime refresh fetches the committed document only for a browser with no unsaved generation, retained failed operation, scheduled snapshot, or in-flight request. A latched ED104 warning alone does not create unsaved work.
+- Zero-annotation documents perform no annotation scan; changed-range block identity and mapped decorations avoid complete-document work on ordinary keystrokes.
+- Sleeping rows render the latest document without placing a complete-document React update in the critical save task.
+
+Automated coverage:
+- `tests/frontend/modules/editor/mangoTiptapFoundation.test.ts`
+- `tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.tsx`
+- `tests/frontend/modules/editor/editorRowVirtualizationReact.test.tsx`
+- Backend editor JSON store, HTTP, revision, idempotency, version, and realtime tests
+
+### Scenario ED-S18A: Mixed Text And Images Survive Concurrent Editing
+
+Business logic covered:
+- ED26
+- ED97
+- ED106 through ED109
+
+Given:
+- A user pastes a large external selection containing text, formatting, lists or tables, and one or more images.
+- Image sources may be clipboard files, existing Mango attachments, data/blob sources, repeated sources, or retrievable HTTP(S) URLs.
+- At least one image import is delayed, and the user continues typing or formatting elsewhere before all imports finish.
+- One image may fail while the other images succeed.
+
+When:
+- Mango prevents the browser's unsafe default rich-image paste.
+- Durable image resolution runs with bounded concurrency.
+- ProseMirror transactions occur before the prepared paste is ready.
+
+Expected:
+- The user's intervening edits remain immediately visible and are never used as a reason to reject the paste.
+- The saved insertion bookmark maps through every intervening transaction, and the prepared selection is inserted at the mapped range when imports settle.
+- Supported text and document structure survive even when unsupported cosmetics or one image cannot be represented.
+- Every successful image is uploaded and linked first, then inserted in source order as a durable attachment-ID node.
+- Repeated sources may share one imported attachment while retaining every intended image frame.
+- A failed image becomes visible fallback text; it does not remove the surrounding text, structure, or successful images.
+- No third-party source URL, S3 signed URL, `blob:` URL, data URL, credentials, or raw image bytes enter durable editor JSON.
+- Target change, editor destruction, or unmount prevents the finished import from inserting into a different document.
+- The resulting editor transaction uses the ordinary JSON batch/recovery/save path; rich paste does not own a second document save system.
+
+Automated coverage:
+- `tests/frontend/modules/editor/mangoTiptapRichClipboard.test.ts`
+- `tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.tsx`
+- Attachment direct-upload, attachment API, hydration, and backend remote-image import tests
+
+### Scenario ED-S18B: Failure Attention Lasts Until Refresh
+
+Business logic covered:
+- ED103 through ED105
+- ED109
+
+Given:
+- A document save, ordinary image upload, or mixed rich-image import reports a failure.
+- The same document later has more local edits and one or more successful backend acknowledgements.
+
+When:
+- Pending, Saving, or Saved would ordinarily replace the status icon.
+- Recovery cleanup, revision advancement, retry, or dirty-row unpin completes successfully.
+
+Expected:
+- The first failure remains the visible status for that document for the rest of the current page session.
+- The complete textbox frame remains red and pulses every two seconds for Nodes, Projects, and Logic Gates.
+- An unrelated later success never tells the user that the earlier failed text or image was recovered.
+- The permanent warning is presentation state, not a block on saving: later edits still batch, enter recovery, post, acknowledge, advance revisions, and unpin normally.
+- No repeated identical failure state is published and ordinary status changes remain isolated from the complete parent surface.
+- A full browser refresh starts a new page session, performs exact recovery/canonical loading, and may then present the current saved state or a new failure.
+
+Automated coverage:
+- `tests/frontend/modules/editor/mangoTiptapFoundation.test.ts`
+- `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`
+
 
 ### Scenario ED-S19: Create And Insert Workspace Entity Links
 
