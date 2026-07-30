@@ -579,12 +579,12 @@ export class MangoTiptapSync {
     this.batchTimer = setTimeout(() => {
       this.batchTimer = undefined;
       void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
-    }, this.options.batchMs ?? 180);
+    }, this.options.batchMs ?? 500);
     if (this.maxBatchTimer === undefined) {
       this.maxBatchTimer = setTimeout(() => {
         this.maxBatchTimer = undefined;
         void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
-      }, this.options.maxBatchMs ?? 1_500);
+      }, this.options.maxBatchMs ?? 10_000);
     }
   }
 
