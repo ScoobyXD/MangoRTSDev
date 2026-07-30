@@ -640,7 +640,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const mappedAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
   const persistedAnnotationsRef = useRef<readonly MangoTiptapPersistedAnnotation[]>([]);
   const lifecycleRef = useRef(new MangoEditorLifecycle());
-  const [lifecycle, setLifecycle] = useState<MangoEditorLifecycleSnapshot>(lifecycleRef.current.getSnapshot());
+  const dirtyMetricReleaseRef = useRef<(() => void) | null>(null);
+  const [editorActive, setEditorActive] = useState(false);
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
   const [recoveryStorageError, setRecoveryStorageError] = useState("");
@@ -676,12 +677,30 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   formattingControllerActiveRef.current = formattingControllerActive;
   ownerAnnotationsRef.current = annotations;
 
-  useEffect(() => lifecycleRef.current.subscribe((snapshot) => {
-    setLifecycle((current) => current.state === snapshot.state && current.pinned === snapshot.pinned
-      && current.pendingCount === snapshot.pendingCount && current.targeted === snapshot.targeted
-      && current.nearViewport === snapshot.nearViewport ? current : snapshot);
-    callbacksRef.current.onLifecycleChange?.(snapshot);
-  }), []);
+  useEffect(() => {
+    const unsubscribe = lifecycleRef.current.subscribe((snapshot) => {
+      const active = snapshot.state === "active" || snapshot.state === "dirty";
+      setEditorActive((current) => current === active ? current : active);
+      const root = rootRef.current;
+      if (root) {
+        root.dataset.mangoEditorState = snapshot.state;
+        if (snapshot.pinned) root.dataset.mangoEditorPinned = "true";
+        else delete root.dataset.mangoEditorPinned;
+      }
+      if (snapshot.state === "dirty" && !dirtyMetricReleaseRef.current) {
+        dirtyMetricReleaseRef.current = trackEditorRuntimeResource("dirty_editors");
+      } else if (snapshot.state !== "dirty" && dirtyMetricReleaseRef.current) {
+        dirtyMetricReleaseRef.current();
+        dirtyMetricReleaseRef.current = null;
+      }
+      callbacksRef.current.onLifecycleChange?.(snapshot);
+    });
+    return () => {
+      unsubscribe();
+      dirtyMetricReleaseRef.current?.();
+      dirtyMetricReleaseRef.current = null;
+    };
+  }, []);
 
   const deactivate = useCallback(async (): Promise<boolean> => {
     if (!lifecycleRef.current.requestSleep()) return false;
@@ -906,11 +925,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, [initial.error, prepare]);
 
   const activate = useCallback(async () => {
-    if (lifecycle.state === "sleeping" || lifecycle.state === "safely-inactive" || lifecycle.state === "preparing") {
+    const state = lifecycleRef.current.getSnapshot().state;
+    if (state === "sleeping" || state === "safely-inactive" || state === "preparing") {
       await prepare();
       if (syncStartedRef.current) lifecycleRef.current.activate();
     }
-  }, [lifecycle.state, prepare]);
+  }, [prepare]);
 
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -1063,7 +1083,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
   }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, searchEntityLinksForEditor]);
 
-  const isActive = lifecycle.state === "active" || lifecycle.state === "dirty";
+  const isActive = editorActive;
 
   useLayoutEffect(() => {
     if (!isActive || editorRef.current) return undefined;
@@ -1202,10 +1222,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     ariaLabel, editable, extensions, formattingControllerRef, handleRichClipboardPaste, isActive, openEntityLink, placeholder, updateSelectionState,
   ]);
 
-  useEffect(() => {
-    if (lifecycle.state !== "dirty") return undefined;
-    return trackEditorRuntimeResource("dirty_editors");
-  }, [lifecycle.state]);
 
   useEffect(() => {
     const controller = formattingControllerInstanceRef.current;
@@ -1325,8 +1341,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       style={{ position: "relative", minWidth: 0, minHeight: 0, ...style }}
       data-mango-editor-format="tiptap_json"
       data-mango-editor-editable={editable || undefined}
-      data-mango-editor-state={lifecycle.state}
-      data-mango-editor-pinned={lifecycle.pinned || undefined}
+      data-mango-editor-state={lifecycleRef.current.getSnapshot().state}
+      data-mango-editor-pinned={lifecycleRef.current.getSnapshot().pinned || undefined}
       data-mango-editor-sync-mode="revisioned-json"
       onPointerDown={!isActive ? activateFromPointer : undefined}
       onFocusCapture={!isActive ? activate : undefined}

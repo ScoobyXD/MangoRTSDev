@@ -1588,6 +1588,19 @@ test("node text-block metadata mutations honor the active editor format and remo
   assert.match(nodeSurface, /attachmentID: image\.attachmentID/);
 });
 
+test("revisioned JSON save bookkeeping stays off the typing render path", () => {
+  const tiptap = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+
+  assert.equal(tiptap.includes("const [lifecycle, setLifecycle]"), false);
+  assert.ok(tiptap.includes("setEditorActive((current) => current === active ? current : active)"));
+  assert.ok(tiptap.includes("root.dataset.mangoEditorState = snapshot.state"));
+  assert.ok(tiptap.includes("delete root.dataset.mangoEditorPinned"));
+  assert.ok(nodeSurface.includes("onPinChange={(pinned) => React.startTransition"));
+  assert.ok(projectSummary.includes("onPinChange={(pinned) => React.startTransition"));
+});
+
 test("the shared revisioned JSON editor keeps movable image controls", () => {
   const tiptap = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
