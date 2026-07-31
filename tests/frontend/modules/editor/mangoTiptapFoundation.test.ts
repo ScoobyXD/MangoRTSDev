@@ -259,7 +259,16 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.deepEqual(editor.getJSON(), beforeTable);
     assert.equal(editor.commands.redo(), true);
 
-    updateMangoTiptapAnnotations(editor, [{ id: "comment-1", kind: "comment", from: 2, to: 6 }]);
+    let annotationTransactions = 0;
+    const countAnnotationTransaction = () => { annotationTransactions += 1; };
+    editor.on("transaction", countAnnotationTransaction);
+    assert.equal(updateMangoTiptapAnnotations(editor, [{ id: "comment-1", kind: "comment", from: 2, to: 6 }]), true);
+    assert.equal(annotationTransactions, 1);
+    assert.equal(updateMangoTiptapAnnotations(editor, [{ id: "comment-1", kind: "comment", from: 2, to: 6 }]), false);
+    assert.equal(annotationTransactions, 1, "a content-identical annotation array must not dispatch a replacement transaction");
+    assert.equal(updateMangoTiptapAnnotations(editor, [{ id: "comment-1", kind: "comment", from: 2, to: 6, active: true }]), true);
+    assert.equal(annotationTransactions, 2, "a real annotation change must dispatch exactly once");
+    editor.off("transaction", countAnnotationTransaction);
     const before = readMappedMangoTiptapAnnotations(editor)[0];
     assert.ok(before);
     editor.commands.insertContentAt(1, "prefix");

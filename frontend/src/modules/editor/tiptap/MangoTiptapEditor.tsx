@@ -1220,7 +1220,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.on_transaction",
         "tiptap.callback",
         () => {
-          if (!transaction.docChanged || !transaction.selectionSet) updateSelectionState(transactionEditor);
+          if ((transaction.docChanged && !transaction.selectionSet) || transaction.storedMarksSet) {
+            updateSelectionState(transactionEditor);
+          }
           if (!transaction.docChanged) return;
           incrementEditorRuntimeMetric("transactions");
           mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
@@ -1228,6 +1230,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         {
           doc_changed: transaction.docChanged,
           selection_set: transaction.selectionSet,
+          stored_marks_set: transaction.storedMarksSet,
           step_count: transaction.steps.length,
           document_size: transaction.doc.content.size,
         },
@@ -1355,9 +1358,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       ? durableMangoTiptapAnnotations(mappedAnnotationsRef.current)
       : persistedAnnotationsRef.current;
     const merged = mergeMangoTiptapAnnotationPositions(annotations, positionSource);
+    const changed = !mangoTiptapAnnotationsEqual(mappedAnnotationsRef.current, merged);
     mappedAnnotationsRef.current = merged;
     setRenderedAnnotations((current) => mangoTiptapAnnotationsEqual(current, merged) ? current : merged);
-    if (editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
+    if (changed && editorRef.current) updateMangoTiptapAnnotations(editorRef.current, merged);
   }, [annotations]);
 
   useEffect(() => {

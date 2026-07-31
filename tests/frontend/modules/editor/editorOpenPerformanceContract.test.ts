@@ -32,6 +32,8 @@ test("every node attachment refresh invalidates canonical metadata before increm
 });
 
 test("Tiptap annotation work stays outside the ordinary save and whole-document paths", () => {
+  const nodeWorkspace = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const editorContent = source("frontend/src/modules/editor/EditorContent.tsx");
   const annotations = source("frontend/src/modules/editor/tiptap/mangoTiptapAnnotations.ts");
   const editor = source("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
   assert.doesNotMatch(annotations, /document\.descendants\(/);
@@ -39,6 +41,13 @@ test("Tiptap annotation work stays outside the ordinary save and whole-document 
   assert.match(annotations, /document\.nodesBetween\(annotation\.from, annotation\.to/);
   assert.match(annotations, /previous\.decorations\.map\(transaction\.mapping, newState\.doc\)/);
   assert.match(editor, /if \(changed\) \{\s+if \(editorRef\.current\) updateMangoTiptapAnnotations/);
+  assert.match(editor, /const changed = !mangoTiptapAnnotationsEqual\(mappedAnnotationsRef\.current, merged\);[\s\S]*if \(changed && editorRef\.current\) updateMangoTiptapAnnotations/);
+  assert.match(editor, /if \(\(transaction\.docChanged && !transaction\.selectionSet\) \|\| transaction\.storedMarksSet\)[\s\S]*updateSelectionState\(transactionEditor\);[\s\S]*if \(!transaction\.docChanged\) return;/);
+  assert.match(annotations, /mangoTiptapAnnotationsEqual\(readMappedMangoTiptapAnnotations\(editor\), annotations\)[\s\S]*return false;[\s\S]*editor\.view\.dispatch/);
+  assert.match(editorContent, /setSelectionInlineFormat\(\(current\) => \([\s\S]*current\.bold === nextFormat\.bold[\s\S]*\? current[\s\S]*: nextFormat/);
+  assert.match(nodeWorkspace, /const displayedChatMessagesByBlock = useMemo\(\(\) => \{[\s\S]*if \(!emailOriginNode\) return chatMessagesByBlock;[\s\S]*return displayed;[\s\S]*\}, \[chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, emailOriginNode\]\)/);
+  assert.match(nodeWorkspace, /const messages = displayedChatMessagesByBlock\.get\(block\.id\) \?\? \[\];/);
+  assert.doesNotMatch(nodeWorkspace, /const messages = \[\.\.\.legacyMessages, \.\.\.directMessages\]/);
   assert.match(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+currentDocumentRef\.current = snapshot;\s+persistedAnnotationsRef\.current = \[\.\.\.snapshotAnnotations\];\s+\}/);
   assert.doesNotMatch(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+setDocument\(snapshot\)/);
 });

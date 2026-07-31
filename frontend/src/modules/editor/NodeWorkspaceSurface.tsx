@@ -658,6 +658,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const emailOriginChatBlockID = emailOriginAttachedEmail?.id.trim() ?? "";
   const emailOriginChatHostBlockID = resolveLegacyEmailChatHostBlockID(blocks, emailOriginAttachedEmail);
   const emailOriginNode = Boolean(emailOriginChatBlockID && emailOriginChatHostBlockID);
+  const displayedChatMessagesByBlock = useMemo(() => {
+    if (!emailOriginNode) return chatMessagesByBlock;
+    const directMessages = chatMessagesByBlock.get(emailOriginChatHostBlockID) ?? [];
+    const legacyMessages = chatMessagesByBlock.get(emailOriginChatBlockID) ?? [];
+    if (legacyMessages.length === 0) return chatMessagesByBlock;
+    const displayed = new Map(chatMessagesByBlock);
+    displayed.set(emailOriginChatHostBlockID, [...legacyMessages, ...directMessages].sort((a, b) => (
+      a.createdTimestamp.localeCompare(b.createdTimestamp) || a.id.localeCompare(b.id)
+    )));
+    return displayed;
+  }, [chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, emailOriginNode]);
   const nodeFileAttachments = useMemo(() => filterMangoResourceAttachments(nodeResourceAttachments, {
     relationshipKind: "file_attachment",
   }), [nodeResourceAttachments]);
@@ -3644,11 +3655,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           if (!block) return null;
           const emailOriginPrimaryRow = emailOriginNode && block.id === emailOriginChatHostBlockID;
           const chatBlockID = block.id;
-          const directMessages = chatMessagesByBlock.get(block.id) ?? [];
-          const legacyMessages = emailOriginPrimaryRow ? chatMessagesByBlock.get(emailOriginChatBlockID) ?? [] : [];
-          const messages = [...legacyMessages, ...directMessages].sort((a, b) => (
-            a.createdTimestamp.localeCompare(b.createdTimestamp) || a.id.localeCompare(b.id)
-          ));
+          const messages = displayedChatMessagesByBlock.get(block.id) ?? [];
           const chatIsActive = activeChatBlockID === chatBlockID;
           const chatPaneIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
           const editorPaneIsVisible = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
