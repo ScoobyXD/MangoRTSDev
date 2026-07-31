@@ -1,5 +1,25 @@
 # Editor Process Map
 
+## Opt-in dev editor tracing
+
+Open the exact Node, Project, or Logic Gate editor on the dev site with `editorTrace=1` in the URL query string. Use `?editorTrace=1` when it is the first query value or `&editorTrace=1` when the URL already has a query
+↓
+A fixed panel appears at the top-right and says **Editor trace recording**. If the panel does not appear, tracing is not active
+↓
+Type normally until the freeze happens. Leave the recorder running through the freeze and the burst of delayed characters
+↓
+While enabled, Mango records high-resolution timestamps for browser keyboard/input events, ProseMirror transactions, important ProseMirror plugins, Tiptap callbacks, selection/toolbar calculation, React editor commits, lifecycle pinning, the 500-millisecond and 10-second timers, JSON snapshot creation, IndexedDB recovery work, request JSON serialization, fetch/response parsing, long tasks, long animation frames, and delayed animation frames
+↓
+The trace records counts, sizes, states, durations, and function names. It does **not** record document text, pasted text, request or response bodies, authorization tokens, operation IDs, company IDs, resource IDs, or URL query values
+↓
+Immediately after reproducing the freeze, click **Stop & download**. Chrome downloads one file named `mango-editor-trace-<timestamp>.json`
+↓
+Attach that JSON file to the Codex task. The raw ordered events allow the freeze window to be matched to the exact main-thread function, timer, IndexedDB operation, network phase, React commit, long task, or frame gap
+↓
+Use **Start new** only when you want to discard the current in-memory recording and begin a clean reproduction
+
+Tracing is completely dormant unless `editorTrace=1` is present, and it is accepted only on localhost, `dev.mangorts.com`, or a subdomain of `dev.mangorts.com`. The recorder keeps at most 250,000 events in memory and reports any dropped-event count in the export.
+
 ## Normal typing and saving
 
 You type
@@ -42,12 +62,13 @@ After a successful commit, the realtime sender reads the outbox row and sends ot
 ↓
 Another browser downloads the newest complete JSON document only when it has no unsaved local work. If it does have unsaved work, the notice does not overwrite that work; a later revision mismatch uses Mango's existing conflict flow
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 # Unified Editor Tests
 
 Coverage Status:
 - The active Node, Project, and Logic Gate Tiptap JSON path is covered by `mangoTiptapFoundation.test.ts`, `mangoTiptapRichClipboard.test.ts`, `mangoTiptapEditorIntegration.test.tsx`, `editorRowVirtualizationReact.test.tsx`, backend editor JSON store/HTTP tests, and the normal full-repository verification gate. These suites cover the bare-bones save batch, exact latest-record recovery, generation-safe acknowledgements, stable-operation retry, unusual cosmetic formatting, durable image import, mixed rich paste, edits made while images import, permanent page-session failure attention, annotation mapping, sleeping rows, revision conflicts, and compact save acknowledgements.
+- The opt-in dev trace is covered by `editorTrace.test.ts`, `requestJSON.test.ts`, and `mangoTiptapFoundation.test.ts`; they verify raw event ordering, span completion, content exclusion, default-off behavior, request-boundary timing, quiet-timer behavior, IndexedDB work, save acknowledgement, and downloadable-export data integrity.
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial overall. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. The dedicated production-path realtime runner and browser-driven workflow coverage were removed from CI on 2026-07-28. Focused frontend, backend, and infrastructure suites remain; visible multi-user editor workflows require manual acceptance until replacement automation is added.
@@ -188,6 +209,7 @@ ED110 - Block identity and annotation work are proportional to the change. Missi
 ED111 - Save processing does not synchronously push a complete document through Node, Project, or Logic Gate React state. The active editor remains the live authority while typing. A sleeping editor retains its latest document for static rendering, but that React state is updated after the browser has had a chance to paint or immediately before deactivation, not inside the critical save task. Dirty virtualized rows remain mounted until their pending document work is acknowledged.
 ED112 - Existing committed-snapshot realtime notifications remain the collaboration mechanism. The saving browser does not reload the document it just submitted. Another subscribed browser reacts to the compact revision event by fetching the complete committed Tiptap JSON only when it has no unsaved local edits. Pending, Saving, or failed local work is never replaced by that fetch; existing revision protection raises the conflict choice where appropriate.
 ED113 - Saving must not interrupt typing by routing dirty/saved bookkeeping through the mounted Tiptap React component. The mounted editor treats Active and Dirty as the same React mount state; lifecycle labels and dirty-runtime counters update without rerendering that component. Node and Project row pinning is different: pin and unpin updates use normal immediate React priority because pinning protects unsaved work from virtualization. Pinning must never be delayed as a transition. The 500 ms quiet timer and 10-second maximum timer still choose when to save; they must never be used to hide a save-time typing pause.
+ED114 - Detailed editor tracing is an explicit developer diagnostic, never ordinary editor persistence. It activates only when `editorTrace=1` is present on localhost or the dev-site host, displays an unmistakable fixed recording panel, holds a maximum of 250,000 ordered events in memory, performs no per-event console, network, file, or IndexedDB logging of its own, and exports one raw JSON file from a user click. The export correlates input IDs and transaction IDs with microsecond timestamps and named spans for input, ProseMirror dispatch/plugins, Tiptap callbacks, selection/toolbar calculation, React editor commits, lifecycle pinning, quiet/max/retry timers and lateness, snapshot creation, IndexedDB, request serialization/fetch/parsing, long tasks, long animation frames, and frame gaps. It may record only non-content metadata such as counts, sizes, states, duration, method, and URL path; it must never record editor/paste text, JSON bodies, response bodies, authorization data, operation/client/company/resource/document IDs, or URL query values. The normal production host and every URL without the opt-in parameter must install no trace panel, input listeners, performance observers, or trace storage.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -204,6 +226,30 @@ ED113 - Saving must not interrupt typing by routing dirty/saved bookkeeping thro
 The architecture has four distinct responsibilities: `EditorDocumentSurface` owns the actual rich editable DOM; `useEditorDocumentSurfaceHandlers` owns keyboard, clipboard, paste/drop, list, image, mention, undo/redo, and flush semantics; `useEditorDocumentFormattingController` owns every toolbar command and selection/pending-format state; and `EditorTabBar` owns the visible controls. Domain adapters own only loading, value changes, flush/save/send callbacks, permissions, attachment context, and surface-specific layout.
 
 ## Scenarios
+
+### Scenario ED-S114: Export One Complete Freeze Trace
+
+Business logic covered:
+- ED114
+
+Given:
+- A developer opens a Node, Project, or Logic Gate JSON editor on localhost or the dev site with `editorTrace=1`.
+- The fixed panel visibly says that recording is active.
+
+When:
+- The developer types through a visible freeze and delayed-character burst.
+- The developer immediately clicks **Stop & download**.
+
+Then:
+- Chrome downloads one `mango-editor-trace-<timestamp>.json` file containing ordered input, transaction, function-span, timer, IndexedDB, request, React, long-task, and frame timing.
+- The export reports any dropped-event count and unfinished spans.
+- The export contains counts and paths but contains none of the typed document text, request/response content, credentials, stable operation identities, resource identities, or query values.
+- The same page without `editorTrace=1`, and the normal production host even with that query value, installs no recorder UI or browser observers.
+
+Automated coverage:
+- `editorTrace.test.ts` covers ordered span export, shape-only document summaries, error outcomes, unfinished spans, duplicate-end protection, privacy, and default-off behavior.
+- `requestJSON.test.ts` covers serialization/fetch/parse timing and removal of query values and payload content.
+- `mangoTiptapFoundation.test.ts` covers the quiet timer through snapshot capture, IndexedDB persistence, POST acknowledgement, recovery cleanup, pin/save states, and content exclusion.
 
 ### Scenario ED-S1: Shared Editing Semantics Across Target Surfaces
 

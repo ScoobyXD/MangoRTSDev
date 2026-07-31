@@ -1,10 +1,19 @@
 import { publishEditorSaveState } from "../editorSaveStatusStore.js";
 import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
+import {
+  beginEditorTraceSpan,
+  editorTraceInstant,
+  endEditorTraceSpan,
+  traceEditorAsyncFunction,
+  traceEditorFunction,
+  type EditorTraceContext,
+} from "../editorTrace.js";
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import { validateMangoTiptapDocument, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
 export type MangoTiptapResourceType = "node" | "project" | "logic_gate";
-export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
+export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & {
+  json?: unknown; editorTraceContext?: EditorTraceContext | null }) => Promise<T>;
 
 export type MangoTiptapSnapshot = {
   revision: number;
@@ -58,6 +67,7 @@ export type MangoTiptapSyncOptions = {
   resourceID: string;
   documentID: string;
   requestJSON: MangoTiptapRequest;
+  traceContext?: EditorTraceContext | null;
   initialRevision?: number;
   onDocument: (document: MangoTiptapDocument, source: "canonical" | "recovery") => void;
   onAnnotations?: (annotations: readonly MangoTiptapPersistedAnnotation[], source: "canonical" | "recovery") => void;
@@ -181,26 +191,44 @@ function migrateRecoveryRecord(storageKey: string, value: unknown): { record: Ma
   return { record, changed: raw.record_version !== 2 };
 }
 
-function openDB(): Promise<IDBDatabase> {
+function openDB(traceContext?: EditorTraceContext | null): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("tiptap_pending_storage_unavailable"));
   return new Promise((resolve, reject) => {
+    const span = beginEditorTraceSpan(traceContext ?? null, "indexeddb.open", "indexeddb", {
+      database_version: DB_VERSION,
+    });
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
+      editorTraceInstant(traceContext ?? null, "indexeddb.upgrade", "indexeddb", {
+        old_version: event.oldVersion,
+      });
       if (!request.result.objectStoreNames.contains(DB_STORE)) {
         request.result.createObjectStore(DB_STORE, { keyPath: "storage_key" });
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("tiptap_pending_storage_unavailable"));
-    request.onblocked = () => reject(new Error("tiptap_pending_storage_blocked"));
+    request.onsuccess = () => {
+      endEditorTraceSpan(span, { result: "success" });
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      endEditorTraceSpan(span, { result: "error" }, "error");
+      reject(request.error ?? new Error("tiptap_pending_storage_unavailable"));
+    };
+    request.onblocked = () => {
+      endEditorTraceSpan(span, { result: "blocked" }, "error");
+      reject(new Error("tiptap_pending_storage_blocked"));
+    };
   });
 }
 
 async function withStore<T>(
   mode: IDBTransactionMode,
   work: (store: IDBObjectStore, resolve: (value: T) => void, reject: (cause: unknown) => void) => void,
+  traceContext?: EditorTraceContext | null,
+  operation = "unknown",
 ): Promise<T> {
-  const db = await openDB();
+  return traceEditorAsyncFunction(traceContext ?? null, `indexeddb.${operation}.transaction`, "indexeddb", async () => {
+    const db = await openDB(traceContext);
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(DB_STORE, mode);
@@ -211,14 +239,23 @@ async function withStore<T>(
   } finally {
     db.close();
   }
+  });
 }
 
-export async function readExactMangoTiptapPending(storageKey: string): Promise<MangoTiptapRecoveryRecord | null> {
+export async function readExactMangoTiptapPending(
+  storageKey: string,
+  traceContext?: EditorTraceContext | null,
+): Promise<MangoTiptapRecoveryRecord | null> {
   incrementEditorRuntimeMetric("indexeddb_reads");
   return withStore("readwrite", (store, resolve, reject) => {
+    const requestSpan = beginEditorTraceSpan(traceContext ?? null, "indexeddb.pending.get", "indexeddb");
     const request = store.get(storageKey);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      endEditorTraceSpan(requestSpan, { result: "error" }, "error");
+      reject(request.error);
+    };
     request.onsuccess = () => {
+      endEditorTraceSpan(requestSpan, { found: request.result !== undefined });
       if (request.result === undefined) {
         resolve(null);
         return;
@@ -236,23 +273,34 @@ export async function readExactMangoTiptapPending(storageKey: string): Promise<M
         reject(cause);
       }
     };
-  });
+  }, traceContext, "pending.read");
 }
 
-async function writePending(record: MangoTiptapRecoveryRecord): Promise<void> {
+async function writePending(record: MangoTiptapRecoveryRecord, traceContext?: EditorTraceContext | null): Promise<void> {
   incrementEditorRuntimeMetric("indexeddb_writes");
   await withStore<void>("readwrite", (store, resolve, reject) => {
+    const requestSpan = beginEditorTraceSpan(traceContext ?? null, "indexeddb.pending.put", "indexeddb");
     const request = store.put(record);
-    request.onerror = () => reject(request.error);
-    store.transaction.oncomplete = () => resolve();
-  });
+    request.onerror = () => {
+      endEditorTraceSpan(requestSpan, { result: "error" }, "error");
+      reject(request.error);
+    };
+    store.transaction.oncomplete = () => {
+      endEditorTraceSpan(requestSpan, { result: "committed" });
+      resolve();
+    };
+  }, traceContext, "pending.write");
 }
 
-async function deletePendingIfOperation(storageKey: string, operationID: string): Promise<void> {
+async function deletePendingIfOperation(storageKey: string, operationID: string, traceContext?: EditorTraceContext | null): Promise<void> {
   incrementEditorRuntimeMetric("indexeddb_writes");
   await withStore<void>("readwrite", (store, resolve, reject) => {
+    const requestSpan = beginEditorTraceSpan(traceContext ?? null, "indexeddb.pending.delete_if_operation", "indexeddb");
     const read = store.get(storageKey);
-    read.onerror = () => reject(read.error);
+    read.onerror = () => {
+      endEditorTraceSpan(requestSpan, { stage: "read" }, "error");
+      reject(read.error);
+    };
     read.onsuccess = () => {
       const record = read.result as MangoTiptapRecoveryRecord | undefined;
       if (record?.operation_id !== operationID) return;
@@ -263,8 +311,11 @@ async function deletePendingIfOperation(storageKey: string, operationID: string)
         reject(cause);
       }
     };
-    store.transaction.oncomplete = () => resolve();
-  });
+    store.transaction.oncomplete = () => {
+      endEditorTraceSpan(requestSpan, { result: "committed" });
+      resolve();
+    };
+  }, traceContext, "pending.delete");
 }
 
 function isConflict(cause: unknown): boolean {
@@ -293,6 +344,9 @@ export class MangoTiptapSync {
   private batchTimer: ReturnType<typeof setTimeout> | undefined;
   private maxBatchTimer: ReturnType<typeof setTimeout> | undefined;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private batchTimerExpectedAt = 0;
+  private maxBatchTimerExpectedAt = 0;
+  private retryTimerExpectedAt = 0;
   private retryAttempt = 0;
   private snapshotProvider: (() => MangoTiptapDocument) | undefined;
   private annotationProvider: (() => readonly MangoTiptapPersistedAnnotation[]) | undefined;
@@ -314,9 +368,11 @@ export class MangoTiptapSync {
   }
 
   async start(): Promise<void> {
-    this.stopped = false;
-    await this.recover();
-    this.initialRecoveryComplete = true;
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.start", "editor.sync", async () => {
+      this.stopped = false;
+      await this.recover();
+      this.initialRecoveryComplete = true;
+    });
   }
 
   setRealtimeVisible(visible: boolean): void {
@@ -338,13 +394,15 @@ export class MangoTiptapSync {
     immediate = false,
     annotations?: () => readonly MangoTiptapPersistedAnnotation[],
   ): void {
-    if (this.stopped || this.conflicted) return;
-    this.generation += 1;
-    this.snapshotProvider = typeof document === "function" ? document : () => document;
-    this.annotationProvider = annotations;
-    this.publishPendingCount();
-    this.emitSaveState({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
-    this.armDrain(immediate);
+    return traceEditorFunction(this.options.traceContext ?? null, "sync.schedule", "editor.sync", () => {
+      if (this.stopped || this.conflicted) return;
+      this.generation += 1;
+      this.snapshotProvider = typeof document === "function" ? document : () => document;
+      this.annotationProvider = annotations;
+      this.publishPendingCount();
+      this.emitSaveState({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
+      this.armDrain(immediate);
+    }, { immediate, next_generation: this.generation + 1 });
   }
 
   reportFailure(message: string): void {
@@ -354,6 +412,7 @@ export class MangoTiptapSync {
   }
 
   private async captureScheduledSnapshot(): Promise<void> {
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.capture_scheduled_snapshot", "editor.snapshot", async () => {
     const provider = this.snapshotProvider;
     const annotationProvider = this.annotationProvider;
     const generation = this.generation;
@@ -366,8 +425,18 @@ export class MangoTiptapSync {
     let document: MangoTiptapDocument;
     let annotations: MangoTiptapPersistedAnnotation[];
     try {
-      document = provider();
-      annotations = [...(annotationProvider?.() ?? [])];
+      document = traceEditorFunction(
+        this.options.traceContext ?? null,
+        "sync.snapshot_provider",
+        "editor.snapshot",
+        provider,
+      );
+      annotations = traceEditorFunction(
+        this.options.traceContext ?? null,
+        "sync.annotation_provider",
+        "editor.snapshot",
+        () => [...(annotationProvider?.() ?? [])],
+      );
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Unable to prepare this text box for saving";
       this.reportFailure(message);
@@ -390,8 +459,14 @@ export class MangoTiptapSync {
       captured_at: Date.now(),
     };
     this.latest = record;
-    this.options.onSnapshot?.(document, annotations);
+    traceEditorFunction(
+      this.options.traceContext ?? null,
+      "sync.on_snapshot",
+      "editor.snapshot",
+      () => this.options.onSnapshot?.(document, annotations),
+    );
     await this.persistRecordBestEffort(record);
+    });
   }
 
   private async retryFailedBeforeCapture(): Promise<void> {
@@ -399,32 +474,38 @@ export class MangoTiptapSync {
   }
 
   private async captureAndDrain(): Promise<void> {
-    this.clearTimers();
-    await this.retryFailedBeforeCapture();
-    await this.captureScheduledSnapshot();
-    await this.drain();
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.capture_and_drain", "editor.sync", async () => {
+      this.clearTimers();
+      await this.retryFailedBeforeCapture();
+      await this.captureScheduledSnapshot();
+      await this.drain();
+    });
   }
 
   async flush(): Promise<void> {
-    this.clearTimers();
-    await this.retryFailedBeforeCapture();
-    await this.captureScheduledSnapshot();
-    await this.drain();
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.flush", "editor.sync", async () => {
+      this.clearTimers();
+      await this.retryFailedBeforeCapture();
+      await this.captureScheduledSnapshot();
+      await this.drain();
+    });
   }
 
   async shutdown(): Promise<void> {
-    this.setRealtimeVisible(false);
-    this.clearTimers();
-    await this.captureScheduledSnapshot();
-    this.stopped = true;
-    try {
-      await this.drain();
-    } catch (cause) {
-      this.options.onError?.(cause);
-    } finally {
-      this.unsubscribe?.();
-      this.unsubscribe = undefined;
-    }
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.shutdown", "editor.sync", async () => {
+      this.setRealtimeVisible(false);
+      this.clearTimers();
+      await this.captureScheduledSnapshot();
+      this.stopped = true;
+      try {
+        await this.drain();
+      } catch (cause) {
+        this.options.onError?.(cause);
+      } finally {
+        this.unsubscribe?.();
+        this.unsubscribe = undefined;
+      }
+    });
   }
 
   recover(): Promise<void> {
@@ -442,12 +523,13 @@ export class MangoTiptapSync {
   }
 
   private async performRecovery(): Promise<void> {
+    return traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.perform_recovery", "editor.recovery", async () => {
     incrementEditorRuntimeMetric("recovery_requests");
     await this.captureScheduledSnapshot();
     if (this.initialRecoveryComplete && this.hasUnsavedLocalEdits()) return;
     let recoveryStorageAvailable = true;
     const [record, canonical] = await Promise.all([
-      readExactMangoTiptapPending(this.storageKey).then((value) => {
+      readExactMangoTiptapPending(this.storageKey, this.options.traceContext).then((value) => {
         this.reportRecoveryStorageRecovered();
         return value;
       }).catch((cause) => {
@@ -455,7 +537,9 @@ export class MangoTiptapSync {
         this.reportRecoveryStorageFailure(cause);
         return null;
       }),
-      this.options.requestJSON<MangoTiptapSnapshot>(this.path),
+      this.options.requestJSON<MangoTiptapSnapshot>(this.path, {
+        editorTraceContext: this.options.traceContext,
+      }),
     ]);
     const canonicalDocument = requireSnapshotDocument(canonical);
     this.revision = canonical.revision;
@@ -484,10 +568,13 @@ export class MangoTiptapSync {
       });
     this.options.onDocument(canonicalDocument, "canonical");
     this.options.onAnnotations?.(canonical.annotations ?? [], "canonical");
+    });
   }
 
   async resolveConflict(choice: "keep-local" | "use-canonical"): Promise<void> {
-    const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
+    const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path, {
+      editorTraceContext: this.options.traceContext,
+    });
     const canonicalDocument = requireSnapshotDocument(canonical);
     const local = this.latest;
     this.revision = canonical.revision;
@@ -530,7 +617,7 @@ export class MangoTiptapSync {
     const snapshot = { ...record, annotations: [...record.annotations] };
     this.persistence = this.persistence.catch(() => undefined).then(async () => {
       try {
-        await writePending(snapshot);
+        await writePending(snapshot, this.options.traceContext);
         this.reportRecoveryStorageRecovered();
         succeeded = true;
       } catch (cause) {
@@ -545,7 +632,7 @@ export class MangoTiptapSync {
     let succeeded = false;
     this.persistence = this.persistence.catch(() => undefined).then(async () => {
       try {
-        await deletePendingIfOperation(this.storageKey, operationID);
+        await deletePendingIfOperation(this.storageKey, operationID, this.options.traceContext);
         this.reportRecoveryStorageRecovered();
         succeeded = true;
       } catch (cause) {
@@ -573,24 +660,35 @@ export class MangoTiptapSync {
   private armDrain(immediate: boolean): void {
     this.clearTimer("batch");
     if (immediate) {
+      editorTraceInstant(this.options.traceContext ?? null, "sync.immediate_drain", "editor.timer", { generation: this.generation });
       void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
       return;
     }
+    const batchDelay = this.options.batchMs ?? 500;
+    this.batchTimerExpectedAt = Date.now() + batchDelay;
+    editorTraceInstant(this.options.traceContext ?? null, "sync.batch_timer.armed", "editor.timer", { delay_ms: batchDelay, generation: this.generation });
     this.batchTimer = setTimeout(() => {
+      const actualAt = Date.now();
+      editorTraceInstant(this.options.traceContext ?? null, "sync.batch_timer.fired", "editor.timer", { late_by_ms: Math.max(0, actualAt - this.batchTimerExpectedAt), generation: this.generation });
       this.batchTimer = undefined;
       void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
-    }, this.options.batchMs ?? 500);
+    }, batchDelay);
     if (this.maxBatchTimer === undefined) {
+      const maxBatchDelay = this.options.maxBatchMs ?? 10_000;
+      this.maxBatchTimerExpectedAt = Date.now() + maxBatchDelay;
+      editorTraceInstant(this.options.traceContext ?? null, "sync.max_batch_timer.armed", "editor.timer", { delay_ms: maxBatchDelay, generation: this.generation });
       this.maxBatchTimer = setTimeout(() => {
+        const actualAt = Date.now();
+        editorTraceInstant(this.options.traceContext ?? null, "sync.max_batch_timer.fired", "editor.timer", { late_by_ms: Math.max(0, actualAt - this.maxBatchTimerExpectedAt), generation: this.generation });
         this.maxBatchTimer = undefined;
         void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
-      }, this.options.maxBatchMs ?? 10_000);
+      }, maxBatchDelay);
     }
   }
 
   private async drain(): Promise<void> {
     if (this.drainPromise) return this.drainPromise;
-    this.drainPromise = (async () => {
+    this.drainPromise = traceEditorAsyncFunction(this.options.traceContext ?? null, "sync.drain", "editor.sync", async () => {
       while (this.latest && !this.conflicted) {
         const commit = this.latest;
         this.inFlight = commit;
@@ -602,6 +700,7 @@ export class MangoTiptapSync {
           incrementEditorRuntimeMetric("full_document_serializations");
           const response = await this.options.requestJSON<MangoTiptapSaveAcknowledgement>(this.path, {
             method: "POST",
+            editorTraceContext: this.options.traceContext,
             json: {
               operation_id: commit.operation_id,
               client_id: commit.client_id,
@@ -641,7 +740,9 @@ export class MangoTiptapSync {
           this.inFlight = null;
           if (isConflict(cause)) {
             await this.captureScheduledSnapshot();
-            const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path);
+            const canonical = await this.options.requestJSON<MangoTiptapSnapshot>(this.path, {
+              editorTraceContext: this.options.traceContext,
+            });
             requireSnapshotDocument(canonical);
             this.raiseConflict(this.latest?.document ?? commit.document, canonical);
           } else {
@@ -654,7 +755,7 @@ export class MangoTiptapSync {
           throw cause;
         }
       }
-    })().finally(() => { this.drainPromise = undefined; });
+    }).finally(() => { this.drainPromise = undefined; });
     return this.drainPromise;
   }
 
@@ -673,6 +774,12 @@ export class MangoTiptapSync {
       && previous.message === published.message
       && previous.unresolvedFailure === published.unresolvedFailure) return;
     this.lastSaveState = published;
+    editorTraceInstant(this.options.traceContext ?? null, "sync.save_state.published", "editor.save_state", {
+      status: published.status,
+      revision: published.revision,
+      unresolved_failure: Boolean(published.unresolvedFailure),
+      has_message: Boolean(published.message),
+    });
     this.options.onSaveStateChange?.(published);
   }
 
@@ -680,28 +787,44 @@ export class MangoTiptapSync {
     const count = this.hasUnsavedLocalEdits() ? 1 : 0;
     if (count === this.lastPendingCount) return;
     this.lastPendingCount = count;
+    editorTraceInstant(this.options.traceContext ?? null, "sync.pending_count.changed", "editor.pin", { pending_count: count });
     this.options.onPendingChange?.(count);
   }
 
   private clearTimer(which: "batch" | "max"): void {
+    const active = which === "batch" ? this.batchTimer !== undefined : this.maxBatchTimer !== undefined;
+    if (active) editorTraceInstant(this.options.traceContext ?? null, `sync.${which}_timer.cancelled`, "editor.timer");
     if (which === "batch" && this.batchTimer !== undefined) clearTimeout(this.batchTimer);
     if (which === "max" && this.maxBatchTimer !== undefined) clearTimeout(this.maxBatchTimer);
-    if (which === "batch") this.batchTimer = undefined;
-    else this.maxBatchTimer = undefined;
+    if (which === "batch") {
+      this.batchTimer = undefined;
+      this.batchTimerExpectedAt = 0;
+    } else {
+      this.maxBatchTimer = undefined;
+      this.maxBatchTimerExpectedAt = 0;
+    }
   }
 
   private clearTimers(): void {
     this.clearTimer("batch");
     this.clearTimer("max");
-    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer);
+    if (this.retryTimer !== undefined) {
+      editorTraceInstant(this.options.traceContext ?? null, "sync.retry_timer.cancelled", "editor.timer");
+      clearTimeout(this.retryTimer);
+    }
     this.retryTimer = undefined;
+    this.retryTimerExpectedAt = 0;
   }
 
   private armRetry(): void {
     if (this.stopped || this.conflicted || this.retryTimer !== undefined || !this.latest) return;
     const delay = Math.min(30_000, 1_000 * (2 ** Math.min(5, this.retryAttempt)));
     this.retryAttempt += 1;
+    this.retryTimerExpectedAt = Date.now() + delay;
+    editorTraceInstant(this.options.traceContext ?? null, "sync.retry_timer.armed", "editor.timer", { delay_ms: delay, attempt: this.retryAttempt });
     this.retryTimer = setTimeout(() => {
+      const actualAt = Date.now();
+      editorTraceInstant(this.options.traceContext ?? null, "sync.retry_timer.fired", "editor.timer", { late_by_ms: Math.max(0, actualAt - this.retryTimerExpectedAt), attempt: this.retryAttempt });
       this.retryTimer = undefined;
       void this.captureAndDrain().catch((cause) => this.options.onError?.(cause));
     }, delay);

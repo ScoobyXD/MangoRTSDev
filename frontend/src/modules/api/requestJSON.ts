@@ -5,6 +5,14 @@ import {
   markTerminalAuthFailure,
 } from "../../auth/cognitoAuth.js";
 import { RealtimeMutationBlockedError, shouldBlockRealtimeMutation } from "../realtime/realtimeHealth.js";
+import {
+  beginEditorTraceSpan,
+  endEditorTraceSpan,
+  sanitizeEditorTracePath,
+  traceEditorAsyncFunction,
+  traceEditorFunction,
+  type EditorTraceContext,
+} from "../editor/editorTrace.js";
 
 export type RequestJSONInit = RequestInit & {
   json?: unknown;
@@ -14,6 +22,7 @@ export type RequestJSONInit = RequestInit & {
   fetchImpl?: typeof fetch;
   throwOnHTTPError?: boolean;
   allowDuringRealtimeDegraded?: boolean;
+  editorTraceContext?: EditorTraceContext | null;
 };
 
 export type BoundRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
@@ -63,6 +72,7 @@ export async function requestJSON<T>(apiBase: string, path: string, init: Reques
 export async function requestJSONWithMeta<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<RequestJSONResponse<T>> {
   const {
     allowDuringRealtimeDegraded = false,
+    editorTraceContext = null,
     auth = true,
     fetchImpl = globalThis.fetch.bind(globalThis),
     getAccessToken = getApiAccessToken,
@@ -79,7 +89,13 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
   let body = requestInit.body;
   const isFormDataBody = typeof FormData !== "undefined" && body instanceof FormData;
   if (json !== undefined) {
-    body = JSON.stringify(json);
+    body = traceEditorFunction(
+      editorTraceContext,
+      "request.json_stringify",
+      "network.serialize",
+      () => JSON.stringify(json),
+      { method, path: sanitizeEditorTracePath(path) },
+    );
     if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   } else if (body != null && !headers.has("Content-Type") && !isFormDataBody) {
     headers.set("Content-Type", "application/json");
@@ -89,7 +105,13 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     if (isAuthEnabled() && isTerminalAuthFailureActive()) {
       throw new TerminalAuthFailureError("terminal_auth_failure_active");
     }
-    const token = await getAccessToken();
+    const token = await traceEditorAsyncFunction(
+      editorTraceContext,
+      "request.get_access_token",
+      "network.auth",
+      getAccessToken,
+      { method, path: sanitizeEditorTracePath(path) },
+    );
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
     } else if (isAuthEnabled()) {
@@ -98,11 +120,26 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     }
   }
 
-  const { signal, cleanup } = timeoutSignal(requestInit.signal, timeoutMs);
+  const { signal, cleanup } = traceEditorFunction(editorTraceContext, "request.timeout_signal", "network.prepare", () => timeoutSignal(requestInit.signal, timeoutMs));
   const startedAt = requestTimingNow();
+  const cleanPath = sanitizeEditorTracePath(path);
+  const requestSpan = beginEditorTraceSpan(editorTraceContext, "request.total", "network.request", {
+    method,
+    path: cleanPath,
+    has_json: json !== undefined,
+    request_body_bytes: typeof body === "string" ? body.length : 0,
+    timeout_ms: timeoutMs,
+  });
   let responseStatus: number | undefined;
+  let requestFailed = false;
   try {
-    const response = await fetchImpl(`${apiBase}${path}`, { ...requestInit, headers, body, signal });
+    const response = await traceEditorAsyncFunction(
+      editorTraceContext,
+      "request.fetch",
+      "network.fetch",
+      () => fetchImpl(`${apiBase}${path}`, { ...requestInit, headers, body, signal }),
+      { method, path: cleanPath },
+    );
     responseStatus = response.status;
     const responseHeaders = new Headers(response.headers);
     const notModified = response.status === 304;
@@ -113,7 +150,8 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
         throw new TerminalAuthFailureError("http_401");
       }
       if (throwOnHTTPError) {
-        throw new APIHTTPError(response.status, response.statusText, await response.text());
+        const responseText = await traceEditorAsyncFunction(editorTraceContext, "request.response_text", "network.parse", () => response.text());
+        throw new APIHTTPError(response.status, response.statusText, responseText);
       }
       return {
         body: undefined,
@@ -127,7 +165,7 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     }
     const emptyBody = notModified || response.status === 204;
     return {
-      body: emptyBody ? undefined : await response.json() as T,
+      body: emptyBody ? undefined : await traceEditorAsyncFunction(editorTraceContext, "request.response_json", "network.parse", () => response.json()) as T,
       status: response.status,
       statusText: response.statusText,
       ok: true,
@@ -135,9 +173,14 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
       headers: responseHeaders,
       etag: responseHeaders.get("ETag") ?? undefined,
     };
+  } catch (cause) {
+    requestFailed = true;
+    throw cause;
   } finally {
+    const requestSucceeded = !requestFailed && responseStatus !== undefined && (responseStatus < 400 || responseStatus === 304);
+    endEditorTraceSpan(requestSpan, { status: responseStatus ?? 0 }, requestSucceeded ? "ok" : "error");
     logBenchmarkRequestTiming(method, path, responseStatus, requestTimingNow() - startedAt);
-    cleanup();
+    traceEditorFunction(editorTraceContext, "request.cleanup", "network.prepare", cleanup);
   }
 }
 

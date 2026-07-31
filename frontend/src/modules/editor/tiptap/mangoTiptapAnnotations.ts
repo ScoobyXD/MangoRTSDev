@@ -1,6 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
 
 export type MangoTiptapAnnotationKind = "comment" | "change" | "chat" | "email-selection";
 
@@ -90,6 +91,11 @@ export const MangoTiptapAnnotations = new Plugin<AnnotationPluginState>({
   state: {
     init: () => ({ annotations: [], decorations: DecorationSet.empty }),
     apply(transaction, previous, _oldState, newState) {
+      return traceEditorFunction(
+        getCurrentEditorTraceContext(),
+        "plugin.annotations.apply",
+        "prosemirror.plugin",
+        () => {
       const replacement = transaction.getMeta(annotationMetaKey) as MangoTiptapAnnotation[] | undefined;
       if (replacement) {
         const annotations = normalizedAnnotations(replacement, newState.doc.content.size);
@@ -116,6 +122,11 @@ export const MangoTiptapAnnotations = new Plugin<AnnotationPluginState>({
         if (removed.length > 0) decorations = decorations.remove(removed);
       }
       return { annotations: mapped, decorations };
+        }, {
+          doc_changed: transaction.docChanged,
+          previous_annotation_count: previous.annotations.length,
+          replacement: Boolean(transaction.getMeta(annotationMetaKey)),
+        });
     },
   },
   props: {

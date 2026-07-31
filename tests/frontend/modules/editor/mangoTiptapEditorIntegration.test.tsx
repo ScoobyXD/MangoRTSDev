@@ -8,6 +8,11 @@ import React, { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Simulate } from "react-dom/test-utils";
 
+import {
+  resetEditorTraceForTests,
+  startEditorTraceForTests,
+  stopEditorTraceForTests,
+} from "../../../../frontend/src/modules/editor/editorTrace.ts";
 import { getEditorRuntimeMetrics, resetEditorRuntimeMetricsForTests } from "../../../../frontend/src/modules/editor/editorRuntimeMetrics.ts";
 import type { MangoTiptapFormattingController } from "../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx";
 import { MangoTiptapStaticRenderer } from "../../../../frontend/src/modules/editor/tiptap/MangoTiptapStaticRenderer.tsx";
@@ -346,6 +351,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let pageHostRoot: { unmount(): void } | null = null;
   let setHostVisible: React.Dispatch<React.SetStateAction<boolean>> = () => undefined;
   resetEditorRuntimeMetricsForTests();
+  startEditorTraceForTests();
   try {
     const [{ createRoot }, { MangoTiptapEditor }, { NodeTextBlockEditor }, { LogicGateTiptapEditorSurface }] = await Promise.all([
       import("react-dom/client"),
@@ -795,11 +801,41 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => !remountedEditorRoot.querySelector('[role="alert"]'), "the recovered storage warning should disappear");
     assert.equal(conflictCallbacks, 0);
 
+    const traceExport = stopEditorTraceForTests();
+    const traceEventNames = new Set(traceExport.events.map((event) => event.name));
+    for (const expected of [
+      "prosemirror.dispatch_transaction",
+      "plugin.block_identity.append_transaction",
+      "plugin.paste_loading.apply",
+      "plugin.annotations.apply",
+      "tiptap.on_transaction",
+      "tiptap.on_update",
+      "editor.update_selection_state",
+      "runtime_metrics.increment",
+      "lifecycle.mark_dirty",
+      "host.on_lifecycle_change",
+      "sync.schedule",
+      "sync.capture_scheduled_snapshot",
+      "tiptap.get_json",
+      "indexeddb.pending.put",
+      "react.mango_tiptap_editor.commit",
+    ]) {
+      assert.ok(traceEventNames.has(expected), `missing mounted-editor trace event: ${expected}`);
+    }
+    assert.equal(traceExport.limits.dropped_events, 0);
+    assert.equal(traceExport.open_spans.length, 0);
+    assert.ok(traceExport.events.some((event) => (
+      event.name === "prosemirror.dispatch_transaction"
+      && event.phase === "end"
+      && Number(event.duration_us) >= 0
+    )));
+    assert.ok(!JSON.stringify(traceExport).includes("Type while image imports"));
     await act(async () => root.unmount());
     mountedRoot = null;
     assert.equal(subscriptions, 2);
     assert.equal(unsubscriptions, 2, "unmount cleanup releases the active visible subscription");
   } finally {
+    resetEditorTraceForTests();
     releaseRemoteImageImport?.();
     releasePost?.();
     if (pageHostRoot) await act(async () => pageHostRoot?.unmount());
