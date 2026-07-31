@@ -7,10 +7,8 @@ You type
 ProseMirror immediately updates its structured document tree in memory and paints the visible text
 ↓
 The first unsaved document change makes Mango mark that text box Dirty, pin its row so virtualization cannot destroy it, and start two timers: a 500-millisecond quiet timer and a separate 10-second maximum timer
-↓
-Every later document change restarts the 500-millisecond quiet timer, but the 10-second maximum timer keeps counting from the first unsaved change
-↓
-Saving begins when typing has been quiet for 500 milliseconds, the 10-second maximum is reached, or Mango must save immediately because focus leaves the editor or the editor is closing
+    1. Every later document change restarts the 500-millisecond quiet timer, but the 10-second maximum timer keeps counting from the first unsaved change
+    2. Saving begins when typing has been quiet for 500 milliseconds, the 10-second maximum is reached, or Mango must save immediately because focus leaves the  editor or the editor is closing
 ↓
 Tiptap's getJSON() translates the current ProseMirror tree—including text, formatting, lists, tables, images, and other supported content—into a plain JavaScript JSON object
 ↓
@@ -24,7 +22,7 @@ Chrome sends that JSON text in an HTTPS POST from the browser to Mango's Go API 
 ↓
 The Go API authenticates the user, checks edit permission, parses the JSON text into Go request data, and validates the document, operation ID, and server revision on which the edit was based
 ↓
-The Go API sends the document JSON to PostgreSQL in one transaction. PostgreSQL parses it as JSONB, updates the current-document table with the newest full document and revision, adds a version-history row, adds an operation row for safe retry detection, and adds a realtime-outbox row for delivery to other browsers
+The Go API sends the document JSON to PostgreSQL in one transaction. PostgreSQL then parses it as JSONB, updates the current-document table with the newest full document and revision, adds a version-history row, adds an operation row for safe retry detection, and adds a realtime-outbox row for delivery to other browsers
 ↓
 All four database writes succeed together, or PostgreSQL rolls all four back together
 ↓
