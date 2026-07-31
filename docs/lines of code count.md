@@ -1,6 +1,6 @@
 # Lines of Code Count
 
-## Count History
+## 2026-07-31 (do this exact same analysis for each new timestamp when you are tasked with doing another code audit on a new timestamp and we will grow a historical list)
 
 The history table keeps the summary from each audit. The area, subcategory, and
 large-file tables below show the latest snapshot only.
