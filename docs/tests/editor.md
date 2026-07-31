@@ -1,47 +1,49 @@
 # Editor Process Map
+
+## Normal typing and saving
+
 You type
 ↓
-ProseMirror updates the document and visible text immediately
+ProseMirror immediately updates its structured document tree in memory and paints the visible text
 ↓
-Mango changes its internal lifecycle from Active to Dirty
+The first unsaved document change makes Mango mark that text box Dirty, pin its row so virtualization cannot destroy it, and start two timers: a 500-millisecond quiet timer and a separate 10-second maximum timer
 ↓
-Both Active and Dirty still mean “the editor is mounted”
+Every later document change restarts the 500-millisecond quiet timer, but the 10-second maximum timer keeps counting from the first unsaved change
 ↓
-The React editorActive value remains true
+Saving begins when typing has been quiet for 500 milliseconds, the 10-second maximum is reached, or Mango must save immediately because focus leaves the editor or the editor is closing
 ↓
-The Tiptap React component does not rerender for that lifecycle change
+Tiptap's getJSON() translates the current ProseMirror tree—including text, formatting, lists, tables, images, and other supported content—into a plain JavaScript JSON object
 ↓
-Mango directly changes tiny DOM labels such as data-mango-editor-state="dirty"
+Mango wraps that JSON object in a local recovery record. The record identifies the exact document, numbers the local change, says which server revision it started from, gives the save a unique operation ID for safe retries, and includes saved annotation positions
 ↓
-The save-status icon may update by itself
+Mango stores the complete recovery record in browser IndexedDB. IndexedDB keeps one latest-unsaved record for each document, so storing a newer record for the same document replaces its older recovery record
 ↓
-Mango requests that the row become pinned
+Mango builds an HTTP save request from that record, and JSON.stringify changes the JavaScript request object into JSON text
 ↓
-The Node/Project pinned-row state updates at normal immediate React priority, never as a low-priority transition
+Chrome sends that JSON text in an HTTPS POST from the browser to Mango's Go API in AWS
 ↓
-The Node/Project component may rerender immediately to apply the safety pin
+The Go API authenticates the user, checks edit permission, parses the JSON text into Go request data, and validates the document, operation ID, and server revision on which the edit was based
 ↓
-Saving continues through JSON, IndexedDB, HTTP, Go, and PostgreSQL
+The Go API sends the document JSON to PostgreSQL in one transaction. PostgreSQL parses it as JSONB, updates the current-document table with the newest full document and revision, adds a version-history row, adds an operation row for safe retry detection, and adds a realtime-outbox row for delivery to other browsers
 ↓
-The save acknowledgement returns
+All four database writes succeed together, or PostgreSQL rolls all four back together
 ↓
-Mango changes its internal lifecycle from Dirty back to Active
+After the transaction succeeds, the Go API wakes the realtime sender and sends an HTTP 200 response from AWS back to the same browser. That response contains the operation ID, the new server revision, and the commit time
 ↓
-The React editorActive value is still true
+The browser verifies that the response belongs to the same save, then asks whether that save's local change number is still the newest local change
 ↓
-The Tiptap React component does not rerender for that lifecycle change
+If no newer typing exists, Mango deletes only that save's matching IndexedDB recovery record, marks the document Saved, and unpins its row
 ↓
-Mango directly changes the tiny DOM lifecycle label back to "active"
+If newer typing exists, Mango does not clear the recovery storage, keeps the document Dirty and pinned, bases the next save on the newly confirmed server revision, and repeats the save flow
+
+## Failure and other-browser behavior
+
+A failed or unacknowledged save keeps the IndexedDB recovery record and retries with the same operation ID. If PostgreSQL already committed the first request but its response was lost, the operation table recognizes the retry and returns the original result instead of creating another version
 ↓
-The save-status icon updates by itself
+After a successful commit, the realtime sender reads the outbox row and sends other browsers a small WebSocket notice containing the document identity and new revision, not the complete document
 ↓
-Mango requests that the row be unpinned
-↓
-The Node/Project unpin state updates at normal immediate React priority
-↓
-The Node/Project component may rerender immediately
-↓
-If the textbox is offscreen or closed, virtualization may now remove it
+Another browser downloads the newest complete JSON document only when it has no unsaved local work. If it does have unsaved work, the notice does not overwrite that work; a later revision mismatch uses Mango's existing conflict flow
+
 Last updated: 2026-07-30
 
 # Unified Editor Tests
