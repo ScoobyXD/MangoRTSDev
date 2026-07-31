@@ -81,6 +81,23 @@ func TestMangoTiptapJSONAcceptsDocumentsAndAnnotationPositionsBeyondTwoMiB(t *te
 	}
 }
 
+func TestMangoTiptapJSONCommitRejectsDuplicateBlockIDsWithoutBreakingLegacyReads(t *testing.T) {
+	raw := json.RawMessage(`{
+		"format":"mango-tiptap-json","schema_version":1,
+		"document":{"type":"doc","content":[
+			{"type":"paragraph","attrs":{"blockId":"duplicate-block"}},
+			{"type":"bulletList","attrs":{"blockId":"list-block"},"content":[
+				{"type":"listItem","attrs":{"blockId":"duplicate-block"},"content":[{"type":"paragraph"}]}
+			]}
+		]}
+	}`)
+	if _, err := ValidateMangoTiptapJSON(raw); err != nil {
+		t.Fatalf("legacy snapshot with duplicate block IDs must remain readable: %v", err)
+	}
+	if _, err := validateMangoTiptapJSONForCommit(raw); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("new commit with duplicate block IDs error=%v", err)
+	}
+}
 func TestMangoTiptapJSONKeepsOnlyStructuralAndDurabilityRestrictions(t *testing.T) {
 	rejected := []json.RawMessage{
 		json.RawMessage(`{"format":"mango-tiptap-json","schema_version":2,"document":{"type":"doc","content":[]}}`),

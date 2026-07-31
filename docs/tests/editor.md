@@ -1,5 +1,26 @@
 # Editor Process Map
 
+## Process Story: one unique identity for every editor block
+
+You open a Node, Project, or Logic Gate document
+↓
+Before the JSON enters Tiptap, Mango walks the document once. The first occurrence of every existing block ID stays unchanged; a missing ID or a later duplicate receives a fresh ID. Opening alone does not save or create a revision
+↓
+You press Enter in a list, paste structured content, nest a list item, or perform another structural edit
+↓
+ProseMirror may copy the source node's attributes while it creates the new block
+↓
+The block-identity plugin tracks ID counts and inspects only the ranges changed by the transaction. The original block keeps its ID and every new copy receives a fresh ID
+↓
+Within one editor document, each paragraph, heading, quote, code block, divider, list, list item, task list, task item, and table has one non-empty block ID that no other block in that document uses. IDs do not need to be globally unique across unrelated documents
+↓
+When the document is next saved, the repaired IDs are included in the normal full JSON snapshot
+↓
+The Go API continues to read older snapshots that contain duplicate IDs so those documents can open and repair safely, but it rejects a new commit if any supported block ID is repeated
+↓
+Block navigation, comments, chats, and future collaboration code can resolve a block ID to exactly one block
+
+
 ## Process Story: stable typing with comments, chats, and change highlights
 
 You type one character in an active Node, Project, or Logic Gate JSON editor

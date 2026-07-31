@@ -67,6 +67,7 @@ import {
   indentMangoTiptapSelection,
   MangoAttachmentImage,
   hideMangoTiptapPasteLoading,
+  normalizeMangoTiptapBlockIDs,
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
   showMangoTiptapPasteLoading,
@@ -160,10 +161,17 @@ export type MangoTiptapEditorProps = {
 const EMPTY_MENTION_USERS: readonly MentionableCompanyUser[] = [];
 const EMPTY_ANNOTATIONS: readonly MangoTiptapAnnotation[] = [];
 
+function documentWithUniqueBlockIDs(document: MangoTiptapDocument): MangoTiptapDocument {
+  const normalized = normalizeMangoTiptapBlockIDs(document.document);
+  return normalized === document.document ? document : { ...document, document: normalized };
+}
+
 function initialDocument(value?: string): { document: MangoTiptapDocument; error?: string } {
-  if (!value?.trim()) return { document: createEmptyMangoTiptapDocument() };
+  if (!value?.trim()) return { document: documentWithUniqueBlockIDs(createEmptyMangoTiptapDocument()) };
   const parsed = parseMangoTiptapDocument(value);
-  return parsed.valid ? { document: parsed.value } : { document: createEmptyMangoTiptapDocument(), error: parsed.error };
+  return parsed.valid
+    ? { document: documentWithUniqueBlockIDs(parsed.value) }
+    : { document: documentWithUniqueBlockIDs(createEmptyMangoTiptapDocument()), error: parsed.error };
 }
 
 function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
@@ -856,10 +864,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         });
       }),
       onDocument: (canonical) => {
-        setDocument(canonical);
-        currentDocumentRef.current = canonical;
+        const normalizedCanonical = documentWithUniqueBlockIDs(canonical);
+        setDocument(normalizedCanonical);
+        currentDocumentRef.current = normalizedCanonical;
         if (editorRef.current) {
-          editorRef.current.commands.setContent(canonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+          editorRef.current.commands.setContent(normalizedCanonical.document, { emitUpdate: false, errorOnInvalidContent: true });
         }
         setError("");
       },

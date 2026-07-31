@@ -25,6 +25,14 @@ var editorJSONMarkTypes = map[string]bool{
 // structural/safety rules that the configured Tiptap schema cannot enforce on
 // the Go server. Cosmetic attributes are deliberately left to ProseMirror.
 func ValidateMangoTiptapJSON(raw json.RawMessage) (json.RawMessage, error) {
+	return validateMangoTiptapJSON(raw, false)
+}
+
+func validateMangoTiptapJSONForCommit(raw json.RawMessage) (json.RawMessage, error) {
+	return validateMangoTiptapJSON(raw, true)
+}
+
+func validateMangoTiptapJSON(raw json.RawMessage, enforceUniqueBlockIDs bool) (json.RawMessage, error) {
 	if len(raw) == 0 || editorBytesContainSensitiveContent(raw) {
 		return nil, ErrInvalid
 	}
@@ -46,7 +54,11 @@ func ValidateMangoTiptapJSON(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, ErrInvalid
 	}
 	count := 0
-	if err := validateEditorJSONNode(document, "document", 0, &count); err != nil {
+	var blockIDs map[string]string
+	if enforceUniqueBlockIDs {
+		blockIDs = make(map[string]string)
+	}
+	if err := validateEditorJSONNode(document, "document", 0, &count, blockIDs); err != nil {
 		return nil, err
 	}
 	canonical, err := json.Marshal(envelope)
@@ -56,7 +68,7 @@ func ValidateMangoTiptapJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return canonical, nil
 }
 
-func validateEditorJSONNode(value any, path string, depth int, count *int) error {
+func validateEditorJSONNode(value any, path string, depth int, count *int, blockIDs map[string]string) error {
 	if depth > 100 {
 		return fmt.Errorf("%w: %s nested too deeply", ErrInvalid, path)
 	}
@@ -80,6 +92,20 @@ func validateEditorJSONNode(value any, path string, depth int, count *int) error
 	attrs, err := editorJSONAttributes(node["attrs"])
 	if err != nil {
 		return err
+	}
+	if blockIDs != nil && editorJSONIdentityBlockNode(nodeType) {
+		switch blockID := attrs["blockId"].(type) {
+		case nil:
+		case string:
+			if strings.TrimSpace(blockID) != "" {
+				if firstPath, duplicate := blockIDs[blockID]; duplicate {
+					return fmt.Errorf("%w: duplicate blockId at %s (first used at %s)", ErrInvalid, path, firstPath)
+				}
+				blockIDs[blockID] = path
+			}
+		default:
+			return fmt.Errorf("%w: invalid blockId at %s", ErrInvalid, path)
+		}
 	}
 	if nodeType == "mention" {
 		userID, userOK := attrs["userId"].(string)
@@ -178,7 +204,7 @@ func validateEditorJSONNode(value any, path string, depth int, count *int) error
 		if !childOK || !typeOK || !editorJSONChildAllowed(nodeType, childType, index) {
 			return fmt.Errorf("%w: invalid %s child in %s", ErrInvalid, childType, nodeType)
 		}
-		if err := validateEditorJSONNode(child, fmt.Sprintf("%s.content[%d]", path, index), depth+1, count); err != nil {
+		if err := validateEditorJSONNode(child, fmt.Sprintf("%s.content[%d]", path, index), depth+1, count, blockIDs); err != nil {
 			return err
 		}
 	}
@@ -223,6 +249,15 @@ func editorJSONAtomNode(nodeType string) bool {
 func editorJSONNonEmptyContainer(nodeType string) bool {
 	switch nodeType {
 	case "doc", "blockquote", "bulletList", "orderedList", "taskList", "listItem", "taskItem", "table", "tableRow", "tableCell", "tableHeader":
+		return true
+	default:
+		return false
+	}
+}
+
+func editorJSONIdentityBlockNode(nodeType string) bool {
+	switch nodeType {
+	case "paragraph", "heading", "blockquote", "codeBlock", "horizontalRule", "bulletList", "orderedList", "listItem", "taskList", "taskItem", "table":
 		return true
 	default:
 		return false

@@ -177,7 +177,7 @@ func NormalizeEditorJSONCommit(input EditorJSONCommitInput) (EditorJSONCommitInp
 		len(input.ClientID) > EditorJSONOperationMaxIDSize || input.BaseRevision < 0 || input.SchemaVersion != MangoTiptapSchemaVersion {
 		return EditorJSONCommitInput{}, ErrInvalid
 	}
-	canonical, err := ValidateMangoTiptapJSON(input.JSONDocument)
+	canonical, err := validateMangoTiptapJSONForCommit(input.JSONDocument)
 	if err != nil {
 		return EditorJSONCommitInput{}, err
 	}

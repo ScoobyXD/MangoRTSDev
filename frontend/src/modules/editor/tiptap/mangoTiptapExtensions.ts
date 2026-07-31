@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type AnyExtension, type Editor, type Extensions } from "@tiptap/core";
+import { Extension, Node, mergeAttributes, type AnyExtension, type Editor, type Extensions, type JSONContent } from "@tiptap/core";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import Highlight from "@tiptap/extension-highlight";
 import Mention from "@tiptap/extension-mention";
@@ -8,7 +8,8 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
-import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
@@ -21,12 +22,162 @@ const mangoBlockNodeNames = [
   "paragraph", "heading", "blockquote", "codeBlock", "horizontalRule",
   "bulletList", "orderedList", "listItem", "taskList", "taskItem", "table",
 ];
+const mangoBlockNodeNameSet = new Set(mangoBlockNodeNames);
 
 function newBlockID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `mango-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function readableBlockID(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value : "";
+}
+
+function unusedBlockID(used: Set<string>): string {
+  let blockID = newBlockID();
+  while (used.has(blockID)) blockID = newBlockID();
+  used.add(blockID);
+  return blockID;
+}
+
+/**
+ * Keeps the first occurrence of each valid block ID and replaces missing or
+ * repeated IDs. This is used once when canonical or recovery JSON enters an
+ * editor, so older snapshots remain readable without saving merely on open.
+ */
+export function normalizeMangoTiptapBlockIDs(document: JSONContent): JSONContent {
+  const used = new Set<string>();
+  const normalizeNode = (node: JSONContent): JSONContent => {
+    let next = node;
+    if (mangoBlockNodeNameSet.has(node.type ?? "")) {
+      const currentBlockID = readableBlockID(node.attrs?.blockId);
+      if (!currentBlockID || used.has(currentBlockID)) {
+        next = { ...next, attrs: { ...next.attrs, blockId: unusedBlockID(used) } };
+      } else {
+        used.add(currentBlockID);
+      }
+    }
+    if (node.content) {
+      let contentChanged = false;
+      const content = node.content.map((child) => {
+        const normalized = normalizeNode(child);
+        if (normalized !== child) contentChanged = true;
+        return normalized;
+      });
+      if (contentChanged) next = { ...next, content };
+    }
+    return next;
+  };
+  return normalizeNode(document);
+}
+
+type MangoBlockRange = { from: number; to: number };
+type MangoBlockEntry = { position: number; blockID: string };
+type MangoBlockIDCounts = ReadonlyMap<string, number>;
+
+const mangoBlockIdentityKey = new PluginKey<MangoBlockIDCounts>("mangoBlockIdentity");
+
+function mergeMangoBlockRanges(ranges: MangoBlockRange[]): MangoBlockRange[] {
+  const sorted = ranges
+    .filter(({ from, to }) => to >= from)
+    .sort((left, right) => left.from - right.from || left.to - right.to);
+  const merged: MangoBlockRange[] = [];
+  sorted.forEach((range) => {
+    const previous = merged[merged.length - 1];
+    if (!previous || range.from > previous.to) {
+      merged.push({ ...range });
+      return;
+    }
+    previous.to = Math.max(previous.to, range.to);
+  });
+  return merged;
+}
+
+function expandedMangoBlockRange(from: number, to: number, documentSize: number): MangoBlockRange {
+  return {
+    from: Math.max(0, Math.min(from, to) - 1),
+    to: Math.min(documentSize, Math.max(Math.min(from, to) + 1, Math.max(from, to) + 1)),
+  };
+}
+
+function mangoTransactionRanges(transaction: Transaction, side: "before" | "after"): MangoBlockRange[] {
+  const documentSize = side === "before" ? transaction.before.content.size : transaction.doc.content.size;
+  const ranges: MangoBlockRange[] = [];
+  transaction.mapping.maps.forEach((stepMap, stepIndex) => {
+    stepMap.forEach((oldStart, oldEnd, newStart, newEnd) => {
+      if (side === "before") {
+        const earlierSteps = transaction.mapping.slice(0, stepIndex).invert();
+        ranges.push(expandedMangoBlockRange(
+          earlierSteps.map(oldStart, -1),
+          earlierSteps.map(oldEnd, 1),
+          documentSize,
+        ));
+        return;
+      }
+      const laterSteps = transaction.mapping.slice(stepIndex + 1);
+      ranges.push(expandedMangoBlockRange(
+        laterSteps.map(newStart, -1),
+        laterSteps.map(newEnd, 1),
+        documentSize,
+      ));
+    });
+  });
+  return mergeMangoBlockRanges(ranges);
+}
+
+function mangoFinalChangedRanges(transactions: readonly Transaction[], documentSize: number): MangoBlockRange[] {
+  const ranges: MangoBlockRange[] = [];
+  transactions.forEach((changedTransaction, transactionIndex) => {
+    changedTransaction.mapping.maps.forEach((stepMap, stepIndex) => {
+      stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+        const laterSteps = changedTransaction.mapping.slice(stepIndex + 1);
+        let from = laterSteps.map(newStart, -1);
+        let to = laterSteps.map(newEnd, 1);
+        for (let laterIndex = transactionIndex + 1; laterIndex < transactions.length; laterIndex += 1) {
+          from = transactions[laterIndex].mapping.map(from, -1);
+          to = transactions[laterIndex].mapping.map(to, 1);
+        }
+        ranges.push(expandedMangoBlockRange(from, to, documentSize));
+      });
+    });
+  });
+  return mergeMangoBlockRanges(ranges);
+}
+
+function mangoBlockEntries(document: ProseMirrorNode, ranges: readonly MangoBlockRange[]): MangoBlockEntry[] {
+  const entries: MangoBlockEntry[] = [];
+  const seenPositions = new Set<number>();
+  const collect: Parameters<typeof document.nodesBetween>[2] = (node, position) => {
+    if (!mangoBlockNodeNameSet.has(node.type.name) || seenPositions.has(position)) return;
+    seenPositions.add(position);
+    entries.push({ position, blockID: readableBlockID(node.attrs.blockId) });
+  };
+  ranges.forEach(({ from, to }) => document.nodesBetween(from, to, collect));
+  return entries;
+}
+
+function allMangoBlockIDCounts(document: ProseMirrorNode): MangoBlockIDCounts {
+  const counts = new Map<string, number>();
+  mangoBlockEntries(document, [{ from: 0, to: document.content.size }]).forEach(({ blockID }) => {
+    if (blockID) counts.set(blockID, (counts.get(blockID) ?? 0) + 1);
+  });
+  return counts;
+}
+
+function updatedMangoBlockIDCounts(transaction: Transaction, current: MangoBlockIDCounts): MangoBlockIDCounts {
+  if (!transaction.docChanged) return current;
+  const counts = new Map(current);
+  mangoBlockEntries(transaction.before, mangoTransactionRanges(transaction, "before")).forEach(({ blockID }) => {
+    if (!blockID) return;
+    const nextCount = (counts.get(blockID) ?? 0) - 1;
+    if (nextCount > 0) counts.set(blockID, nextCount);
+    else counts.delete(blockID);
+  });
+  mangoBlockEntries(transaction.doc, mangoTransactionRanges(transaction, "after")).forEach(({ blockID }) => {
+    if (blockID) counts.set(blockID, (counts.get(blockID) ?? 0) + 1);
+  });
+  return counts;
+}
 function parsedNumberAttribute(element: HTMLElement, name: string): number | null {
   const raw = element.getAttribute(name);
   if (raw === null || raw.trim() === "") return null;
@@ -219,40 +370,43 @@ export const MangoBlockIdentity = Extension.create({
 
   addProseMirrorPlugins() {
     return [new Plugin({
+      key: mangoBlockIdentityKey,
+      state: {
+        init: (_configuration, state) => allMangoBlockIDCounts(state.doc),
+        apply: (transaction, current) => updatedMangoBlockIDCounts(transaction, current),
+      },
       appendTransaction: (transactions, _oldState, newState) => traceEditorFunction(
         getCurrentEditorTraceContext(),
         "plugin.block_identity.append_transaction",
         "prosemirror.plugin",
         () => {
         if (!transactions.some((transaction) => transaction.docChanged)) return null;
-        const changedRanges: Array<{ from: number; to: number }> = [];
-        transactions.forEach((changedTransaction, transactionIndex) => {
-          changedTransaction.mapping.maps.forEach((stepMap, stepIndex) => {
-            stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-              const laterSteps = changedTransaction.mapping.slice(stepIndex + 1);
-              let from = laterSteps.map(newStart, -1);
-              let to = laterSteps.map(newEnd, 1);
-              for (let laterIndex = transactionIndex + 1; laterIndex < transactions.length; laterIndex += 1) {
-                from = transactions[laterIndex].mapping.map(from, -1);
-                to = transactions[laterIndex].mapping.map(to, 1);
-              }
-              changedRanges.push({
-                from: Math.max(0, from - 1),
-                to: Math.min(newState.doc.content.size, Math.max(from + 1, to + 1)),
-              });
-            });
-          });
-        });
+        const changedRanges = mangoFinalChangedRanges(transactions, newState.doc.content.size);
+        const changedBlocks = mangoBlockEntries(newState.doc, changedRanges);
+        const counts = mangoBlockIdentityKey.getState(newState);
+        if (!counts) return null;
+        const usedBlockIDs = new Set(counts.keys());
         const transaction = newState.tr;
-        const assignedPositions = new Set<number>();
-        const assignMissingID: Parameters<typeof newState.doc.nodesBetween>[2] = (node, position) => {
-          if (mangoBlockNodeNames.includes(node.type.name) && !node.attrs.blockId) {
-            if (assignedPositions.has(position)) return;
-            assignedPositions.add(position);
-            transaction.setNodeMarkup(position, undefined, { ...node.attrs, blockId: newBlockID() });
-          }
+        const assignFreshBlockID = (position: number) => {
+          const node = transaction.doc.nodeAt(position);
+          if (!node || !mangoBlockNodeNameSet.has(node.type.name)) return;
+          transaction.setNodeMarkup(position, undefined, { ...node.attrs, blockId: unusedBlockID(usedBlockIDs) });
         };
-        changedRanges.forEach(({ from, to }) => newState.doc.nodesBetween(from, to, assignMissingID));
+        changedBlocks.filter(({ blockID }) => !blockID).forEach(({ position }) => assignFreshBlockID(position));
+        const occurrencesByID = new Map<string, MangoBlockEntry[]>();
+        changedBlocks.forEach((entry) => {
+          if (!entry.blockID) return;
+          const occurrences = occurrencesByID.get(entry.blockID) ?? [];
+          occurrences.push(entry);
+          occurrencesByID.set(entry.blockID, occurrences);
+        });
+        occurrencesByID.forEach((occurrences, blockID) => {
+          const totalOccurrences = counts.get(blockID) ?? occurrences.length;
+          if (totalOccurrences <= 1) return;
+          const unchangedOccurrences = Math.max(0, totalOccurrences - occurrences.length);
+          const firstReplacement = unchangedOccurrences > 0 ? 0 : 1;
+          occurrences.slice(firstReplacement).forEach(({ position }) => assignFreshBlockID(position));
+        });
         return transaction.steps.length > 0 ? transaction : null;
         },
         {

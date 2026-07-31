@@ -32,6 +32,7 @@ import {
   createMangoTiptapExtensions,
   indentMangoTiptapSelection,
   MangoTiptapEditorEngine,
+  normalizeMangoTiptapBlockIDs,
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
@@ -121,6 +122,15 @@ function richDocument(text = "Mango"): MangoTiptapDocument {
   };
 }
 
+function mangoBlockIDs(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const node = value as { attrs?: { blockId?: unknown }; content?: unknown[] };
+  const current = typeof node.attrs?.blockId === "string" && node.attrs.blockId.trim()
+    ? [node.attrs.blockId]
+    : [];
+  return current.concat((node.content ?? []).flatMap(mangoBlockIDs));
+}
+
 function saveAcknowledgement(operationID: string, revision: number, deduplicated = false) {
   return {
     operation_id: operationID,
@@ -184,6 +194,32 @@ test("Mango validates only the versioned document envelope before Tiptap opens i
   assert.equal(validateMangoTiptapDocument(wrongVersion).valid, false);
   const wrongRoot = { ...createEmptyMangoTiptapDocument(), document: { type: "paragraph" } };
   assert.equal(validateMangoTiptapDocument(wrongRoot).valid, false);
+});
+
+test("block ID normalization preserves the first ID and repairs missing or repeated IDs", () => {
+  const source: MangoTiptapDocument["document"] = {
+    type: "doc",
+    content: [
+      { type: "paragraph", attrs: { blockId: "shared-block" } },
+      { type: "paragraph", attrs: { blockId: "shared-block" } },
+      {
+        type: "bulletList",
+        attrs: { blockId: "list-block" },
+        content: [{
+          type: "listItem",
+          attrs: { blockId: "shared-block" },
+          content: [{ type: "paragraph" }],
+        }],
+      },
+    ],
+  };
+  const normalized = normalizeMangoTiptapBlockIDs(source);
+  const blockIDs = mangoBlockIDs(normalized);
+  assert.equal(blockIDs[0], "shared-block", "the first occurrence remains stable");
+  assert.equal(blockIDs.length, 5);
+  assert.equal(new Set(blockIDs).size, blockIDs.length);
+  assert.equal(source.content?.[1]?.attrs?.blockId, "shared-block", "normalization does not mutate canonical input");
+  assert.equal(normalizeMangoTiptapBlockIDs(normalized), normalized, "already-correct JSON keeps its object identity");
 });
 
 test("cosmetic formatting survives serialization without Mango normalization", () => {
@@ -282,6 +318,22 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     });
     assert.equal(validation.valid, true, validation.valid ? "" : validation.error);
 
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        { type: "paragraph", attrs: { blockId: "kept-block" }, content: [{ type: "text", text: "kept" }] },
+        { type: "paragraph", attrs: { blockId: "other-block" }, content: [{ type: "text", text: "other" }] },
+      ],
+    });
+    assert.equal(editor.commands.insertContentAt(editor.state.doc.content.size, {
+      type: "paragraph",
+      attrs: { blockId: "kept-block" },
+      content: [{ type: "text", text: "copied" }],
+    }), true);
+    const insertedBlockIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(insertedBlockIDs[0], "kept-block", "the existing block keeps its identity");
+    assert.equal(new Set(insertedBlockIDs).size, insertedBlockIDs.length, "inserted structured content cannot reuse an existing block ID");
+
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     editor.commands.setTextSelection(1);
     assert.equal(editor.view.pasteHTML('<p><strong><span style="font-size: 10.5pt; color: rgb(31, 78, 121)">first line<br>second line</span></strong></p>'), true);
@@ -350,29 +402,37 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
 
     editor.commands.setContent({
       type: "doc",
-      content: [{ type: "bulletList", content: [
-        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
-        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "after" }] }] },
+      content: [{ type: "bulletList", attrs: { blockId: "bullet-list" }, content: [
+        { type: "listItem", attrs: { blockId: "bullet-first" }, content: [{ type: "paragraph", attrs: { blockId: "bullet-first-paragraph" }, content: [{ type: "text", text: "first" }] }] },
+        { type: "listItem", attrs: { blockId: "bullet-after" }, content: [{ type: "paragraph", attrs: { blockId: "bullet-after-paragraph" }, content: [{ type: "text", text: "after" }] }] },
       ] }],
     });
     editor.commands.setTextSelection(6);
     assert.equal(editor.commands.splitListItem("listItem"), true, "Enter creates the next bullet row");
+    const splitBulletIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(new Set(splitBulletIDs).size, splitBulletIDs.length, "splitting a bullet must replace cloned list-item and paragraph IDs");
     assert.equal(editor.commands.insertContent("child"), true);
     assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created bullet row");
     assert.equal((JSON.stringify(editor.getJSON()).match(/"type":"bulletList"/g) ?? []).length, 2);
+    const nestedBulletIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(new Set(nestedBulletIDs).size, nestedBulletIDs.length, "nesting a bullet must keep every block ID unique");
 
     editor.commands.setContent({
       type: "doc",
-      content: [{ type: "taskList", content: [
-        { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
-        { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "after" }] }] },
+      content: [{ type: "taskList", attrs: { blockId: "task-list" }, content: [
+        { type: "taskItem", attrs: { checked: false, blockId: "task-first" }, content: [{ type: "paragraph", attrs: { blockId: "task-first-paragraph" }, content: [{ type: "text", text: "first" }] }] },
+        { type: "taskItem", attrs: { checked: false, blockId: "task-after" }, content: [{ type: "paragraph", attrs: { blockId: "task-after-paragraph" }, content: [{ type: "text", text: "after" }] }] },
       ] }],
     });
     editor.commands.setTextSelection(6);
     assert.equal(editor.commands.splitListItem("taskItem"), true, "Enter creates the next checklist row");
+    const splitTaskIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(new Set(splitTaskIDs).size, splitTaskIDs.length, "splitting a checklist item must replace cloned item and paragraph IDs");
     assert.equal(editor.commands.insertContent("child"), true);
     assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created checklist row");
     assert.equal((JSON.stringify(editor.getJSON()).match(/"type":"taskList"/g) ?? []).length, 2);
+    const nestedTaskIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(new Set(nestedTaskIDs).size, nestedTaskIDs.length, "nesting a checklist item must keep every block ID unique");
   } finally {
     editor.destroy();
     dom.window.close();
@@ -1121,7 +1181,8 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.doesNotMatch(sync, /commits:/);
   assert.doesNotMatch(sync, /JSON\.stringify/);
   const extensions = read("frontend/src/modules/editor/tiptap/mangoTiptapExtensions.ts");
-  assert.match(extensions, /newState\.doc\.nodesBetween\(from, to, assignMissingID\)/);
+  assert.match(extensions, /mangoBlockEntries\(newState\.doc, changedRanges\)/);
+  assert.match(extensions, /updatedMangoBlockIDCounts/);
   assert.doesNotMatch(extensions, /newState\.doc\.descendants/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
   assert.match(editor, /data-mango-editor-sync-mode="revisioned-json"/);
