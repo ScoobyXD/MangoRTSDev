@@ -130,7 +130,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /suppressAutomaticCreation: nodeAttachedEmails\.length > 0/);
   assert.doesNotMatch(nodeSurface, /aria-label="Toggle email column"/);
   assert.match(nodeSurface, /defaultOpenTextBlockChatIDs/);
-  assert.match(nodeSurface, /emailOriginNode && block\.id === emailOriginChatHostBlockID/);
+  assert.match(nodeSurface, /if \(!emailOriginNode\) return chatMessagesByBlock;[\s\S]*displayed\.set\(emailOriginChatHostBlockID, \[\.\.\.legacyMessages, \.\.\.directMessages\]/);
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
   assert.match(nodeSurface, /data-node-pane-header="editor"/);
   assert.match(nodeSurface, /data-node-pane-header="chat"/);

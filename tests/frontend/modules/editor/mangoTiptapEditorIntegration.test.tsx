@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Simulate } from "react-dom/test-utils";
 
 import {
+  restartEditorTraceForTests,
   resetEditorTraceForTests,
   startEditorTraceForTests,
   stopEditorTraceForTests,
@@ -350,6 +351,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let mountedRoot: { unmount(): void } | null = null;
   let pageHostRoot: { unmount(): void } | null = null;
   let setHostVisible: React.Dispatch<React.SetStateAction<boolean>> = () => undefined;
+  let forceHostRerender: () => void = () => undefined;
   resetEditorRuntimeMetricsForTests();
   startEditorTraceForTests();
   try {
@@ -366,6 +368,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     function VirtualizedEditorHost() {
       const [rowVisible, setRowVisible] = React.useState(true);
       const [pinned, setPinned] = React.useState(false);
+      const [, setRenderVersion] = React.useState(0);
+      forceHostRerender = () => setRenderVersion((current) => current + 1);
       setHostVisible = setRowVisible;
       if (!rowVisible && !pinned) return <div data-virtual-row-placeholder="document-1" />;
       return (
@@ -394,7 +398,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
             subscriptions += 1;
             return () => { unsubscriptions += 1; };
           }}
-          annotations={annotations}
+          annotations={annotations.map((annotation) => ({ ...annotation }))}
           formattingControllerRef={controllerRef}
           onSelectionFontSizeChange={(fontSize) => selectionFontSizes.push(fontSize)}
           onSelectionInlineFormatChange={(format) => selectionInlineFormats.push(format)}
@@ -448,6 +452,23 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
 
+    const selectionPublicationsBeforeStableRerender = selectionInlineFormats.length;
+    restartEditorTraceForTests();
+    await act(async () => { forceHostRerender(); });
+    await flushAsyncWork(4);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const stableRerenderTrace = stopEditorTraceForTests();
+    assert.equal(
+      stableRerenderTrace.events.filter((event) => event.name === "prosemirror.dispatch_transaction").length,
+      0,
+      "a parent rerender with a new but content-identical annotation array must not dispatch any ProseMirror transaction",
+    );
+    assert.ok(
+      stableRerenderTrace.events.filter((event) => event.name === "react.mango_tiptap_editor.commit").length <= 2,
+      "one parent rerender must settle instead of starting an editor commit loop",
+    );
+    assert.equal(selectionInlineFormats.length, selectionPublicationsBeforeStableRerender, "an annotation-only rerender must not republish toolbar state");
+    startEditorTraceForTests();
     await act(async () => { assert.equal(controllerRef.current?.adjustFontSize(1), true); });
     await waitFor(() => selectionFontSizes.at(-1) === 16, "the plus command must immediately update the toolbar number");
     await act(async () => { assert.equal(controllerRef.current?.toggleInlineFormat("bold"), true); });

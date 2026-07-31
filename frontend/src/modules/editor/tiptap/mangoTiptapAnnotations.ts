@@ -152,8 +152,10 @@ export function setMangoTiptapAnnotations(transaction: Transaction, annotations:
   return transaction.setMeta(annotationMetaKey, [...annotations]);
 }
 
-export function updateMangoTiptapAnnotations(editor: Editor, annotations: readonly MangoTiptapAnnotation[]): void {
+export function updateMangoTiptapAnnotations(editor: Editor, annotations: readonly MangoTiptapAnnotation[]): boolean {
+  if (mangoTiptapAnnotationsEqual(readMappedMangoTiptapAnnotations(editor), annotations)) return false;
   editor.view.dispatch(setMangoTiptapAnnotations(editor.state.tr, annotations));
+  return true;
 }
 
 export function readMappedMangoTiptapAnnotations(editor: Editor): readonly MangoTiptapAnnotation[] {

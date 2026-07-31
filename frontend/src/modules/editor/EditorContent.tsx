@@ -943,7 +943,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [currentFormattingController, linkedEntityCanEdit]);
 
   const updateSelectionInlineFormat = useCallback((nextFormat: EditorSelectionInlineFormatState) => {
-    setSelectionInlineFormat(nextFormat);
+    setSelectionInlineFormat((current) => (
+      current.bold === nextFormat.bold
+      && current.underline === nextFormat.underline
+      && current.italic === nextFormat.italic
+      && current.strikethrough === nextFormat.strikethrough
+        ? current
+        : nextFormat
+    ));
   }, []);
 
   const toggleEditorInlineFormat = useCallback((command: EditorInlineStyleCommand) => {
