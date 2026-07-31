@@ -22,6 +22,18 @@ import {
 import { calculateEditorSelectionActionPosition } from "../editorSelectionActions.js";
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
 import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
+import {
+  beginEditorTraceSpan,
+  createEditorTraceContext,
+  editorTraceNow,
+  endEditorTraceSpan,
+  recordEditorDocumentStructure,
+  recordEditorTraceDuration,
+  registerEditorTraceRoot,
+  releaseEditorTraceContext,
+  runWithEditorTraceContext,
+  traceEditorFunction,
+} from "../editorTrace.js";
 import type {
   EditorDocumentFormattingController,
   EditorImageAttachmentContext,
@@ -620,8 +632,16 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onLifecycleChange,
   onAnnotationsChange,
 }) => {
+  const traceRenderStartedAt = editorTraceNow();
+  const traceContextRef = useRef<ReturnType<typeof createEditorTraceContext> | undefined>(undefined);
+  if (traceContextRef.current === undefined) {
+    traceContextRef.current = createEditorTraceContext({ resourceType, documentLabel: ariaLabel });
+  }
+  const traceContext = traceContextRef.current;
   const initialRef = useRef<ReturnType<typeof initialDocument> | null>(null);
-  if (!initialRef.current) initialRef.current = initialDocument(value);
+  if (!initialRef.current) initialRef.current = traceEditorFunction(
+    traceContext, "editor.initial_document.parse", "editor.initialize", () => initialDocument(value),
+  );
   const initial = initialRef.current;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
@@ -639,7 +659,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const ownerAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
   const mappedAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
   const persistedAnnotationsRef = useRef<readonly MangoTiptapPersistedAnnotation[]>([]);
-  const lifecycleRef = useRef(new MangoEditorLifecycle());
+  const lifecycleRef = useRef<MangoEditorLifecycle>(null!);
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new MangoEditorLifecycle(traceContext);
+  }
   const dirtyMetricReleaseRef = useRef<(() => void) | null>(null);
   const [editorActive, setEditorActive] = useState(false);
   const [document, setDocument] = useState(initial.document);
@@ -677,8 +700,25 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   formattingControllerActiveRef.current = formattingControllerActive;
   ownerAnnotationsRef.current = annotations;
 
+  useLayoutEffect(() => {
+    recordEditorTraceDuration(traceContext, "react.mango_tiptap_editor.commit", "react.commit", traceRenderStartedAt, {
+      active: editorActive,
+      editable,
+    });
+  });
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const unregister = root ? registerEditorTraceRoot(traceContext, root) : () => {};
+    return () => {
+      unregister();
+      releaseEditorTraceContext(traceContext);
+    };
+
+  }, [traceContext]);
   useEffect(() => {
     const unsubscribe = lifecycleRef.current.subscribe((snapshot) => {
+      traceEditorFunction(traceContext, "editor.lifecycle_listener", "editor.lifecycle", () => {
       const active = snapshot.state === "active" || snapshot.state === "dirty";
       setEditorActive((current) => current === active ? current : active);
       const root = rootRef.current;
@@ -693,7 +733,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         dirtyMetricReleaseRef.current();
         dirtyMetricReleaseRef.current = null;
       }
-      callbacksRef.current.onLifecycleChange?.(snapshot);
+      traceEditorFunction(
+        traceContext,
+        "host.on_lifecycle_change",
+        "editor.pin_callback",
+        () => callbacksRef.current.onLifecycleChange?.(snapshot),
+      );
+      }, {
+        state: snapshot.state,
+        pinned: snapshot.pinned,
+        pending_count: snapshot.pendingCount,
+      });
     });
     return () => {
       unsubscribe();
@@ -719,7 +769,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return true;
   }, []);
 
-  const updateSelectionState = useCallback((editor: Editor) => {
+  const updateSelectionState = useCallback((editor: Editor) => traceEditorFunction(traceContext, "editor.update_selection_state", "editor.selection", () => {
     const state = readMangoTiptapSelectionState(editor);
     setTableActive(editor.isActive("table"));
     callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
@@ -768,7 +818,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       x: actionPosition.left,
       y: actionPosition.top,
     });
-  }, []);
+  }), [traceContext]);
 
   const publishAnnotationPositions = useCallback((persisted: readonly MangoTiptapPersistedAnnotation[]) => {
     persistedAnnotationsRef.current = [...persisted];
@@ -792,6 +842,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       resourceID,
       documentID,
       requestJSON,
+      traceContext,
       subscribeToCanonicalChange: subscribeToCanonicalChange ?? ((recover, localClientID) => {
         const scope = realtimeEditorJSONScope(resourceType, resourceID, documentID);
         return subscribeRealtimeScope(attachmentContext?.apiBase ?? "", companyID, scope, {
@@ -873,7 +924,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })();
     syncPreparationRef.current = preparation;
     return preparation;
-  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange]);
+  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange, traceContext]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1088,7 +1139,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   useLayoutEffect(() => {
     if (!isActive || editorRef.current) return undefined;
     const releaseActive = trackEditorRuntimeResource("active_editors");
-    const editor = new Editor({
+    const editor = traceEditorFunction(
+      traceContext,
+      "tiptap.editor.create",
+      "tiptap.initialize",
+      () => new Editor({
       extensions,
       content: currentDocumentRef.current.document,
       editable,
@@ -1144,34 +1199,96 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onContentError: ({ error: contentError }) => {
         setError(`The JSON document is invalid and was not opened: ${contentError.message}`);
       },
-      onFocus: ({ editor: focusedEditor }) => {
-        const controller = formattingControllerInstanceRef.current;
-        if (formattingControllerRef && controller) formattingControllerRef.current = controller;
-        updateSelectionState(focusedEditor);
-        callbacksRef.current.onFocus?.();
-      },
-      onBlur: () => {
+      onFocus: ({ editor: focusedEditor }) => traceEditorFunction(
+        traceContext,
+        "tiptap.on_focus",
+        "tiptap.callback",
+        () => {
+          const controller = formattingControllerInstanceRef.current;
+          if (formattingControllerRef && controller) formattingControllerRef.current = controller;
+          updateSelectionState(focusedEditor);
+          callbacksRef.current.onFocus?.();
+        },
+      ),
+      onBlur: () => traceEditorFunction(traceContext, "tiptap.on_blur", "tiptap.callback", () => {
         callbacksRef.current.onBlur?.();
         void syncRef.current?.flush().catch(() => undefined);
-      },
+      }),
       onSelectionUpdate: ({ editor: activeEditor }) => updateSelectionState(activeEditor),
-      onTransaction: ({ editor: transactionEditor, transaction }) => {
-        if (!transaction.docChanged || !transaction.selectionSet) updateSelectionState(transactionEditor);
-        if (!transaction.docChanged) return;
-        incrementEditorRuntimeMetric("transactions");
-        mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
-      },
-      onUpdate: ({ editor: activeEditor }) => {
-        lifecycleRef.current.markDirty();
-        syncRef.current?.schedule(() => ({
-          format: "mango-tiptap-json",
-          schema_version: 1,
-          document: activeEditor.getJSON(),
-        }), false, () => durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)));
-      },
+      onTransaction: ({ editor: transactionEditor, transaction }) => traceEditorFunction(
+        traceContext,
+        "tiptap.on_transaction",
+        "tiptap.callback",
+        () => {
+          if (!transaction.docChanged || !transaction.selectionSet) updateSelectionState(transactionEditor);
+          if (!transaction.docChanged) return;
+          incrementEditorRuntimeMetric("transactions");
+          mappedAnnotationsRef.current = [...readMappedMangoTiptapAnnotations(transactionEditor)];
+        },
+        {
+          doc_changed: transaction.docChanged,
+          selection_set: transaction.selectionSet,
+          step_count: transaction.steps.length,
+          document_size: transaction.doc.content.size,
+        },
+      ),
+      onUpdate: ({ editor: activeEditor }) => traceEditorFunction(
+        traceContext,
+        "tiptap.on_update",
+        "tiptap.callback",
+        () => {
+          lifecycleRef.current.markDirty();
+          syncRef.current?.schedule(() => ({
+            format: "mango-tiptap-json",
+            schema_version: 1,
+            document: traceEditorFunction(
+              traceContext,
+              "tiptap.get_json",
+              "editor.snapshot",
+              () => activeEditor.getJSON(),
+            ),
+          }), false, () => traceEditorFunction(
+            traceContext,
+            "annotations.read_durable",
+            "editor.snapshot",
+            () => durableMangoTiptapAnnotations(readMappedMangoTiptapAnnotations(activeEditor)),
+          ));
+        },
+      ),
+    }),
+    );
+    const originalDispatch = editor.view.dispatch.bind(editor.view);
+    editor.view.dispatch = (transaction) => {
+      const previousTransactionID = traceContext?.currentTransactionID ?? 0;
+      if (traceContext) {
+        traceContext.transactionSequence += 1;
+        traceContext.currentTransactionID = traceContext.transactionSequence;
+      }
+      const span = beginEditorTraceSpan(traceContext, "prosemirror.dispatch_transaction", "prosemirror.transaction", {
+        doc_changed: transaction.docChanged,
+        selection_set: transaction.selectionSet,
+        step_count: transaction.steps.length,
+        before_document_size: transaction.before.content.size,
+        after_document_size: transaction.doc.content.size,
+      });
+      let outcome: "ok" | "error" = "ok";
+      try {
+        return runWithEditorTraceContext(traceContext, () => originalDispatch(transaction));
+      } catch (cause) {
+        outcome = "error";
+        throw cause;
+      } finally {
+        endEditorTraceSpan(span, undefined, outcome);
+        if (traceContext) traceContext.currentTransactionID = previousTransactionID;
+      }
+    };
+    traceEditorFunction(traceContext, "annotations.plugin.register", "tiptap.initialize", () => {
+      editor.registerPlugin(MangoTiptapAnnotations);
     });
-    editor.registerPlugin(MangoTiptapAnnotations);
-    updateMangoTiptapAnnotations(editor, mappedAnnotationsRef.current);
+    traceEditorFunction(traceContext, "annotations.plugin.initial_update", "tiptap.initialize", () => {
+      updateMangoTiptapAnnotations(editor, mappedAnnotationsRef.current);
+    });
+    recordEditorDocumentStructure(traceContext, editor.state.doc, "editor_activated");
     editorRef.current = editor;
     setActiveEditor(editor);
     const controller: MangoTiptapFormattingController = {

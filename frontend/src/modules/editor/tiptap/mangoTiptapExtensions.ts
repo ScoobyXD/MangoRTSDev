@@ -13,6 +13,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
+import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -218,7 +219,11 @@ export const MangoBlockIdentity = Extension.create({
 
   addProseMirrorPlugins() {
     return [new Plugin({
-      appendTransaction: (transactions, _oldState, newState) => {
+      appendTransaction: (transactions, _oldState, newState) => traceEditorFunction(
+        getCurrentEditorTraceContext(),
+        "plugin.block_identity.append_transaction",
+        "prosemirror.plugin",
+        () => {
         if (!transactions.some((transaction) => transaction.docChanged)) return null;
         const changedRanges: Array<{ from: number; to: number }> = [];
         transactions.forEach((changedTransaction, transactionIndex) => {
@@ -249,7 +254,13 @@ export const MangoBlockIdentity = Extension.create({
         };
         changedRanges.forEach(({ from, to }) => newState.doc.nodesBetween(from, to, assignMissingID));
         return transaction.steps.length > 0 ? transaction : null;
-      },
+        },
+        {
+          transaction_count: transactions.length,
+          changed_transaction_count: transactions.filter((transaction) => transaction.docChanged).length,
+          document_size: newState.doc.content.size,
+        },
+      ),
     })];
   },
 });
@@ -269,7 +280,11 @@ const MangoPasteLoading = Extension.create({
       key: mangoPasteLoadingKey,
       state: {
         init: () => DecorationSet.empty,
-        apply: (transaction, current) => {
+        apply: (transaction, current) => traceEditorFunction(
+          getCurrentEditorTraceContext(),
+          "plugin.paste_loading.apply",
+          "prosemirror.plugin",
+          () => {
           let next = current.map(transaction.mapping, transaction.doc);
           const meta = transaction.getMeta(mangoPasteLoadingKey) as MangoPasteLoadingMeta | undefined;
           if (meta?.remove) {
@@ -299,7 +314,12 @@ const MangoPasteLoading = Extension.create({
             next = next.add(transaction.doc, [widget]);
           }
           return next;
-        },
+          }, {
+            doc_changed: transaction.docChanged,
+            has_meta: Boolean(transaction.getMeta(mangoPasteLoadingKey)),
+            document_size: transaction.doc.content.size,
+          },
+        ),
       },
       props: {
         decorations: (state) => mangoPasteLoadingKey.getState(state),

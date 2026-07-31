@@ -2,6 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isTerminalAuthFailureActive, resetTerminalAuthFailure } from "../../../../frontend/src/auth/cognitoAuth.js";
 import { isTerminalAuthFailureError, requestJSON, requestJSONWithMeta } from "../../../../frontend/src/modules/api/requestJSON.js";
+import {
+  createEditorTraceContext,
+  resetEditorTraceForTests,
+  startEditorTraceForTests,
+  stopEditorTraceForTests,
+} from "../../../../frontend/src/modules/editor/editorTrace.js";
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -214,4 +220,41 @@ test("requestJSONWithMeta can return non-OK responses for cache fallbacks", asyn
   assert.equal(response.ok, false);
   assert.equal(response.notModified, false);
   assert.equal(response.body, undefined);
+});
+
+test("requestJSON traces editor serialization, fetch, and parsing without payload contents", async () => {
+  startEditorTraceForTests();
+  try {
+    const context = createEditorTraceContext({ resourceType: "node", documentLabel: "Node text" });
+    assert.ok(context);
+    const sensitiveText = "request payload text must stay private";
+
+    const response = await requestJSON<{ ok: boolean }>("https://api.example.test", "/v1/editor-json/node/node-1/documents/text?company_id=secret", {
+      auth: false,
+      editorTraceContext: context,
+      fetchImpl: async () => jsonResponse({ ok: true }),
+      json: { document: { text: sensitiveText } },
+      method: "POST",
+    });
+    assert.deepEqual(response, { ok: true });
+
+    const exported = stopEditorTraceForTests();
+    const names = new Set(exported.events.map((event) => event.name));
+    assert.ok(names.has("request.json_stringify"));
+    assert.ok(names.has("request.timeout_signal"));
+    assert.ok(names.has("request.fetch"));
+    assert.ok(names.has("request.response_json"));
+    assert.ok(names.has("request.cleanup"));
+    assert.ok(names.has("request.total"));
+    const requestStart = exported.events.find((event) => event.name === "request.total" && event.phase === "begin");
+    assert.equal(requestStart?.data?.method, "POST");
+    assert.equal(requestStart?.data?.path, "/v1/editor-json/node/:resource_id/documents/:document_id");
+    assert.equal(requestStart?.data?.has_json, true);
+    assert.ok(Number(requestStart?.data?.request_body_bytes) > sensitiveText.length);
+    const serialized = JSON.stringify(exported);
+    assert.ok(!serialized.includes(sensitiveText));
+    assert.ok(!serialized.includes("company_id=secret"));
+  } finally {
+    resetEditorTraceForTests();
+  }
 });

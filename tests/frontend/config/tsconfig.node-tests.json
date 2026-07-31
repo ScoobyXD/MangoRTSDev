@@ -176,6 +176,7 @@
     "../modules/kanban/nodeEditorOverlayViewMode.test.ts",
     "../../../frontend/src/modules/editor/editorTabs.ts",
     "../modules/editor/editorTabs.test.ts",
+    "../modules/editor/editorTrace.test.ts",
     "../../../frontend/src/modules/editor/editorRowVirtualization.ts",
     "../modules/editor/editorRowVirtualization.test.ts",
     "../../../frontend/src/modules/editor/editorUndoHistory.ts",

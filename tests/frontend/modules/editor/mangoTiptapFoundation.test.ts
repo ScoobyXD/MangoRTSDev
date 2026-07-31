@@ -45,6 +45,12 @@ import {
   getEditorRuntimeMetrics,
   resetEditorRuntimeMetricsForTests,
 } from "../../../../frontend/src/modules/editor/editorRuntimeMetrics.js";
+import {
+  createEditorTraceContext,
+  resetEditorTraceForTests,
+  startEditorTraceForTests,
+  stopEditorTraceForTests,
+} from "../../../../frontend/src/modules/editor/editorTrace.js";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -1163,6 +1169,84 @@ test("exact realtime scope exists only while the document is visibly eligible", 
     assert.equal(unsubscriptions, 1, "visibility cleanup is idempotent");
   } finally {
     await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
+test("editor trace follows quiet-period scheduling through IndexedDB and save acknowledgement", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  startEditorTraceForTests();
+  const traceContext = createEditorTraceContext({ resourceType: "node", documentLabel: "Node text" });
+  assert.ok(traceContext);
+  const sensitiveText = "private full document text";
+  const document = richDocument(sensitiveText);
+  let postCount = 0;
+  const sync = new MangoTiptapSync({
+    companyID: "company-trace",
+    resourceType: "node",
+    resourceID: "node-trace",
+    documentID: "document-trace",
+    traceContext,
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown; editorTraceContext?: typeof traceContext }) => {
+      assert.equal(init?.editorTraceContext, traceContext);
+      if (init?.method === "POST") {
+        postCount += 1;
+        const json = init.json as { operation_id: string };
+        return {
+          operation_id: json.operation_id,
+          revision: postCount,
+          committed_at: "2026-07-30T00:00:00Z",
+        } as T;
+      }
+      return {
+        revision: 0,
+        schema_version: 1,
+        document: createEmptyMangoTiptapDocument(),
+      } as T;
+    },
+    onDocument: () => undefined,
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+
+  try {
+    await sync.start();
+    sync.schedule(() => document);
+    await sync.flush();
+    await sync.shutdown();
+    const exported = stopEditorTraceForTests();
+    const names = new Set(exported.events.map((event) => event.name));
+    for (const expected of [
+      "sync.schedule",
+      "sync.batch_timer.armed",
+      "sync.batch_timer.cancelled",
+      "sync.capture_scheduled_snapshot",
+      "sync.snapshot_provider",
+      "indexeddb.open",
+      "indexeddb.pending.get",
+      "indexeddb.pending.put",
+      "indexeddb.pending.delete_if_operation",
+      "sync.drain",
+      "sync.save_state.published",
+      "sync.pending_count.changed",
+    ]) {
+      assert.ok(names.has(expected), `missing trace event: ${expected}`);
+    }
+    assert.equal(postCount, 1);
+    assert.equal(exported.open_spans.length, 0);
+    assert.ok(!JSON.stringify(exported).includes(sensitiveText));
+  } finally {
+    resetEditorTraceForTests();
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
       else Object.defineProperty(globalThis, key, { configurable: true, value });
