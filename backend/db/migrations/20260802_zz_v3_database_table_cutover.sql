@@ -16,24 +16,22 @@ create function pg_temp.mangorts_v3_assert_columns(expected_table text, expected
 returns void language plpgsql as $$
 declare
   actual_columns text[];
-  normalized_expected_columns text[];
 begin
   -- Column order is not a schema contract. PostgreSQL appends columns added by
-  -- ALTER TABLE, so equivalent legacy databases can have different ordinals.
-  -- Compare sorted sets while still rejecting every missing or extra column.
-  select array_agg(column_name order by column_name)
+  -- ALTER TABLE, and identifier/text sorting can use different collations.
+  -- Compare both set directions plus cardinality so order and collation are
+  -- irrelevant while every missing, extra, or duplicated expectation fails.
+  select array_agg(column_name::text order by ordinal_position)
     into actual_columns
     from information_schema.columns
    where table_schema='public' and table_name=expected_table;
   if actual_columns is null then
     raise exception 'V3 cutover expected table % is missing', expected_table;
   end if;
-  select array_agg(expected.column_name order by expected.column_name)
-    into normalized_expected_columns
-    from unnest(expected_columns) as expected(column_name);
-  if actual_columns is distinct from normalized_expected_columns then
+  if cardinality(actual_columns) <> cardinality(expected_columns)
+     or not (actual_columns @> expected_columns and actual_columns <@ expected_columns) then
     raise exception 'V3 cutover schema drift for %: expected %, found %',
-      expected_table, normalized_expected_columns, actual_columns;
+      expected_table, expected_columns, actual_columns;
   end if;
 end;
 $$;

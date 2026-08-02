@@ -145,15 +145,13 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 	migration := strings.ToLower(string(migrationBytes))
 	fixture := strings.ToLower(string(fixtureBytes))
 	assertions := strings.ToLower(string(assertionBytes))
-	if strings.Contains(migration, "order by ordinal_position") {
-		t.Error("strict V3 migration must compare exact column sets without treating physical column order as schema drift")
-	}
-	for _, normalizedSet := range []string{
-		"array_agg(column_name order by column_name)",
-		"array_agg(expected.column_name order by expected.column_name)",
+	for _, exactSetCheck := range []string{
+		"cardinality(actual_columns) <> cardinality(expected_columns)",
+		"actual_columns @> expected_columns",
+		"actual_columns <@ expected_columns",
 	} {
-		if !strings.Contains(migration, normalizedSet) {
-			t.Errorf("strict V3 migration missing column-set normalization %q", normalizedSet)
+		if !strings.Contains(migration, exactSetCheck) {
+			t.Errorf("strict V3 migration missing order-independent exact column-set check %q", exactSetCheck)
 		}
 	}
 	for _, forbidden := range []string{"drop table if exists", "create table if not exists node_textbox_chats", "create table if not exists email_relationships"} {
