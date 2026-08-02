@@ -275,6 +275,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     disconnect() { this.target = null; }
     unobserve(target: Element) { if (this.target === target) this.target = null; }
     takeRecords() { return []; }
+    isObserving() { return this.target !== null; }
   }
   installGlobal("IntersectionObserver", TestIntersectionObserver, restores);
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
@@ -426,7 +427,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       assert.ok(editorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `sleeping renderer should paint ${annotation.id}`);
     }
 
-    const exactObserver = observers.filter((observer) => observer.rootMargin === "0px").at(-1);
+    const exactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving()).at(-1);
     assert.ok(exactObserver);
     const readsBeforeVisible = canonicalReads;
     const subscriptionsBeforeVisible = subscriptions;
@@ -676,7 +677,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     for (const annotation of canonicalAnnotations) {
       assert.ok(remountedEditorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `persisted ${annotation.kind} position should survive remount`);
     }
-    const reentryExactObserver = observers.filter((observer) => observer.rootMargin === "0px").at(-1);
+    const reentryExactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving()).at(-1);
     assert.ok(reentryExactObserver);
     const subscriptionsBeforeReentry = subscriptions;
     const readsBeforeVisibleReentry = canonicalReads;

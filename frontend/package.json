@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:node-relationships": "node ../tests/frontend/scripts/run-node-relationship-tests.contract.test.mjs && node ../tests/frontend/scripts/run-node-relationship-tests.mjs",
     "test:mango-html-to-json": "node scripts/run-mango-html-to-json-tests.mjs",
-    "convert:mango-html-to-json": "node scripts/run-mango-html-to-json.mjs"
+    "convert:mango-html-to-json": "node scripts/run-mango-html-to-json.mjs",
+    "convert:editor-textbox-history": "node scripts/run-mango-editor-history-cutover.mjs"
   },
   "dependencies": {
     "@tiptap/core": "3.28.0",

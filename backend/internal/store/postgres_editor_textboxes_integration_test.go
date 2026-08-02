@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -147,6 +148,84 @@ func TestPostgresEditorTextboxCutoverWorksAfterLegacyTablesAreDropped(t *testing
 	if nodeHistory != 1 || projectHistory != 1 || logicHistory != 1 {
 		t.Fatalf("history counts node=%d project=%d logic=%d", nodeHistory, projectHistory, logicHistory)
 	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := newCompanyExplorerRecycleScope()
+	scope.NodeIDs[nodeID] = true
+	scope.ProjectIDs[projectID] = true
+	scope.LogicGateIDs[logicGateID] = true
+	recyclePayload, err := postgresSnapshotRecyclePayloadTx(context.Background(), tx, companyID, scope)
+	if rollbackErr := tx.Rollback(); err == nil && rollbackErr != nil {
+		err = rollbackErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recycled map[string][]json.RawMessage
+	if err := json.Unmarshal(recyclePayload, &recycled); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{
+		"node_textboxes", "project_textboxes", "logic_gate_textboxes",
+		"node_textboxes_history", "project_textboxes_history", "logic_gate_textboxes_history",
+	} {
+		if len(recycled[table]) != 1 {
+			t.Fatalf("recycle payload %s rows=%d, want 1", table, len(recycled[table]))
+		}
+	}
+
+	for _, owner := range []struct {
+		table  string
+		column string
+		id     string
+	}{
+		{"nodes", "node_id", nodeID},
+		{"projects", "project_id", projectID},
+		{"logic_gates", "logic_gate_id", logicGateID},
+	} {
+		query := fmt.Sprintf("delete from %s where company_id=$1::uuid and %s=$2::uuid", owner.table, owner.column)
+		if _, err := db.Exec(query, companyID, owner.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restoreTx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range recycleRestoreTableOrder {
+		tableRows := recycled[table]
+		if len(tableRows) == 0 {
+			continue
+		}
+		encodedRows, marshalErr := json.Marshal(tableRows)
+		if marshalErr != nil {
+			_ = restoreTx.Rollback()
+			t.Fatal(marshalErr)
+		}
+		if restoreErr := postgresRestoreRecycleTableTx(context.Background(), restoreTx, table, encodedRows); restoreErr != nil {
+			_ = restoreTx.Rollback()
+			t.Fatalf("restore %s: %v", table, restoreErr)
+		}
+	}
+	if err := restoreTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var restoredRows int
+	if err := db.QueryRow(`select
+		(select count(*) from node_textboxes where company_id=$1::uuid)
+		+ (select count(*) from project_textboxes where company_id=$1::uuid)
+		+ (select count(*) from logic_gate_textboxes where company_id=$1::uuid)
+		+ (select count(*) from node_textboxes_history where company_id=$1::uuid)
+		+ (select count(*) from project_textboxes_history where company_id=$1::uuid)
+		+ (select count(*) from logic_gate_textboxes_history where company_id=$1::uuid)`, companyID).Scan(&restoredRows); err != nil {
+		t.Fatal(err)
+	}
+	if restoredRows != 6 {
+		t.Fatalf("restored current/history textbox rows=%d, want 6", restoredRows)
+	}
+
 	if outbox != 4 {
 		t.Fatalf("outbox rows=%d, want 4 current-save events", outbox)
 	}

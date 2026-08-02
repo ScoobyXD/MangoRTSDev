@@ -137,7 +137,7 @@ func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage
 			content_revision,revision,display_order,created_timestamp,updated_timestamp
 		) values($1::uuid,$2::uuid,$3::uuid,1,$4::jsonb,$5::jsonb,'',0,0,
 			coalesce((select max(display_order)+1 from node_textboxes where company_id=$1::uuid and node_id=$2::uuid),0),
-			clock_timestamp(),clock_timestamp()) on conflict(company_id,node_id,textbox_id) do nothing`,
+			statement_timestamp(),statement_timestamp()) on conflict(company_id,node_id,textbox_id) do nothing`,
 			ref.CompanyID, ref.ResourceID, ref.DocumentID, emptyMangoTiptapDocument, body)
 		return mapEditorOwnerTextLimitError(err)
 	}
@@ -145,7 +145,7 @@ func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage
 		query := fmt.Sprintf(`insert into %s(company_id,%s,%s,body_json,revision,display_order,created_timestamp,updated_timestamp)
 			values($1::uuid,$2::uuid,%s,$4::jsonb,0,
 			coalesce((select max(display_order)+1 from %s where company_id=$1::uuid and %s=$2::uuid),0),
-			clock_timestamp(),clock_timestamp()) on conflict(company_id,%s,%s) do nothing`,
+			statement_timestamp(),statement_timestamp()) on conflict(company_id,%s,%s) do nothing`,
 			storage.table, storage.ownerColumn, storage.textboxColumn,
 			postgresEditorTextboxIDExpression(storage, "$3"), storage.table, storage.ownerColumn,
 			storage.ownerColumn, storage.textboxColumn)
@@ -153,7 +153,7 @@ func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage
 		return mapEditorOwnerTextLimitError(err)
 	}
 	query := fmt.Sprintf(`insert into %s(company_id,%s,%s,body_json,revision,created_timestamp,updated_timestamp)
-		values($1::uuid,$2::uuid,%s,$4::jsonb,0,clock_timestamp(),clock_timestamp())
+		values($1::uuid,$2::uuid,%s,$4::jsonb,0,statement_timestamp(),statement_timestamp())
 		on conflict(company_id,%s,%s) do nothing`, storage.table, storage.ownerColumn,
 		storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"), storage.ownerColumn, storage.textboxColumn)
 	_, err := tx.ExecContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID, body)
@@ -344,14 +344,16 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null from %s
+	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,
+		greatest(clock_timestamp(),created_timestamp) from %s
 		where company_id=$1::uuid and %s=$2::uuid and %s=%s for update`, storage.table,
 		storage.ownerColumn, storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
 	var revision int64
 	var currentBody []byte
 	var deleted bool
+	var now time.Time
 	if err := tx.QueryRowContext(ctx, query, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID).
-		Scan(&revision, &currentBody, &deleted); err != nil {
+		Scan(&revision, &currentBody, &deleted, &now); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if deleted && input.BaseRevision != revision {
@@ -367,7 +369,7 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		}
 		return EditorJSONCommit{OperationID: input.OperationID, Revision: revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: currentDocument,
-			Annotations: currentAnnotations, CommittedAt: time.Now().UTC(), Deduplicated: true}, nil
+			Annotations: currentAnnotations, CommittedAt: now, Deduplicated: true}, nil
 	}
 	merged := input.BaseRevision != revision
 	nextDocument, nextAnnotations := input.JSONDocument, input.Annotations
@@ -384,7 +386,7 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
-	now, nextRevision, eventID := time.Now().UTC(), revision+1, newUUIDv7String()
+	nextRevision, eventID := revision+1, newUUIDv7String()
 	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextDocument, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -432,14 +434,16 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null from %s
+	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,
+		greatest(clock_timestamp(),created_timestamp) from %s
 		where company_id=$1::uuid and %s=$2::uuid and %s=%s for update`, storage.table,
 		storage.ownerColumn, storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
 	var revision int64
 	var body []byte
 	var deleted bool
+	var now time.Time
 	if err := tx.QueryRowContext(ctx, query, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID).
-		Scan(&revision, &body, &deleted); err != nil {
+		Scan(&revision, &body, &deleted, &now); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return EditorJSONCommit{}, ErrNotFound
 		}
@@ -456,9 +460,9 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		}
 		return EditorJSONCommit{OperationID: input.OperationID, Revision: revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
-			Annotations: annotations, CommittedAt: time.Now().UTC(), Deduplicated: true}, nil
+			Annotations: annotations, CommittedAt: now, Deduplicated: true}, nil
 	}
-	now, nextRevision, eventID := time.Now().UTC(), revision+1, newUUIDv7String()
+	nextRevision, eventID := revision+1, newUUIDv7String()
 	update := fmt.Sprintf(`update %s set revision=$4,deleted_timestamp=$5,updated_timestamp=$5
 		where company_id=$1::uuid and %s=$2::uuid and %s=%s`, storage.table, storage.ownerColumn,
 		storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
