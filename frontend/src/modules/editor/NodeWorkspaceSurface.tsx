@@ -34,7 +34,6 @@ import {
 } from "../attachments/attachmentApi";
 import {
   buildEditorAttachedEmailPayload,
-  buildEditorTextBlockMetadataPayload,
   buildEditorTextBlockChatPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
@@ -1384,15 +1383,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
     if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block_metadata");
-    const format = editorDataFormat.gate?.editor_format;
-    if (!format) throw new Error("editor_data_format_not_ready");
+    if (!editorDataFormat.gate) throw new Error("editor_data_format_not_ready");
     const response = await requestJSON<{ projection_revision?: number }>(
-      `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+      `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
         method: "PATCH",
-        body: JSON.stringify(format === "tiptap_json"
-          ? { title: content.title, attachments: content.attachments ?? [] }
-          : buildEditorTextBlockMetadataPayload(content)),
+        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
       },
     );
     const revision = response?.projection_revision ?? 0;
@@ -1708,8 +1704,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
-    const format = editorDataFormat.gate?.editor_format;
-    if (!format) {
+    if (!editorDataFormat.gate) {
       onError("editor_data_format_not_ready");
       return;
     }
@@ -1720,9 +1715,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     let snapshot;
     try {
-      if (format === "tiptap_json") {
-        await flushMangoTiptapDocument({ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID });
-      }
+      await flushMangoTiptapDocument({ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID });
       snapshot = await textBlockProjectionSaveController.waitForInProgressSave(blockID);
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_save_text_block_before_deletion");
@@ -1738,16 +1731,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       for (const informationID of deletedInformationIDs) {
         try {
           if (informationID === blockID) {
-            const editorPath = `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
-            const baseRevision = format === "tiptap_json"
-              ? (await requestJSON<{ revision: number }>(editorPath)).revision
-              : undefined;
+            const editorPath = `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
+            const baseRevision = (await requestJSON<{ revision: number }>(editorPath)).revision;
             await requestJSON<unknown>(editorPath, {
               method: "DELETE",
               body: JSON.stringify({
                 operation_id: generateStableInformationID(),
                 client_id: `node-delete:${author.userID}`,
-                ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+                base_revision: baseRevision,
               }),
             });
           } else {

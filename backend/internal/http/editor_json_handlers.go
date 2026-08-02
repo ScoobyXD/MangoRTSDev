@@ -298,8 +298,8 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var request struct {
-			Title       string                                         `json:"title"`
-			Attachments []store.EditorCollaborationAttachmentReference `json:"attachments"`
+			Title       string                                `json:"title"`
+			Attachments []store.EditorJSONAttachmentReference `json:"attachments"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -307,7 +307,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		commit, err := s.repo.UpdateEditorJSONMetadata(store.EditorCollaborationMetadataInput{
+		commit, err := s.repo.UpdateEditorJSONMetadata(store.EditorJSONMetadataInput{
 			Document: store.EditorDocumentRef{
 				CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
 				ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,

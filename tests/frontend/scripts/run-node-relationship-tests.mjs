@@ -205,11 +205,10 @@ for (const componentTest of componentTests) {
 const componentTestFiles = new Set(componentTests.map((componentTest) => componentTest.file));
 for (const testFile of [...testFiles, ...componentTestFiles]) {
   console.log(`\n=== Frontend feature tests: ${testFile} ===`);
-  // Running the compiled test module directly avoids Node's worker-spawn path, which is
-  // blocked in some Windows sandboxes. `node:test` still reports TAP and exits non-zero
-  // on failures, so this keeps the same pass/fail contract.
+  // Force the Node test harness to close timers left by deliberately long-lived UI
+  // clients after each module reports its assertions.
   run(
-    `"${process.execPath}" "${testFile}"`,
+    `"${process.execPath}" --test --test-force-exit "${testFile}"`,
     componentTestFiles.has(testFile) ? { NODE_ENV: "development" } : {},
   );
 }

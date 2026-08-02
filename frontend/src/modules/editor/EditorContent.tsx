@@ -23,7 +23,7 @@ import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipPr
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
-import { linkMangoResourceAttachment, loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
+import { linkMangoResourceAttachment } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -33,16 +33,13 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
-  buildEditorTextBlockMetadataPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
   parseEditorTextBlockContent,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import { editorHTMLPatchForChange } from "./editorTextboxSync";
 import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
-import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
@@ -60,22 +57,17 @@ import {
   type NodeImageNodeRequest,
 } from "./NodeWorkspaceSurfaceShared";
 import {
-  deserializeEditorDocumentHTML,
-  EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
   type EditorHighlightColor,
 } from "./richTextEditing";
 import {
-  documentTargetKey,
   generateStableInformationID,
   shouldReadStoredSelectionForEvent,
   type DocumentSaveRequest,
   type DocumentSaveTarget,
-  type LinkedEntityKind,
   type LinkedSelection,
 } from "./editorTypes";
-import { hydrateEditorAttachmentImageFrames } from "./editorImages";
 import {
   EDITOR_DOCUMENT_FONT_SIZE_PX,
   EDITOR_DOCUMENT_LINE_HEIGHT,
@@ -86,8 +78,6 @@ import {
   useEditorPreferences,
 } from "./useEditorPreferences";
 import {
-  getEditorSelectionOffsets,
-  setEditorSelectionByOffsets,
   useEditorDocumentFormattingController,
   useEditorDocumentSurfaceHandlers,
   type EditorDocumentFormattingController,
@@ -627,8 +617,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [selectionHighlightColor, setSelectionHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [selectionTextAlignment, setSelectionTextAlignment] = useState<EditorTextAlignment>("left");
   const [nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable] = useState(false);
-  const [documentScrollTop, setDocumentScrollTop] = useState(0);
-  const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
+  const [, setDocumentScrollTop] = useState(0);
+  const [, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editorHeaderHeightPx, setEditorHeaderHeightPx] = useState(0);
   const [relationshipTabAnchorCenterPx, setRelationshipTabAnchorCenterPx] = useState<number | null>(null);
@@ -770,16 +760,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const element = editorDocumentRef.current;
     if (!targetKey || !element) return;
     scrollMemoryRef.current.remember(targetKey, element.scrollTop);
-  }, []);
-
-  const restoreEditorDocumentScroll = useCallback((targetKey: string) => {
-    window.requestAnimationFrame(() => {
-      const element = editorDocumentRef.current;
-      if (!element || currentDocumentTargetKeyRef.current !== targetKey) return;
-      const nextScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
-      element.scrollTop = nextScrollTop;
-      setDocumentScrollTop(nextScrollTop);
-    });
   }, []);
 
   const focusEditorDocumentWithoutScrollJump = useCallback((targetKey = currentDocumentTargetKeyRef.current) => {
@@ -986,51 +966,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       flushPendingDocumentSave(editorDocumentRef.current ? serializeEditorDocumentHTML(editorDocumentRef.current) : documentDraftRef.current);
     };
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
-
-  const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string, revision: number) => {
-    const resolvedInformationID = informationID || (entityKind === "logic_gate" ? generateStableInformationID() : "");
-    const targetKey = resolvedInformationID ? documentTargetKey({ entityKind, entityID, informationID: resolvedInformationID }) : `${entityKind}:${entityID}:`;
-    const loadedText = text;
-    const baseRevision = Number.isInteger(revision) && revision >= 0 ? revision : 0;
-    const element = editorDocumentRef.current;
-    const preserveSelection = currentDocumentTargetKeyRef.current === targetKey;
-    if (element && preserveSelection) restoreDocumentSelectionForHydrationRef.current?.(element);
-    const selectionOffsets = element && preserveSelection ? getEditorSelectionOffsets(element) : null;
-    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
-    documentDraftRef.current = loadedText;
-    persistedDocumentRef.current = text;
-    documentInformationIDRef.current = resolvedInformationID;
-    documentRevisionRef.current = baseRevision;
-    setDocumentInformationID(resolvedInformationID);
-    currentDocumentTargetKeyRef.current = targetKey;
-    persistedDocumentTargetKeyRef.current = targetKey;
-    setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
-    setSelectionInlineFormat({ bold: false, underline: false, italic: false, strikethrough: false });
-    setSelectionHighlightColor(null);
-    pendingEditorFontSizeRef.current = null;
-    pendingEditorHighlightColorRef.current = undefined;
-    pendingEditorInlineFormatRef.current = null;
-    pendingEditorTypingCaretRef.current = null;
-    setSelectionTextAlignment("left");
-    restoringScrollRef.current = true;
-    const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
-    if (element) {
-      const nextHTML = deserializeEditorDocumentHTML(loadedText);
-      attachmentHydrationCleanupRef.current?.();
-      attachmentHydrationCleanupRef.current = null;
-      if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
-      if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
-      attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
-        loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
-      ));
-      element.scrollTop = restoredScrollTop;
-    }
-    setDocumentScrollTop(restoredScrollTop);
-    scheduleIndentGuideUpdate(element ? readEditorDocumentText(element) : loadedText);
-    restoreEditorDocumentScroll(targetKey);
-    window.requestAnimationFrame(() => { restoringScrollRef.current = false; });
-    if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [apiBase, companyID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -1419,7 +1354,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         editorSurface: "node_text_block",
       });
     }
-    if (editorDataFormat.gate?.editor_format === "tiptap_json") {
       const parsed = parseMangoTiptapDocument(input.tiptapDocument ?? document);
       if (!parsed.valid) throw new Error(`invalid_image_node_tiptap_document: ${parsed.error}`);
       const path = `/v1/editor-json/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`;
@@ -1437,21 +1371,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         method: "PATCH",
         body: JSON.stringify({ title: blockTitle, attachments: [] }),
       });
-    } else {
-      await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "POST",
-        body: JSON.stringify({
-          operation_id: operationID,
-          client_id: `editor-image-node:${currentUserID}`,
-          base_revision: 0,
-          patch: editorHTMLPatchForChange("", document),
-        }),
-      });
-      await requestJSON<unknown>(`/v1/editor-collaboration/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "PATCH",
-        body: JSON.stringify(buildEditorTextBlockMetadataPayload({ title: blockTitle, document })),
-      });
-    }
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
@@ -1979,16 +1898,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         : undefined;
       const currentTextBox = activeTextBox ?? focusedTextBox ?? selectCurrentEditorTextProjection(projections);
       if (!editorDataFormat.gate) return;
-      if (editorDataFormat.gate.editor_format === "tiptap_json") {
-        const informationID = currentTextBox?.information_id?.trim() || LOGIC_GATE_OVERVIEW_DOCUMENT_ID;
-        setDocumentInformationID(informationID);
-        documentInformationIDRef.current = informationID;
-        documentDraftRef.current = "";
-        persistedDocumentRef.current = "";
-        return;
-      }
-      const localDocumentSaveActive = pendingSaveRef.current !== null || queuedSaveRef.current !== null || saveInFlightRef.current;
-      if (!localDocumentSaveActive) applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
+      const informationID = currentTextBox?.information_id?.trim() || LOGIC_GATE_OVERVIEW_DOCUMENT_ID;
+      setDocumentInformationID(informationID);
+      documentInformationIDRef.current = informationID;
+      documentDraftRef.current = "";
+      persistedDocumentRef.current = "";
+      return;
     } catch (cause) {
       if (!isCurrentTarget()) return;
       if (isTerminalResourceNotFoundError(cause)) {
@@ -2000,7 +1915,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
       setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
     }
-  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, editorDataFormat.gate, focusInformationID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, clearVisibleDocumentForSelection, companyID, editorDataFormat.gate, focusInformationID, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     const nodeID = linkedEntityKind === "node" ? linkedNodeID.trim() : "";
@@ -2059,17 +1974,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       await nodeWorkspaceSaveControllerRef.current?.flushPendingProjectionSaves();
       return;
     }
-    if (linkedEntityKind === "logic_gate") {
-      if (editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationIDRef.current) {
-        await flushMangoTiptapDocument({
-          companyID,
-          resourceType: "logic_gate",
-          resourceID: linkedNodeID,
-          documentID: documentInformationIDRef.current,
-        });
-        return;
-      }
-      await saveDocumentNow(editorDocumentRef.current ? serializeEditorDocumentHTML(editorDocumentRef.current) : documentDraftRef.current);
+    if (linkedEntityKind === "logic_gate" && documentInformationIDRef.current) {
+      await flushMangoTiptapDocument({
+        companyID,
+        resourceType: "logic_gate",
+        resourceID: linkedNodeID,
+        documentID: documentInformationIDRef.current,
+      });
     }
   }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityKind, linkedNodeID, saveDocumentNow]);
 
@@ -2117,8 +2028,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return null;
         }
       });
-      const canRestoreJSON = editorDataFormat.gate?.editor_format === "tiptap_json"
-        && jsonItems.length > 0
+      const canRestoreJSON = jsonItems.length > 0
         && jsonItems.every((item) => item?.document?.format === "mango-tiptap-json");
       if (canRestoreJSON) {
         const desiredItems = jsonItems.filter((item): item is NonNullable<typeof item> => item !== null);
@@ -2530,16 +2440,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ? projections.find((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === cleanFocusInformationID)
             : undefined;
           const currentTextBox = focusedTextBox ?? selectCurrentEditorTextProjection(projections);
-          if (editorDataFormat.gate?.editor_format === "legacy_html") {
-            applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "", currentTextBox?.revision ?? 0);
-          } else {
             const informationID = currentTextBox?.information_id?.trim() || LOGIC_GATE_OVERVIEW_DOCUMENT_ID;
             setDocumentInformationID(informationID);
             documentInformationIDRef.current = informationID;
             documentRevisionRef.current = 0;
             documentDraftRef.current = "";
             persistedDocumentRef.current = "";
-          }
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
@@ -2615,7 +2521,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, editorDataFormat.gate?.editor_format, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, editorDataFormat.gate?.editor_format, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2627,16 +2533,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : EDITOR_NEU_SURFACE;
   const scrollbarAccent = theme === "light" ? "rgb(71, 85, 105)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)";
-  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
-  const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions" || activeTab === "save-settings";
   const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 128 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
   const documentTopPx = hasLinkedDocument && editorHeaderHeightPx > 0 ? editorHeaderHeightPx + 6 : fallbackDocumentTopPx;
-  const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
-  const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const editorImageAttachmentContext = useMemo(() => (
     (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && linkedNodeID.trim()
@@ -2679,11 +2581,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     editorImageAttachmentContext,
   });
   const {
-    mentionMenu: documentMentionMenu,
     insertTable: insertDocumentTable,
     restoreSelection: restoreDocumentSelection,
     flushPendingInput: flushDocumentInputBatch,
-    ...documentSurfaceEventHandlers
   } = documentSurfaceHandlers;
   restoreDocumentSelectionForHydrationRef.current = restoreDocumentSelection;
   flushPendingLocalInputRef.current = () => { flushDocumentInputBatch(editorDocumentRef.current); };
@@ -2827,7 +2727,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
-            saveStateStorageKey={linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
+            saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
             secondaryActions={linkedEntityKind === "logic_gate" ? [{
               id: "apply-gvic-to-assigned-nodes",
               label: logicGateGVICApplyToAssignedNodesBusy ? "Applying GVIC to assigned nodes" : "Apply GVIC to assigned nodes",
@@ -3027,29 +2927,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onError={setError}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind !== "node" && editorDataFormat.gate?.editor_format === "legacy_html" && (
-          <EditorDocumentSurface
-            documentRef={editorDocumentRef}
-            surfaceID="logic-gate-editor"
-            documentIsolation={documentIsolation}
-            editable={editorWriteEnabled}
-            documentTopPx={documentTopPx}
-            documentFontSize={documentFontSize}
-            documentLineHeightPx={documentLineHeightPx}
-            documentFontFamily={documentFontFamily}
-            documentBottomBufferPx={documentBottomBufferPx}
-            documentScrollTop={documentScrollTop}
-            showIndentGuides={showIndentGuides}
-            indentGuideSegments={indentGuideSegments}
-            indentGuideColor={indentGuideColor}
-            surfaceText={surfaceText}
-            caretColor={editorPrimaryText}
-            scrollbarAccent={scrollbarAccent}
-            scrollbarTrack={scrollbarTrack}
-            {...documentSurfaceEventHandlers}
-          />
-        )}
-        {hasLinkedDocument && linkedEntityKind === "logic_gate" && editorDataFormat.gate?.editor_format === "tiptap_json" && documentInformationID && (
+        {hasLinkedDocument && linkedEntityKind === "logic_gate" && documentInformationID && (
           <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
             <LogicGateTiptapEditorSurface
               key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
@@ -3076,7 +2954,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             />
           </React.Suspense>
         )}
-        {linkedEntityCanEdit && editorDataFormat.gate?.editor_format === "legacy_html" && documentMentionMenu}
         {emptyMessage && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
             {emptyMessage}

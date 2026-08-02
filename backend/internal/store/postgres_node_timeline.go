@@ -200,9 +200,6 @@ values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)`, input.CompanyID, input.Nod
 	if err != nil {
 		return NodeTimelineMutationResult{}, err
 	}
-	if err := insertNodeV2VerificationRequestForLegacyTx(ctx, tx, input, item); err != nil {
-		return NodeTimelineMutationResult{}, err
-	}
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{{
 		CompanyID: input.CompanyID, StreamType: EntityTypeNode, StreamID: input.NodeID,
 		Type: NodeVerificationRequestedWorkspaceEventType, ActorUserID: input.ActorUserID,
@@ -251,9 +248,6 @@ where company_id=$1::uuid and node_id=$2::uuid and event_id=$3::uuid and user_id
 	if err != nil {
 		return domain.NodeTimelineEvent{}, err
 	}
-	if err := insertNodeV2VerificationStampForLegacyTx(ctx, tx, input, item); err != nil {
-		return domain.NodeTimelineEvent{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.NodeTimelineEvent{}, err
 	}
@@ -276,9 +270,6 @@ where source_gate.company_id=$2::uuid and source_gate.logic_gate_id=$5::uuid
 returning `+nodeTimelineEventColumns,
 		newUUIDv7String(), companyID, nodeID, actorUserID, fromLogicGateID, toLogicGateID))
 	if err != nil {
-		return item, err
-	}
-	if err := insertNodeV2MovementForLegacyTimelineTx(ctx, tx, item); err != nil {
 		return item, err
 	}
 	return item, nil

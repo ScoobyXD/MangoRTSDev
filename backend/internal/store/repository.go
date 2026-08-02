@@ -16,8 +16,6 @@ var (
 	ErrVersionConflict               = errors.New("version conflict")
 	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
 	ErrEditorOwnerTextLimit          = errors.New("editor owner text limit exceeded")
-	ErrNodeV2Inactive                = errors.New("node v2 inactive")
-	ErrNodeV2UntrustedCheckpoint     = errors.New("node v2 checkpoint requires trusted service")
 	ErrSendInProgress                = errors.New("send in progress")
 	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
 	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
@@ -76,9 +74,7 @@ type Repository interface {
 	ProjectManagementRepository
 	NotificationRepository
 	NodeTimelineRepository
-	NodeV2Repository
 	RealtimeOutboxRepository
-	EditorCollaborationRepository
 	EditorJSONRepository
 	DomainEventRepository
 }
@@ -1015,13 +1011,6 @@ type RealtimeOutboxRepository interface {
 	CurrentPublishedRealtimeOutboxSequence() (int64, error)
 }
 
-type EditorCollaborationRepository interface {
-	GetEditorCollaborationSnapshot(ref EditorDocumentRef) (EditorCollaborationSnapshot, error)
-	CommitEditorCollaborationOperation(input EditorCollaborationOperationInput) (EditorCollaborationCommit, error)
-	UpdateEditorCollaborationMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error)
-	DeleteEditorCollaborationDocument(input EditorCollaborationDeleteInput) (EditorCollaborationCommit, error)
-}
-
 type EditorJSONRepository interface {
 	GetEditorDataFormat(companyID string) (EditorDataFormatGate, error)
 	GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJSONSnapshot, error)
@@ -1029,7 +1018,7 @@ type EditorJSONRepository interface {
 	CommitEditorJSONDocument(input EditorJSONCommitInput) (EditorJSONCommit, error)
 	DeleteEditorJSONDocument(input EditorJSONDeleteInput) (EditorJSONCommit, error)
 	ListEditorJSONVersions(ref EditorJSONDocumentRef, limit int) ([]EditorJSONVersion, error)
-	UpdateEditorJSONMetadata(input EditorCollaborationMetadataInput) (EditorCollaborationMetadataCommit, error)
+	UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (EditorJSONMetadataCommit, error)
 }
 
 type DeleteCompanyUserResult struct {

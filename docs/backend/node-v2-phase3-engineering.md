@@ -1,8 +1,8 @@
 # Node v2 Phase 3 engineering and rollout runbook
 
-Last updated: 2026-07-28
+Last updated: 2026-08-02
 
-Status: repository engineering complete behind inactive gates. Manual user acceptance, development migration-ledger reconciliation, real conversion, real cutover, and legacy cleanup are intentionally pending.
+Status: **superseded before rollout**. The shared revisioned TipTap JSON path replaced this design, and migration `20260802_retire_node_v2_and_legacy_editor.sql` removes its remaining Node v2 and cutover storage. This file is a historical record only.
 
 ## Executive result
 

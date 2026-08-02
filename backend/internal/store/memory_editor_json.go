@@ -53,31 +53,16 @@ func (r *MemoryRepo) GetEditorDataFormat(companyID string) (EditorDataFormatGate
 	if companyID == "" {
 		return EditorDataFormatGate{}, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if gate, exists := r.editorDataFormats[companyID]; exists {
-		return gate, nil
-	}
 	return DefaultEditorDataFormatGate(companyID), nil
 }
 
-// SetEditorDataFormatForTests is intentionally not part of Repository. Production
-// format changes are performed only by the future audited migration/cutover tool.
+// SetEditorDataFormatForTests validates the permanent TipTap-only gate.
 func (r *MemoryRepo) SetEditorDataFormatForTests(gate EditorDataFormatGate) error {
-	if err := ValidateEditorDataFormatGate(gate); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.editorDataFormats[gate.CompanyID] = gate
-	return nil
+	return ValidateEditorDataFormatGate(gate)
 }
 
 func (r *MemoryRepo) editorJSONFormatReadyLocked(companyID string) bool {
-	gate, exists := r.editorDataFormats[companyID]
-	return exists && gate.EditorFormat == EditorFormatTiptapJSON &&
-		gate.MigrationState == EditorMigrationReady &&
-		gate.ExpectedDocumentCount == gate.ConvertedDocumentCount
+	return strings.TrimSpace(companyID) != ""
 }
 
 func (r *MemoryRepo) editorJSONResourceExistsLocked(ref EditorJSONDocumentRef) bool {

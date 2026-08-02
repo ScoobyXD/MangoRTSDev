@@ -85,7 +85,6 @@
     "../../../frontend/src/modules/workspace/workspaceSnapshotCache.ts",
     "../modules/workspace/workspaceSnapshotCache.test.ts",
     "../../../frontend/src/modules/realtime/realtimeWebSocket.ts",
-    "../../../frontend/src/modules/editor/editorTextboxSync.ts",
     "../../../frontend/src/modules/editor/editorLifecycle.ts",
     "../../../frontend/src/modules/editor/editorRuntimeMetrics.ts",
     "../../../frontend/src/modules/editor/editorDataFormat.ts",

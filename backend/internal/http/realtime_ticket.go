@@ -15,7 +15,7 @@ import (
 )
 
 const realtimeTicketTTL = 30 * time.Second
-const nodeV2CollaborationTicketTTL = 2 * time.Minute
+const editorOwnerCollaborationTicketTTL = 2 * time.Minute
 const realtimeTicketCookieName = "mangorts_realtime_ticket"
 const realtimeSignedTicketVersion = 1
 
@@ -31,19 +31,6 @@ type realtimeSignedTicketPayload struct {
 	CompanyID string       `json:"company_id"`
 	IssuedAt  int64        `json:"issued_at"`
 	ExpiresAt int64        `json:"expires_at"`
-}
-
-type nodeV2CollaborationTicketPayload struct {
-	Version            int    `json:"v"`
-	Type               string `json:"type"`
-	CompanyID          string `json:"company_id"`
-	NodeID             string `json:"node_id"`
-	TextboxID          string `json:"textbox_id"`
-	CollaborationEpoch string `json:"collaboration_epoch"`
-	UserID             string `json:"user_id"`
-	ClientID           string `json:"client_id"`
-	IssuedAt           int64  `json:"issued_at"`
-	ExpiresAt          int64  `json:"expires_at"`
 }
 
 type editorOwnerCollaborationTicketPayload struct {
@@ -149,44 +136,12 @@ func (s *realtimeTicketStore) mintSigned(actor ActorContext, companyID string, e
 	return body + "." + signature, nil
 }
 
-// mintNodeV2Collaboration creates a self-contained ticket that a separate
-// collaboration service can verify without receiving the browser's API token.
-// It is deliberately scoped to one exact document and one browser tab.
-func (s *realtimeTicketStore) mintNodeV2Collaboration(actor ActorContext, companyID, nodeID, textboxID, collaborationEpoch, clientID string) (string, time.Time, error) {
-	if s == nil || strings.TrimSpace(s.secret) == "" {
-		return "", time.Time{}, errors.New("node v2 collaboration ticket secret is not configured")
-	}
-	now := time.Now().UTC()
-	expiresAt := now.Add(nodeV2CollaborationTicketTTL)
-	payload := nodeV2CollaborationTicketPayload{
-		Version:            realtimeSignedTicketVersion,
-		Type:               "node-v2-collaboration",
-		CompanyID:          strings.TrimSpace(companyID),
-		NodeID:             strings.TrimSpace(nodeID),
-		TextboxID:          strings.TrimSpace(textboxID),
-		CollaborationEpoch: strings.TrimSpace(collaborationEpoch),
-		UserID:             strings.TrimSpace(actor.User.UserID),
-		ClientID:           strings.TrimSpace(clientID),
-		IssuedAt:           now.Unix(),
-		ExpiresAt:          expiresAt.Unix(),
-	}
-	if payload.CompanyID == "" || payload.NodeID == "" || payload.TextboxID == "" || payload.CollaborationEpoch == "" || payload.UserID == "" || payload.ClientID == "" || len(payload.ClientID) > 160 {
-		return "", time.Time{}, errors.New("invalid node v2 collaboration ticket payload")
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	body := base64.RawURLEncoding.EncodeToString(raw)
-	return body + "." + s.sign(body), expiresAt, nil
-}
-
 func (s *realtimeTicketStore) mintEditorOwnerCollaboration(actor ActorContext, companyID, ownerType, ownerID, documentID, collaborationEpoch, clientID string) (string, time.Time, error) {
 	if s == nil || strings.TrimSpace(s.secret) == "" {
 		return "", time.Time{}, errors.New("editor collaboration ticket secret is not configured")
 	}
 	now := time.Now().UTC()
-	expiresAt := now.Add(nodeV2CollaborationTicketTTL)
+	expiresAt := now.Add(editorOwnerCollaborationTicketTTL)
 	payload := editorOwnerCollaborationTicketPayload{
 		Version: realtimeSignedTicketVersion, Type: "editor-owner-collaboration",
 		CompanyID: strings.TrimSpace(companyID), OwnerType: strings.TrimSpace(ownerType),

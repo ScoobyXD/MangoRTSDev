@@ -91,12 +91,6 @@ func (r *MemoryRepo) PreparePermanentAttachmentDeletion(ctx context.Context, com
 			r.resourceAttachments[linkID] = link
 		}
 	}
-	for linkID, link := range r.nodeV2.attachmentLinks {
-		if link.Attachment.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
-			link.DeletedTimestamp = &now
-			r.nodeV2.attachmentLinks[linkID] = link
-		}
-	}
 	return AttachmentDeletionPlan{StorageKeys: keys}, nil
 }
 
@@ -119,11 +113,6 @@ func (r *MemoryRepo) FinalizePermanentAttachmentDeletion(ctx context.Context, co
 	for linkID, link := range r.resourceAttachments {
 		if link.CompanyID == companyID && link.AttachmentID == attachmentID {
 			delete(r.resourceAttachments, linkID)
-		}
-	}
-	for linkID, link := range r.nodeV2.attachmentLinks {
-		if link.Attachment.AttachmentID == attachmentID {
-			delete(r.nodeV2.attachmentLinks, linkID)
 		}
 	}
 	return nil

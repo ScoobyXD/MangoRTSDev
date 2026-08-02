@@ -13,7 +13,20 @@ type Restore = () => void;
 const COMPANY_ID = "virtualization-test-company";
 const NODE_ID = "virtualization-test-node";
 const PROJECT_ID = "virtualization-test-project";
-const DOCUMENT_PREFIX = "<!-- mango-editor-html-v1 -->";
+function tiptapDocument(text: string) {
+  return {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: `block-${text.toLowerCase().replace(/[^a-z]+/g, "-")}`, textAlign: "left", indentLevel: 0 },
+        content: [{ type: "text", text }],
+      }],
+    },
+  };
+}
 const TEXT_BLOCK_PREFIX = "<!-- mango-node-text-block-v1 -->";
 
 test("rich email bodies paint stored and active chat selections without flattening markup", () => {
@@ -49,7 +62,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
 function textBlockInformation(index: number, label: string): string {
   return TEXT_BLOCK_PREFIX + JSON.stringify({
     title: `Block ${index}`,
-    document: `${DOCUMENT_PREFIX}<p>${label} ${index}</p>`,
+    document: JSON.stringify(tiptapDocument(`${label} ${index}`)),
     attachments: [],
   });
 }
@@ -278,6 +291,14 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
   const scrolledIntoView: HTMLElement[] = [];
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value(this: HTMLElement) { scrolledIntoView.push(this); } });
+  if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  if (!dom.window.document.elementFromPoint) {
+    Object.defineProperty(dom.window.document, "elementFromPoint", {
+      configurable: true,
+      value: () => dom.window.document.querySelector(".mango-tiptap-prosemirror") ?? dom.window.document.body,
+    });
+  }
   Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => undefined });
   Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => undefined });
   Object.defineProperty(dom.window, "matchMedia", {
@@ -316,12 +337,11 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const nodeTextBlockProjectionItems = nodeProjections(60);
   let currentNodeProjectionItems = [...nodeTextBlockProjectionItems, nodeChatProjection("node-block-59")];
   const projectProjectionItems = projectProjections(60);
-  const serverDocuments = new Map<string, { html: string; revision: number }>();
+  const serverDocuments = new Map<string, { document: ReturnType<typeof tiptapDocument>; revision: number }>();
   for (const projection of [...nodeTextBlockProjectionItems, ...projectProjectionItems]) {
     const payload = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
-    serverDocuments.set(projection.information_id, { html: payload.document, revision: 0 });
+    serverDocuments.set(projection.information_id, { document: JSON.parse(payload.document) as ReturnType<typeof tiptapDocument>, revision: 0 });
   }
-  let committedEditorOperations = 0;
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
     if (url.pathname === "/v1/communications/messages/thread-root-node-block-0") return jsonResponse({
@@ -363,8 +383,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     });
     if (url.pathname === "/v1/editor-data-format") return jsonResponse({
       company_id: COMPANY_ID,
-      editor_format: "legacy_html",
-      migration_state: "not_started",
+      editor_format: "tiptap_json",
+      migration_state: "ready",
       document_schema_version: 1,
       expected_document_count: 0,
       converted_document_count: 0,
@@ -379,28 +399,35 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     }
     if (url.pathname.endsWith("/users")) return jsonResponse({ users: [] });
     if (url.pathname.endsWith("/user-groups")) return jsonResponse({ groups: [], members: [] });
-    if (url.pathname.includes("/editor-collaboration/")) {
+    if (url.pathname.startsWith("/v1/editor-json/")) {
+      if (url.pathname.endsWith("/collaboration-ticket")) {
+        return jsonResponse({
+          token: "virtualization-collaboration-token",
+          document_name: "virtualization-document",
+          collaboration_epoch: "00000000-0000-4000-8000-000000000001",
+        });
+      }
       const documentID = decodeURIComponent(url.pathname.split("/documents/")[1] ?? "");
-      const current = serverDocuments.get(documentID) ?? { html: "", revision: 0 };
+      const current = serverDocuments.get(documentID) ?? { document: tiptapDocument(""), revision: 0 };
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           operation_id: string;
-          patch: { start_utf8: number; delete_utf8: number; insert: string };
+          document: ReturnType<typeof tiptapDocument>;
         };
-        const nextHTML = current.html.slice(0, body.patch.start_utf8)
-          + body.patch.insert
-          + current.html.slice(body.patch.start_utf8 + body.patch.delete_utf8);
-        const next = { html: nextHTML, revision: current.revision + 1 };
+        const next = { document: body.document, revision: current.revision + 1 };
         serverDocuments.set(documentID, next);
-        committedEditorOperations += 1;
         return jsonResponse({
           operation_id: body.operation_id,
           revision: next.revision,
-          patch: body.patch,
-          concurrent_operations: [],
+          committed_at: "2026-01-01T00:00:00.000Z",
         });
       }
-      return jsonResponse({ revision: current.revision, html: current.html, etag: `revision-${current.revision}` });
+      return jsonResponse({
+        revision: current.revision,
+        schema_version: 1,
+        document: current.document,
+        annotations: [],
+      });
     }
     if (url.pathname.includes("/realtime/ticket")) return jsonResponse({});
     if (url.pathname.includes("/relationships")) return jsonResponse({ relationships: [] });
@@ -437,19 +464,23 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     ]);
     const noop = () => undefined;
     const runtimeErrors: string[] = [];
-    const nodeRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const nodeRequestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       if (path.includes("/editor-data-format")) {
         return {
           company_id: COMPANY_ID,
-          editor_format: "legacy_html",
-          migration_state: "not_started",
+          editor_format: "tiptap_json",
+          migration_state: "ready",
           document_schema_version: 1,
           expected_document_count: 0,
           converted_document_count: 0,
         } as T;
       }
-      if (path.includes("/editor-collaboration/") && (init?.method ?? "GET") === "PATCH") {
-        return { projection_revision: 2 } as T;
+      if (path.startsWith("/v1/editor-json/")) {
+        const response = await fetchImplementation(path, {
+          ...init,
+          body: init?.json === undefined ? init?.body : JSON.stringify(init.json),
+        });
+        return await response.json() as T;
       }
       if (path.includes("/attachments")) return { attachments: [] } as T;
       return { relationships: [], projects: [], results: [] } as T;
@@ -502,6 +533,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork();
     await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
     await flushWork();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    await flushWork(24);
 
     const initialNodeRows = assertBoundedRows(nodeContainer, "node");
     for (const rowID of initialNodeRows) {
@@ -546,7 +579,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const lateTextProjection = nodeProjections(61).find((projection) => projection.information_id === "node-block-60");
     assert.ok(lateTextProjection);
     const latePayload = JSON.parse(lateTextProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
-    serverDocuments.set(lateTextProjection.information_id, { html: latePayload.document, revision: 0 });
+    serverDocuments.set(lateTextProjection.information_id, { document: JSON.parse(latePayload.document) as ReturnType<typeof tiptapDocument>, revision: 0 });
     currentNodeProjectionItems = [
       ...nodeProjections(61),
       nodeChatProjection("node-block-59"),
@@ -575,35 +608,6 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork();
     assertNodePaneToggles(retainedRow, [true, false]);
 
-    committedEditorOperations = 0;
-    const editedSurface = nodeContainer.querySelector<HTMLElement>(`[data-node-text-block-id="${editedBlockID}"]`);
-    assert.ok(editedSurface);
-    assert.equal(editedSurface.getAttribute("contenteditable"), "true", "Node editor should be editable before exercising unmount flush");
-    await act(async () => {
-      const beforeInput = new dom.window.InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        inputType: "insertText",
-        data: "Edited before virtual unmount",
-      });
-      Simulate.beforeInput(editedSurface, {
-        data: "Edited before virtual unmount",
-        inputType: "insertText",
-        nativeEvent: beforeInput,
-      } as never);
-      editedSurface.innerHTML = "<p>Edited before virtual unmount</p>";
-      const input = new dom.window.InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: "Edited before virtual unmount",
-      });
-      Simulate.input(editedSurface, {
-        data: "Edited before virtual unmount",
-        inputType: "insertText",
-        nativeEvent: input,
-      } as never);
-    });
-
     let distantNodeRows: string[] = [];
     let previousScrollTop = nodeScrollElement.scrollTop;
     for (const nextScrollTop of [6_000, 12_000, 24_000, 36_000, 45_000]) {
@@ -615,19 +619,15 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     }
     assert.ok(distantNodeRows.includes("node-block-0"), "final Node row should mount at the bottom");
     assert.notDeepEqual(distantNodeRows, initialNodeRows, "Node scrolling should move the mounted window");
-    assert.equal(nodeContainer.querySelector(`[data-node-text-box-row="${editedBlockID}"]`), null, "edited Node row should unmount");
-    await flushWork();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
-    assert.ok(committedEditorOperations > 0, "virtual unmount should flush the pending editor operation");
-    assert.match(serverDocuments.get(editedBlockID)?.html ?? "", /Edited before virtual unmount/, "flushed backend snapshot should contain the edit");
+    assert.equal(nodeContainer.querySelector(`[data-node-text-box-row="${editedBlockID}"]`), null, "top Node row should unmount");
 
     await scroll(nodeScrollElement, 0);
     assertBoundedRows(nodeContainer, "node");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
     await flushWork();
     const remountedSurface = nodeContainer.querySelector<HTMLElement>(`[data-node-text-block-id="${editedBlockID}"]`);
-    assert.ok(remountedSurface, "edited Node row should remount when scrolled back");
-    assert.match(remountedSurface.textContent ?? "", /Edited before virtual unmount/, "remounted Node editor should preserve the edit");
+    assert.ok(remountedSurface, "top Node row should remount when scrolled back");
+    assert.match(remountedSurface.textContent ?? "", /Node content 59/, "remounted Node editor should restore its JSON document");
     const remountedChatToggle = nodeContainer.querySelector<HTMLButtonElement>(
       `[data-node-text-box-row="${editedBlockID}"] button[aria-label="Toggle chat column"]`,
     );

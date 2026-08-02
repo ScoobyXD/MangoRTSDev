@@ -29,27 +29,6 @@ func TestPostgresRealtimeProjectAndLogicGateJSONUsePermanentTextboxTables(t *tes
 		t.Fatal(err)
 	}
 
-	var runID string
-	if err := db.QueryRow(`insert into editor_conversion_runs(
-		conversion_run_id,company_id,owner_type,mode,status,batch_size,source_snapshot_timestamp,
-		backup_reference,expected_count,converted_count,started_timestamp,completed_timestamp
-	) values(gen_random_uuid(),$1::uuid,'all','backfill','completed',100,now(),'disposable owner routing proof',0,0,now(),now())
-	returning conversion_run_id::text`, company.CompanyID).Scan(&runID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`insert into editor_rollout_gates(
-		company_id,owner_type,rollout_state,validation_run_id,validated_timestamp,activated_timestamp
-	) select $1::uuid,owner_type,'active',$2::uuid,now(),now()
-	from unnest(array['node','project','logic_gate']) owner_type`, company.CompanyID, runID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`insert into workspace_editor_formats(
-		company_id,editor_format,migration_state,expected_document_count,converted_document_count,
-		validated_timestamp,cutover_timestamp
-	) values($1::uuid,'tiptap_json','ready',0,0,now(),now())`, company.CompanyID); err != nil {
-		t.Fatal(err)
-	}
-
 	document := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Owner table text"}]}]}}`)
 	cases := []struct {
 		name, resourceType, resourceID, documentID, currentTable, ownerColumn string

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"fmt"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -168,20 +167,6 @@ func (r *MemoryRepo) UpsertLogicGateProjection(input LogicGateProjectionInput) (
 	return projection, nil
 }
 
-func (r *MemoryRepo) materializeEditorCollaborationDocumentsForSaveLocked(companyID, resourceType, resourceID string, now time.Time) error {
-	for _, document := range r.editorCollaborationDocuments {
-		if document.Ref.CompanyID != companyID || document.Ref.ResourceType != resourceType || document.Ref.ResourceID != resourceID || document.Deleted {
-			continue
-		}
-		snapshot, err := r.editorCollaborationSnapshotLocked(document.Ref)
-		if err != nil {
-			return err
-		}
-		r.materializeEditorProjectionLocked(document.Ref, snapshot.HTML, snapshot.Revision, now)
-	}
-	return nil
-}
-
 func (r *MemoryRepo) CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -191,9 +176,6 @@ func (r *MemoryRepo) CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
 
-	if err := r.materializeEditorCollaborationDocumentsForSaveLocked(companyID, EntityTypeNode, nodeID, time.Now().UTC()); err != nil {
-		return domain.EditorSaveVersion{}, err
-	}
 	projections := memoryEditorTextNodeProjections(r.nodeText[key(companyID, nodeID)])
 	if len(projections) == 0 {
 		return domain.EditorSaveVersion{}, ErrInvalid
@@ -240,9 +222,6 @@ func (r *MemoryRepo) CreateLogicGateEditorSaveVersion(input EditorSaveVersionInp
 	logicGateID := strings.TrimSpace(input.ResourceID)
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound
-	}
-	if err := r.materializeEditorCollaborationDocumentsForSaveLocked(companyID, EntityTypeLogicGate, logicGateID, time.Now().UTC()); err != nil {
-		return domain.EditorSaveVersion{}, err
 	}
 	projections := memoryEditorTextLogicGateProjections(r.logicGateText[key(companyID, logicGateID)])
 	if len(projections) == 0 {
@@ -333,20 +312,21 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 		if _, keep := desired[sourceID]; keep {
 			continue
 		}
-		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, DocumentID: sourceID}
-		if err := r.tombstoneEditorCollaborationDocumentLocked(ref, "restore-delete:"+saveID+":"+sourceID, "server-save-version", input.ActorUserID, now); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
+		r.deleteEditorProjectionLocked(EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, DocumentID: sourceID})
 	}
 	for sourceID, item := range desired {
-		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, DocumentID: sourceID}
-		html := editorDocumentHTMLFromProjectionInformation(item.Information)
-		operationID := fmt.Sprintf("restore:%s:%s:%d", saveID, sourceID, now.UnixNano())
-		if err := r.replaceEditorCollaborationSnapshotLocked(ref, html, operationID, "server-save-version", input.ActorUserID, now); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
 		projection := r.nodeText[key(companyID, nodeID)][sourceID]
-		projection.Information = editorProjectionInformationWithDocument(item.Information, html)
+		created := projection.CreatedTimestamp
+		if created.IsZero() {
+			created = now
+		}
+		projection.CompanyID, projection.NodeID, projection.InformationID = companyID, nodeID, sourceID
+		projection.Type, projection.Information, projection.IsDeleted = "Text box", item.Information, false
+		projection.Revision++
+		if projection.Revision < 1 {
+			projection.Revision = 1
+		}
+		projection.CreatedTimestamp, projection.UpdatedTimestamp = created, now
 		r.nodeText[key(companyID, nodeID)][sourceID] = projection
 	}
 	return version, nil
@@ -382,20 +362,21 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 		if _, keep := desired[sourceID]; keep {
 			continue
 		}
-		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGateID, DocumentID: sourceID}
-		if err := r.tombstoneEditorCollaborationDocumentLocked(ref, "restore-delete:"+saveID+":"+sourceID, "server-save-version", input.ActorUserID, now); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
+		r.deleteEditorProjectionLocked(EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGateID, DocumentID: sourceID})
 	}
 	for sourceID, item := range desired {
-		ref := EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGateID, DocumentID: sourceID}
-		html := editorDocumentHTMLFromProjectionInformation(item.Information)
-		operationID := fmt.Sprintf("restore:%s:%s:%d", saveID, sourceID, now.UnixNano())
-		if err := r.replaceEditorCollaborationSnapshotLocked(ref, html, operationID, "server-save-version", input.ActorUserID, now); err != nil {
-			return domain.EditorSaveVersion{}, err
-		}
 		projection := r.logicGateText[key(companyID, logicGateID)][sourceID]
-		projection.Information = editorProjectionInformationWithDocument(item.Information, html)
+		created := projection.CreatedTimestamp
+		if created.IsZero() {
+			created = now
+		}
+		projection.CompanyID, projection.LogicGateID, projection.InformationID = companyID, logicGateID, sourceID
+		projection.Type, projection.Information, projection.IsDeleted = "Text box", item.Information, false
+		projection.Revision++
+		if projection.Revision < 1 {
+			projection.Revision = 1
+		}
+		projection.CreatedTimestamp, projection.UpdatedTimestamp = created, now
 		r.logicGateText[key(companyID, logicGateID)][sourceID] = projection
 	}
 	return version, nil

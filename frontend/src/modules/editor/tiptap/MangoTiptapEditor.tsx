@@ -120,6 +120,7 @@ export type MangoTiptapEditorProps = {
   editable?: boolean;
   ariaLabel: string;
   placeholder?: string;
+  dataAttributes?: Record<string, string | undefined>;
   className?: string;
   style?: React.CSSProperties;
   companyID: string;
@@ -606,6 +607,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   editable = true,
   ariaLabel,
   placeholder,
+  dataAttributes,
   className,
   style,
   companyID,
@@ -1467,6 +1469,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   return (
     <div
       ref={rootRef}
+      {...dataAttributes}
       className={className}
       style={{ position: "relative", minWidth: 0, minHeight: 0, ...style }}
       data-mango-editor-format="tiptap_json"

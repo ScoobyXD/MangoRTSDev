@@ -33,7 +33,6 @@ import { createRequestJSON } from "../api/requestJSON.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
-  buildEditorTextBlockMetadataPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   canEditEditorTextBlockChatMessage,
@@ -988,16 +987,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const configuredScope = projectSaveScope;
     projectTextBlockSaveController.configure({
       saveBlock: async ({ blockID, content, sentVersion }) => {
-        const format = editorDataFormat.gate?.editor_format;
-        if (!format) throw new Error("editor_data_format_not_ready");
+        if (!editorDataFormat.gate) throw new Error("editor_data_format_not_ready");
         const savedTimestamp = new Date().toISOString();
         await attachmentRequestJSON(
-          `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
+          `/v1/editor-json/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
           {
             method: "PATCH",
-            body: JSON.stringify(format === "tiptap_json"
-              ? { title: content.title, attachments: content.attachments ?? [] }
-              : buildEditorTextBlockMetadataPayload(content)),
+            body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
           },
         );
         if (projectSaveScopeRef.current !== configuredScope) return;
@@ -1116,9 +1112,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const restoreProjectVersion = useCallback(async (version: ProjectSavedVersion) => {
     if (!companyID || !projectID || projectVersionRestoring) return;
     if (!window.confirm("Overwrite the current project text boxes with this saved version?")) return;
-    const format = editorDataFormat.gate?.editor_format;
-    if (format !== "tiptap_json") {
-      setError("Saved-version restore requires the JSON editor format.");
+    if (!editorDataFormat.gate) {
+      setError("Editor data format is still loading.");
       return;
     }
     setProjectVersionRestoring(true);
@@ -1215,8 +1210,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [editorDataFormat.gate, projectTextBlockSaveController]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
-    const format = editorDataFormat.gate?.editor_format;
-    if (!format) {
+    if (!editorDataFormat.gate) {
       setError("Editor data format is still loading.");
       return;
     }
@@ -1225,13 +1219,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       window.clearTimeout(timer);
       projectTextBlockSaveTimersRef.current.delete(blockID);
     }
-    if (format === "tiptap_json") {
-      try {
-        await flushMangoTiptapDocument({ companyID, resourceType: "project", resourceID: projectID, documentID: blockID });
-      } catch (flushError) {
-        setError(flushError instanceof Error ? flushError.message : "Failed to save project text before deletion");
-        return;
-      }
+    try {
+      await flushMangoTiptapDocument({ companyID, resourceType: "project", resourceID: projectID, documentID: blockID });
+    } catch (flushError) {
+      setError(flushError instanceof Error ? flushError.message : "Failed to save project text before deletion");
+      return;
     }
     await projectTextBlockSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
     const latestContent = projectTextBlockContentRef.current.get(blockID);
@@ -1249,17 +1241,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setAttachedEmails((current) => current.filter((email) => email.blockID !== blockID));
     setError("");
     try {
-      const editorPath = `/v1/${format === "tiptap_json" ? "editor-json" : "editor-collaboration"}/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
-      const baseRevision = format === "tiptap_json"
-        ? (await attachmentRequestJSON<{ revision: number }>(editorPath)).revision
-        : undefined;
+      const editorPath = `/v1/editor-json/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
+      const baseRevision = (await attachmentRequestJSON<{ revision: number }>(editorPath)).revision;
       await Promise.all([
         attachmentRequestJSON(editorPath, {
           method: "DELETE",
           body: JSON.stringify({
             operation_id: generateStableInformationID(),
             client_id: `project-delete:${currentUserID || "browser"}`,
-            ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+            base_revision: baseRevision,
           }),
         }),
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),

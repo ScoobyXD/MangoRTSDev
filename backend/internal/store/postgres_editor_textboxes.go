@@ -132,13 +132,11 @@ func getPostgresEditorTextboxSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef
 func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef) error {
 	body := emptyEditorTextboxBody()
 	if ref.ResourceType == EntityTypeNode {
-		_, err := tx.ExecContext(ctx, `insert into node_textboxes(
-			company_id,node_id,textbox_id,document_schema_version,document_json,body_json,plain_text,
-			content_revision,revision,display_order,created_timestamp,updated_timestamp
-		) values($1::uuid,$2::uuid,$3::uuid,1,$4::jsonb,$5::jsonb,'',0,0,
+		_, err := tx.ExecContext(ctx, `insert into node_textboxes(company_id,node_id,textbox_id,body_json,revision,display_order,created_timestamp,updated_timestamp)
+		values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,0,
 			coalesce((select max(display_order)+1 from node_textboxes where company_id=$1::uuid and node_id=$2::uuid),0),
 			statement_timestamp(),statement_timestamp()) on conflict(company_id,node_id,textbox_id) do nothing`,
-			ref.CompanyID, ref.ResourceID, ref.DocumentID, emptyMangoTiptapDocument, body)
+			ref.CompanyID, ref.ResourceID, ref.DocumentID, body)
 		return mapEditorOwnerTextLimitError(err)
 	}
 	if storage.displayOrder {
@@ -306,14 +304,12 @@ func mergeMangoTiptapDocuments(server, local json.RawMessage) (json.RawMessage, 
 	return ValidateMangoTiptapJSON(encoded)
 }
 
-func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef, body, document json.RawMessage, revision int64, now time.Time) error {
+func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef, body json.RawMessage, revision int64, now time.Time) error {
 	if ref.ResourceType == EntityTypeNode {
 		_, err := tx.ExecContext(ctx, `update node_textboxes
-			set body_json=$4::jsonb,document_json=$5::jsonb,plain_text=$6,revision=$7,content_revision=$7,
-			    deleted_timestamp=null,updated_timestamp=$8
+			set body_json=$4::jsonb,revision=$5,deleted_timestamp=null,updated_timestamp=$6
 			where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
-			ref.CompanyID, ref.ResourceID, ref.DocumentID, body, document,
-			postgresEditorTextboxPlainText(document), revision, now)
+			ref.CompanyID, ref.ResourceID, ref.DocumentID, body, revision, now)
 		return mapEditorOwnerTextLimitError(err)
 	}
 	query := fmt.Sprintf(`update %s set body_json=$4::jsonb,revision=$5,deleted_timestamp=null,updated_timestamp=$6
@@ -387,7 +383,7 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		return EditorJSONCommit{}, err
 	}
 	nextRevision, eventID := revision+1, newUUIDv7String()
-	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextDocument, nextRevision, now); err != nil {
+	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	reason := "tiptap_json_committed"

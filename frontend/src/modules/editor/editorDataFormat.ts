@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-export type MangoEditorDataFormat = "legacy_html" | "tiptap_json";
-export type MangoEditorMigrationState = "not_started" | "converting" | "validated" | "ready";
+export type MangoEditorDataFormat = "tiptap_json";
+export type MangoEditorMigrationState = "ready";
 
 export type MangoEditorDataFormatGate = {
   company_id: string;
@@ -28,13 +28,10 @@ function key(apiBase: string, companyID: string): string {
 
 function validateGate(value: MangoEditorDataFormatGate, companyID: string): MangoEditorDataFormatGate {
   if (value.company_id !== companyID) throw new Error("editor_data_format_company_mismatch");
-  if (!["legacy_html", "tiptap_json"].includes(value.editor_format)) throw new Error("editor_data_format_unknown");
-  if (!["not_started", "converting", "validated", "ready"].includes(value.migration_state)) throw new Error("editor_migration_state_unknown");
-  if (value.editor_format === "tiptap_json") {
-    if (value.migration_state !== "ready") throw new Error("editor_json_format_not_ready");
-    if (value.expected_document_count !== value.converted_document_count) throw new Error("editor_json_conversion_incomplete");
-    if (value.document_schema_version !== 1) throw new Error("editor_json_schema_version_unsupported");
-  }
+  if (value.editor_format !== "tiptap_json") throw new Error("editor_data_format_unknown");
+  if (value.migration_state !== "ready") throw new Error("editor_json_format_not_ready");
+  if (value.expected_document_count !== value.converted_document_count) throw new Error("editor_json_conversion_incomplete");
+  if (value.document_schema_version !== 1) throw new Error("editor_json_schema_version_unsupported");
   return value;
 }
 
