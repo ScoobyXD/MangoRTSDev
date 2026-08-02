@@ -131,6 +131,12 @@ No document body or credential was printed or stored during the audit.
    npm run convert:editor-textbox-history -- --company-id <company-id> --host <host> --port 5432 --database <database> --user mangorts_readonly --sslmode require
    ```
 
+   Interactive runs always ask for the database password without displaying it,
+   so a stale `PGPASSWORD` or `DB_PASSWORD` cannot be reused accidentally. The
+   entered password is passed only to the converter child process; it is not
+   printed, written to a file, or retained in the parent shell. Non-interactive
+   automation must provide `PGPASSWORD` in its process environment.
+
 4. Review the counts, then rerun with a human-managed writer connection and the
    explicit write confirmations. Do not give the writer credential to an agent:
 
