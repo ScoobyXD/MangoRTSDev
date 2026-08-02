@@ -1,5 +1,3 @@
-\set ON_ERROR_STOP on
-
 -- Destructive phase of the editor textbox cutover.
 -- Run only after the new backend is deployed and
 -- scripts/verify_editor_textbox_cutover.sql reports no blockers.
