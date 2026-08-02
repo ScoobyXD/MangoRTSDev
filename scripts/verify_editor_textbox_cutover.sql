@@ -3,9 +3,21 @@
 -- destructive cleanup migration. Every row with status='blocker' must be zero.
 
 with checks as (
+  select 'node editor documents without a parent node'::text as check_name,
+         count(*)::bigint as problem_count
+    from editor_json_documents legacy
+    left join nodes parent
+      on parent.company_id=legacy.company_id
+     and parent.node_id=legacy.resource_id::uuid
+   where legacy.resource_type='node'
+     and parent.node_id is null
+  union all
   select 'node current rows missing or different'::text as check_name,
          count(*)::bigint as problem_count
     from editor_json_documents legacy
+    join nodes parent
+      on parent.company_id=legacy.company_id
+     and parent.node_id=legacy.resource_id::uuid
     left join node_textboxes current
       on current.company_id=legacy.company_id
      and current.node_id=legacy.resource_id::uuid

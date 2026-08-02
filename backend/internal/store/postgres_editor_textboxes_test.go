@@ -155,3 +155,29 @@ func TestEditorTextboxCutoverAcceptsUUIDv7Identities(t *testing.T) {
 		t.Fatalf("test requires the application's UUIDv7 identity format, got %q", id)
 	}
 }
+
+func TestEditorTextboxCutoverKeepsOrphanedNodeDocumentsForReview(t *testing.T) {
+	checks := map[string][]string{
+		filepath.Join("..", "..", "db", "migrations", "20260801_editor_textbox_storage_foundation.sql"): {
+			"join nodes parent",
+			"parent.node_id = document.resource_id::uuid",
+		},
+		filepath.Join("..", "..", "..", "scripts", "verify_editor_textbox_cutover.sql"): {
+			"node editor documents without a parent node",
+		},
+		filepath.Join("..", "..", "..", "scripts", "apply_editor_textbox_cleanup.sql"): {
+			"editor_textbox_cleanup_blocked_orphaned_node_document",
+		},
+	}
+	for path, required := range checks {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for _, text := range required {
+			if !strings.Contains(string(contents), text) {
+				t.Fatalf("%s must preserve and report orphaned Node documents; missing %q", path, text)
+			}
+		}
+	}
+}

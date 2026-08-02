@@ -13,6 +13,21 @@ begin
   if exists (
     select 1
       from editor_json_documents legacy
+      left join nodes parent
+        on parent.company_id=legacy.company_id
+       and parent.node_id=legacy.resource_id::uuid
+     where legacy.resource_type='node'
+       and parent.node_id is null
+  ) then
+    raise exception 'editor_textbox_cleanup_blocked_orphaned_node_document';
+  end if;
+
+  if exists (
+    select 1
+      from editor_json_documents legacy
+      join nodes parent
+        on parent.company_id=legacy.company_id
+       and parent.node_id=legacy.resource_id::uuid
       left join node_textboxes current
         on current.company_id=legacy.company_id
        and current.node_id=legacy.resource_id::uuid
