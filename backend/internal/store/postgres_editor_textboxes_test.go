@@ -133,6 +133,47 @@ func TestEditorTextboxCutoverUsesSixPermanentTables(t *testing.T) {
 	}
 }
 
+func TestEditorTextboxRetirementRemovesNineLegacyTables(t *testing.T) {
+	schema, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
+	if err != nil {
+		t.Fatalf("read canonical schema: %v", err)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260801_z_retire_legacy_editor_storage.sql"))
+	if err != nil {
+		t.Fatalf("read retirement migration: %v", err)
+	}
+	schemaText := strings.ToLower(string(schema))
+	migrationText := strings.ToLower(string(migration))
+	obsolete := []string{
+		"editor_json_documents",
+		"editor_json_operations",
+		"editor_json_versions",
+		"project_editor_documents",
+		"project_editor_document_operations",
+		"project_editor_document_versions",
+		"logic_gate_editor_documents",
+		"logic_gate_editor_document_operations",
+		"logic_gate_editor_document_versions",
+	}
+	for _, table := range obsolete {
+		if strings.Contains(schemaText, table) {
+			t.Errorf("canonical schema still references obsolete table %s", table)
+		}
+		if !strings.Contains(migrationText, "drop table if exists "+table) {
+			t.Errorf("retirement migration does not drop %s", table)
+		}
+	}
+	for _, required := range []string{
+		"legacy_editor_storage_not_empty",
+		"from node_textboxes",
+		"from project_textboxes",
+		"from logic_gate_textboxes",
+	} {
+		if !strings.Contains(migrationText, required) {
+			t.Errorf("retirement migration missing %q", required)
+		}
+	}
+}
 func TestEditorTextboxCutoverAcceptsUUIDv7Identities(t *testing.T) {
 	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260801_editor_textbox_storage_foundation.sql")
 	migration, err := os.ReadFile(migrationPath)

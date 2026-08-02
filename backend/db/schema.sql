@@ -4402,149 +4402,6 @@ create table if not exists workspace_editor_formats (
     )
 );
 
-create table if not exists editor_json_documents (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id text not null,
-  document_id text not null,
-  document_schema_version integer not null default 1,
-  revision bigint not null default 0,
-  canonical_document jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  is_deleted boolean not null default false,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, resource_type, resource_id, document_id),
-  constraint editor_json_documents_company_fkey
-    foreign key (company_id) references companies(company_id) on delete cascade,
-  constraint editor_json_documents_resource_type_chk
-    check (resource_type in ('node', 'logic_gate', 'project')),
-  constraint editor_json_documents_resource_id_chk
-    check (btrim(resource_id) <> '' and octet_length(resource_id) <= 500),
-  constraint editor_json_documents_document_id_chk
-    check (btrim(document_id) <> '' and octet_length(document_id) <= 500),
-  constraint editor_json_documents_schema_chk check (document_schema_version = 1),
-  constraint editor_json_documents_revision_chk check (revision >= 0),
-  constraint editor_json_documents_contract_chk check (
-    jsonb_typeof(canonical_document) = 'object'
-    and canonical_document->>'format' = 'mango-tiptap-json'
-    and canonical_document->>'schema_version' = '1'
-    and jsonb_typeof(canonical_document->'document') = 'object'
-    and canonical_document->'document'->>'type' = 'doc'
-  ),
-  constraint editor_json_documents_annotations_chk check (
-    jsonb_typeof(canonical_annotations) = 'array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create index if not exists idx_editor_json_documents_resource
-  on editor_json_documents(company_id, resource_type, resource_id, updated_timestamp desc);
-
-create table if not exists editor_json_operations (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id text not null,
-  document_id text not null,
-  revision bigint not null,
-  operation_id text not null,
-  client_id text not null,
-  actor_user_id uuid,
-  base_revision bigint not null,
-  document_schema_version integer not null default 1,
-  canonical_document jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  event_id uuid not null unique,
-  is_delete boolean not null default false,
-  committed_timestamp timestamptz not null default now(),
-  primary key (company_id, resource_type, resource_id, document_id, revision),
-  unique (company_id, resource_type, resource_id, document_id, operation_id),
-  constraint editor_json_operations_document_fkey
-    foreign key (company_id, resource_type, resource_id, document_id)
-    references editor_json_documents(company_id, resource_type, resource_id, document_id)
-    on delete cascade,
-  constraint editor_json_operations_actor_fkey
-    foreign key (actor_user_id) references users(user_id) on delete set null,
-  constraint editor_json_operations_revision_chk
-    check (revision > 0 and base_revision >= 0 and revision = base_revision + 1),
-  constraint editor_json_operations_id_chk
-    check (btrim(operation_id) <> '' and octet_length(operation_id) <= 160),
-  constraint editor_json_operations_client_chk
-    check (btrim(client_id) <> '' and octet_length(client_id) <= 160),
-  constraint editor_json_operations_schema_chk check (document_schema_version = 1),
-  constraint editor_json_operations_contract_chk check (
-    jsonb_typeof(canonical_document) = 'object'
-    and canonical_document->>'format' = 'mango-tiptap-json'
-    and canonical_document->>'schema_version' = '1'
-  ),
-  constraint editor_json_operations_annotations_chk check (
-    jsonb_typeof(canonical_annotations) = 'array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create table if not exists editor_json_versions (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id text not null,
-  document_id text not null,
-  revision bigint not null,
-  document_schema_version integer not null default 1,
-  canonical_document jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  operation_id text not null,
-  actor_user_id uuid,
-  is_deleted boolean not null default false,
-  created_timestamp timestamptz not null default now(),
-  primary key (company_id, resource_type, resource_id, document_id, revision),
-  constraint editor_json_versions_document_fkey
-    foreign key (company_id, resource_type, resource_id, document_id)
-    references editor_json_documents(company_id, resource_type, resource_id, document_id)
-    on delete cascade,
-  constraint editor_json_versions_actor_fkey
-    foreign key (actor_user_id) references users(user_id) on delete set null,
-  constraint editor_json_versions_schema_chk check (document_schema_version = 1),
-  constraint editor_json_versions_contract_chk check (
-    jsonb_typeof(canonical_document) = 'object'
-    and canonical_document->>'format' = 'mango-tiptap-json'
-    and canonical_document->>'schema_version' = '1'
-  ),
-  constraint editor_json_versions_annotations_chk check (
-    jsonb_typeof(canonical_annotations) = 'array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create index if not exists idx_editor_json_versions_recent
-  on editor_json_versions(company_id, resource_type, resource_id, document_id, revision desc);
-
-create or replace function mangorts_validate_editor_format_cutover()
-returns trigger
-language plpgsql
-as $$
-declare
-  stored_count bigint;
-begin
-  if new.migration_state = 'ready' or new.editor_format = 'tiptap_json' then
-    select count(*) into stored_count
-    from editor_json_documents
-    where company_id = new.company_id and not is_deleted;
-    if new.expected_document_count <> new.converted_document_count
-      or stored_count <> new.converted_document_count
-      or new.validated_timestamp is null then
-      raise exception 'workspace editor conversion is incomplete';
-    end if;
-  end if;
-  new.updated_timestamp = now();
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_validate_editor_format_cutover on workspace_editor_formats;
-create trigger trg_validate_editor_format_cutover
-before insert or update on workspace_editor_formats
-for each row execute function mangorts_validate_editor_format_cutover();
-
 create or replace function mangorts_reject_legacy_editor_write_after_cutover()
 returns trigger
 language plpgsql
@@ -4572,8 +4429,6 @@ for each row execute function mangorts_reject_legacy_editor_write_after_cutover(
 
 comment on table workspace_editor_formats is
   'Atomic company-wide editor data-format gate. No application endpoint mutates this table.';
-comment on column editor_json_documents.canonical_document is
-  'Strict Mango Tiptap JSON envelope. Never contains legacy HTML or transient attachment URLs.';
 -- NODE_V2_PHASE1_FOUNDATION_BEGIN
 -- Additive, inactive storage for Node v2. This migration does not backfill
 -- legacy HTML, change a workspace editor gate, or redirect any live reader.
@@ -5185,200 +5040,6 @@ alter table node_textboxes
   add column if not exists target_json_sha256 text,
   add column if not exists conversion_run_id uuid;
 
-create table if not exists project_editor_documents (
-  company_id uuid not null,
-  project_id uuid not null,
-  document_id text not null,
-  source_document_id text,
-  document_schema_version integer not null default 1,
-  revision bigint not null default 0,
-  document_json jsonb not null,
-  plain_text text not null default '',
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  is_deleted boolean not null default false,
-  source_html text,
-  source_html_sha256 text,
-  target_json_sha256 text,
-  conversion_run_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, project_id, document_id),
-  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade,
-  constraint project_editor_documents_source_id_chk check (source_document_id is null or btrim(source_document_id) <> ''),
-  constraint project_editor_documents_schema_chk check (document_schema_version = 1),
-  constraint project_editor_documents_revision_chk check (revision >= 0),
-  constraint project_editor_documents_source_sha_chk check (source_html_sha256 is null or source_html_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint project_editor_documents_target_sha_chk check (target_json_sha256 is null or target_json_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint project_editor_documents_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-  ),
-  constraint project_editor_documents_annotations_chk check (
-    jsonb_typeof(canonical_annotations)='array' and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create index if not exists idx_project_editor_documents_project
-  on project_editor_documents(company_id, project_id, updated_timestamp desc, document_id);
-
-create table if not exists logic_gate_editor_documents (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  document_id text not null,
-  source_document_id text,
-  document_schema_version integer not null default 1,
-  revision bigint not null default 0,
-  document_json jsonb not null,
-  plain_text text not null default '',
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  is_deleted boolean not null default false,
-  source_html text,
-  source_html_sha256 text,
-  target_json_sha256 text,
-  conversion_run_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, logic_gate_id, document_id),
-  foreign key (company_id, logic_gate_id) references logic_gates(company_id, logic_gate_id) on delete cascade,
-  constraint logic_gate_editor_documents_source_id_chk check (source_document_id is null or btrim(source_document_id) <> ''),
-  constraint logic_gate_editor_documents_schema_chk check (document_schema_version = 1),
-  constraint logic_gate_editor_documents_revision_chk check (revision >= 0),
-  constraint logic_gate_editor_documents_source_sha_chk check (source_html_sha256 is null or source_html_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint logic_gate_editor_documents_target_sha_chk check (target_json_sha256 is null or target_json_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint logic_gate_editor_documents_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-  ),
-  constraint logic_gate_editor_documents_annotations_chk check (
-    jsonb_typeof(canonical_annotations)='array' and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create index if not exists idx_logic_gate_editor_documents_gate
-  on logic_gate_editor_documents(company_id, logic_gate_id, updated_timestamp desc, document_id);
-
-
-create table if not exists project_editor_document_operations (
-  company_id uuid not null,
-  project_id uuid not null,
-  document_id text not null,
-  revision bigint not null,
-  operation_id text not null,
-  client_id text not null,
-  actor_user_id uuid references users(user_id) on delete set null,
-  base_revision bigint not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  event_id uuid not null,
-  is_delete boolean not null default false,
-  committed_timestamp timestamptz not null default now(),
-  primary key (company_id, project_id, document_id, operation_id),
-  unique (company_id, project_id, document_id, revision),
-  foreign key (company_id, project_id, document_id)
-    references project_editor_documents(company_id, project_id, document_id) on delete cascade,
-  constraint project_editor_document_operations_revision_chk check (revision > base_revision and base_revision >= 0),
-  constraint project_editor_document_operations_identity_chk check (btrim(operation_id) <> '' and btrim(client_id) <> ''),
-  constraint project_editor_document_operations_schema_chk check (document_schema_version = 1),
-  constraint project_editor_document_operations_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-    and jsonb_typeof(canonical_annotations)='array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create table if not exists project_editor_document_versions (
-  company_id uuid not null,
-  project_id uuid not null,
-  document_id text not null,
-  revision bigint not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  operation_id text not null,
-  actor_user_id uuid references users(user_id) on delete set null,
-  is_deleted boolean not null default false,
-  created_timestamp timestamptz not null default now(),
-  primary key (company_id, project_id, document_id, revision),
-  foreign key (company_id, project_id, document_id)
-    references project_editor_documents(company_id, project_id, document_id) on delete cascade,
-  constraint project_editor_document_versions_revision_chk check (revision > 0),
-  constraint project_editor_document_versions_schema_chk check (document_schema_version = 1),
-  constraint project_editor_document_versions_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-    and jsonb_typeof(canonical_annotations)='array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create table if not exists logic_gate_editor_document_operations (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  document_id text not null,
-  revision bigint not null,
-  operation_id text not null,
-  client_id text not null,
-  actor_user_id uuid references users(user_id) on delete set null,
-  base_revision bigint not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  event_id uuid not null,
-  is_delete boolean not null default false,
-  committed_timestamp timestamptz not null default now(),
-  primary key (company_id, logic_gate_id, document_id, operation_id),
-  unique (company_id, logic_gate_id, document_id, revision),
-  foreign key (company_id, logic_gate_id, document_id)
-    references logic_gate_editor_documents(company_id, logic_gate_id, document_id) on delete cascade,
-  constraint logic_gate_editor_document_operations_revision_chk check (revision > base_revision and base_revision >= 0),
-  constraint logic_gate_editor_document_operations_identity_chk check (btrim(operation_id) <> '' and btrim(client_id) <> ''),
-  constraint logic_gate_editor_document_operations_schema_chk check (document_schema_version = 1),
-  constraint logic_gate_editor_document_operations_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-    and jsonb_typeof(canonical_annotations)='array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create table if not exists logic_gate_editor_document_versions (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  document_id text not null,
-  revision bigint not null,
-  document_schema_version integer not null default 1,
-  document_json jsonb not null,
-  canonical_annotations jsonb not null default '[]'::jsonb,
-  operation_id text not null,
-  actor_user_id uuid references users(user_id) on delete set null,
-  is_deleted boolean not null default false,
-  created_timestamp timestamptz not null default now(),
-  primary key (company_id, logic_gate_id, document_id, revision),
-  foreign key (company_id, logic_gate_id, document_id)
-    references logic_gate_editor_documents(company_id, logic_gate_id, document_id) on delete cascade,
-  constraint logic_gate_editor_document_versions_revision_chk check (revision > 0),
-  constraint logic_gate_editor_document_versions_schema_chk check (document_schema_version = 1),
-  constraint logic_gate_editor_document_versions_json_chk check (
-    document_json->>'format'='mango-tiptap-json'
-    and document_json->>'schema_version'='1'
-    and document_json->'document'->>'type'='doc'
-    and jsonb_typeof(canonical_annotations)='array'
-    and jsonb_array_length(canonical_annotations) <= 10000
-  )
-);
-
-create index if not exists idx_project_editor_document_versions
-  on project_editor_document_versions(company_id, project_id, document_id, revision desc);
-create index if not exists idx_logic_gate_editor_document_versions
-  on logic_gate_editor_document_versions(company_id, logic_gate_id, document_id, revision desc);
-
 create table if not exists editor_conversion_runs (
   conversion_run_id uuid primary key,
   company_id uuid not null references companies(company_id) on delete cascade,
@@ -5561,41 +5222,6 @@ begin
 end;
 $$;
 
-create or replace function mangorts_validate_editor_format_cutover()
-returns trigger
-language plpgsql
-as $$
-declare
-  stored_count bigint;
-  ready_gate_count integer;
-begin
-  if new.migration_state = 'ready' or new.editor_format = 'tiptap_json' then
-    select
-      (select count(*) from node_textboxes where company_id=new.company_id and source_information_id is not null and deleted_timestamp is null)
-      + (select count(*) from project_editor_documents where company_id=new.company_id)
-      + (select count(*) from logic_gate_editor_documents where company_id=new.company_id)
-    into stored_count;
-    select count(*) into ready_gate_count
-    from editor_rollout_gates
-    where company_id=new.company_id
-      and owner_type in ('node','project','logic_gate')
-      and rollout_state in ('ready','active')
-      and expected_count=converted_count
-      and failed_count=0
-      and shadow_mismatch_count=0
-      and validated_timestamp is not null;
-    if new.expected_document_count <> new.converted_document_count
-      or stored_count <> new.converted_document_count
-      or ready_gate_count <> 3
-      or new.validated_timestamp is null then
-      raise exception 'workspace editor conversion is incomplete';
-    end if;
-  end if;
-  new.updated_timestamp = clock_timestamp();
-  return new;
-end;
-$$;
-
 comment on function mangorts_prepare_company_editor_purge(uuid) is
   'First, explicit step in company deletion: removes Node V2 typed ownership links in restrictive dependency order. The caller must keep this call and company deletion in one transaction.';
 comment on table editor_rollout_gates is
@@ -5603,166 +5229,27 @@ comment on table editor_rollout_gates is
 comment on table editor_rollback_exports is
   'Post-cutover JSON-to-HTML exports. Rollback cannot proceed until current revisions are exported.';
 -- NODE_V2_PHASE3_ENGINEERING_END
--- One aggregate current-text limit per editor owner. Attachment object bytes
--- and historical document versions are separate storage and deliberately do
--- not count toward this limit.
-create or replace function mangorts_enforce_generic_editor_owner_text_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  total_bytes bigint;
-begin
-  perform pg_advisory_xact_lock(hashtextextended(
-    'editor-owner-text:' || new.company_id::text || ':' || new.resource_type || ':' || new.resource_id,
-    0
-  ));
-  select coalesce(sum(octet_length(document.canonical_document::text)), 0)
-    into total_bytes
-    from editor_json_documents document
-   where document.company_id = new.company_id
-     and document.resource_type = new.resource_type
-     and document.resource_id = new.resource_id
-     and not document.is_deleted
-     and document.document_id <> new.document_id;
-  if not new.is_deleted then
-    total_bytes := total_bytes + octet_length(new.canonical_document::text);
-  end if;
-  if total_bytes > 1073741824 then
-    raise exception 'editor_owner_text_limit_exceeded'
-      using errcode = 'P0001',
-            detail = 'The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_generic_editor_owner_text_limit on editor_json_documents;
-create trigger trg_generic_editor_owner_text_limit
-before insert or update of company_id, resource_type, resource_id, document_id, canonical_document, is_deleted
-on editor_json_documents
-for each row execute function mangorts_enforce_generic_editor_owner_text_limit();
-
-create or replace function mangorts_enforce_node_editor_text_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  total_bytes bigint;
-begin
-  perform pg_advisory_xact_lock(hashtextextended(
-    'editor-owner-text:' || new.company_id::text || ':node:' || new.node_id::text,
-    0
-  ));
-  select coalesce(sum(octet_length(textbox.document_json::text)), 0)
-    into total_bytes
-    from node_textboxes textbox
-   where textbox.company_id = new.company_id
-     and textbox.node_id = new.node_id
-     and textbox.deleted_timestamp is null
-     and textbox.textbox_id <> new.textbox_id;
-  if new.deleted_timestamp is null then
-    total_bytes := total_bytes + octet_length(new.document_json::text);
-  end if;
-  if total_bytes > 1073741824 then
-    raise exception 'editor_owner_text_limit_exceeded'
-      using errcode = 'P0001',
-            detail = 'The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_node_editor_text_limit on node_textboxes;
-create trigger trg_node_editor_text_limit
-before insert or update of company_id, node_id, textbox_id, document_json, deleted_timestamp
-on node_textboxes
-for each row execute function mangorts_enforce_node_editor_text_limit();
-
-create or replace function mangorts_enforce_project_editor_text_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  total_bytes bigint;
-begin
-  perform pg_advisory_xact_lock(hashtextextended(
-    'editor-owner-text:' || new.company_id::text || ':project:' || new.project_id::text,
-    0
-  ));
-  select coalesce(sum(octet_length(document.document_json::text)), 0)
-    into total_bytes
-    from project_editor_documents document
-   where document.company_id = new.company_id
-     and document.project_id = new.project_id
-     and not document.is_deleted
-     and document.document_id <> new.document_id;
-  if not new.is_deleted then
-    total_bytes := total_bytes + octet_length(new.document_json::text);
-  end if;
-  if total_bytes > 1073741824 then
-    raise exception 'editor_owner_text_limit_exceeded'
-      using errcode = 'P0001',
-            detail = 'The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_project_editor_text_limit on project_editor_documents;
-create trigger trg_project_editor_text_limit
-before insert or update of company_id, project_id, document_id, document_json, is_deleted
-on project_editor_documents
-for each row execute function mangorts_enforce_project_editor_text_limit();
-
-create or replace function mangorts_enforce_logic_gate_editor_text_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  total_bytes bigint;
-begin
-  perform pg_advisory_xact_lock(hashtextextended(
-    'editor-owner-text:' || new.company_id::text || ':logic_gate:' || new.logic_gate_id::text,
-    0
-  ));
-  select coalesce(sum(octet_length(document.document_json::text)), 0)
-    into total_bytes
-    from logic_gate_editor_documents document
-   where document.company_id = new.company_id
-     and document.logic_gate_id = new.logic_gate_id
-     and not document.is_deleted
-     and document.document_id <> new.document_id;
-  if not new.is_deleted then
-    total_bytes := total_bytes + octet_length(new.document_json::text);
-  end if;
-  if total_bytes > 1073741824 then
-    raise exception 'editor_owner_text_limit_exceeded'
-      using errcode = 'P0001',
-            detail = 'The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_logic_gate_editor_text_limit on logic_gate_editor_documents;
-create trigger trg_logic_gate_editor_text_limit
-before insert or update of company_id, logic_gate_id, document_id, document_json, is_deleted
-on logic_gate_editor_documents
-for each row execute function mangorts_enforce_logic_gate_editor_text_limit();
-
-comment on function mangorts_enforce_node_editor_text_limit() is
-  'Caps the sum of current Node textbox Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
-comment on function mangorts_enforce_project_editor_text_limit() is
-  'Caps the sum of current Project editor Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
-comment on function mangorts_enforce_logic_gate_editor_text_limit() is
-  'Caps the sum of current Logic Gate editor Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
-
 -- The permanent editor model is introduced additively so an application
 -- deployment can be rolled back before obsolete storage is removed.
 alter table node_textboxes
   add column if not exists body_json jsonb,
   add column if not exists revision bigint;
+
+alter table node_textboxes
+  alter column body_json set not null,
+  alter column revision set not null,
+  alter column revision set default 0;
+
+alter table node_textboxes
+  drop constraint if exists node_textboxes_body_json_chk,
+  add constraint node_textboxes_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  ),
+  drop constraint if exists node_textboxes_cutover_revision_chk,
+  add constraint node_textboxes_cutover_revision_chk check (revision >= 0);
 
 create table if not exists project_textboxes (
   company_id uuid not null,
@@ -5883,3 +5370,157 @@ create table if not exists logic_gate_textboxes_history (
     and jsonb_typeof(body_json->'annotations') = 'array'
   )
 );
+-- The permanent textbox tables are the only current editor document storage.
+create or replace function mangorts_validate_editor_format_cutover()
+returns trigger
+language plpgsql
+as $$
+declare
+  stored_count bigint;
+  ready_gate_count integer;
+begin
+  if new.migration_state = 'ready' or new.editor_format = 'tiptap_json' then
+    select
+      (select count(*) from node_textboxes where company_id=new.company_id and deleted_timestamp is null)
+      + (select count(*) from project_textboxes where company_id=new.company_id and deleted_timestamp is null)
+      + (select count(*) from logic_gate_textboxes where company_id=new.company_id and deleted_timestamp is null)
+      into stored_count;
+
+    select count(*)
+      into ready_gate_count
+      from editor_rollout_gates
+     where company_id=new.company_id
+       and owner_type in ('node','project','logic_gate')
+       and rollout_state in ('ready','active')
+       and expected_count=converted_count
+       and failed_count=0
+       and shadow_mismatch_count=0
+       and validated_timestamp is not null;
+
+    if new.expected_document_count <> new.converted_document_count
+       or stored_count <> new.converted_document_count
+       or ready_gate_count <> 3
+       or new.validated_timestamp is null then
+      raise exception 'workspace editor conversion is incomplete';
+    end if;
+  end if;
+  new.updated_timestamp = clock_timestamp();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_validate_editor_format_cutover on workspace_editor_formats;
+create trigger trg_validate_editor_format_cutover
+before insert or update on workspace_editor_formats
+for each row execute function mangorts_validate_editor_format_cutover();
+
+-- One aggregate current-text limit per editor owner. Attachment object bytes
+-- and editor history are separate storage and do not count toward this limit.
+create or replace function mangorts_enforce_node_editor_text_limit()
+returns trigger
+language plpgsql
+as $$
+declare
+  total_bytes bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    'editor-owner-text:' || new.company_id::text || ':node:' || new.node_id::text, 0
+  ));
+  select coalesce(sum(octet_length(textbox.body_json::text)),0)
+    into total_bytes
+    from node_textboxes textbox
+   where textbox.company_id=new.company_id
+     and textbox.node_id=new.node_id
+     and textbox.deleted_timestamp is null
+     and textbox.textbox_id<>new.textbox_id;
+  if new.deleted_timestamp is null then
+    total_bytes := total_bytes + octet_length(new.body_json::text);
+  end if;
+  if total_bytes > 1073741824 then
+    raise exception 'editor_owner_text_limit_exceeded'
+      using errcode='P0001',
+            detail='The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function mangorts_enforce_project_editor_text_limit()
+returns trigger
+language plpgsql
+as $$
+declare
+  total_bytes bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    'editor-owner-text:' || new.company_id::text || ':project:' || new.project_id::text, 0
+  ));
+  select coalesce(sum(octet_length(textbox.body_json::text)),0)
+    into total_bytes
+    from project_textboxes textbox
+   where textbox.company_id=new.company_id
+     and textbox.project_id=new.project_id
+     and textbox.deleted_timestamp is null
+     and textbox.textbox_id<>new.textbox_id;
+  if new.deleted_timestamp is null then
+    total_bytes := total_bytes + octet_length(new.body_json::text);
+  end if;
+  if total_bytes > 1073741824 then
+    raise exception 'editor_owner_text_limit_exceeded'
+      using errcode='P0001',
+            detail='The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function mangorts_enforce_logic_gate_editor_text_limit()
+returns trigger
+language plpgsql
+as $$
+declare
+  total_bytes bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    'editor-owner-text:' || new.company_id::text || ':logic_gate:' || new.logic_gate_id::text, 0
+  ));
+  select coalesce(sum(octet_length(textbox.body_json::text)),0)
+    into total_bytes
+    from logic_gate_textboxes textbox
+   where textbox.company_id=new.company_id
+     and textbox.logic_gate_id=new.logic_gate_id
+     and textbox.deleted_timestamp is null
+     and textbox.textbox_id<>new.textbox_id;
+  if new.deleted_timestamp is null then
+    total_bytes := total_bytes + octet_length(new.body_json::text);
+  end if;
+  if total_bytes > 1073741824 then
+    raise exception 'editor_owner_text_limit_exceeded'
+      using errcode='P0001',
+            detail='The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_node_editor_text_limit on node_textboxes;
+create trigger trg_node_editor_text_limit
+before insert or update of company_id,node_id,textbox_id,body_json,deleted_timestamp
+on node_textboxes for each row execute function mangorts_enforce_node_editor_text_limit();
+
+drop trigger if exists trg_project_editor_text_limit on project_textboxes;
+create trigger trg_project_editor_text_limit
+before insert or update of company_id,project_id,textbox_id,body_json,deleted_timestamp
+on project_textboxes for each row execute function mangorts_enforce_project_editor_text_limit();
+
+drop trigger if exists trg_logic_gate_editor_text_limit on logic_gate_textboxes;
+create trigger trg_logic_gate_editor_text_limit
+before insert or update of company_id,logic_gate_id,textbox_id,body_json,deleted_timestamp
+on logic_gate_textboxes for each row execute function mangorts_enforce_logic_gate_editor_text_limit();
+
+comment on function mangorts_enforce_node_editor_text_limit() is
+  'Caps the sum of current Node textbox Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
+comment on function mangorts_enforce_project_editor_text_limit() is
+  'Caps the sum of current Project textbox Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
+comment on function mangorts_enforce_logic_gate_editor_text_limit() is
+  'Caps the sum of current Logic Gate textbox Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';

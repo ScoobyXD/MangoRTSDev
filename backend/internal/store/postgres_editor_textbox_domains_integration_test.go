@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPostgresRealtimeActiveProjectAndLogicGateJSONUseOwnerTables(t *testing.T) {
+func TestPostgresRealtimeProjectAndLogicGateJSONUsePermanentTextboxTables(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Owner-specific editor JSON proof")
 	if err != nil {
@@ -54,8 +54,8 @@ func TestPostgresRealtimeActiveProjectAndLogicGateJSONUseOwnerTables(t *testing.
 	cases := []struct {
 		name, resourceType, resourceID, documentID, currentTable, ownerColumn string
 	}{
-		{"project", EntityTypeProject, projectResult.Project.ProjectID, "00000000-0000-4000-8000-000000000201", "project_editor_documents", "project_id"},
-		{"logic gate", EntityTypeLogicGate, logicGate.LogicGateID, "00000000-0000-4000-8000-000000000202", "logic_gate_editor_documents", "logic_gate_id"},
+		{"project", EntityTypeProject, projectResult.Project.ProjectID, "00000000-0000-4000-8000-000000000201", "project_textboxes", "project_id"},
+		{"logic gate", EntityTypeLogicGate, logicGate.LogicGateID, "00000000-0000-4000-8000-000000000202", "logic_gate_textboxes", "logic_gate_id"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,16 +78,12 @@ func TestPostgresRealtimeActiveProjectAndLogicGateJSONUseOwnerTables(t *testing.
 				t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 			}
 			versions, err := repo.ListEditorJSONVersions(ref, 10)
-			if err != nil || len(versions) != 1 || versions[0].Revision != 1 {
+			if err != nil || len(versions) != 0 {
 				t.Fatalf("versions=%+v err=%v", versions, err)
 			}
-			if got := countPostgresRows(t, db, "select count(*) from editor_json_documents where company_id=$1::uuid and resource_type=$2 and resource_id=$3 and document_id=$4", company.CompanyID, tc.resourceType, tc.resourceID, tc.documentID); got != 0 {
-				t.Fatalf("legacy generic current-document rows=%d, want 0", got)
-			}
-			var plainText string
-			query := "select plain_text from " + tc.currentTable + " where company_id=$1::uuid and " + tc.ownerColumn + "=$2::uuid and document_id=$3"
-			if err := db.QueryRow(query, company.CompanyID, tc.resourceID, tc.documentID).Scan(&plainText); err != nil || plainText != "Owner table text" {
-				t.Fatalf("plain_text=%q err=%v", plainText, err)
+			query := "select count(*) from " + tc.currentTable + " where company_id=$1::uuid and " + tc.ownerColumn + "=$2::uuid and textbox_id=$3"
+			if got := countPostgresRows(t, db, query, company.CompanyID, tc.resourceID, tc.documentID); got != 1 {
+				t.Fatalf("permanent textbox rows=%d, want 1", got)
 			}
 			deleteInput := EditorJSONDeleteInput{
 				Document: ref, OperationID: tc.name + "-delete", ClientID: "owner-json-client",

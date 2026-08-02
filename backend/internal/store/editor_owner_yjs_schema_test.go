@@ -52,8 +52,8 @@ func TestRetiredYJSStorageHasForwardCleanup(t *testing.T) {
 	}
 }
 
-func TestProjectAndLogicGateRuntimeDoesNotReferenceRetiredYJSColumns(t *testing.T) {
-	runtimeSource := readEditorSchemaFile(t, "postgres_editor_domain_json.go")
+func TestEditorRuntimeDoesNotReferenceRetiredYJSColumns(t *testing.T) {
+	runtimeSource := readEditorSchemaFile(t, "postgres_editor_textboxes.go") + readEditorSchemaFile(t, "postgres_editor_textbox_plain_text.go")
 	for _, forbidden := range []string{
 		"collaboration_epoch::text",
 		"collaboration_epoch=gen_random_uuid()",

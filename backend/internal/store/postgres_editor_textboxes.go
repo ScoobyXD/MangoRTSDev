@@ -313,7 +313,7 @@ func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage post
 			    deleted_timestamp=null,updated_timestamp=$8
 			where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
 			ref.CompanyID, ref.ResourceID, ref.DocumentID, body, document,
-			postgresEditorDomainPlainText(document), revision, now)
+			postgresEditorTextboxPlainText(document), revision, now)
 		return mapEditorOwnerTextLimitError(err)
 	}
 	query := fmt.Sprintf(`update %s set body_json=$4::jsonb,revision=$5,deleted_timestamp=null,updated_timestamp=$6

@@ -374,8 +374,8 @@ on conflict (company_id) do update set
 		if _, err := repo.CommitEditorJSONDocument(input); err == nil {
 			t.Fatal("JSON editor commit succeeded with forced outbox failure")
 		}
-		if got := countPostgresRows(t, db, "select count(*) from editor_json_documents where company_id=$1::uuid and document_id=$2", company.CompanyID, documentID); got != 0 {
-			t.Fatalf("rolled-back JSON editor documents = %d", got)
+		if got := countPostgresRows(t, db, "select count(*) from node_textboxes where company_id=$1::uuid and textbox_id=$2::uuid", company.CompanyID, documentID); got != 0 {
+			t.Fatalf("rolled-back Node textboxes = %d", got)
 		}
 		forceRealtimeOutboxEvent(t, db, EditorJSONSnapshotEventType, false)
 		first, err := repo.CommitEditorJSONDocument(input)
@@ -394,7 +394,7 @@ on conflict (company_id) do update set
 			t.Fatalf("JSON snapshot=%+v err=%v", snapshot, err)
 		}
 		versions, err := repo.ListEditorJSONVersions(ref, 10)
-		if err != nil || len(versions) != 1 || !editorJSONAnnotationsEqual(versions[0].Annotations, annotations) {
+		if err != nil || len(versions) != 0 {
 			t.Fatalf("JSON versions=%+v err=%v", versions, err)
 		}
 		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2 and event_type=$3", company.CompanyID, EditorJSONRealtimeScope(ref), EditorJSONSnapshotEventType); got != 1 {
