@@ -57,6 +57,7 @@ import {
   type MangoTiptapPersistedAnnotation,
 } from "./mangoTiptapAnnotations.js";
 import {
+  compactMangoTiptapDocument,
   createEmptyMangoTiptapDocument,
   needsMangoTiptapLegacyDateHeadingBreak,
   parseMangoTiptapDocument,
@@ -1252,7 +1253,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.callback",
         () => {
           lifecycleRef.current.markDirty();
-          syncRef.current?.schedule(() => ({
+          syncRef.current?.schedule(() => compactMangoTiptapDocument({
             format: "mango-tiptap-json",
             schema_version: 1,
             document: traceEditorFunction(
@@ -1261,7 +1262,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
               "editor.snapshot",
               () => activeEditor.getJSON(),
             ),
-          }), false, () => traceEditorFunction(
+          }, activeEditor.schema), false, () => traceEditorFunction(
             traceContext,
             "annotations.read_durable",
             "editor.snapshot",

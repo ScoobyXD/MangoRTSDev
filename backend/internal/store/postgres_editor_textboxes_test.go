@@ -47,6 +47,82 @@ func TestEditorTextboxBodyStoresAnnotationsInsideJSON(t *testing.T) {
 	}
 }
 
+func TestEditorTextboxBodyCompactsTiptapDefaultsWithoutLosingContent(t *testing.T) {
+	document := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"970fa252-c954-4fc8-a5fa-7d5ba02807f3","textAlign":null,"indentLevel":0},"content":[{"text":"this is a test test testS","type":"text"}]}`,
+		`{"type":"paragraph","attrs":{"blockId":"7c83bff9-24de-448c-a569-cdd951a7277c","textAlign":null,"indentLevel":0}}`,
+		`{"type":"paragraph","attrs":{"blockId":"65aac248-d542-45c6-9f1a-b13be7fb8b82","textAlign":null,"indentLevel":0},"content":[{"text":"s","type":"text"},{"type":"hardBreak"},{"type":"hardBreak"}]}`,
+		`{"type":"mangoAttachmentImage","attrs":{"alt":"image.png","title":"image.png","width":640,"height":360,"layout":"content","linkRel":"","filename":"image.png","linkHref":"","mimeType":"image/png","position":"break","alignment":"left","linkTitle":"","linkTarget":"","attachmentId":"019fc309-c4a2-7001-b819-35365e91c300","displayWidth":640,"displayHeight":360}}`,
+		`{"type":"paragraph","attrs":{"blockId":"3807418e-4311-4f94-9075-d9ce53afee0a","textAlign":null,"indentLevel":0}}`,
+	)
+	body, err := encodeEditorTextboxBody(document, []EditorJSONAnnotation{})
+	if err != nil {
+		t.Fatalf("encodeEditorTextboxBody: %v", err)
+	}
+	for _, redundant := range []string{
+		`"textAlign"`, `"indentLevel"`, `"alignment"`, `"position"`,
+		`"layout"`, `"linkHref"`, `"linkTarget"`, `"linkRel"`, `"linkTitle"`,
+	} {
+		if bytes.Contains(body, []byte(redundant)) {
+			t.Fatalf("stored body retained default attribute %s: %s", redundant, body)
+		}
+	}
+	for _, required := range []string{
+		`"this is a test test testS"`, `"hardBreak"`,
+		`"attachmentId":"019fc309-c4a2-7001-b819-35365e91c300"`,
+		`"filename":"image.png"`, `"width":640`, `"displayWidth":640`,
+		`"alt":"image.png"`, `"title":"image.png"`, `"annotations":[]`,
+	} {
+		if !bytes.Contains(body, []byte(required)) {
+			t.Fatalf("stored body lost required content %s: %s", required, body)
+		}
+	}
+	if saved := len(document) - len(body); saved < 200 {
+		t.Fatalf("default compaction saved %d bytes, want at least 200\noriginal=%s\ncompact=%s", saved, document, body)
+	}
+	decoded, annotations, err := decodeEditorTextboxBody(body)
+	if err != nil {
+		t.Fatalf("decodeEditorTextboxBody: %v", err)
+	}
+	expected, err := compactMangoTiptapJSON(document)
+	if err != nil {
+		t.Fatalf("compactMangoTiptapJSON: %v", err)
+	}
+	if !bytes.Equal(decoded, expected) {
+		t.Fatalf("decoded compact document changed\nwant %s\n got %s", expected, decoded)
+	}
+	if len(annotations) != 0 {
+		t.Fatalf("decoded annotations=%#v, want empty", annotations)
+	}
+}
+
+func TestMergeMangoTiptapDocumentsTreatsOmittedDefaultsAsEquivalent(t *testing.T) {
+	expandedParagraph := `{"type":"paragraph","attrs":{"blockId":"a","textAlign":null,"indentLevel":0},"content":[{"type":"text","text":"same","marks":[{"type":"link","attrs":{"href":"https://example.test","target":"_blank","rel":"noopener noreferrer nofollow","class":null,"title":null}}]}]}`
+	compactParagraph := `{"type":"paragraph","attrs":{"blockId":"a"},"content":[{"type":"text","text":"same","marks":[{"type":"link","attrs":{"href":"https://example.test"}}]}]}`
+	expandedImage := `{"type":"mangoAttachmentImage","attrs":{"attachmentId":"image-1","filename":"image.png","mimeType":"image/png","alignment":"left","position":"break","layout":"content","linkHref":"","linkTarget":"","linkRel":"","linkTitle":""}}`
+	compactImage := `{"type":"mangoAttachmentImage","attrs":{"attachmentId":"image-1","filename":"image.png","mimeType":"image/png"}}`
+
+	merged, err := mergeMangoTiptapDocuments(
+		editorMergeTestDocument(t, expandedParagraph, expandedImage),
+		editorMergeTestDocument(t, compactParagraph, compactImage),
+	)
+	if err != nil {
+		t.Fatalf("mergeMangoTiptapDocuments: %v", err)
+	}
+	var envelope mangoTiptapMergeEnvelope
+	if err := json.Unmarshal(merged, &envelope); err != nil {
+		t.Fatalf("unmarshal merged document: %v", err)
+	}
+	if got, want := len(envelope.Document.Content), 2; got != want {
+		t.Fatalf("compact/expanded compatibility duplicated content: got %d blocks, want %d: %s", got, want, merged)
+	}
+	for _, redundant := range []string{`"textAlign"`, `"indentLevel"`, `"alignment"`, `"position"`, `"layout"`} {
+		if bytes.Contains(merged, []byte(redundant)) {
+			t.Fatalf("merged document retained default attribute %s: %s", redundant, merged)
+		}
+	}
+}
+
 func TestMergeMangoTiptapDocumentsKeepsBothConflictingBlocksAndRejectsDeletion(t *testing.T) {
 	serverA := `{"type":"paragraph","attrs":{"blockId":"a"},"content":[{"type":"text","text":"server edit"}]}`
 	serverB := `{"type":"paragraph","attrs":{"blockId":"b"},"content":[{"type":"text","text":"server-only block"}]}`

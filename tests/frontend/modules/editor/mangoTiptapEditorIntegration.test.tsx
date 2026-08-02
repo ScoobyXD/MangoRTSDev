@@ -155,6 +155,34 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /mango-editor-entity-icon/);
   assert.match(html, /M2.3 3.1h11.4v9.8H2.3z/);
 
+  const compactDefaultsHTML = renderToStaticMarkup(
+    <MangoTiptapStaticRenderer
+      value={{
+        format: "mango-tiptap-json",
+        schema_version: 1,
+        document: { type: "doc", content: [
+          { type: "paragraph", content: [{ type: "mangoEntityLink", attrs: { entityId: "node-compact", label: "Compact Node" } }] },
+          { type: "paragraph", content: [{ type: "text", text: "Compact link", marks: [{ type: "link", attrs: { href: "https://example.test" } }] }] },
+          { type: "mangoAttachmentImage", attrs: { attachmentId: "compact-image", filename: "compact.png", mimeType: "image/png" } },
+        ] },
+      }}
+      renderAttachmentImage={(attributes) => (
+        <span
+          data-compact-image={attributes.attachmentId}
+          data-alignment={attributes.alignment}
+          data-position={attributes.position}
+          data-layout={attributes.layout}
+        />
+      )}
+    />,
+  );
+  assert.match(compactDefaultsHTML, /href="\/nodes\/node-compact"/);
+  assert.match(compactDefaultsHTML, /href="https:\/\/example.test" target="_blank"/);
+  assert.match(compactDefaultsHTML, /data-compact-image="compact-image"/);
+  assert.match(compactDefaultsHTML, /data-alignment="left"/);
+  assert.match(compactDefaultsHTML, /data-position="break"/);
+  assert.match(compactDefaultsHTML, /data-layout="content"/);
+
   const presentationCSS = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptap.css"), "utf8");
   assert.match(presentationCSS, /font-size:\s*14px/);
   assert.match(presentationCSS, /line-height:\s*20px/);
@@ -502,7 +530,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await act(async () => { assert.equal(controllerRef.current?.applyTextAlignment("left"), true); });
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "left", "the selected image node attributes must receive the toolbar alignment");
     await waitFor(() => postStarted, "selected image alignment must use the normal durable document save");
-    assert.match(JSON.stringify(postedDocument), /"attachmentId":"image-1"[^}]*"alignment":"left"/);
+    const postedImage = postedDocument?.document.content?.find((node) => node.type === "mangoAttachmentImage");
+    assert.equal(postedImage?.attrs?.attachmentId, "image-1");
+    assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "alignment"), false, "the default left alignment should not be sent");
+    assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "position"), false, "the default break position should not be sent");
+    assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "layout"), false, "the default content layout should not be sent");
+    assert.doesNotMatch(JSON.stringify(postedDocument), /"indentLevel":0|"textAlign":null/);
     releasePost?.();
     await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the selected image alignment save must receive its backend acknowledgement");
     postStarted = false;

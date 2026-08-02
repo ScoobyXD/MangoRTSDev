@@ -46,7 +46,7 @@ function markContent(content: React.ReactNode, mark: NonNullable<JSONContent["ma
     case "textStyle":
       return <span key={key} style={{ fontSize: attrs.fontSize ? String(attrs.fontSize) : undefined, color: attrs.color ? String(attrs.color) : undefined }}>{content}</span>;
     case "link":
-      return <a key={key} href={String(attrs.href || "#")} target={attrs.target ? String(attrs.target) : undefined} rel="noopener noreferrer nofollow">{content}</a>;
+      return <a key={key} href={String(attrs.href || "#")} target={Object.prototype.hasOwnProperty.call(attrs, "target") ? (attrs.target ? String(attrs.target) : undefined) : "_blank"} rel="noopener noreferrer nofollow">{content}</a>;
     default: return content;
   }
 }
@@ -133,7 +133,7 @@ function renderNode(
     case "codeBlock": return <pre key={key} {...blockProps}><code>{children}</code></pre>;
     case "horizontalRule": return <hr key={key} {...blockProps} />;
     case "mangoEntityLink": {
-      const entityType = attrs.entityType;
+      const entityType = Object.prototype.hasOwnProperty.call(attrs, "entityType") ? attrs.entityType : "node";
       const entityID = String(attrs.entityId || "");
       const label = String(attrs.label || "Entity");
       if (!isEditorEntityType(entityType) || !entityID) return <span key={key}>{label}</span>;
@@ -183,6 +183,9 @@ function renderNode(
       return <span key={key} className={`mango-tiptap-mention mango-tiptap-mention--${kind}`} data-mango-user-id={String(attrs.userId || "")} data-mango-mention-kind={kind}>{kind === "urgent" ? "!" : "@"}{String(attrs.label || "user")}</span>;
     }
     case "mangoAttachmentImage": {
+      const alignment = Object.prototype.hasOwnProperty.call(attrs, "alignment") ? attrs.alignment : "left";
+      const imagePosition = Object.prototype.hasOwnProperty.call(attrs, "position") ? attrs.position : "break";
+      const layout = Object.prototype.hasOwnProperty.call(attrs, "layout") ? attrs.layout : "content";
       const image = {
         attachmentId: String(attrs.attachmentId || ""),
         filename: String(attrs.filename || ""),
@@ -191,9 +194,9 @@ function renderNode(
         height: typeof attrs.height === "number" ? attrs.height : undefined,
         displayWidth: typeof attrs.displayWidth === "number" ? attrs.displayWidth : undefined,
         displayHeight: typeof attrs.displayHeight === "number" ? attrs.displayHeight : undefined,
-        alignment: typeof attrs.alignment === "string" ? attrs.alignment : undefined,
-        position: typeof attrs.position === "string" ? attrs.position : undefined,
-        layout: typeof attrs.layout === "string" ? attrs.layout : undefined,
+        alignment: typeof alignment === "string" ? alignment : undefined,
+        position: typeof imagePosition === "string" ? imagePosition : undefined,
+        layout: typeof layout === "string" ? layout : undefined,
         alt: typeof attrs.alt === "string" ? attrs.alt : undefined,
         title: typeof attrs.title === "string" ? attrs.title : undefined,
         linkHref: typeof attrs.linkHref === "string" ? attrs.linkHref : undefined,
