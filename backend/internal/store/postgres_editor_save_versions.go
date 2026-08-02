@@ -48,7 +48,6 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 	if companyID == "" || nodeID == "" || informationID == "" || infoType == "" || strings.TrimSpace(input.Information) == "" {
 		return domain.NodeProjection{}, ErrInvalid
 	}
-
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
 		`select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`,
@@ -59,65 +58,20 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 	if !exists {
 		return domain.NodeProjection{}, ErrNotFound
 	}
-	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
-		return domain.NodeProjection{}, ErrProtectedEmailCollaborationResource
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return domain.NodeProjection{}, err
-	}
-
-	if isEditorTextBoxType(infoType) {
-		return upsertPostgresNodeTextProjection(ctx, tx, input, companyID, nodeID, informationID, infoType)
-	}
-	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
+	previous, previousFound, err := postgresNodeV3ProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}
-
-	var projection domain.NodeProjection
-	if err := tx.QueryRowContext(ctx,
-		`insert into node_projection_table
-		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, node_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now(),
-		   revision=node_projection_table.revision+1
-		 returning company_id::text, node_id::text, information_id::text, type::text, information, revision, created_timestamp, updated_timestamp`,
-		companyID, nodeID, informationID, infoType, input.Information,
-	).Scan(
-		&projection.CompanyID,
-		&projection.NodeID,
-		&projection.InformationID,
-		&projection.Type,
-		&projection.Information,
-		&projection.Revision,
-		&projection.CreatedTimestamp,
-		&projection.UpdatedTimestamp,
-	); err != nil {
+	input.CompanyID = companyID
+	input.NodeID = nodeID
+	input.InformationID = informationID
+	input.Type = infoType
+	projection, err := postgresUpsertNodeV3ProjectionTx(ctx, tx, input)
+	if err != nil {
 		return domain.NodeProjection{}, err
 	}
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		actor := normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName)
-		var previousPtr *domain.NodeProjection
-		if previousFound {
-			previousPtr = &previous
-		}
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			companyID,
-			nodeID,
-			informationID,
-			infoType,
-			previousPtr,
-			input.Information,
-			actor,
-			time.Now().UTC(),
-		)); err != nil {
-			return domain.NodeProjection{}, err
-		}
-	}
-	if previousFound && strings.EqualFold(strings.TrimSpace(previous.Type), "Text block chat") && strings.EqualFold(infoType, "Text block chat") {
+	if previousFound && strings.EqualFold(previous.Type, CommunicationsEmailCollaborationChatInformationType) &&
+		strings.EqualFold(projection.Type, CommunicationsEmailCollaborationChatInformationType) {
 		outboxInput, err := nodeChatUpdatedOutboxInput(projection)
 		if err != nil {
 			return domain.NodeProjection{}, err
@@ -225,20 +179,21 @@ func (r *PostgresRepo) listEditorSaveVersions(companyID, resourceType, resourceI
 	if companyID == "" || resourceID == "" {
 		return nil, ErrInvalid
 	}
-
-	query := `select company_id::text, node_id::text, save_batch_id::text, save_kind, coalesce(saved_by_user_id::text, ''), saved_by_display_name,
-		         information_id::text, coalesce(source_information_id::text, ''), type::text, information, created_timestamp, updated_timestamp
-		    from node_information
-		   where company_id=$1::uuid and node_id=$2::uuid and save_batch_id is not null
-		   order by created_timestamp desc, information_id asc`
-	if resourceType == EntityTypeLogicGate {
-		query = `select company_id::text, logic_gate_id::text, save_batch_id::text, save_kind, coalesce(saved_by_user_id::text, ''), saved_by_display_name,
-		         information_id::text, coalesce(source_information_id::text, ''), type::text, information, created_timestamp, updated_timestamp
-		    from logic_gate_information
-		   where company_id=$1::uuid and logic_gate_id=$2::uuid and save_batch_id is not null
-		   order by created_timestamp desc, information_id asc`
+	if resourceType == EntityTypeNode {
+		// Node save history is authoritative in node_textboxes_history.
+		return []domain.EditorSaveVersion{}, nil
 	}
-	rows, err := r.db.QueryContext(ctx, query, companyID, resourceID)
+	if resourceType != EntityTypeLogicGate {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select company_id::text, logic_gate_id::text, save_batch_id::text, save_kind,
+       coalesce(saved_by_user_id::text, ''), saved_by_display_name,
+       information_id::text, coalesce(source_information_id::text, ''),
+       type::text, information, created_timestamp, updated_timestamp
+from logic_gate_information
+where company_id=$1::uuid and logic_gate_id=$2::uuid and save_batch_id is not null
+order by created_timestamp desc, information_id asc`, companyID, resourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -315,34 +270,6 @@ func (r *PostgresRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionResto
 
 func (r *PostgresRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error) {
 	return restorePostgresEditorTextboxHistoryCompatible(r, input, EntityTypeLogicGate)
-}
-
-func selectEditorSaveVersionTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID, saveID string) (domain.EditorSaveVersion, error) {
-	query := `select company_id::text, node_id::text, save_batch_id::text, save_kind, coalesce(saved_by_user_id::text, ''), saved_by_display_name,
-		         information_id::text, coalesce(source_information_id::text, ''), type::text, information, created_timestamp, updated_timestamp
-		    from node_information
-		   where company_id=$1::uuid and node_id=$2::uuid and save_batch_id=$3::uuid
-		   order by created_timestamp asc, information_id asc`
-	if resourceType == EntityTypeLogicGate {
-		query = `select company_id::text, logic_gate_id::text, save_batch_id::text, save_kind, coalesce(saved_by_user_id::text, ''), saved_by_display_name,
-		         information_id::text, coalesce(source_information_id::text, ''), type::text, information, created_timestamp, updated_timestamp
-		    from logic_gate_information
-		   where company_id=$1::uuid and logic_gate_id=$2::uuid and save_batch_id=$3::uuid
-		   order by created_timestamp asc, information_id asc`
-	}
-	rows, err := tx.QueryContext(ctx, query, companyID, resourceID, saveID)
-	if err != nil {
-		return domain.EditorSaveVersion{}, err
-	}
-	defer rows.Close()
-	versions, err := scanEditorSaveVersions(rows, resourceType)
-	if err != nil {
-		return domain.EditorSaveVersion{}, err
-	}
-	if len(versions) == 0 {
-		return domain.EditorSaveVersion{}, ErrNotFound
-	}
-	return versions[0], nil
 }
 
 func editorSaveVersionFromItems(companyID, resourceType, resourceID, saveID, saveKind, savedByUserID, savedByDisplayName string, items []domain.EditorSaveVersionItem) domain.EditorSaveVersion {

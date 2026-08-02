@@ -175,35 +175,19 @@ func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Contex
 	threadInput := communicationsEmailThreadInputForConversionMessage(input, message)
 	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, threadInput)
 	if err != nil {
-		if strings.TrimSpace(input.AccountEmail) == "" {
-			informationID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, "", now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
-			return informationID, "", err
-		}
 		return "", "", err
 	}
-	informationID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
+	relationshipID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID,
+		input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now,
+		input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	if err != nil {
 		return "", "", err
 	}
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID); err != nil {
-		return "", "", err
-	}
-	if _, err := tx.ExecContext(ctx, `update communications_email_nodes
-set email_thread_id=$4::uuid, updated_timestamp=now()
-where company_id=$1::uuid and node_id=$2::uuid and message_id=$3`,
-		input.CompanyID, input.NodeID, message.ID, thread.EmailThreadID); err != nil {
-		return "", "", err
-	}
-	if _, err := tx.ExecContext(ctx, `update communications_email_node_attachments
-set email_thread_id=$5::uuid, updated_timestamp=now()
-where company_id=$1::uuid and user_id=$2::uuid and message_id=$3 and node_id=$4::uuid`,
-		input.CompanyID, input.UserID, message.ID, input.NodeID, thread.EmailThreadID); err != nil {
-		return "", "", err
-	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
+		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID,
+			thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
 			return "", "", err
 		}
 	}
-	return informationID, thread.EmailThreadID, nil
+	return relationshipID, thread.EmailThreadID, nil
 }

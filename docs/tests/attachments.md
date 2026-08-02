@@ -1,4 +1,14 @@
-Last updated: 2026-07-16
+# Process Story: Related-Email Attachments Use Relationship Identity
+
+A normalized email message is related to a Node, Project, Logic Gate, or supported textbox.
+↓
+Email bytes and metadata stay in `attachments` and `resource_attachments`; no attachment array or blob is copied into a chat, textbox, or email relationship row.
+↓
+A relationship-specific link uses `resource_type='email_relationship'` and the internal relationship UUID, then resolves the related resource for authorization.
+↓
+Deleting or revoking the relationship/resource makes that link unavailable while message-owned and draft-owned links keep their own independent lifetimes.
+
+Last updated: 2026-08-02
 
 # Attachments Tests
 
@@ -12,6 +22,12 @@ Coverage Status:
 - Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, draft/signature durable-inline guards, destination resource linking, and migration behavior are covered. `backend/internal/http/email_draft_attachment_scope_test.go` covers active/deleted exact and legacy draft links, wrong user/account, shared permission revocation, manager/admin bypass attempts, and independent sent-message survival; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers durable draft preparation before upload plus failure retention. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
 
 ## Business Logic
+
+### V3 related-email attachment identity
+
+- `attached_email` is not a valid current attachment resource type. Relationship-specific attachments use `email_relationship` plus the internal `email_relationship_id`.
+- Message-owned downloads use `email_message`; draft uploads use `email_draft`; Node textbox comments use `node_chat_message`. Each path resolves its own durable owner before returning bytes.
+- The V3 migration must abort if one legacy attached-email link maps to zero or multiple relationships. A successful migration preserves the attachment and changes only its resource identity.
 
 ### 2026-07-10 Node Attachment Retention And Preview Contract
 

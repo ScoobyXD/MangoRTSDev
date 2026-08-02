@@ -80,7 +80,7 @@ test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
 });
 
-test("email collaboration reads are participant-scoped and clone stored message snapshots", async () => {
+test("related email reads are resource-scoped and clone stored message snapshots", async () => {
   const calls: string[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL) => {
@@ -152,7 +152,7 @@ test("email collaboration resolve is read-only while ensure sends the complete s
   }
 });
 
-test("email collaboration thread reads durable participant-visible messages without mailbox scope", async () => {
+test("related email thread reads durable resource-visible messages without mailbox scope", async () => {
   const originalFetch = globalThis.fetch;
   let requested = "";
   globalThis.fetch = async (input: RequestInfo | URL) => {

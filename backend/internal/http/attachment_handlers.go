@@ -400,16 +400,14 @@ func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.R
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
-	if handled, allowed := s.requireEmailCollaborationNodeAttachmentAccess(w, r, companyID, resourceType, resourceID); handled {
-		return allowed
-	}
+
 	switch resourceType {
 	case "email_draft", "email_message":
 		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, false)
 	case "email_signature":
 		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
-	case "attached_email":
-		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
+	case "email_relationship":
+		return s.requireEmailRelationshipAttachmentResourceAccess(w, r, companyID, resourceID, false)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
@@ -421,16 +419,14 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
-	if handled, allowed := s.requireEmailCollaborationNodeAttachmentAccess(w, r, companyID, resourceType, resourceID); handled {
-		return allowed
-	}
+
 	switch resourceType {
 	case "email_draft", "email_message":
 		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, true)
 	case "email_signature":
 		return s.requireEmailSignatureAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
-	case "attached_email":
-		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
+	case "email_relationship":
+		return s.requireEmailRelationshipAttachmentResourceAccess(w, r, companyID, resourceID, true)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
@@ -466,9 +462,7 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 		}
 		return s.canViewEmailDraftAttachmentResource(actor, companyID, resourceID)
 	}
-	if handled, allowed, err := s.canAccessEmailCollaborationNodeAttachment(r, companyID, resourceType, resourceID); handled {
-		return allowed, err
-	}
+
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
 		return true, nil
@@ -478,12 +472,8 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 		return s.canViewEmailMessageAttachmentResource(companyID, userID, resourceID)
 	case "email_signature":
 		return s.canViewEmailSignatureAttachmentResource(companyID, userID, resourceID)
-	case "attached_email":
-		nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
-		if !ok {
-			return false, nil
-		}
-		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
+	case "email_relationship":
+		return s.canViewEmailRelationshipAttachmentResource(companyID, userID, resourceID)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
@@ -737,16 +727,35 @@ func (s *Server) canViewEmailSignatureAttachmentResource(companyID, userID, reso
 	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionEdit)
 }
 
-func (s *Server) requireAttachedEmailAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {
-	nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
-	if !ok {
+func (s *Server) requireEmailRelationshipAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID string, mutation bool) bool {
+	resource, err := s.repo.GetEmailRelationshipAttachmentResource(companyID, resourceID)
+	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
 		return false
 	}
-	if accessLevel == store.EntityPermissionEdit {
-		return s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return false
 	}
-	return s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_email_relationship")
+		return false
+	}
+	if mutation {
+		return s.requireEntityEdit(w, r, companyID, resource.ResourceType, resource.ResourceID, "resource_not_found")
+	}
+	return s.requireEntityView(w, r, companyID, resource.ResourceType, resource.ResourceID, "resource_not_found")
+}
+
+func (s *Server) canViewEmailRelationshipAttachmentResource(companyID, userID, resourceID string) (bool, error) {
+	resource, err := s.repo.GetEmailRelationshipAttachmentResource(companyID, resourceID)
+	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.repo.UserHasEffectiveAccess(companyID, userID, resource.ResourceType, resource.ResourceID, store.EntityPermissionEdit)
 }
 
 func parseEmailScopedAttachmentResourceID(resourceType, resourceID string) (emailScopedAttachmentResource, bool) {
@@ -862,27 +871,6 @@ func parseEmailSignatureAttachmentResourceID(resourceID string) (emailScopedAtta
 	}
 }
 
-func parseAttachedEmailAttachmentResourceID(resourceID string) (string, bool) {
-	parts := strings.Split(strings.TrimSpace(resourceID), ":")
-	if len(parts) != 4 || parts[0] != "node" || parts[2] != "message" {
-		return "", false
-	}
-	nodeID, err := url.QueryUnescape(parts[1])
-	if err != nil {
-		return "", false
-	}
-	messageID, err := url.QueryUnescape(parts[3])
-	if err != nil {
-		return "", false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	messageID = strings.TrimSpace(messageID)
-	if nodeID == "" || messageID == "" {
-		return "", false
-	}
-	return nodeID, true
-}
-
 func attachmentPermissionEntityType(resourceType string) (string, bool) {
 	switch store.NormalizeAttachmentResourceType(resourceType) {
 	case "node":
@@ -947,58 +935,4 @@ func (s *Server) accessibleEmailCollaborationDraft(companyID, userID string, par
 		return domain.CommunicationsEmailDraft{}, false, err
 	}
 	return draft, draft.IsShared && draft.CollaborationID == parsed.collaborationID, nil
-}
-
-func emailCollaborationAttachmentNodeID(resourceType, resourceID string) (string, bool) {
-	switch store.NormalizeAttachmentResourceType(resourceType) {
-	case "node":
-		nodeID := strings.TrimSpace(resourceID)
-		return nodeID, nodeID != ""
-	case "attached_email":
-		return parseAttachedEmailAttachmentResourceID(resourceID)
-	default:
-		return "", false
-	}
-}
-
-func (s *Server) canAccessEmailCollaborationNodeAttachment(r *http.Request, companyID, resourceType, resourceID string) (bool, bool, error) {
-	nodeID, ok := emailCollaborationAttachmentNodeID(resourceType, resourceID)
-	if !ok {
-		return false, false, nil
-	}
-	collaboration, err := s.repo.GetCommunicationsEmailCollaborationByNode(companyID, nodeID)
-	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
-		return false, false, nil
-	}
-	if err != nil {
-		return true, false, err
-	}
-	actor, ok := authenticatedActor(r)
-	if !ok || actorRoleForCompany(actor, companyID) == "" {
-		return true, false, nil
-	}
-	_, err = s.repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, strings.TrimSpace(actor.User.UserID))
-	if errors.Is(err, store.ErrNotFound) {
-		return true, false, nil
-	}
-	if err != nil {
-		return true, false, err
-	}
-	return true, true, nil
-}
-
-func (s *Server) requireEmailCollaborationNodeAttachmentAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) (bool, bool) {
-	handled, allowed, err := s.canAccessEmailCollaborationNodeAttachment(r, companyID, resourceType, resourceID)
-	if !handled {
-		return false, false
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_check_email_collaboration_attachment")
-		return true, false
-	}
-	if !allowed {
-		writeAccessResourceNotFound(w)
-		return true, false
-	}
-	return true, true
 }

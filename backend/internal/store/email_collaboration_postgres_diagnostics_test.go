@@ -67,13 +67,13 @@ func TestEmailCollaborationStorageNotReadySQLStates(t *testing.T) {
 	}
 }
 
-func TestEmailCollaborationInvalidEnumValueIsStorageDriftOnlyAtAttachedEmailStages(t *testing.T) {
+func TestEmailRelationshipInvalidEnumValueIsNotSchemaReadiness(t *testing.T) {
 	tests := []struct {
 		stage string
 		want  bool
 	}{
-		{stage: "insert_attached_email_history", want: true},
-		{stage: "insert_attached_email_projection", want: true},
+		{stage: "persist_email_thread", want: false},
+		{stage: "insert_email_relationship", want: false},
 		{stage: "check_creator_membership", want: false},
 		{stage: "insert_collaboration", want: false},
 	}
@@ -109,22 +109,9 @@ func TestPostgresEmailCollaborationCreationSkipsBroadProjectionSync(t *testing.T
 		t.Fatal("standalone email collaboration creation must not depend on broad Node derived projections")
 	}
 	for _, stage := range []string{
-		"lookup_existing",
-		"insert_node",
-		"insert_attached_email_history",
-		"insert_attached_email_projection",
-		"place_explorer_node",
-		"insert_collaboration",
-		"insert_creator_participant",
-		"grant_creator_access",
-		"assign_creator_gvic",
-		"allocate_creator_gvic_policy",
-		"set_creator_gvic_policy",
-		"sync_creator_gvic",
-		"sync_creator_gvic_projection",
-		"load_created",
-		"commit_created",
-	} {
+		"begin_transaction",
+		"lock_scope",
+		"persist_email_thread"} {
 		if !strings.Contains(ensureSource, `wrapEmailCollaborationEnsureStage("`+stage+`"`) {
 			t.Fatalf("creation path missing staged diagnostic %q", stage)
 		}

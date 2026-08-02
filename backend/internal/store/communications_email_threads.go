@@ -29,6 +29,7 @@ type CommunicationsEmailThreadUpsertInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	AccountEmail         string
+	Provider             string
 	ProviderThreadID     string
 	SelectedMessageID    string
 	Messages             []domain.EmailMessageSnapshot
@@ -129,6 +130,10 @@ func normalizeCommunicationsEmailThreadInput(input CommunicationsEmailThreadUpse
 	input.PersonalAccountEmail = scope.personalAccountEmail
 	input.SharedInboxID = scope.sharedInboxID
 	input.AccountEmail = scope.accountEmail
+	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
+	if input.Provider != "" && input.Provider != "google" && input.Provider != "microsoft" {
+		return CommunicationsEmailThreadUpsertInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
 	input.SelectedMessageID = strings.TrimSpace(input.SelectedMessageID)
 	input.LastDownloadError = strings.TrimSpace(input.LastDownloadError)

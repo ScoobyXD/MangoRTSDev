@@ -47,8 +47,8 @@ func TestPostgresEmailNodeWorkPathsAreOpenWhileCanonicalEmailRemainsProtected(t 
 			t.Fatalf("ReadFile %s: %v", test.file, err)
 		}
 		body := emailCollaborationPostgresFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), test.signature)
-		if !strings.Contains(body, "AttachedEmailInformationID") || !strings.Contains(body, "ErrProtectedEmailCollaborationResource") {
-			t.Errorf("%s in %s does not protect only the canonical attached-email projection", test.signature, test.file)
+		if strings.Contains(body, "ErrProtectedEmailCollaborationResource") || strings.Contains(body, "postgresRejectEmailCollaborationNodeMutation") {
+			t.Errorf("%s in %s still applies retired protected-collaboration behavior", test.signature, test.file)
 		}
 	}
 }

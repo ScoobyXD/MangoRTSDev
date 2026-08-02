@@ -77,19 +77,21 @@ func TestEditorJSONHTTPUsesPermanentFormatAndRetiresLegacyRoute(t *testing.T) {
 		t.Fatalf("save acknowledgement returned a complete document: %s", created.Body.String())
 	}
 	metadata := doJSON(http.MethodPatch, jsonPath, map[string]any{
-		"title": "JSON image", "attachments": []any{},
+		"title": "retired title", "attachments": []any{},
 	})
-	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), "\"projection_revision\":1") {
-		t.Fatalf("metadata status=%d body=%s", metadata.Code, metadata.Body.String())
+	if metadata.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("retired Node metadata status=%d body=%s", metadata.Code, metadata.Body.String())
 	}
-	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
-	if err != nil || len(projections) != 1 {
-		t.Fatalf("JSON metadata projections=%+v err=%v", projections, err)
+	snapshot, err := repo.GetEditorJSONSnapshot(store.EditorJSONDocumentRef{
+		CompanyID: companyID, ResourceType: store.EntityTypeNode,
+		ResourceID: node.NodeID, DocumentID: documentID,
+	})
+	if err != nil {
+		t.Fatalf("load JSON textbox snapshot: %v", err)
 	}
-	if !strings.Contains(projections[0].Information, "\"title\":\"JSON image\"") ||
-		!strings.Contains(projections[0].Information, "\"document\":\"\"") ||
-		strings.Contains(projections[0].Information, "safe JSON") {
-		t.Fatalf("JSON metadata projection leaked document content: %s", projections[0].Information)
+	body := string(snapshot.JSONDocument)
+	if !strings.Contains(body, "safe JSON") || strings.Contains(body, "\"title\"") || strings.Contains(body, "\"attachments\"") {
+		t.Fatalf("Node textbox body is not body-only: %s", body)
 	}
 	stale := doJSON(http.MethodPost, jsonPath, map[string]any{
 		"operation_id": "json-operation-2", "client_id": "json-client",

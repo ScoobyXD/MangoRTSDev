@@ -10,6 +10,9 @@ func (r *MemoryRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (Ed
 	if err != nil {
 		return EditorJSONMetadataCommit{}, err
 	}
+	if input.Document.ResourceType == EntityTypeNode {
+		return EditorJSONMetadataCommit{}, ErrInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.editorJSONFormatReadyLocked(input.Document.CompanyID) {
@@ -30,23 +33,6 @@ func (r *MemoryRepo) updateEditorProjectionMetadataLocked(input EditorJSONMetada
 	bucketKey := key(input.Document.CompanyID, input.Document.ResourceID)
 	var revision int64
 	switch input.Document.ResourceType {
-	case EntityTypeNode:
-		if r.nodeText[bucketKey] == nil {
-			r.nodeText[bucketKey] = map[string]domain.NodeProjection{}
-		}
-		item := r.nodeText[bucketKey][input.Document.DocumentID]
-		created := item.CreatedTimestamp
-		if created.IsZero() {
-			created = now
-		}
-		revision = item.Revision + 1
-		if revision < 1 {
-			revision = 1
-		}
-		item.CompanyID, item.NodeID, item.InformationID = input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID
-		item.Type, item.Information, item.IsDeleted, item.Revision = "Text box", information, false, revision
-		item.CreatedTimestamp, item.UpdatedTimestamp = created, now
-		r.nodeText[bucketKey][input.Document.DocumentID] = item
 	case EntityTypeLogicGate:
 		if r.logicGateText[bucketKey] == nil {
 			r.logicGateText[bucketKey] = map[string]domain.LogicGateProjection{}

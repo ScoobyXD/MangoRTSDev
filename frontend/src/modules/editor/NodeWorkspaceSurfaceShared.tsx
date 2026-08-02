@@ -72,14 +72,11 @@ export type NodeImageNodeRequest = {
   attachmentID?: string;
   document: string;
   tiptapDocument?: string;
-  blockTitle?: string;
 };
 
 export type TextBlockState = {
   id: string;
-  title: string;
   document: string;
-  attachments: EditorChatAttachment[];
   emailMessageID?: string;
   emailAccent?: string;
   createdTimestamp: string;
@@ -139,7 +136,6 @@ export const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK
 export const TEXT_BLOCK_ROW_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT + 2;
 export const TEXT_BLOCK_ROW_GAP = 12;
 export const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
-export const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 export const EDITOR_NEU_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";
 export const EDITOR_NEU_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
 export const EDITOR_NEU_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";

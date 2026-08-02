@@ -1,3 +1,13 @@
+# Process Story: Node Textboxes Have One Current Body Store
+
+A user creates, edits, reorders, or deletes a Node textbox.
+↓
+The frontend sends Mango TipTap JSON with the textbox UUID and no title metadata.
+↓
+The backend reads and writes `node_textboxes` only; comments use `node_textbox_chats`, seen baselines use `node_textbox_seen_snapshots`, and changes point to `textbox_id`.
+↓
+Realtime versions and Recycle Bin capture/restore follow those permanent tables, so no retired information/projection row can become current again.
+
 # Editor Process Map
 
 ## Process Story: compact JSON keeps the same editor document
@@ -24,7 +34,7 @@ Mango always uses the TipTap JSON API and the current owner-specific textbox tab
 ↓
 Each current row stores the owner and textbox IDs, the complete `body_json` envelope, `revision`, display order where applicable, and lifecycle timestamps. Node text boxes do not duplicate the document into legacy JSON, plain-text, checksum, migration, actor, or idempotency columns
 ↓
-Normal saves continue to write current history, operation, and realtime-outbox records. Information and projection tables remain available for their current read-model and compatibility responsibilities
+Normal saves update the current textbox, manual history, change tracking, and realtime outbox. Node information/projection tables are retired; Project and Logic Gate projection tables remain for their separate product responsibilities
 ↓
 The retirement migration drops the 21 Node V2, editor-cutover, and HTML-collaboration tables with strict statements. If an expected object is missing, migration stops and exposes schema drift instead of silently skipping it
 ↓
@@ -470,7 +480,7 @@ Business logic covered:
 
 Given:
 - A user opens a chat pane inside a node or project text block.
-- An email collaboration supplies its participant roster through the optional shared ChatPane header slot, while Node and Project callers omit it.
+- A related-email chat may show authors and mention history through the optional shared ChatPane header slot, but authorization still comes from normal resource permissions; there is no participant roster.
 
 Expected:
 - Chat remains a conversation composer.

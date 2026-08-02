@@ -30,8 +30,8 @@ func (r *MemoryRepo) rejectEmailCollaborationExplorerNodeMutationLocked(companyI
 	if nodeID == "" {
 		nodeID = entity.EntityID
 	}
-	if _, ok := r.emailCollaborationForNodeLocked(companyID, nodeID); ok {
-		return ErrProtectedEmailCollaborationResource
+	if _, exists := r.nodes[key(companyID, nodeID)]; !exists {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -60,8 +60,13 @@ func postgresEmailCollaborationByNode(ctx context.Context, queryer emailCollabor
 	}
 	item, err := scanPostgresEmailCollaboration(queryer.QueryRowContext(ctx, `
 select `+postgresEmailCollaborationColumns+`
-from communications_email_collaborations c
-where c.company_id=$1::uuid and c.node_id=$2::uuid`, companyID, nodeID))
+from email_relationships relationship
+join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+join email_messages message on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
+where relationship.company_id=$1::uuid and relationship.resource_type='node'
+ and relationship.resource_id=$2::uuid and relationship.resource_textbox_id is null
+order by relationship.created_timestamp limit 1`, companyID, nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
@@ -77,12 +82,18 @@ func (r *PostgresRepo) GetCommunicationsEmailCollaborationByNode(companyID, node
 }
 
 func postgresRejectEmailCollaborationNodeMutation(ctx context.Context, queryer emailCollaborationQueryer, companyID, nodeID string) error {
-	_, err := postgresEmailCollaborationByNode(ctx, queryer, companyID, nodeID)
-	if err == nil {
-		return ErrProtectedEmailCollaborationResource
+	companyID, nodeID = cleanUUIDText(companyID), cleanUUIDText(nodeID)
+	if ctx == nil || queryer == nil || companyID == "" || nodeID == "" {
+		return ErrInvalid
 	}
-	if errors.Is(err, ErrNotFound) {
-		return nil
+	var exists bool
+	if err := queryer.QueryRowContext(ctx, `
+select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`,
+		companyID, nodeID).Scan(&exists); err != nil {
+		return err
 	}
-	return err
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
 }

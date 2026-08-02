@@ -252,11 +252,12 @@ var recycleSnapshotTables = map[string]bool{
 	"logic_gate_textboxes_history":           true,
 	"project_textboxes":                      true,
 	"project_textboxes_history":              true,
-	"node_information":                       true,
-	"node_projection_table":                  true,
+	"node_textbox_chats":                     true,
+	"node_textbox_seen_snapshots":            true,
 	"node_content_changes":                   true,
 	"node_content_change_seen":               true,
-	"node_projection_seen_snapshots":         true,
+	"email_relationships":                    true,
+	"email_drafts":                           true,
 	"node_map_positions":                     true,
 	"node_account_assignments":               true,
 	"node_relationships":                     true,
@@ -277,7 +278,6 @@ var recycleSnapshotTables = map[string]bool{
 	"resource_gvic_assignments":              true,
 	"resource_permissions":                   true,
 	"company_explorer_items":                 true,
-	"communications_email_nodes":             true,
 }
 
 var recycleRestoreTableOrder = []string{
@@ -291,8 +291,7 @@ var recycleRestoreTableOrder = []string{
 	"project_textboxes",
 	"project_textboxes_history",
 	"company_explorer_folders",
-	"node_information",
-	"node_projection_table",
+	"node_textbox_chats",
 	"logic_gate_information",
 	"logic_gate_projection_table",
 	"project_information",
@@ -301,12 +300,13 @@ var recycleRestoreTableOrder = []string{
 	"logic_gate_map_positions",
 	"node_content_changes",
 	"node_content_change_seen",
-	"node_projection_seen_snapshots",
+	"node_textbox_seen_snapshots",
 	"node_account_assignments",
 	"resource_gvic_assignments",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
-	"communications_email_nodes",
+	"email_relationships",
+	"email_drafts",
 	"node_logic_gate_assignments",
 	"node_relationships",
 	"logic_gate_relationships",
@@ -448,7 +448,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(nodeIDs) > 0 {
-		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_information", "node_projection_table", "node_projection_seen_snapshots", "node_map_positions", "node_account_assignments"} {
+		for _, tableName := range []string{"nodes", "node_textboxes", "node_textbox_chats", "node_textboxes_history", "node_textbox_seen_snapshots", "node_map_positions", "node_account_assignments"} {
 			if err := addTable(tableName, `company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])`, companyID, nodeIDCSV); err != nil {
 				return nil, err
 			}
@@ -522,10 +522,13 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			}
 		}
 	}
-	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 {
-		emailWhere, emailArgs := recycleResourceWhere(companyID, nodeIDs, logicGateIDs, nil, "node_id", "logic_gate_id", "")
+	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {
+		emailWhere, emailArgs := recycleTypedResourceWhere(companyID, nodeIDs, logicGateIDs, projectIDs, "resource_type", "resource_id")
 		if emailWhere != "" {
-			if err := addTable("communications_email_nodes", emailWhere, emailArgs...); err != nil {
+			if err := addTable("email_relationships", emailWhere, emailArgs...); err != nil {
+				return nil, err
+			}
+			if err := addTable("email_drafts", "company_id=$1::uuid and email_relationship_id in (select email_relationship_id from email_relationships where "+emailWhere+")", emailArgs...); err != nil {
 				return nil, err
 			}
 		}

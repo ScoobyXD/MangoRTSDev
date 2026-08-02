@@ -380,7 +380,8 @@ export function homeMailDraftMatchesScope(
   sharedInboxID = "",
   accountEmail = "",
 ): boolean {
-  // Collaboration drafts are participant-scoped rather than mailbox-viewer
+
+
   // scoped. The backend list boundary reauthorizes participation, and every
   // participant must see the same draft from My Drafts even when the immutable
   // source mailbox belongs to somebody else.
