@@ -26,7 +26,6 @@ type RealtimeMessageType =
   | "kanban.changed"
   | "mailbox.message.changed"
   | "mailbox.folder.changed"
-  | "editor.delta.committed"
   | "editor.snapshot.required"
   | "editor.document.deleted"
   | "heartbeat.challenge"
@@ -150,27 +149,6 @@ export type RealtimeErrorMessage = RealtimeBaseMessage & {
   message?: string;
 };
 
-export type RealtimeEditorHTMLPatch = {
-  start_utf8: number;
-  delete_utf8: number;
-  insert: string;
-};
-
-export type RealtimeEditorPatchCommittedMessage = RealtimeBaseMessage & {
-  type: "editor.delta.committed";
-  company_id: string;
-  scope: string;
-  event_id: string;
-  resource_type: "node" | "logic_gate" | "project";
-  resource_id: string;
-  document_id: string;
-  resource_revision: number;
-  operation_id: string;
-  client_id: string;
-  committed_at?: string;
-  patch: RealtimeEditorHTMLPatch;
-};
-
 export type RealtimeEditorSnapshotRequiredMessage = RealtimeBaseMessage & {
   type: "editor.snapshot.required";
   company_id: string;
@@ -220,7 +198,6 @@ type RealtimeInboundMessage =
   | RealtimeKanbanChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
-  | RealtimeEditorPatchCommittedMessage
   | RealtimeEditorSnapshotRequiredMessage
   | RealtimeEditorDocumentDeletedMessage
   | RealtimeHeartbeatMessage
@@ -239,7 +216,6 @@ export type RealtimeSubscriptionHandlers = {
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
-  onEditorPatchCommitted?: (message: RealtimeEditorPatchCommittedMessage) => void;
   onEditorSnapshotRequired?: (message: RealtimeEditorSnapshotRequiredMessage) => void;
   onEditorDocumentDeleted?: (message: RealtimeEditorDocumentDeletedMessage) => void;
   onRecover?: () => void | Promise<void>;
@@ -399,7 +375,6 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         ts: stringValue(payload.ts) || undefined,
       };
     }
-    case "editor.delta.committed":
     case "editor.snapshot.required":
     case "editor.document.deleted": {
       const scoped = scopedMessageBase(payload, type);
@@ -419,10 +394,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         client_id: clientID, committed_at: stringValue(payload.committed_at) || undefined,
       };
       if (type === "editor.document.deleted") return common as RealtimeEditorDocumentDeletedMessage;
-      if (type === "editor.snapshot.required") return { ...common, reason: stringValue(payload.reason) || undefined } as RealtimeEditorSnapshotRequiredMessage;
-      const patch = recordValue(payload.patch);
-      if (!patch) throw new Error("realtime_editor_patch_required");
-      return { ...common, patch: patch as RealtimeEditorHTMLPatch } as RealtimeEditorPatchCommittedMessage;
+      return { ...common, reason: stringValue(payload.reason) || undefined } as RealtimeEditorSnapshotRequiredMessage;
     }
     case "heartbeat.challenge":
     case "heartbeat.confirmed": {
@@ -775,9 +747,7 @@ export class MangoRealtimeClient {
         case "mailbox.folder.changed":
           sub.onMailboxFolderChanged?.(message);
           break;
-        case "editor.delta.committed":
-          sub.onEditorPatchCommitted?.(message);
-          break;
+
         case "editor.snapshot.required":
           sub.onEditorSnapshotRequired?.(message);
           break;

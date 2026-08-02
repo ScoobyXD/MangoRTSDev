@@ -10,8 +10,7 @@ import (
 
 func TestEditorOwnerTextLimitHTTPMessage(t *testing.T) {
 	for name, write := range map[string]func(http.ResponseWriter){
-		"json":    func(w http.ResponseWriter) { writeEditorJSONStoreError(w, store.ErrEditorOwnerTextLimit) },
-		"node-v2": func(w http.ResponseWriter) { writeNodeV2StoreError(w, store.ErrEditorOwnerTextLimit) },
+		"json": func(w http.ResponseWriter) { writeEditorJSONStoreError(w, store.ErrEditorOwnerTextLimit) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()

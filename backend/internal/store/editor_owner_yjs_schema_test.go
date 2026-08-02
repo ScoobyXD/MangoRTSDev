@@ -53,7 +53,7 @@ func TestRetiredYJSStorageHasForwardCleanup(t *testing.T) {
 }
 
 func TestEditorRuntimeDoesNotReferenceRetiredYJSColumns(t *testing.T) {
-	runtimeSource := readEditorSchemaFile(t, "postgres_editor_textboxes.go") + readEditorSchemaFile(t, "postgres_editor_textbox_plain_text.go")
+	runtimeSource := readEditorSchemaFile(t, "postgres_editor_textboxes.go")
 	for _, forbidden := range []string{
 		"collaboration_epoch::text",
 		"collaboration_epoch=gen_random_uuid()",

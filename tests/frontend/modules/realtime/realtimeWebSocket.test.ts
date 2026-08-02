@@ -107,23 +107,7 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(mailboxFolder.shared_inbox_id, "shared-1");
 });
 
-test("parses exact editor HTML patches, tombstones, and application heartbeats", () => {
-  const committed = parseRealtimeMessage(JSON.stringify({
-    type: "editor.delta.committed",
-    company_id: "company-1",
-    scope: "editor:node:node-1:document-1",
-    event_id: "event-1",
-    resource_type: "node",
-    resource_id: "node-1",
-    document_id: "document-1",
-    resource_revision: 2,
-    operation_id: "operation-1",
-    client_id: "client-1",
-    patch: { start_utf8: 17, delete_utf8: 0, insert: "<strong>A</strong>" },
-  }));
-  assert.equal(committed.type, "editor.delta.committed");
-  assert.equal(committed.scope, "editor:node:node-1:document-1");
-  assert.deepEqual("patch" in committed ? committed.patch : undefined, { start_utf8: 17, delete_utf8: 0, insert: "<strong>A</strong>" });
+test("parses editor snapshots, tombstones, and application heartbeats", () => {
   const snapshotRequired = parseRealtimeMessage(JSON.stringify({
     type: "editor.snapshot.required",
     company_id: "company-1",
@@ -143,7 +127,7 @@ test("parses exact editor HTML patches, tombstones, and application heartbeats",
   assert.equal(heartbeat.type, "heartbeat.confirmed");
 });
 test("rejects deleted broad protocol messages", () => {
-  for (const type of ["projection.delta", "workspace.event", "communications.event", "snapshot.refetch", "permission.revoked"]) {
+  for (const type of ["projection.delta", "workspace.event", "communications.event", "snapshot.refetch", "permission.revoked", "editor.delta.committed"]) {
     assert.throws(() => parseRealtimeMessage(JSON.stringify({ type, company_id: "company-1", scope: "board:A" })), /unknown_realtime_message_type/);
   }
 });
@@ -415,7 +399,7 @@ test("application heartbeat stays non-green through subscription recovery and dr
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   assert.notEqual(statuses[statuses.length - 1], "connected", "socket open plus heartbeat is not green before mounted-document recovery");
   assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-health"), true);
-  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/editor-collaboration/node/node-health/documents/document-health"), false);
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/editor-json/node/node-health/documents/document-health"), false);
 
   finishRecovery?.();
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
@@ -635,7 +619,7 @@ test("frontend source inventory contains only retained narrow scope families", (
   }
   assert.equal(existsSync(resolve(sourceRoot, "modules/workspace/workspaceRealtime.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/communications/communicationsStream.ts")), false);
-  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorTextboxSync.ts")), true);
+  assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorTextboxSync.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/editor/editorProjectionDeltas.ts")), false);
   assert.equal(existsSync(resolve(sourceRoot, "modules/kanban/kanbanProjectionDeltas.ts")), false);
 
@@ -643,11 +627,10 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-  assert.equal(subscriptionSources.length, 7);
+  assert.equal(subscriptionSources.length, 6);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/NotificationRealtimeBridge.tsx",
     "modules/editor/EditorContent.tsx",
-    "modules/editor/editorTextboxSync.ts",
     "modules/editor/tiptap/MangoTiptapEditor.tsx",
     "modules/kanban/KanbanContent.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",

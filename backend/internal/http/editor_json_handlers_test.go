@@ -12,19 +12,13 @@ import (
 	"time"
 )
 
-func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
+func TestEditorJSONHTTPUsesPermanentFormatAndRetiresLegacyRoute(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "81818181-8181-4181-8181-818181818181"
 	repo.EnsureCompany(companyID, "JSON editor")
 	user := mustRealtimeAuthUser(t, repo, companyID, "json-editor-admin", domain.RoleCompanyAdmin)
 	node, err := repo.CreateNode(companyID, "JSON node")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.SetEditorDataFormatForTests(store.EditorDataFormatGate{
-		CompanyID: companyID, EditorFormat: store.EditorFormatTiptapJSON,
-		MigrationState: store.EditorMigrationReady, DocumentSchemaVersion: 1,
-	}); err != nil {
 		t.Fatal(err)
 	}
 	const token = "json-editor-token"
@@ -59,8 +53,8 @@ func TestEditorJSONHTTPUsesAtomicGateAndRejectsStaleFormats(t *testing.T) {
 		}
 	}
 	legacy := doJSON(http.MethodGet, legacyPath, nil)
-	if legacy.Code != http.StatusConflict || !strings.Contains(legacy.Body.String(), "editor_format_mismatch") {
-		t.Fatalf("legacy status=%d body=%s", legacy.Code, legacy.Body.String())
+	if legacy.Code != http.StatusNotFound {
+		t.Fatalf("retired legacy status=%d body=%s", legacy.Code, legacy.Body.String())
 	}
 	document := map[string]any{
 		"format": "mango-tiptap-json", "schema_version": 1,
@@ -303,7 +297,7 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 	}
 }
 
-func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
+func TestEditorJSONHTTPDefaultsToPermanentJSONFormat(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "83838383-8383-4383-8383-838383838383"
 	repo.EnsureCompany(companyID, "Legacy editor")
@@ -320,8 +314,8 @@ func TestEditorJSONHTTPDefaultsToLegacyAndRejectsJSONRoute(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	server.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "editor_format_mismatch") {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("permanent JSON status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

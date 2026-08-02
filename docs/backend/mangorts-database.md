@@ -36,13 +36,15 @@ Incremental migrations:
 backend/db/migrations/
 ```
 
-### Permanent Tiptap textbox storage contract (2026-08-01)
+### Permanent Tiptap textbox storage contract (2026-08-02)
 
-`workspace_editor_formats` remains the company/workspace cutover gate. A `tiptap_json/ready` row is valid only when schema version 1 is selected, expected and converted counts match, all three owner rollout gates are ready or active, validation/cutover timestamps exist, and the active rows in the permanent textbox tables match the converted count.
+The editor cutover is complete. `GET /v1/editor-data-format` reports the permanent `tiptap_json/ready` contract directly; runtime behavior no longer depends on a database rollout or workspace-format row.
 
 Current editor documents live only in `node_textboxes`, `project_textboxes`, and `logic_gate_textboxes`. Manual saves live only in `node_textboxes_history`, `project_textboxes_history`, and `logic_gate_textboxes_history`. Ordinary commits update `body_json` and `revision` in the current table and enqueue realtime delivery in the same transaction. They do not create automatic operation or version copies. The one-GiB owner limit counts active `body_json` values only; attachment objects and manual history do not count.
 
 The generic JSON document/operation/version tables and the owner-specific Project/Logic Gate document/operation/version tables were retired after the textbox cutover. Migration `20260801_z_retire_legacy_editor_storage.sql` refuses to drop any of the nine tables when one still contains rows, then removes empty remnants and repoints cutover and size-limit functions at the permanent textbox tables. The canonical schema never creates the retired tables. Email bodies, drafts, signatures, imported snapshots, display, and delivery remain rich HTML in their existing domain tables.
+
+Migration `20260802_retire_node_v2_and_legacy_editor.sql` strictly removes the remaining ten editor cutover/HTML-collaboration tables and eleven unshipped Node v2 tables. It also reduces `node_textboxes` to current JSON, ordering, revision, identity, and timestamps. The six current/history textbox tables and the existing information/projection tables remain. The migration deliberately has no missing-object skips: a missing object is schema drift that must be understood before rollout.
 
 Schema version 1 includes the additive inline atom `mangoEntityLink` with required `entityType`, `entityId`, and `label` attributes. The strict API validator permits only `node`, `logic_gate`, or `project`, requires bounded nonblank identity/display values, and permits the atom only where inline content is valid. Existing legacy editor documents persist the equivalent canonical `data-mango-entity-*` attributes inside their already-owned rich-HTML columns.
 
@@ -165,6 +167,6 @@ The migration runner records applied files in `schema_migrations` so migrations 
 
 Node, Project, and Logic Gate current documents use `node_textboxes`, `project_textboxes`, and `logic_gate_textboxes`. Their manual history uses the matching `_history` tables. The former generic and owner-specific document/operation/version tables are no longer runtime storage and are absent from the canonical schema.
 
-`editor_conversion_runs/items`, `editor_shadow_comparisons`, `editor_rollout_gates`, and `editor_rollback_exports` remain transitional rollout evidence for a later retention decision. No default rollout rows are created.
+The cutover audit, conversion, rollback, workspace-format, and HTML-collaboration tables are retired. Conversion scripts and runtime fallback routes were removed with them. Email-owned HTML remains in the email draft, signature, imported-message, and delivery domains; it is not editor collaboration storage.
 
-Migration `20260728_zz_retire_yjs_storage.sql` removed the abandoned Yjs update/checkpoint tables, sequence columns, verification pins, and cleanup functions. `mangorts_prepare_company_editor_purge` remains the explicit first step of company deletion and removes restrictive Node v2 comment-attachment, email, and attachment links in dependency order; the caller must execute it and company deletion in one transaction.
+Migration `20260728_zz_retire_yjs_storage.sql` removed the abandoned Yjs update/checkpoint tables, sequence columns, verification pins, and cleanup functions. Migration `20260802_retire_node_v2_and_legacy_editor.sql` removes the later Node v2 purge helper together with the unshipped Node v2 tables; normal retained-table foreign keys continue to govern company deletion.

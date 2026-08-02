@@ -218,10 +218,10 @@ func TestEditorJSONDeleteSupportsNeverEditedEmptyDocument(t *testing.T) {
 	}
 }
 
-func TestEditorFormatGateDefaultsLegacyAndRejectsPartialReady(t *testing.T) {
+func TestEditorFormatGateIsPermanentlyReadyAndRejectsPartialCounts(t *testing.T) {
 	repo := NewMemoryRepo()
 	gate, err := repo.GetEditorDataFormat("33333333-3333-4333-8333-333333333333")
-	if err != nil || gate.EditorFormat != EditorFormatLegacyHTML || gate.MigrationState != EditorMigrationNotStarted {
+	if err != nil || gate.EditorFormat != EditorFormatTiptapJSON || gate.MigrationState != EditorMigrationReady || gate.ExpectedDocumentCount != gate.ConvertedDocumentCount {
 		t.Fatalf("gate=%+v err=%v", gate, err)
 	}
 	err = repo.SetEditorDataFormatForTests(EditorDataFormatGate{
@@ -229,7 +229,7 @@ func TestEditorFormatGateDefaultsLegacyAndRejectsPartialReady(t *testing.T) {
 		EditorFormat: EditorFormatTiptapJSON, MigrationState: EditorMigrationReady,
 		DocumentSchemaVersion: 1, ExpectedDocumentCount: 2, ConvertedDocumentCount: 1,
 	})
-	if !errors.Is(err, ErrVersionConflict) {
+	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("partial ready error=%v", err)
 	}
 }

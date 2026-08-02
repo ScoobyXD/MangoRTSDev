@@ -86,9 +86,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { NodeTextBlockEditor }, { EditorTabBar }, { AppModalPortal }] = await Promise.all([
+    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }] = await Promise.all([
       import("react-dom/client"),
-      import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
+      import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
       import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
@@ -97,17 +97,6 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     const highlightApplications: Array<`#${string}` | null> = [];
     let setToolbarHighlightContext: React.Dispatch<React.SetStateAction<`#${string}` | null>> = () => undefined;
     const noop = () => undefined;
-    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
-      assert.equal(path, "/v1/editor-data-format?company_id=company-1");
-      return {
-        company_id: "company-1",
-        editor_format: "legacy_html",
-        migration_state: "not_started",
-        document_schema_version: 1,
-        expected_document_count: 0,
-        converted_document_count: 0,
-      } as T;
-    };
     const ToolbarHarness = () => {
       const [toolbarHighlightColor, setToolbarHighlightColor] = React.useState<`#${string}` | null>(null);
       setToolbarHighlightContext = setToolbarHighlightColor;
@@ -148,34 +137,22 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     };
     const toolbar = <ToolbarHarness />;
     const editor = (
-      <NodeTextBlockEditor
-        blockID="format-test"
+      <UnifiedRichEditorSurface
+        value="<!-- mango-editor-html-v1 -->seed"
         editable
-        nodeID="node-1"
-        apiBase="http://localhost"
-        companyID="company-1"
-        attachmentRequestJSON={legacyFormatRequestJSON}
-        currentUserID="user-1"
-        companyUsers={[{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }]}
-        documentValue="<!-- mango-editor-html-v1 -->seed"
-        contentChanges={[]}
-        chatMessages={[]}
-        activeChatAnchorMessageID=""
-        chatNavigationRequest={null}
+        outlineStyle="automatic-outline-numbering"
+        surfaceID="email-collaboration-shared-draft"
+        ariaLabel="Email body"
         surfaceText="#111827"
         accent="#7c3aed"
-        outlineStyle="automatic-outline-numbering"
         indentGuideColor="#94a3b8"
         scrollbarTrack="#e2e8f0"
+        mentionUsers={[{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }]}
+        formattingControllerRef={controllerRef}
+        onChange={(documentValue) => savedDocuments.push(documentValue)}
+        onFlush={noop}
         onFocus={noop}
         onBlur={noop}
-        onDocumentChange={(documentValue) => savedDocuments.push(documentValue)}
-        onDocumentFlush={noop}
-        onChangeSeen={noop}
-        onSelectionChatRequest={noop}
-        onImageChatRequest={noop}
-        onImageNodeRequest={noop}
-        formattingControllerRef={controllerRef}
       />
     );
 
@@ -185,7 +162,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     mountedRoot = root;
     await act(async () => root.render(<>{toolbar}{editor}</>));
     await flushAsyncWork();
-    const editorRoot = container.querySelector<HTMLElement>('[data-node-text-block-id="format-test"]');
+    const editorRoot = container.querySelector<HTMLElement>('[data-mango-unified-rich-editor="email-collaboration-shared-draft"]');
     assert.ok(editorRoot);
 
     const rememberSelection = async () => {
@@ -301,7 +278,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await setTextSelection("selected", 0, "selected".length);
     await pressToolbarButton("Increase font size");
     await pressToolbarButton("Increase font size");
-    assert.match(editorRoot.innerHTML, /font-size:\s*16px/i, "repeated plus clicks keep formatting the same selected text");
+    assert.match(editorRoot.innerHTML, /font-size:\s*17px/i, "repeated plus clicks keep formatting the same selected text");
 
     editorRoot.textContent = "seed";
 
@@ -326,10 +303,10 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       if (index === 2) await act(async () => plus.focus());
     }
     await act(async () => editorRoot.focus());
-    assert.equal(controllerRef.current?.readFormatState()?.fontSize, 20);
+    assert.equal(controllerRef.current?.readFormatState()?.fontSize, 21);
     await typeText("X");
-    assert.match(editorRoot.innerHTML, /font-size:\s*20px/i);
-    assert.ok(savedDocuments.at(-1)?.includes("20px"));
+    assert.match(editorRoot.innerHTML, /font-size:\s*21px/i);
+    assert.ok(savedDocuments.at(-1)?.includes("21px"));
 
     await pressToolbarButton("Italic");
     await act(async () => editorRoot.focus());
@@ -624,7 +601,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       </AppModalPortal>,
     ));
     await flushAsyncWork();
-    const trappedEditor = dom.window.document.querySelector<HTMLElement>('[data-node-text-block-id="format-test"]');
+    const trappedEditor = dom.window.document.querySelector<HTMLElement>('[data-mango-unified-rich-editor="email-collaboration-shared-draft"]');
     const trappedChatButton = dom.window.document.querySelector<HTMLButtonElement>('[data-testid="trapped-chat-button"]');
     assert.ok(trappedEditor);
     assert.ok(trappedChatButton);

@@ -1,5 +1,20 @@
 # Editor Process Map
 
+## Process Story: the editor has one permanent JSON storage path
+
+A user opens or edits a Node, Project, or Logic Gate text box
+↓
+Mango always uses the TipTap JSON API and the current owner-specific textbox table; there is no workspace cutover flag and no HTML collaboration fallback
+↓
+Each current row stores the owner and textbox IDs, the complete `body_json` envelope, `revision`, display order where applicable, and lifecycle timestamps. Node text boxes do not duplicate the document into legacy JSON, plain-text, checksum, migration, actor, or idempotency columns
+↓
+Normal saves continue to write current history, operation, and realtime-outbox records. Information and projection tables remain available for their current read-model and compatibility responsibilities
+↓
+The retirement migration drops the 21 Node V2, editor-cutover, and HTML-collaboration tables with strict statements. If an expected object is missing, migration stops and exposes schema drift instead of silently skipping it
+↓
+A fresh database built from `schema.sql` never creates those retired tables
+
+
 ## Process Story: visible editors subscribe before their canonical refresh
 
 A prepared Node, Project, or Logic Gate JSON text box enters the visible viewport

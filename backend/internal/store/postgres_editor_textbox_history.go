@@ -318,7 +318,5 @@ func restorePostgresEditorTextboxHistoryCompatible(r *PostgresRepo, input Editor
 	if !errors.Is(err, ErrNotFound) {
 		return domain.EditorSaveVersion{}, err
 	}
-	// An HTML-era manual save stays readable and restorable until a later
-	// conversion moves it. The cleanup script refuses to delete such a row.
-	return r.restoreEditorSaveVersion(input, resourceType)
+	return domain.EditorSaveVersion{}, ErrNotFound
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -303,60 +302,7 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and 
 		}
 	})
 
-	t.Run("rich HTML editor and canonical limit", func(t *testing.T) {
-		documentID := "00000000-0000-4000-8000-000000000121"
-		ref := EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: documentID}
-		forceRealtimeOutboxEvent(t, db, EditorCollaborationEventType, true)
-		if _, err := repo.CommitEditorCollaborationOperation(EditorCollaborationOperationInput{
-			Document: ref, OperationID: "pg-editor-outbox-failure", ClientID: "pg-editor-client",
-			ActorUserID: user.UserID, BaseRevision: 0,
-			Patch: EditorHTMLPatch{Insert: "hello"},
-		}); err == nil {
-			t.Fatal("editor commit succeeded with forced outbox failure")
-		}
-		if got := countPostgresRows(t, db, "select count(*) from editor_collaboration_documents where company_id=$1::uuid and document_id=$2::uuid", company.CompanyID, documentID); got != 0 {
-			t.Fatalf("rolled-back editor documents = %d", got)
-		}
-		forceRealtimeOutboxEvent(t, db, EditorCollaborationEventType, false)
-
-		limitDocumentID := "00000000-0000-4000-8000-000000000122"
-		text := strings.Repeat("x", EditorCollaborationDocumentMaxBytes-len("<p></p>"))
-		if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
-			CompanyID: company.CompanyID, NodeID: node.NodeID, Type: "Text box",
-			Information: "<p>" + text + "</p>", InformationID: limitDocumentID, ActorUserID: user.UserID,
-		}); err != nil {
-			t.Fatalf("seed boundary document: %v", err)
-		}
-		limitRef := EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: limitDocumentID}
-		if _, err := repo.CommitEditorCollaborationOperation(EditorCollaborationOperationInput{
-			Document: limitRef, OperationID: "pg-editor-too-large", ClientID: "pg-editor-client",
-			ActorUserID: user.UserID, BaseRevision: 0,
-			Patch: EditorHTMLPatch{StartUTF8: EditorCollaborationDocumentMaxBytes, Insert: "y"},
-		}); !errors.Is(err, ErrEditorDocumentTooLarge) {
-			t.Fatalf("oversized editor commit error = %v", err)
-		}
-		if got := countPostgresRows(t, db, "select count(*) from editor_collaboration_operations where company_id=$1::uuid and document_id=$2::uuid", company.CompanyID, limitDocumentID); got != 0 {
-			t.Fatalf("oversized operation rows = %d", got)
-		}
-		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2", company.CompanyID, EditorRealtimeScope(limitRef)); got != 0 {
-			t.Fatalf("oversized outbox rows = %d", got)
-		}
-	})
-
 	t.Run("JSON editor annotations, atomicity, and lost acknowledgement replay", func(t *testing.T) {
-		if _, err := db.Exec(`
-insert into workspace_editor_formats (
-  company_id, editor_format, migration_state, document_schema_version,
-  expected_document_count, converted_document_count, validated_timestamp, cutover_timestamp
-) values ($1::uuid, 'tiptap_json', 'ready', 1, 0, 0, now(), now())
-on conflict (company_id) do update set
-  editor_format=excluded.editor_format, migration_state=excluded.migration_state,
-  document_schema_version=excluded.document_schema_version,
-  expected_document_count=excluded.expected_document_count,
-  converted_document_count=excluded.converted_document_count,
-  validated_timestamp=excluded.validated_timestamp, cutover_timestamp=excluded.cutover_timestamp`, company.CompanyID); err != nil {
-			t.Fatal(err)
-		}
 		documentID := "00000000-0000-4000-8000-000000000131"
 		ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: documentID}
 		document := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Postgres mapped positions"}]}]}}`)

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS,
@@ -238,9 +238,9 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(editorDocumentSurface, /data-placeholder=\{placeholder\}/);
   assert.match(indexCSS, /\[data-mango-editor-empty="true"\]\[data-placeholder\]::before/);
   assert.match(nodeWorkspaceParts, /dataAttributes=\{\{/);
-  assert.match(nodeWorkspaceParts, /"data-project-text-block-id": surfaceKind === "project" \? blockID : undefined/);
+  assert.match(nodeWorkspaceParts, /"data-project-text-block-id": props\.surfaceKind === "project" \? props\.blockID : undefined/);
   assert.match(editorDocumentSurface, /\{\.\.\.dataAttributes\}/);
-  assert.match(nodeWorkspaceParts, /"Project text block"/);
+  assert.match(nodeWorkspaceParts, /"Project" : "Node"\} text box/);
   assert.match(projectSummary, /surfaceKind="project"/);
   assert.match(projectSummary, /const \[activeRichTextBlockID, setActiveRichTextBlockID\] = useState\(""\)/);
   assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
@@ -322,143 +322,50 @@ test("format availability never disables editor navigation tabs", () => {
   assert.match(editorTabBar, /disabled=\{disabled\}/);
 });
 
-test("all unified rich editors use one contentEditable host and one formatting-controller hook", () => {
-  const editorDocumentSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorDocumentSurface.tsx"), "utf8");
+test("product editors use TipTap while mail keeps the shared HTML editor", () => {
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  const contentEditableMarkupCount = (source: string) => source.match(/\bcontentEditable\s*=/g)?.length ?? 0;
-  assert.equal(contentEditableMarkupCount(editorDocumentSurface), 1, "EditorDocumentSurface must own the one rich contentEditable element");
-  for (const [label, source] of [
-    ["EditorContent", editorContent],
-    ["NodeWorkspaceSurfaceParts", nodeWorkspaceParts],
-    ["UnifiedRichEditorSurface", unifiedRichEditorSurface],
-    ["ProjectSummaryContent", projectSummary],
-    ["HomeParts", homeParts],
-  ] as const) {
-    assert.equal(contentEditableMarkupCount(source), 0, label + " must configure the shared surface instead of emitting rich contentEditable markup");
-  }
-
-  for (const [label, source] of [
-    ["EditorContent", editorContent],
-    ["NodeWorkspaceSurfaceParts", nodeWorkspaceParts],
-    ["UnifiedRichEditorSurface", unifiedRichEditorSurface],
-  ] as const) {
-    assert.match(source, /<EditorDocumentSurface/, label + " must mount the shared rich DOM host");
-    assert.match(source, /useEditorDocumentFormattingController\s*\(/, label + " must use the shared formatting-controller hook");
-  }
-  assert.match(editorContent, /<EditorDocumentSurface[\s\S]*surfaceID="logic-gate-editor"/);
-  assert.match(nodeWorkspaceParts, /surfaceID=\{surfaceKind === "project" \? "project-text-block" : "node-text-block"\}/);
-  assert.match(unifiedRichEditorSurface, /<EditorDocumentSurface[\s\S]*surfaceID=\{surfaceID\}/);
+  assert.match(editorContent, /<LogicGateTiptapEditorSurface/);
+  assert.match(nodeWorkspaceParts, /<MangoTiptapEditor/);
   assert.match(projectSummary, /<NodeTextBlockEditor/);
+  assert.doesNotMatch(editorContent, /<EditorDocumentSurface/);
+  assert.doesNotMatch(nodeWorkspaceParts, /<EditorDocumentSurface/);
+  assert.match(unifiedRichEditorSurface, /<EditorDocumentSurface[\s\S]*surfaceID=\{surfaceID\}/);
   assert.match(homeParts, /<UnifiedRichEditorSurface/);
 });
 
-test("project text bodies use exact-document collaboration while metadata keeps its serialized queue", () => {
+test("Node and Project text bodies use permanent revisioned JSON without the retired HTML sync client", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
-  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const textboxSync = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorTextboxSync.ts"), "utf8");
+  const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const tiptapSync = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptapSync.ts"), "utf8");
 
-  assert.match(projectSummary, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\)/);
-  assert.match(projectSummary, /projectTextBlockSaveController\.configure\(\{/);
-  assert.match(projectSummary, /applyProjectSyncedDocument/);
-  assert.match(projectSummary, /onDocumentChange=\{\(document\) => applyProjectSyncedDocument\(block\.id, document\)\}/);
-  assert.doesNotMatch(projectSummary, /scheduleProjectTextBlockSave/);
-  assert.match(projectSummary, /flushProjectTextBlockSave\(block\.id, \{ attachments: nextAttachments \}\)/);
-  assert.match(nodeWorkspaceParts, /useEditorTextboxSync\(\{/);
-  assert.match(nodeWorkspaceParts, /resourceType: surfaceKind === "project" \? "project" : "node"/);
-  assert.match(nodeWorkspaceParts, /textboxSync\.scheduleDocumentSave\(nextDocument, immediate\)/);
-  assert.match(textboxSync, /mango-editor-collaboration-v2/);
-  assert.match(textboxSync, /indexedDB\.open/);
-  assert.match(textboxSync, /microBatchMs \?\? 160/);
-  assert.doesNotMatch(textboxSync, /mango-editor-projection-draft-v2:[^"\]]/);
-});
-test("the active node or project text block keeps its formatting controller current across rerenders", () => {
-  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const nodeWorkspaceSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
-  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
-  const handoff = sourceSliceBetween(
-    nodeWorkspaceParts,
-    "const activateFormattingController",
-    "const handleBlur",
-    "active text-block formatting-controller handoff",
-  );
-  const activeEditorSurface = jsxOpeningTagContaining(
-    nodeWorkspaceParts,
-    "EditorDocumentSurface",
-    "onFocus={() => {",
-    "active node/project text-block editor surface",
-  );
-  const workspaceAvailability = sourceSliceBetween(
-    nodeWorkspaceSurface,
-    "const [focusedTextBlockID",
-    "const projectionIdentity",
-    "node formatting-controller availability",
-  );
-  const workspaceTextBlock = jsxOpeningTagContaining(
-    nodeWorkspaceSurface,
-    "NodeTextBlockEditor",
-    "documentScrollMemoryRef={documentScrollMemoryRef}",
-    "node workspace text-block editor",
-  );
-
-  assert.match(nodeWorkspaceParts, /const publishedFormattingControllerRef = useRef<EditorDocumentFormattingController \| null>\(null\)/);
-  assert.match(nodeWorkspaceParts, /const formattingControllerWasActivatedRef = useRef\(false\)/);
-  assert.match(handoff, /formattingControllerWasActivatedRef\.current = true/);
-  assert.match(handoff, /publishedFormattingControllerRef\.current = formattingController/);
-  assert.match(handoff, /formattingControllerRef\.current = formattingController/);
-  assert.match(handoff, /const previousController = publishedFormattingControllerRef\.current/);
-  assert.match(handoff, /formattingControllerWasActivatedRef\.current && formattingControllerRef\?\.current === previousController/);
-  assert.match(activeEditorSurface, /onFocus=\{\(\) => \{[\s\S]*activateFormattingController\(\)/);
-  assert.match(workspaceAvailability, /const formattingControllerAvailable = editorTextCanEdit && blocks\.some\(\(block\) => block\.id === focusedTextBlockID\)/);
-  assert.match(workspaceAvailability, /onFormattingControllerAvailabilityChange\?\.\(formattingControllerAvailable\)/);
-  assert.match(nodeWorkspaceSurface, /const \[focusedTextBlockID, setFocusedTextBlockID\] = useState<string \| null>\(null\)/);
-  assert.match(nodeWorkspaceSurface, /setFocusedTextBlockID\(\(current\) => \{\s*if \(nodeChanged \|\| current === null\) return "";\s*return blockIDs\.has\(current\) \? current : "";\s*\}\)/);
-  assert.match(editorContent, /const \[nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable\] = useState\(false\)/);
-  assert.match(editorContent, /onFormattingControllerAvailabilityChange=\{setNodeFormattingControllerAvailable\}/);
-  assert.match(editorContent, /formattingDisabled=\{documentIsolation\.pointerEvents !== "auto" \|\| !linkedEntityCanEdit \|\| \(linkedEntityKind === "node" && !nodeFormattingControllerAvailable\)\}/);
-  assert.match(nodeWorkspaceParts, /formattingControllerActive\?: boolean/);
-  assert.match(nodeWorkspaceParts, /if \(!formattingControllerActive\) return;\s*activateFormattingController\(\)/);
-  assert.match(workspaceTextBlock, /formattingControllerActive=\{textBlockIsFocused\}/);
-  assert.match(workspaceTextBlock, /onFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setFocusedTextBlockID\(block\.id\);\s*\}\}/);
-  assert.match(workspaceTextBlock, /onBlur=\{\(\) => undefined\}/);
-  assert.doesNotMatch(workspaceTextBlock, /onBlur=[\s\S]*setFocusedTextBlockID\(""\)/);
+  assert.match(nodeSurface, /`\/v1\/editor-json\/node\/\$\{nodeID\}\/documents\/\$\{blockID\}/);
+  assert.match(projectSummary, /`\/v1\/editor-json\/project\/\$\{projectID\}\/documents\/\$\{blockID\}/);
+  assert.doesNotMatch(nodeSurface, /editor-collaboration|legacy_html/);
+  assert.doesNotMatch(projectSummary, /editor-collaboration|legacy_html/);
+  assert.match(tiptapEditor, /data-mango-editor-sync-mode="revisioned-json"/);
+  assert.match(tiptapSync, /indexedDB\.open/);
+  assert.equal(existsSync(resolve(process.cwd(), "frontend/src/modules/editor/editorTextboxSync.ts")), false);
+  assert.equal(existsSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorTextboxSync.ts")), false);
 });
 
-test("external hydration preserves logical selection and node teardown retains failed local edits", () => {
+test("current TipTap editors publish formatting controllers and retain pending recovery", () => {
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
-  const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const tiptapSync = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptapSync.ts"), "utf8");
 
-  assert.match(nodeWorkspaceParts, /const deferredExternalDocumentRef = useRef<\{ targetKey: string; value: string \} \| null>\(null\)/);
-  assert.match(nodeWorkspaceParts, /if \(editorHasFocus\(element\)\) \{\s*deferredExternalDocumentRef\.current = \{ targetKey: documentTargetKey, value: documentValue \}/);
-  assert.match(nodeWorkspaceParts, /if \(userEditedDocumentRef\.current\) \{[\s\S]*onDocumentConflict\?\.\(\)[\s\S]*\} else \{[\s\S]*suppressNextDocumentFlushRef\.current = true[\s\S]*applyExternalDocumentValue/);
-  assert.match(nodeWorkspaceParts, /if \(preserveSelection\) restoreSelection\(element\);\s*const selectionOffsets = preserveSelection \? getEditorSelectionOffsets\(element\) : null/);
-  assert.match(nodeWorkspaceParts, /setEditorSelectionByOffsets\(element, selectionOffsets\.start, selectionOffsets\.end\)/);
-  assert.match(unifiedRichEditorSurface, /restoreSelectionForHydrationRef\.current\?\.\(editor\)/);
-  assert.match(editorContent, /restoreDocumentSelectionForHydrationRef\.current\?\.\(element\)/);
-  assert.match(editorContent, /setEditorSelectionByOffsets\(element, selectionOffsets\.start, selectionOffsets\.end\)/);
-
-  assert.match(nodeWorkspace, /createTextBlockProjectionSaveController<EditorTextBlockContent>\(\),\s*\[companyID, nodeID\]/);
-  assert.match(nodeWorkspace, /textBlockProjectionSaveController\.flushChangedBlocks\(\)\.catch\(\(\) => undefined\)/);
-  assert.doesNotMatch(nodeWorkspace, /flushChangedBlocks\(\)[\s\S]{0,120}textBlockProjectionSaveController\.clear\(\)/);
-  assert.match(nodeWorkspaceParts, /height: TEXT_BLOCK_MIN_HEIGHT,[\s\S]*resize: "none"/);
-  assert.doesNotMatch(nodeWorkspaceParts, /readStoredTextBlockHeight|storeTextBlockHeight/);
-});
-
-test("outline style changes stay visual and queued editor work invalidates stale projections", () => {
-  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
-  const persistence = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentPersistence.ts"), "utf8");
-
-  assert.match(editorContent, /const outlineStyleRef = useRef\(outlineStyle\)/);
-  assert.match(editorContent, /outlineStyleRef\.current = outlineStyle/);
-  assert.match(editorContent, /const scheduleIndentGuideUpdate = useCallback\(\(text: string\) => \{[\s\S]*outlineStyleRef\.current !== "indent-guides"[\s\S]*\}, \[\]\)/);
-  assert.match(persistence, /pendingSaveRef\.current = request;\s*if \(!request\) return;\s*setError\(""\);\s*invalidateDocumentTargetCaches\(request\.target\);\s*scheduleSyncedSave/);
-  assert.match(persistence, /onLocalCommit: \(\) => \{[\s\S]*invalidateDocumentTargetCaches\(\{[\s\S]*informationID: documentInformationID/);
+  assert.match(editorContent, /formattingControllerRef=\{logicFormattingControllerRef\}/);
+  assert.match(nodeWorkspaceParts, /formattingControllerRef=\{props\.formattingControllerRef\}/);
+  assert.match(tiptapEditor, /formattingControllerRef/);
+  assert.match(tiptapSync, /mangoTiptapPendingStorageKey/);
+  assert.match(tiptapEditor, />Keep my version<\/button>/);
+  assert.match(tiptapEditor, />Use saved version<\/button>/);
 });
 
 test("shared editor clipboard routing keeps mixed content and copies images before cut deletion", () => {
@@ -466,9 +373,7 @@ test("shared editor clipboard routing keeps mixed content and copies images befo
   const editorRichClipboard = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorRichClipboard.ts"), "utf8");
   const editorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorDocumentSurface.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
-  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
-  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const attachmentBackedPreparation = sourceSliceBetween(
     editorSurfaceHandlers,
     "async function prepareEditorClipboardImageData",
@@ -503,10 +408,8 @@ test("shared editor clipboard routing keeps mixed content and copies images befo
   assert.match(editorRichClipboard, /createEditorImageFrame\(ownerDocument,[\s\S]*\{ durable: true \}/);
   assert.match(editorRichClipboard, /sanitizeEditorDocumentHTML\(template\.innerHTML\)/);
   assert.match(editorSurface, /onCut=/);
-  assert.match(nodeWorkspaceParts, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceHandlers\}/);
   assert.match(unifiedRichEditorSurface, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceHandlers\}/);
-  assert.match(editorContent, /<EditorDocumentSurface[\s\S]*\{\.\.\.documentSurfaceEventHandlers\}/);
-  for (const wrapperSource of [nodeWorkspaceParts, unifiedRichEditorSurface, editorContent]) {
+  for (const wrapperSource of [unifiedRichEditorSurface]) {
     assert.doesNotMatch(wrapperSource, /\bonCut\s*=/);
   }
 });
@@ -667,7 +570,7 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   assert.doesNotMatch(projectSummary, /PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS/);
 
-  for (const source of [editorContent, nodeWorkspaceParts, unifiedRichEditorSurface]) {
+  for (const source of [editorContent, unifiedRichEditorSurface]) {
     assert.match(source, /useEditorDocumentFormattingController\s*\(/);
     for (const localMutationHelper of [
       "applyEditorSelectionFontSizeToRoot",
@@ -680,6 +583,7 @@ test("editor toolbar font, inline, highlight, and outline controls share one con
       assert.doesNotMatch(source, new RegExp(`${localMutationHelper}\\s*\\(`));
     }
   }
+  assert.match(nodeWorkspaceParts, /formattingControllerRef=\{props\.formattingControllerRef\}/);
   assertFontToolbarRouting(logicNodeToolbar, "applyEditorSelectionFontSize", "applyEditorSelectionFontSizeValue", "selectionFontSize");
   assert.match(logicNodeFontHandlers, /linkedEntityKind === "node" \? nodeFormattingControllerRef\.current : logicFormattingControllerRef\.current/);
   assert.match(logicNodeFontHandlers, /currentFormattingController\(\)\?\.adjustFontSize\(delta\)/);
@@ -1013,10 +917,11 @@ test("highlight control, active selection state, mutation, and sanitization shar
   assert.match(richTextEditing, /setEditorElementHighlight/);
   assert.match(richTextEditing, /applySafeHighlight\(element, span\)/);
 
-  for (const source of [editorContent, nodeWorkspaceParts, unifiedRichEditorSurface]) {
+  for (const source of [editorContent, unifiedRichEditorSurface]) {
     assert.match(source, /onSelectionHighlightColorChange/);
     assert.match(source, /pendingEditorHighlightColorRef/);
   }
+  assert.match(nodeWorkspaceParts, /onSelectionHighlightColorChange=\{props\.onSelectionHighlightColorChange\}/);
 });
 
 test("mentions, image preview and undo hydration, and retired table-cell controls retain shared editor semantics", () => {
@@ -1474,7 +1379,7 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(projectSummary, /height: "min\(980px, calc\(100dvh - 16px\)\)"/);
 });
 
-test("chat-to-editor navigation is a consumed one-shot request in both document formats", () => {
+test("chat-to-editor navigation is a consumed one-shot request in the permanent JSON editor", () => {
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
@@ -1483,8 +1388,7 @@ test("chat-to-editor navigation is a consumed one-shot request in both document 
   assert.ok(nodeSurface.includes("chatNavigationRequestIDRef.current += 1;"));
   assert.ok(nodeSurface.includes("current?.requestID === requestID ? null : current"));
   assert.ok(nodeSurface.includes("onChatNavigationConsumed={consumeChatNavigationRequest}"));
-  assert.ok(nodeParts.includes("chatNavigationRequest.requestID === lastHandledChatNavigationRequestRef.current"));
-  assert.ok(nodeParts.includes("onChatNavigationConsumed?.(chatNavigationRequest.requestID)"));
+  assert.ok(nodeParts.includes("return { requestID: props.chatNavigationRequest.requestID, annotationID: props.chatNavigationRequest.anchorMessageID };"));
   assert.ok(nodeParts.includes("onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}"));
   assert.ok(tiptapEditor.includes("callbacksRef.current.onTargetHandled?.(target.requestID)"));
 });
@@ -1498,6 +1402,7 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const previewModal = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorImagePreviewModal.tsx"), "utf8");
   const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+  const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
 
   assert.ok(nodeSurface.includes("setActiveChatBlockID(image.blockID)"));
   assert.ok(nodeSurface.includes("setChatComposerFocusRequestIDs"));
@@ -1513,7 +1418,7 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(nodeSurface.includes("editorChatAttachmentsReadyForSubmit(attachments)"));
   assert.ok(projectSummary.includes("editorChatAttachmentsReadyForSubmit(attachments)"));
   assert.ok(nodeSurface.includes('editor?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" })'));
-  assert.ok(nodeParts.includes('data-mango-inline-image-download="true"'));
+  assert.ok(tiptapEditor.includes('data-mango-inline-image-download="true"'));
   assert.ok(nodeParts.includes('data-mango-chat-attachment-download="true"'));
   assert.ok(nodeParts.includes("onDoubleClick={(event) => openAttachment(event, attachment)}"));
   assert.ok(nodeParts.includes("<EditorImagePreviewModal"));
@@ -1523,14 +1428,12 @@ test("node image actions cover attachment chat, inline/fullscreen download, port
   assert.ok(nodeParts.includes("if (!editable || showingEmail || !composerFocusRequestID) return;"));
   assert.ok(!nodeParts.includes("<AppModalPortal trapFocus={false}>"));
   assert.ok(nodeParts.includes('position: "fixed"'));
-  assert.ok(nodeParts.includes('addEventListener("scroll", refreshFloatingImageActions, true)'));
+  assert.ok(tiptapEditor.includes('data-mango-tiptap-image-actions="true"'));
   assert.ok(nodeSurface.includes("pendingChatSelectionAnchor={selectionAnchor}"));
   assert.ok(handlers.includes("React.createElement(EditorImagePreviewModal"));
   assert.ok(previewModal.includes('data-mango-image-preview-download="true"'));
   assert.ok(previewModal.includes("UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE"));
   assert.ok(previewModal.includes("<AppModalPortal onRequestClose={onClose}>"));
-  assert.ok(nodeParts.includes("if (chatMessages.length === 0 && contentChanges.length === 0 && !pendingChatSelectionAnchor && !imageSelected) return undefined;"));
-  assert.ok(nodeParts.includes("[chatMessages.length, contentChanges.length, documentValue, documentScrollTop, imageSelected, pendingChatSelectionAnchor, refreshImageDraft, refreshTextHighlights]"));
   assert.ok(imageActions.includes("frameRect.right + 8"));
   assert.ok(imageActions.includes("appViewportRect.right - IMAGE_ACTION_SURFACE_WIDTH"));
   assert.ok(editorImages.includes("payload[declaredImageType] = blobPromise"));
@@ -1571,14 +1474,15 @@ test("canceling selected-text chat clears both temporary annotation and editor s
   assert.match(nodeParts, /aria-label="Clear selected text"[\s\S]{0,260}onClick=\{onClearSelectionAnchor\}/);
 });
 
-test("node text-block metadata mutations honor the active editor format and remove deleted boxes optimistically", () => {
+test("node text-block metadata mutations use permanent JSON and remove deleted boxes optimistically", () => {
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
 
   assert.match(nodeSurface, /useMangoEditorDataFormat\(apiBase, companyID, requestJSON\)/);
-  assert.match(nodeSurface, /format === "tiptap_json" \? "editor-json" : "editor-collaboration"/);
-  assert.match(nodeSurface, /format === "tiptap_json"\s*\? \{ title: content\.title, attachments: content\.attachments \?\? \[\] \}\s*: buildEditorTextBlockMetadataPayload\(content\)/);
+  assert.match(nodeSurface, /`\/v1\/editor-json\/node\/\$\{nodeID\}\/documents\/\$\{blockID\}/);
+  assert.match(nodeSurface, /JSON\.stringify\(\{ title: content\.title, attachments: content\.attachments \?\? \[\] \}\)/);
+  assert.doesNotMatch(nodeSurface, /editor-collaboration|legacy_html|buildEditorTextBlockMetadataPayload/);
   assert.match(nodeSurface, /await flushMangoTiptapDocument\(\{ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID \}\)/);
-  assert.match(nodeSurface, /const baseRevision = format === "tiptap_json"[\s\S]{0,520}base_revision: baseRevision/);
+  assert.match(nodeSurface, /const baseRevision = \(await requestJSON<\{ revision: number \}>\(editorPath\)\)\.revision;[\s\S]{0,360}base_revision: baseRevision/);
 
   const optimisticRemoval = nodeSurface.indexOf("setBlocks((current) => current.filter((block) => block.id !== blockID));", nodeSurface.indexOf("const deleteTextBlock"));
   const deleteRequest = nodeSurface.indexOf('method: "DELETE"', optimisticRemoval);

@@ -236,15 +236,6 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 	if _, err := tx.ExecContext(ctx, `update resource_attachments set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
-	var nodeV2LinksAvailable bool
-	if err := tx.QueryRowContext(ctx, `select to_regclass('public.node_textbox_attachment_links') is not null`).Scan(&nodeV2LinksAvailable); err != nil {
-		return AttachmentDeletionPlan{}, err
-	}
-	if nodeV2LinksAvailable {
-		if _, err := tx.ExecContext(ctx, `update node_textbox_attachment_links set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
-			return AttachmentDeletionPlan{}, err
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
@@ -262,18 +253,6 @@ func (r *PostgresRepo) FinalizePermanentAttachmentDeletion(ctx context.Context, 
 		return err
 	}
 	defer tx.Rollback()
-	var nodeV2LinksAvailable bool
-	if err := tx.QueryRowContext(ctx, `select to_regclass('public.node_textbox_attachment_links') is not null`).Scan(&nodeV2LinksAvailable); err != nil {
-		return err
-	}
-	if nodeV2LinksAvailable {
-		if _, err := tx.ExecContext(ctx, `delete from node_textbox_comment_attachment_links child using node_textbox_attachment_links link where (child.company_id,child.node_id,child.textbox_id,child.attachment_link_id)=(link.company_id,link.node_id,link.textbox_id,link.attachment_link_id) and link.company_id=$1::uuid and link.attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `delete from node_textbox_attachment_links where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
-			return err
-		}
-	}
 	result, err := tx.ExecContext(ctx, `delete from attachments where company_id=$1::uuid and attachment_id=$2::uuid and deleted_timestamp is not null`, companyID, attachmentID)
 	if err != nil {
 		return err

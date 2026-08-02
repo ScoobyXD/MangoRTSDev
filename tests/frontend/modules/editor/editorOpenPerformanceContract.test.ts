@@ -7,16 +7,17 @@ function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), "utf8");
 }
 
-test("each editor DOM has one attachment hydration owner with explicit cleanup", () => {
+test("product-editor images own their loads while the HTML mail surface keeps one hydration owner", () => {
   const textBlocks = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const unified = source("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx");
   const editor = source("frontend/src/modules/editor/EditorContent.tsx");
-  assert.equal((textBlocks.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
+  const tiptap = source("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
+  assert.equal((textBlocks.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 0);
   assert.equal((unified.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
-  assert.equal((editor.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 1);
-  assert.match(textBlocks, /const owner = attachmentHydrationOwnerRef\.current;\s+attachmentHydrationOwnerRef\.current = null;\s+owner\?\.cleanup\(\)/);
+  assert.equal((editor.match(/hydrateEditorAttachmentImageFrames\(/g) ?? []).length, 0);
+  assert.match(tiptap, /export const MangoAuthenticatedImage/);
+  assert.match(tiptap, /controller\.abort\(\);[\s\S]*if \(current\) URL\.revokeObjectURL\(current\)/);
   assert.match(unified, /attachmentHydrationCleanupRef\.current\?\.\(\)/);
-  assert.match(editor, /attachmentHydrationCleanupRef\.current\?\.\(\)/);
 });
 
 test("save-version history is requested only after Save Settings activation", () => {

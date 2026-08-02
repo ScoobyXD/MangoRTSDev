@@ -1154,12 +1154,12 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   const editorContent = read("frontend/src/modules/editor/EditorContent.tsx");
   const legacyPersistence = read("frontend/src/modules/editor/useEditorDocumentPersistence.ts");
   assert.match(editorContent, /editorFormat: editorDataFormat\.gate\?\.editor_format \?\? ""/);
-  assert.match(editorContent, /editorDataFormat\.gate\?\.editor_format === "legacy_html"[\s\S]*applyLoadedDocument\("logic_gate"/);
+  assert.doesNotMatch(editorContent, /legacy_html|editor-collaboration/);
   assert.match(editorContent, /documentInformationIDRef\.current = informationID;[\s\S]*documentDraftRef\.current = "";[\s\S]*persistedDocumentRef\.current = "";/);
   assert.match(editorContent, /currentTextBox\?\.information_id\?\.trim\(\) \|\| LOGIC_GATE_OVERVIEW_DOCUMENT_ID/);
   assert.doesNotMatch(editorContent, /NodeV2|nodeV2|VITE_NODE_V2/);
-  assert.match(legacyPersistence, /enabled: editorFormat === "legacy_html" && Boolean/);
-  assert.match(legacyPersistence, /if \(editorFormat !== "legacy_html"\) return null;/);
+  assert.match(legacyPersistence, /const permanentJSONPersistence/);
+  assert.doesNotMatch(legacyPersistence, /legacy_html|editor-collaboration|requestJSON|fetch\(/);
   const packageJSON = JSON.parse(read("frontend/package.json")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;

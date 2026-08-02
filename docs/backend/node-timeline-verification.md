@@ -1,18 +1,16 @@
-Last updated: 2026-07-27
+Last updated: 2026-08-02
 
 # Node Timeline Transfer And Verification Rules
 
 This document defines the durable business rules for compact activity entries on a Node timeline. Text boxes remain editable document rows; transfer and verification entries are immutable activity stamps and use a shorter visual row.
 
-## Node v2 primary timeline projection
+## Retired Node v2 projection
 
-The Phase 2 Node v2 workspace reads `node_timeline_items`, a narrow ordered projection that permits exactly `textbox_created`, `node_moved`, and `verification_stamp`. Comments, replies, email, attachments, inline images, typing updates, checkpoints, and snapshots never create primary timeline items.
+The unshipped Node v2 projection is retired. Migration `20260802_retire_node_v2_and_legacy_editor.sql` strictly removes `node_timeline_items`, `node_movements`, the Node v2 verification tables, and the Node v2 textbox comment/link tables. The canonical schema and runtime no longer create, read, or write them.
 
-Creating a v2 text box writes the authoritative textbox, its timeline item, the business domain event, and realtime outbox work in one transaction. The existing Logic Gate movement and verification request commands now bridge their already-authoritative facts into the same three-type projection inside their existing transaction. A failure in any required write rolls back the command.
+Current product activity uses `node_timeline_events` and `node_timeline_verification_recipients` for transfer and verification stamps. Current editable text lives in `node_textboxes`; existing information/projection tables continue to provide the workspace presentation. These retained stores are separate from the retired Node v2 subsystem.
 
-Pages order newest first by `occurred_at`, then source sequence, then stable timeline item ID. The cursor carries all three values, so equal timestamps cannot duplicate or skip records. Source rows retain direct Node ownership; `node_timeline_items` is rebuildable placement and is never the only owner relationship.
-
-The Node v2 frontend flag and runtime were removed before rollout on 2026-07-28. The additive tables and this timeline design remain historical/inactive database artifacts; no agent-run live database change is authorized.
+The transfer and verification rules below remain current. Do not reintroduce the retired Node v2 projection as a second source of truth.
 
 ## Logic Gate transfer events
 

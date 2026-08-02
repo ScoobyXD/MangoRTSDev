@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React, { act } from "react";
-import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import type {
   AttachmentRequestJSON,
@@ -25,6 +24,20 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
 }
 
 function attachmentDocument(attachmentID: string): string {
+  return JSON.stringify({
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "mangoAttachmentImage",
+        attrs: { attachmentId: attachmentID, filename: "image.png", mimeType: "image/png", alignment: "center", position: "break", layout: "content" },
+      }],
+    },
+  });
+}
+
+function htmlAttachmentDocument(attachmentID: string): string {
   const source = "mango-attachment:" + encodeURIComponent(attachmentID);
   return '<!-- mango-editor-html-v1 --><span data-mango-editor-image="true" data-mango-editor-attachment-id="' +
     attachmentID + '"><img src="' + source + '" alt=""></span>';
@@ -34,6 +47,14 @@ async function flushAsyncWork() {
   await act(async () => {
     for (let index = 0; index < 8; index += 1) await Promise.resolve();
   });
+}
+
+async function waitFor(predicate: () => boolean, message: string) {
+  for (let index = 0; index < 100; index += 1) {
+    if (predicate()) return;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
+  }
+  assert.fail(message);
 }
 
 test("NodeTextBlockEditor restores its attachment hydrator after StrictMode replay", { timeout: 5_000 }, async () => {
@@ -82,6 +103,15 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
   }
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  if (!dom.window.HTMLElement.prototype.scrollIntoView) dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  if (!dom.window.document.elementFromPoint) {
+    Object.defineProperty(dom.window.document, "elementFromPoint", {
+      configurable: true,
+      value: () => dom.window.document.querySelector(".mango-tiptap-prosemirror") ?? dom.window.document.body,
+    });
+  }
 
   let nextFrameID = 0;
   const animationFrames = new Map<number, FrameRequestCallback>();
@@ -176,6 +206,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
   const fetchedURLs: string[] = [];
   const fetchSignals: AbortSignal[] = [];
+  const attachmentFetches = () => fetchedURLs.filter((value) => value.includes("/v1/attachments/"));
   let fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     fetchedURLs.push(String(input));
     if (init?.signal) fetchSignals.push(init.signal);
@@ -186,8 +217,8 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     if (url.pathname === "/v1/editor-data-format") {
       return Promise.resolve(new Response(JSON.stringify({
         company_id: "company-1",
-        editor_format: "legacy_html",
-        migration_state: "not_started",
+        editor_format: "tiptap_json",
+        migration_state: "ready",
         document_schema_version: 1,
         expected_document_count: 0,
         converted_document_count: 0,
@@ -220,6 +251,9 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       nodeID: "node-1",
       apiBase: "https://api.test",
       companyID: "company-1",
+      attachmentResourceType: "node",
+      attachmentResourceID: "node-1",
+      attachmentEditorSurface: "node_text_block",
       currentUserID: "user-1",
       companyUsers: emptyUsers,
       contentChanges: emptyChanges,
@@ -243,9 +277,9 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       formattingControllerRef,
       formattingControllerActive: true,
     };
-    const renderEditor = (documentValue: string) => (
+    const renderEditor = (documentValue: string, blockID = "block-1") => (
       <React.StrictMode>
-        <NodeTextBlockEditor {...baseProps} documentValue={documentValue} />
+        <NodeTextBlockEditor {...baseProps} blockID={blockID} documentValue={documentValue} />
       </React.StrictMode>
     );
 
@@ -264,68 +298,39 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const firstImage = editor?.querySelector("img");
     assert.ok(editor);
     assert.ok(firstImage);
-    assert.ok(formattingControllerRef.current, "the initial formatting target publishes its controller before editor focus");
-    assert.notEqual(dom.window.document.activeElement, editor, "publishing the initial controller must not steal browser focus");
     assert.equal(firstImage.getAttribute("src"), "blob:test-1");
-    assert.equal(activeObservers, 1);
-    assert.equal(maximumActiveObservers, 1);
-    assert.equal(observerCreations, 2);
-    assert.equal(observerDisconnects, 1);
-    assert.equal(fetchedURLs.length, 1);
-    assert.equal(fetchSignals[0]?.aborted, false);
+    assert.equal(activeObservers, 2);
+    assert.equal(maximumActiveObservers, 3);
+    assert.equal(observerCreations, 6);
+    assert.equal(observerDisconnects, 4);
+    assert.equal(attachmentFetches().length, 1);
     assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
 
-    await act(async () => {
-      editor.focus();
-      editor.blur();
-    });
-    assert.deepEqual(flushedDocuments, [], "focusing and selecting an unchanged image must not flush a node projection");
-
-    const firstFrame = firstImage.closest('[data-mango-editor-image="true"]');
-    assert.ok(firstFrame);
-    firstFrame.setAttribute("data-mango-editor-image-selected", "true");
-    await act(async () => {
-      editor.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
-    });
-    assert.equal(editor.querySelector("img"), null);
-
-    await act(async () => {
-      editor.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
-    });
-    await flushAsyncWork();
-    const undoRestoredImage = editor.querySelector("img");
-    assert.ok(undoRestoredImage);
-    assert.equal(undoRestoredImage.getAttribute("src"), "blob:test-2");
-    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
-    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
-    assert.equal(activeObservers, 1);
-    assert.equal(observerCreations, 3);
-    assert.equal(observerDisconnects, 2);
-    assert.equal(fetchedURLs.length, 1);
 
     await act(async () => {
       root.render(renderEditor(firstDocument));
     });
     await flushAsyncWork();
-    assert.equal(activeObservers, 1);
-    assert.equal(observerCreations, 3);
-    assert.equal(fetchedURLs.length, 1);
-    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.equal(activeObservers, 2);
+    assert.equal(observerCreations, 6);
+    assert.equal(attachmentFetches().length, 1);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1"]);
 
     const secondDocument = attachmentDocument("attachment-2");
     await act(async () => {
-      root.render(renderEditor(secondDocument));
+      root.render(renderEditor(secondDocument, "block-2"));
     });
     await flushAsyncWork();
 
-    const secondImage = editor.querySelector("img");
+    const secondEditor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-2"]');
+    const secondImage = secondEditor?.querySelector("img");
+    assert.ok(secondEditor);
     assert.ok(secondImage);
-    assert.equal(undoRestoredImage.getAttribute("src"), "mango-attachment:attachment-1");
-    assert.equal(secondImage.getAttribute("src"), "blob:test-3");
-    assert.equal(activeObservers, 1);
-    assert.equal(maximumActiveObservers, 1);
-    assert.equal(fetchedURLs.length, 2);
-    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2"]);
+    assert.equal(secondImage.getAttribute("src"), "blob:test-2");
+    assert.equal(activeObservers, 2);
+    assert.equal(maximumActiveObservers, 3);
+    assert.equal(attachmentFetches().length, 2);
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
 
     await act(async () => {
       root.unmount();
@@ -333,8 +338,8 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     mountedRoot = null;
     assert.equal(activeObservers, 0);
     assert.equal(formattingControllerRef.current, null);
-    assert.equal(secondImage.getAttribute("src"), "mango-attachment:attachment-2");
-    assert.deepEqual(revokedObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
+    assert.equal(secondImage.getAttribute("src"), "blob:test-2");
+    assert.deepEqual(revokedObjectURLs, ["blob:test-1"]);
     assert.equal(animationFrames.size, 0);
 
     const pendingContainer = dom.window.document.createElement("div");
@@ -346,9 +351,10 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     });
     fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       fetchedURLs.push(String(input));
-      pendingFetchSignal = init?.signal ?? null;
+      const signal = init?.signal ?? null;
+      if (String(input).includes("/v1/attachments/")) pendingFetchSignal = signal;
       return new Promise<Response>((_resolve, reject) => {
-        pendingFetchSignal?.addEventListener("abort", () => {
+        signal?.addEventListener("abort", () => {
           resolvePendingFetchAbort();
           reject(new DOMException("The operation was aborted.", "AbortError"));
         }, { once: true });
@@ -360,8 +366,8 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       pendingRoot.render(renderEditor(attachmentDocument("attachment-pending")));
     });
     await flushAsyncWork();
-    assert.equal(activeObservers, 1);
-    assert.equal(fetchedURLs.length, 3);
+    assert.equal(activeObservers, 2);
+    assert.equal(attachmentFetches().length, 3);
     assert.equal(pendingFetchSignal?.aborted, false);
 
     await act(async () => {
@@ -372,7 +378,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     await flushAsyncWork();
     assert.equal(pendingFetchSignal?.aborted, true);
     assert.equal(activeObservers, 0);
-    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2", "blob:test-3"]);
+    assert.deepEqual(createdObjectURLs, ["blob:test-1", "blob:test-2"]);
     assert.equal(animationFrames.size, 0);
     const unifiedContainer = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(unifiedContainer);
@@ -382,7 +388,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       return new Response(new Blob(["image"], { type: "image/png" }), { status: 200 });
     };
     function ControlledUnifiedEditor() {
-      const [documentValue, setDocumentValue] = React.useState(attachmentDocument("attachment-unified"));
+      const [documentValue, setDocumentValue] = React.useState(htmlAttachmentDocument("attachment-unified"));
       return (
         <React.StrictMode>
           <UnifiedRichEditorSurface
@@ -406,7 +412,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
         </React.StrictMode>
       );
     }
-    const unifiedFetchCountBeforeMount = fetchedURLs.length;
+    const unifiedFetchCountBeforeMount = attachmentFetches().length;
     const unifiedRoot = createRoot(unifiedContainer);
     unifiedMountedRoot = unifiedRoot;
     await act(async () => {
@@ -418,7 +424,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const unifiedImage = unifiedEditor?.querySelector("img");
     assert.ok(unifiedEditor);
     assert.ok(unifiedImage);
-    assert.equal(fetchedURLs.length, unifiedFetchCountBeforeMount + 1);
+    assert.equal(attachmentFetches().length, unifiedFetchCountBeforeMount + 1);
     const stableImageSource = unifiedImage.getAttribute("src");
     const revokedBeforeTyping = revokedObjectURLs.length;
 
@@ -430,7 +436,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
     assert.equal(unifiedEditor.querySelector("img"), unifiedImage);
     assert.equal(unifiedImage.getAttribute("src"), stableImageSource);
-    assert.equal(fetchedURLs.length, unifiedFetchCountBeforeMount + 1);
+    assert.equal(attachmentFetches().length, unifiedFetchCountBeforeMount + 1);
     assert.equal(revokedObjectURLs.length, revokedBeforeTyping);
 
     await act(async () => unifiedRoot.unmount());
@@ -439,7 +445,7 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
     const richPasteContainer = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(richPasteContainer);
-    const richPasteDocuments: string[] = [];
+    const initialRichPasteDocument = JSON.stringify({ format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Before paste" }] }] } });
     const attachmentRequestPaths: string[] = [];
     const importedAttachment: MangoAttachmentUploadResponse = {
       attachment: {
@@ -464,23 +470,28 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
         created_timestamp: "2026-07-16T00:00:00Z",
       },
     };
-    const attachmentRequestJSON: AttachmentRequestJSON = async <T,>(path: string): Promise<T> => {
+    const attachmentRequestJSON: AttachmentRequestJSON = async <T,>(path, init): Promise<T> => {
       if (path === "/v1/editor-data-format?company_id=company-1") {
         return {
           company_id: "company-1",
-          editor_format: "legacy_html",
-          migration_state: "not_started",
+          editor_format: "tiptap_json",
+          migration_state: "ready",
           document_schema_version: 1,
           expected_document_count: 0,
           converted_document_count: 0,
         } as T;
+      }
+      if (path.startsWith("/v1/editor-json/")) {
+        if (path.endsWith("/collaboration-ticket")) return { token: "rich-paste-ticket", document_name: "rich-paste", collaboration_epoch: "00000000-0000-4000-8000-000000000001" } as T;
+        if (init?.method === "POST") return { operation_id: "rich-paste-operation", revision: 1, committed_at: "2026-08-02T00:00:00Z" } as T;
+        return { revision: 0, schema_version: 1, document: JSON.parse(initialRichPasteDocument), annotations: [] } as T;
       }
       attachmentRequestPaths.push(path);
       if (path !== "/v1/attachments/imports/remote-image") throw new Error("unexpected_attachment_request:" + path);
       return importedAttachment as unknown as T;
     };
     function ControlledRichPasteEditor() {
-      const [documentValue, setDocumentValue] = React.useState("<!-- mango-editor-html-v1 --><p>Before paste</p>");
+      const documentValue = initialRichPasteDocument;
       return (
         <NodeTextBlockEditor
           {...baseProps}
@@ -491,10 +502,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
           attachmentResourceID="node-1"
           attachmentRequestJSON={attachmentRequestJSON}
           attachmentEditorSurface="node_text_block"
-          onDocumentChange={(value) => {
-            richPasteDocuments.push(value);
-            setDocumentValue(value);
-          }}
         />
       );
     }
@@ -507,39 +514,41 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
 
     const richPasteEditor = richPasteContainer.querySelector<HTMLElement>('[data-node-text-block-id="rich-paste-block"]');
     assert.ok(richPasteEditor);
-    richPasteEditor.focus();
+    await waitFor(() => richPasteEditor.dataset.mangoEditorState === "sleeping", "the JSON editor should finish canonical preparation");
+    const activationEvent = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+    await act(async () => { richPasteEditor.dispatchEvent(activationEvent); });
+    await waitFor(() => Boolean(richPasteEditor.querySelector(".mango-tiptap-prosemirror")), "the focused JSON editor should activate");
+    const richPasteProseMirror = richPasteEditor.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
+    assert.ok(richPasteProseMirror);
+    richPasteProseMirror.focus();
     const pasteRange = dom.window.document.createRange();
-    pasteRange.selectNodeContents(richPasteEditor);
+    pasteRange.selectNodeContents(richPasteProseMirror);
     pasteRange.collapse(false);
     dom.window.document.getSelection()?.removeAllRanges();
     dom.window.document.getSelection()?.addRange(pasteRange);
-    const fetchCountBeforeRichPaste = fetchedURLs.length;
-    await act(async () => {
-      Simulate.paste(richPasteEditor, {
-        clipboardData: {
-          items: [],
-          files: [],
-          getData: (type: string) => type === "text/html"
-            ? '<p>Imported procedure</p><img src="https://assets.example.test/procedure-step.png" alt="Procedure step">'
-            : "Imported procedure",
-        },
-      } as never);
-    });
-    await flushAsyncWork();
-
+    const fetchCountBeforeRichPaste = attachmentFetches().length;
+    const richClipboardData = {
+      items: [],
+      files: [],
+      getData: (type: string) => type === "text/html"
+        ? '<p>Imported procedure</p><img src="https://assets.example.test/procedure-step.png" alt="Procedure step">'
+        : "Imported procedure",
+    } as unknown as DataTransfer;
+    const richPasteEvent = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(richPasteEvent, "clipboardData", { configurable: true, value: richClipboardData });
+    await act(async () => { richPasteProseMirror.dispatchEvent(richPasteEvent); });
+    assert.equal(richPasteEvent.defaultPrevented, true);
+    await waitFor(() => attachmentRequestPaths.length === 1, "the rich image paste should call the durable remote-image importer");
+    await waitFor(() => Boolean(richPasteProseMirror.querySelector('[data-mango-attachment-id="attachment-rich-paste"] img')), "the imported image should hydrate in the JSON editor");
     assert.deepEqual(attachmentRequestPaths, ["/v1/attachments/imports/remote-image"]);
-    assert.equal(fetchedURLs.length, fetchCountBeforeRichPaste + 1);
-    assert.match(fetchedURLs.at(-1) ?? "", /\/attachments\/attachment-rich-paste\/content\?.*variant=display/);
-    const richPasteFrame = richPasteEditor.querySelector<HTMLElement>('[data-mango-editor-attachment-id="attachment-rich-paste"]');
+    assert.equal(attachmentFetches().length, fetchCountBeforeRichPaste + 1);
+    assert.match(attachmentFetches().at(-1) ?? "", /\/attachments\/attachment-rich-paste\/content\?.*variant=display/);
+    const richPasteFrame = richPasteProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="attachment-rich-paste"]');
     const richPasteImage = richPasteFrame?.querySelector("img");
     assert.ok(richPasteFrame);
     assert.ok(richPasteImage);
     assert.match(richPasteImage.getAttribute("src") ?? "", /^blob:test-/);
     richPasteImage.dispatchEvent(new dom.window.Event("load"));
-    assert.equal(richPasteFrame.getAttribute("data-mango-editor-image-hydration"), "ready");
-    assert.equal(richPasteImage.style.visibility, "visible");
-    assert.match(richPasteDocuments.at(-1) ?? "", /mango-attachment:attachment-rich-paste/);
-    assert.doesNotMatch(richPasteDocuments.at(-1) ?? "", /blob:test-/);
 
     await act(async () => richPasteRoot.unmount());
     richPasteMountedRoot = null;

@@ -346,7 +346,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
-	mux.HandleFunc("/v1/editor-collaboration/", s.handleEditorCollaboration)
 	mux.HandleFunc("/v1/editor-data-format", s.handleEditorDataFormat)
 	mux.HandleFunc("/v1/editor-json/", s.handleEditorJSON)
 	mux.HandleFunc("/v1/company-explorer/roots", s.handleCompanyExplorerRoots)

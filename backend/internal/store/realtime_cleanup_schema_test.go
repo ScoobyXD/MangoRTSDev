@@ -24,8 +24,6 @@ func TestRealtimeCleanupCanonicalSchemaAndForwardMigration(t *testing.T) {
 	}
 	for _, required := range []string{
 		"create table if not exists realtime_outbox",
-		"create table if not exists editor_collaboration_documents",
-		"create table if not exists editor_collaboration_operations",
 		"idx_realtime_outbox_claim",
 		"idx_realtime_outbox_published_sequence",
 		"drop index if exists idx_logic_gate_projection_table_one_text_box",

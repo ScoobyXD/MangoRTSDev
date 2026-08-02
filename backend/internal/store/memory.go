@@ -95,9 +95,6 @@ type MemoryRepo struct {
 	realtimeOutbox                 map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence         int64
 	realtimeOutboxErr              error
-	editorCollaborationDocuments   map[string]memoryEditorCollaborationDocument
-	editorCollaborationOperations  map[string][]memoryEditorCollaborationOperation
-	editorDataFormats              map[string]EditorDataFormatGate
 	editorJSONDocuments            map[string]memoryEditorJSONDocument
 	editorJSONOperations           map[string][]memoryEditorJSONOperation
 	editorJSONVersions             map[string][]EditorJSONVersion
@@ -106,7 +103,6 @@ type MemoryRepo struct {
 	domainEventAppendErr           error
 	notifications                  map[string]domain.Notification
 	recycleBin                     map[string]memoryRecycleBinItem
-	nodeV2                         memoryNodeV2State
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -195,16 +191,12 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateShortcuts:             map[string]domain.UserLogicGateShortcut{},
 		domainEvents:                   map[string]domain.DomainEvent{},
 		realtimeOutbox:                 map[string]RealtimeOutboxEvent{},
-		editorCollaborationDocuments:   map[string]memoryEditorCollaborationDocument{},
-		editorCollaborationOperations:  map[string][]memoryEditorCollaborationOperation{},
-		editorDataFormats:              map[string]EditorDataFormatGate{},
 		editorJSONDocuments:            map[string]memoryEditorJSONDocument{},
 		editorJSONOperations:           map[string][]memoryEditorJSONOperation{},
 		editorJSONVersions:             map[string][]EditorJSONVersion{},
 		workspaceReadVersions:          map[string]int64{},
 		notifications:                  map[string]domain.Notification{},
 		recycleBin:                     map[string]memoryRecycleBinItem{},
-		nodeV2:                         newMemoryNodeV2State(),
 	}
 }
 

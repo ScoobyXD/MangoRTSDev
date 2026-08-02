@@ -8,11 +8,7 @@ import (
 )
 
 const (
-	EditorFormatLegacyHTML             = "legacy_html"
 	EditorFormatTiptapJSON             = "tiptap_json"
-	EditorMigrationNotStarted          = "not_started"
-	EditorMigrationConverting          = "converting"
-	EditorMigrationValidated           = "validated"
 	EditorMigrationReady               = "ready"
 	MangoTiptapFormat                  = "mango-tiptap-json"
 	MangoTiptapSchemaVersion           = 1
@@ -52,32 +48,19 @@ type EditorDataFormatGate struct {
 
 func DefaultEditorDataFormatGate(companyID string) EditorDataFormatGate {
 	return EditorDataFormatGate{
-		CompanyID: strings.TrimSpace(companyID), EditorFormat: EditorFormatLegacyHTML,
-		MigrationState: EditorMigrationNotStarted, DocumentSchemaVersion: MangoTiptapSchemaVersion,
+		CompanyID: strings.TrimSpace(companyID), EditorFormat: EditorFormatTiptapJSON,
+		MigrationState: EditorMigrationReady, DocumentSchemaVersion: MangoTiptapSchemaVersion,
 	}
 }
 
 func ValidateEditorDataFormatGate(gate EditorDataFormatGate) error {
 	gate.CompanyID = strings.TrimSpace(gate.CompanyID)
-	if gate.CompanyID == "" || gate.DocumentSchemaVersion != MangoTiptapSchemaVersion || gate.ExpectedDocumentCount < 0 || gate.ConvertedDocumentCount < 0 {
+	if gate.CompanyID == "" || gate.EditorFormat != EditorFormatTiptapJSON ||
+		gate.MigrationState != EditorMigrationReady ||
+		gate.DocumentSchemaVersion != MangoTiptapSchemaVersion ||
+		gate.ExpectedDocumentCount < 0 ||
+		gate.ExpectedDocumentCount != gate.ConvertedDocumentCount {
 		return ErrInvalid
-	}
-	switch gate.EditorFormat {
-	case EditorFormatLegacyHTML:
-	case EditorFormatTiptapJSON:
-		if gate.MigrationState != EditorMigrationReady || gate.ExpectedDocumentCount != gate.ConvertedDocumentCount {
-			return ErrVersionConflict
-		}
-	default:
-		return ErrInvalid
-	}
-	switch gate.MigrationState {
-	case EditorMigrationNotStarted, EditorMigrationConverting, EditorMigrationValidated, EditorMigrationReady:
-	default:
-		return ErrInvalid
-	}
-	if gate.MigrationState == EditorMigrationReady && gate.ExpectedDocumentCount != gate.ConvertedDocumentCount {
-		return ErrVersionConflict
 	}
 	return nil
 }

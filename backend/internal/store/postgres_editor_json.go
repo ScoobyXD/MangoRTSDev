@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 )
 
@@ -25,44 +24,12 @@ func (r *PostgresRepo) GetEditorDataFormat(companyID string) (EditorDataFormatGa
 	if companyID == "" {
 		return EditorDataFormatGate{}, ErrInvalid
 	}
-	gate := DefaultEditorDataFormatGate(companyID)
-	err := r.db.QueryRow(`
-		select editor_format, migration_state, document_schema_version,
-		       expected_document_count, converted_document_count
-		from workspace_editor_formats
-		where company_id=$1::uuid`, companyID,
-	).Scan(&gate.EditorFormat, &gate.MigrationState, &gate.DocumentSchemaVersion, &gate.ExpectedDocumentCount, &gate.ConvertedDocumentCount)
-	if errors.Is(err, sql.ErrNoRows) {
-		return gate, nil
-	}
-	if err != nil {
-		return EditorDataFormatGate{}, err
-	}
-	if err := ValidateEditorDataFormatGate(gate); err != nil {
-		return EditorDataFormatGate{}, err
-	}
-	return gate, nil
+	return DefaultEditorDataFormatGate(companyID), nil
 }
 
-func requirePostgresEditorJSONFormatTx(ctx context.Context, tx *sql.Tx, companyID string) error {
-	var format, state string
-	var schemaVersion int
-	var expected, converted int64
-	err := tx.QueryRowContext(ctx, `
-		select editor_format, migration_state, document_schema_version,
-		       expected_document_count, converted_document_count
-		from workspace_editor_formats
-		where company_id=$1::uuid`, companyID,
-	).Scan(&format, &state, &schemaVersion, &expected, &converted)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrVersionConflict
-	}
-	if err != nil {
-		return err
-	}
-	if format != EditorFormatTiptapJSON || state != EditorMigrationReady ||
-		schemaVersion != MangoTiptapSchemaVersion || expected != converted {
-		return ErrVersionConflict
+func requirePostgresEditorJSONFormatTx(_ context.Context, _ *sql.Tx, companyID string) error {
+	if cleanUUIDText(companyID) == "" {
+		return ErrInvalid
 	}
 	return nil
 }

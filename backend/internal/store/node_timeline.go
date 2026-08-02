@@ -159,7 +159,6 @@ func (r *MemoryRepo) CompleteNodeVerificationRequest(input NodeVerificationCompl
 			now := time.Now().UTC()
 			item.VerificationRecipients[index].CompletedTimestamp = &now
 			r.nodeTimelineEvents[mapKey] = item
-			r.appendNodeV2VerificationStampLocked(input.CompanyID, input.NodeID, input.EventID, input.UserID, now)
 		}
 		return cloneNodeTimelineEvent(item), nil
 	}
@@ -190,6 +189,5 @@ func (r *MemoryRepo) appendLogicGateTransferTimelineEventLocked(companyID, nodeI
 		VerificationRecipients: []domain.NodeTimelineVerificationRecipient{}, CreatedTimestamp: createdTimestamp,
 	}
 	r.nodeTimelineEvents[key(companyID, item.EventID)] = item
-	r.appendNodeV2MovementLocked(item)
 	return item
 }

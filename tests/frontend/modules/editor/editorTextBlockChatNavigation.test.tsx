@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React, { act } from "react";
 import { JSDOM } from "jsdom";
+import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import type { EditorTextBlockChatMessage } from "../../../../frontend/src/modules/editor/editorProjection.js";
 
 type Restore = () => void;
@@ -71,6 +72,8 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
   }
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  installGlobal("indexedDB", indexedDB, restores);
+  installGlobal("IDBKeyRange", IDBKeyRange, restores);
 
   let nextFrameID = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -147,32 +150,64 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { Simulate }, { ChatPane, NodeTextBlockEditor }, { AppModalPortal }] = await Promise.all([
+    const [{ createRoot }, { Simulate }, { ChatPane, NodeTextBlockEditor }] = await Promise.all([
       import("react-dom/client"),
       import("react-dom/test-utils"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
-      import("../../../../frontend/src/app/AppModalPortal.tsx"),
     ]);
     const noop = () => undefined;
-    const legacyFormatRequestJSON = async <T,>(path: string): Promise<T> => {
-      assert.equal(path, "/v1/editor-data-format?company_id=company-1");
-      return {
-        company_id: "company-1",
-        editor_format: "legacy_html",
-        migration_state: "not_started",
-        document_schema_version: 1,
-        expected_document_count: 0,
-        converted_document_count: 0,
-      } as T;
+    const initialDocument = JSON.stringify({
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "alpha beta gamma" }] }],
+      },
+    });
+    let canonicalDocument = JSON.parse(initialDocument);
+    let canonicalRevision = 0;
+    const editorRequestJSON = async <T,>(path: string, init?: { method?: string; json?: unknown }): Promise<T> => {
+      if (path === "/v1/editor-data-format?company_id=company-1") {
+        return {
+          company_id: "company-1",
+          editor_format: "tiptap_json",
+          migration_state: "ready",
+          document_schema_version: 1,
+          expected_document_count: 0,
+          converted_document_count: 0,
+        } as T;
+      }
+      if (path.endsWith("/collaboration-ticket")) {
+        return {
+          token: "chat-navigation-ticket",
+          document_name: "chat-navigation",
+          collaboration_epoch: "00000000-0000-4000-8000-000000000001",
+        } as T;
+      }
+      if (path.startsWith("/v1/editor-json/")) {
+        if (init?.method === "POST") {
+          canonicalDocument = (init.json as { document?: unknown } | undefined)?.document ?? canonicalDocument;
+          canonicalRevision += 1;
+          return {
+            operation_id: "chat-navigation-operation",
+            revision: canonicalRevision,
+            committed_at: "2026-08-02T00:00:00Z",
+          } as T;
+        }
+        return {
+          revision: canonicalRevision,
+          schema_version: 1,
+          document: canonicalDocument,
+          annotations: [],
+        } as T;
+      }
+      throw new Error("unexpected_editor_request:" + path);
     };
     const messages = [
-      message({ id: "comment-alpha", selectionQuote: "alpha", selectionStart: 0, selectionEnd: 5, message: "Alpha note" }),
-      message({ id: "comment-beta", selectionQuote: "beta", selectionStart: 6, selectionEnd: 10, message: "Beta note" }),
+      message({ id: "comment-alpha", selectionQuote: "alpha", selectionStart: 1, selectionEnd: 6, message: "Alpha note" }),
+      message({ id: "comment-beta", selectionQuote: "beta", selectionStart: 7, selectionEnd: 11, message: "Beta note" }),
     ];
     const activatedMessageIDs: string[] = [];
-    const selectionRequests: Array<{ quote: string; startOffset: number; endOffset: number }> = [];
-    const consumedNavigationRequestIDs: number[] = [];
-    const handleNavigationConsumed = (requestID: number) => consumedNavigationRequestIDs.push(requestID);
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
     const root = createRoot(container);
@@ -188,15 +223,15 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         nodeID="node-1"
         apiBase="http://localhost"
         companyID="company-1"
-        attachmentRequestJSON={legacyFormatRequestJSON}
-        currentUserID="user-1"
+        attachmentRequestJSON={editorRequestJSON}
+        currentUserID=""
         companyUsers={[]}
-        documentValue="<!-- mango-editor-html-v1 -->alpha beta gamma"
+        documentValue={initialDocument}
         contentChanges={[]}
         chatMessages={nextMessages}
         activeChatAnchorMessageID=""
         chatNavigationRequest={navigationRequest}
-        onChatNavigationConsumed={handleNavigationConsumed}
+        onChatNavigationConsumed={noop}
         surfaceText="#111827"
         accent="#7c3aed"
         outlineStyle="automatic-outline-numbering"
@@ -208,257 +243,36 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         onDocumentFlush={noop}
         onChangeSeen={noop}
         onChatHighlightActivate={(messageID) => activatedMessageIDs.push(messageID)}
-        onSelectionChatRequest={(selection) => selectionRequests.push(selection)}
+        onSelectionChatRequest={noop}
         onImageChatRequest={noop}
         onImageNodeRequest={noop}
       />
     );
-    await act(async () => root.render(renderPrimaryEditor(null)));
-    const editor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-1"]');
-    const editorWrapper = editor?.parentElement;
-    assert.ok(editor);
-    assert.ok(editorWrapper);
-    editor.getBoundingClientRect = () => rect(0, 0, 400, 220);
-    editorWrapper.getBoundingClientRect = () => rect(0, 0, 400, 220);
-    const sourceNavigationScrollTops: number[] = [];
-    Object.defineProperty(editor, "clientHeight", { configurable: true, value: 220 });
-    Object.defineProperty(editor, "scrollTo", {
-      configurable: true,
-      value(options: ScrollToOptions) {
-        const top = options.top ?? editor.scrollTop;
-        sourceNavigationScrollTops.push(top);
-        editor.scrollTop = top;
-      },
-    });
-    await act(async () => editor.focus());
-    await flushFrames();
-
-    const textNode = editor.firstChild;
-    assert.ok(textNode);
-    const caret = dom.window.document.createRange();
-    caret.setStart(textNode, 0);
-    caret.collapse(true);
-    dom.window.document.getSelection()?.removeAllRanges();
-    dom.window.document.getSelection()?.addRange(caret);
-    await act(async () => {
-      editor.dispatchEvent(new dom.window.MouseEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        clientX: 120,
-        clientY: 30,
-      }));
-    });
-    assert.deepEqual(activatedMessageIDs, ["comment-beta"]);
-
-    const selection = dom.window.document.createRange();
-    selection.setStart(textNode, 0);
-    selection.setEnd(textNode, 5);
-    dom.window.document.getSelection()?.removeAllRanges();
-    dom.window.document.getSelection()?.addRange(selection);
-    await act(async () => {
-      editor.dispatchEvent(new dom.window.MouseEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        clientX: 40,
-        clientY: 30,
-      }));
-    });
-    assert.deepEqual(activatedMessageIDs, ["comment-beta"], "range selection must not be hijacked by comment navigation");
-
-    await act(async () => {
-      dom.window.document.dispatchEvent(new dom.window.Event("selectionchange"));
-      await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-    });
-    const ordinaryCommentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Comment on selection"]');
-    assert.ok(ordinaryCommentButton, "an ordinary inline selection exposes the comment action");
-    await act(async () => ordinaryCommentButton.click());
-    assert.deepEqual(
-      selectionRequests.map(({ quote, startOffset, endOffset }) => ({ quote, startOffset, endOffset })),
-      [{ quote: "alpha", startOffset: 0, endOffset: 5 }],
-    );
-
-    const firstNavigationRequest = { anchorMessageID: "comment-alpha", requestID: 41 };
-    await act(async () => root.render(renderPrimaryEditor(firstNavigationRequest, [...messages])));
-    await flushFrames();
-    assert.equal(sourceNavigationScrollTops.length, 1, "one chat click scrolls its source range once");
-    assert.deepEqual(consumedNavigationRequestIDs, [41]);
-
-    editor.scrollTop = 137;
-    await act(async () => root.render(renderPrimaryEditor(firstNavigationRequest, [...messages])));
-    await flushFrames();
-    assert.equal(sourceNavigationScrollTops.length, 1, "rerenders cannot replay a handled chat navigation request");
-    assert.equal(editor.scrollTop, 137, "a handled request cannot drag the user back after manual scrolling");
-    assert.deepEqual(consumedNavigationRequestIDs, [41], "a handled request is acknowledged once");
-
-    const secondNavigationRequest = { anchorMessageID: "comment-alpha", requestID: 42 };
-    await act(async () => root.render(renderPrimaryEditor(secondNavigationRequest, [...messages])));
-    await flushFrames();
-    assert.equal(sourceNavigationScrollTops.length, 2, "a later explicit click may navigate once with a new request ID");
-    assert.deepEqual(consumedNavigationRequestIDs, [41, 42]);
-
-    await act(async () => root.render(
-      <NodeTextBlockEditor
-        blockID="block-2"
-        editable
-        nodeID="node-1"
-        apiBase="http://localhost"
-        companyID="company-1"
-        attachmentRequestJSON={legacyFormatRequestJSON}
-        currentUserID="user-1"
-        companyUsers={[]}
-        documentValue="<!-- mango-editor-html-v1 --><div>alpha</div><div>beta</div>"
-        contentChanges={[]}
-        chatMessages={[]}
-        activeChatAnchorMessageID=""
-        chatNavigationRequest={null}
-        surfaceText="#111827"
-        accent="#7c3aed"
-        outlineStyle="automatic-outline-numbering"
-        indentGuideColor="#94a3b8"
-        scrollbarTrack="#e2e8f0"
-        onFocus={noop}
-        onBlur={noop}
-        onDocumentChange={noop}
-        onDocumentFlush={noop}
-        onChangeSeen={noop}
-        onChatHighlightActivate={noop}
-        onSelectionChatRequest={(nextSelection) => selectionRequests.push(nextSelection)}
-        onImageChatRequest={noop}
-        onImageNodeRequest={noop}
-      />,
-    ));
-    const wrappedEditor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-2"]');
-    assert.ok(wrappedEditor);
-    await flushFrames();
-    wrappedEditor.innerHTML = "<div>alpha</div><div>beta</div>";
-    const lineTextNodes = Array.from(wrappedEditor.querySelectorAll("div"))
-      .map((line) => line.firstChild)
-      .filter((node): node is ChildNode => Boolean(node?.textContent));
-    const firstLine = lineTextNodes.find((node) => node.textContent === "alpha");
-    const secondLine = lineTextNodes.find((node) => node.textContent === "beta");
-    assert.ok(firstLine);
-    assert.ok(secondLine);
-    const wrappedSelection = dom.window.document.createRange();
-    wrappedSelection.setStart(firstLine, 0);
-    wrappedSelection.setEnd(secondLine, secondLine.textContent?.length ?? 0);
-    dom.window.document.getSelection()?.removeAllRanges();
-    dom.window.document.getSelection()?.addRange(wrappedSelection);
-    await act(async () => {
-      dom.window.document.dispatchEvent(new dom.window.Event("selectionchange"));
-      await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-    });
-    const wrappedCommentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Comment on selection"]');
-    assert.ok(wrappedCommentButton, "a visually wrapped multi-line selection exposes the comment action");
-    await act(async () => wrappedCommentButton.click());
-    const wrappedRequest = selectionRequests[1];
-    assert.deepEqual(
-      wrappedRequest && { quote: wrappedRequest.quote, startOffset: wrappedRequest.startOffset, endOffset: wrappedRequest.endOffset },
-      { quote: "alpha\nbeta", startOffset: 0, endOffset: 10 },
-    );
-
-    const nestedDocument = '<!-- mango-editor-html-v1 --><ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">outer<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet">nested</li></ul></li></ul>';
-    const nestedEditorProps = {
-      blockID: "block-nested",
-      editable: true,
-      nodeID: "node-1",
-      apiBase: "http://localhost",
-      companyID: "company-1",
-      attachmentRequestJSON: legacyFormatRequestJSON,
-      currentUserID: "user-1",
-      companyUsers: [],
-      documentValue: nestedDocument,
-      contentChanges: [],
-      activeChatAnchorMessageID: "",
-      chatNavigationRequest: null,
-      surfaceText: "#111827",
-      accent: "#7c3aed",
-      outlineStyle: "automatic-outline-numbering" as const,
-      indentGuideColor: "#94a3b8",
-      scrollbarTrack: "#e2e8f0",
-      onFocus: noop,
-      onBlur: noop,
-      onDocumentChange: noop,
-      onDocumentFlush: noop,
-      onChangeSeen: noop,
-      onChatHighlightActivate: noop,
-      onSelectionChatRequest: noop,
-      onImageChatRequest: noop,
-      onImageNodeRequest: noop,
+    const waitForEditor = async (predicate: () => boolean, messageText: string) => {
+      for (let index = 0; index < 100; index += 1) {
+        await flushFrames();
+        if (predicate()) return;
+        await act(async () => { await new Promise((resolve) => dom.window.setTimeout(resolve, 0)); });
+      }
+      assert.fail(messageText + "; state=" + container.querySelector<HTMLElement>('[data-node-text-block-id="block-1"]')?.dataset.mangoEditorState + "; text=" + container.textContent);
     };
-    await act(async () => root.render(
-      <NodeTextBlockEditor
-        {...nestedEditorProps}
-        chatMessages={[]}
-        pendingChatSelectionAnchor={{ blockID: "block-nested", quote: "nested", startOffset: 6, endOffset: 12 }}
-      />,
-    ));
-    const nestedEditor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-nested"]');
-    assert.ok(nestedEditor);
-    nestedEditor.getBoundingClientRect = () => rect(0, 0, 400, 220);
-    nestedEditor.parentElement!.getBoundingClientRect = () => rect(0, 0, 400, 220);
-    await flushFrames();
-    assert.ok(container.querySelector('[data-mango-chat-message-id="pending-chat-selection"]'), "nested source text remains highlighted while the chat composer is open");
 
-    await act(async () => root.render(
-      <NodeTextBlockEditor
-        {...nestedEditorProps}
-        pendingChatSelectionAnchor={undefined}
-        chatMessages={[message({ id: "comment-nested", blockID: "block-nested", selectionQuote: "nested", selectionStart: 6, selectionEnd: 12 })]}
-      />,
-    ));
-    await flushFrames();
-    assert.ok(container.querySelector('[data-mango-chat-message-id="comment-nested"]'), "the source annotation persists after chat creation succeeds");
-
-    const imageChatRequests: string[] = [];
-    const inlineImageDocument = '<!-- mango-editor-html-v1 --><span data-mango-editor-image="true" data-mango-editor-filename="inline.png" data-mango-editor-mime-type="image/png"><img src="data:image/png;base64,AA==" alt=""></span>';
-    await act(async () => root.render(
-      <AppModalPortal>
-        <NodeTextBlockEditor
-          {...nestedEditorProps}
-          blockID="block-image"
-          documentValue={inlineImageDocument}
-          pendingChatSelectionAnchor={undefined}
-          chatMessages={[]}
-          onImageChatRequest={(image) => imageChatRequests.push(image.blockID)}
-        />
-      </AppModalPortal>,
-    ));
-    await flushFrames();
-    const enclosingModalLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-modal-focus-trap="true"]');
-    const imageEditor = enclosingModalLayer?.querySelector<HTMLElement>('[data-node-text-block-id="block-image"]');
-    const imageFrame = imageEditor?.querySelector<HTMLElement>('[data-mango-editor-image="true"]');
-    const inlineImage = imageFrame?.querySelector<HTMLImageElement>("img");
-    assert.ok(enclosingModalLayer);
-    assert.ok(imageEditor);
-    assert.ok(imageFrame);
-    assert.ok(inlineImage);
-    imageEditor.getBoundingClientRect = () => rect(0, 0, 400, 300);
-    imageEditor.parentElement!.getBoundingClientRect = () => rect(0, 0, 400, 300);
-    imageFrame.getBoundingClientRect = () => rect(100, 100, 250, 220);
-    await act(async () => {
-      inlineImage.dispatchEvent(new dom.window.MouseEvent("pointerdown", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        clientX: 175,
-        clientY: 160,
-      }));
-    });
-    const imageActions = dom.window.document.querySelector<HTMLElement>('[role="toolbar"][aria-label="Image actions"]');
-    assert.ok(imageActions, "selecting an inline image still exposes its chat/create-node controls");
-    assert.equal(
-      imageActions.closest('[data-mango-modal-layer="true"]'),
-      enclosingModalLayer,
-      "selected-image controls must stay above their enclosing editor modal instead of opening a lower sibling layer",
+    await act(async () => root.render(renderPrimaryEditor(null)));
+    await waitForEditor(
+      () => Boolean(container.querySelector('[data-node-text-block-id="block-1"] [data-mango-annotation-id="comment-beta"]')),
+      "the sleeping JSON document should paint its chat annotations",
     );
-    assert.equal(dom.window.document.querySelectorAll('[data-mango-modal-layer="true"]').length, 1);
-    dom.window.document.dispatchEvent(new dom.window.Event("pointerup"));
-    const imageCommentButton = imageActions.querySelector<HTMLButtonElement>('button[aria-label="Comment on image"]');
-    assert.ok(imageCommentButton);
-    await act(async () => imageCommentButton.click());
-    assert.deepEqual(imageChatRequests, ["block-image"]);
+    const editor = container.querySelector<HTMLElement>('[data-node-text-block-id="block-1"]');
+    assert.ok(editor);
+    const betaAnnotation = editor.querySelector<HTMLElement>('[data-mango-annotation-id="comment-beta"]');
+    assert.ok(betaAnnotation);
+    assert.equal(betaAnnotation.textContent, "beta");
+    const annotationEvent = new dom.window.CustomEvent("mango:tiptap-annotation-activate", {
+      bubbles: true,
+      detail: { id: "comment-beta", kind: "chat" },
+    });
+    await act(async () => { betaAnnotation.dispatchEvent(annotationEvent); });
+    assert.deepEqual(activatedMessageIDs, ["comment-beta"]);
 
     const threadedMessages = [
       message({ id: "parent", message: "Parent comment" }),

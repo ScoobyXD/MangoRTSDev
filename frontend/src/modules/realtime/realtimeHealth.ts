@@ -68,7 +68,7 @@ export function getGlobalRealtimeHealthStatus(): RealtimeHealthStatus {
 export function shouldBlockRealtimeMutation(method: string, path: string): boolean {
   const normalizedMethod = method.trim().toUpperCase() || "GET";
   if (normalizedMethod === "GET" || normalizedMethod === "HEAD" || normalizedMethod === "OPTIONS") return false;
-  if (normalizedMethod === "POST" && path.split("?")[0].startsWith("/v1/editor-collaboration/")) return false;
+  if (path.trim().toLowerCase().startsWith("/v1/editor-json/")) return false;
   return getGlobalRealtimeHealthStatus() !== "connected";
 }
 
