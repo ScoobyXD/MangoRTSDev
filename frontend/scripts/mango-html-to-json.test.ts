@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import "./mango-editor-history-cutover.test.js";
 import type { JSONContent } from "@tiptap/core";
 import { convertMangoLegacyHTML, mapMangoQuoteAnnotations } from "./mango-html-to-json-core.js";
 

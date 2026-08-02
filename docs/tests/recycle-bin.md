@@ -1,3 +1,16 @@
+# Process Story: Restoring Deleted Editor Textboxes
+
+A user deletes a Node, Project, or Logic Gate that contains current textboxes and
+manual history. Before the owner rows are deleted, the Recycle Bin payload copies
+the matching current and history rows from the six permanent editor tables.
+Restoring the item recreates the owner first, restores its textbox/history rows,
+and then restores the remaining projections and relationships. Permanent delete
+removes the payload, including those editor copies.
+
+Old recycle payloads created before the six-table cutover are converted in place.
+Their HTML-era textboxes and manual saves must pass the same text-preserving
+HTML-to-Tiptap converter before legacy editor tables can be removed.
+
 Last updated: 2026-07-20
 
 # Recycle Bin Tests
@@ -36,6 +49,7 @@ RB25 - Restore and permanent-delete actions operate only on selected recycle-bin
 RB26 - Dev admins and company admins list all recycle-bin rows for the company, grouped in the UI by deleting user with user-group context when available.
 RB27 - Admin permanent delete can purge any selected recycle-bin row in the company, regardless of which user originally deleted it.
 RB28 - Restore remains scoped to the deleting user; an admin aggregate view must not imply that an admin can restore another user's recycle-bin item unless a future rule explicitly allows it.
+RB29 - Recycle payloads preserve current and manual-history rows from node_textboxes, project_textboxes, logic_gate_textboxes, and their three _history tables. Old payloads must be converted before editor cleanup; disabled automatic snapshots are not manual history and are excluded.
 
 ## Scenarios
 
@@ -162,3 +176,26 @@ Expected:
 - The UI groups rows by deleting user and displays user-group context where company user-group data is available.
 - The admin can permanently delete either row.
 - Restore remains available only for rows deleted by the current actor.
+
+### Scenario RB-S7: Editor Textboxes Survive Recycle Restore
+
+Business logic covered:
+
+- RB16
+- RB19
+- RB29
+
+Given:
+
+- A Node, Project, or Logic Gate has current JSON textboxes and one or more manual
+  history batches.
+- The user deletes that owner and later restores its recycle-bin item.
+
+Expected:
+
+- The recycle payload contains the owner's matching current and manual-history
+  rows from the six permanent editor tables.
+- Automatic snapshots are not added to manual history.
+- Restore recreates the owner before its textbox rows, so foreign keys remain
+  valid and current content plus manual history return together.
+- Permanent delete removes the only recycled copies and does not recreate them.

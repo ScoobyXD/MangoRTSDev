@@ -321,6 +321,7 @@ select information.company_id,
    select mangorts_legacy_saved_editor_body(information.information) as body_json
  ) converted
  where information.save_batch_id is not null
+   and information.save_kind <> 'auto'
    and converted.body_json is not null
 on conflict (company_id,node_id,batch_id,textbox_id) do nothing;
 
@@ -339,6 +340,7 @@ select information.company_id,
    select mangorts_legacy_saved_editor_body(information.information) as body_json
  ) converted
  where information.save_batch_id is not null
+   and information.save_kind <> 'auto'
    and converted.body_json is not null
 on conflict (company_id,logic_gate_id,batch_id,textbox_id) do nothing;
 

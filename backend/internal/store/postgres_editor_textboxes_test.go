@@ -156,17 +156,21 @@ func TestEditorTextboxCutoverAcceptsUUIDv7Identities(t *testing.T) {
 	}
 }
 
-func TestEditorTextboxCutoverKeepsOrphanedNodeDocumentsForReview(t *testing.T) {
+func TestEditorTextboxCutoverPreservesRecyclableDocumentsAndManualHistory(t *testing.T) {
 	checks := map[string][]string{
 		filepath.Join("..", "..", "db", "migrations", "20260801_editor_textbox_storage_foundation.sql"): {
 			"join nodes parent",
-			"parent.node_id = document.resource_id::uuid",
+			"information.save_kind <> 'auto'",
 		},
 		filepath.Join("..", "..", "..", "scripts", "verify_editor_textbox_cutover.sql"): {
-			"node editor documents without a parent node",
+			"recyclable node current rows missing or different in recycle payload",
+			"recycle current textbox projections not copied",
+			"recycle legacy editor save rows not converted",
 		},
 		filepath.Join("..", "..", "..", "scripts", "apply_editor_textbox_cleanup.sql"): {
-			"editor_textbox_cleanup_blocked_orphaned_node_document",
+			"editor_textbox_cleanup_blocked_recyclable_node_document",
+			"editor_textbox_cleanup_blocked_recycle_current_rows",
+			"editor_textbox_cleanup_blocked_recycle_history_rows",
 		},
 	}
 	for path, required := range checks {
@@ -176,8 +180,40 @@ func TestEditorTextboxCutoverKeepsOrphanedNodeDocumentsForReview(t *testing.T) {
 		}
 		for _, text := range required {
 			if !strings.Contains(string(contents), text) {
-				t.Fatalf("%s must preserve and report orphaned Node documents; missing %q", path, text)
+				t.Fatalf("%s must preserve recycled editor state; missing %q", path, text)
 			}
 		}
+	}
+}
+
+func TestEditorTextboxRecyclePayloadUsesSixPermanentTables(t *testing.T) {
+	contents, err := os.ReadFile("postgres_recycle_bin.go")
+	if err != nil {
+		t.Fatalf("read postgres_recycle_bin.go: %v", err)
+	}
+	source := string(contents)
+	for _, table := range []string{
+		"node_textboxes", "project_textboxes", "logic_gate_textboxes",
+		"node_textboxes_history", "project_textboxes_history", "logic_gate_textboxes_history",
+	} {
+		if !strings.Contains(source, `"`+table+`":`) || strings.Count(source, `"`+table+`"`) < 3 {
+			t.Fatalf("recycle snapshot and restore paths must include %s", table)
+		}
+	}
+}
+func TestEditorTextboxWritesUseDatabaseTimestamps(t *testing.T) {
+	contents, err := os.ReadFile("postgres_editor_textboxes.go")
+	if err != nil {
+		t.Fatalf("read postgres_editor_textboxes.go: %v", err)
+	}
+	source := string(contents)
+	if strings.Contains(source, "clock_timestamp(),clock_timestamp()") {
+		t.Fatal("textbox inserts must not use two independently evaluated clock timestamps")
+	}
+	if strings.Count(source, "statement_timestamp(),statement_timestamp()") != 3 {
+		t.Fatal("all three textbox insert paths must use one stable statement timestamp")
+	}
+	if strings.Count(source, "greatest(clock_timestamp(),created_timestamp)") != 2 {
+		t.Fatal("commit and delete must use a database timestamp that cannot precede row creation")
 	}
 }
