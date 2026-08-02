@@ -132,3 +132,26 @@ func TestEditorTextboxCutoverUsesSixPermanentTables(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorTextboxCutoverAcceptsUUIDv7Identities(t *testing.T) {
+	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260801_editor_textbox_storage_foundation.sql")
+	migration, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(migration)
+	for _, check := range []string{
+		"not pg_input_is_valid(resource_id, 'uuid')",
+		"not pg_input_is_valid(document_id, 'uuid')",
+	} {
+		if !strings.Contains(sql, check) {
+			t.Fatalf("migration must let PostgreSQL validate UUID identities; missing %q", check)
+		}
+	}
+	if strings.Contains(sql, "[1-5][0-9a-f]{3}") {
+		t.Fatal("migration must not reject valid UUIDv6, UUIDv7, or UUIDv8 identities")
+	}
+	if id := newUUIDv7String(); len(id) != 36 || id[14] != '7' {
+		t.Fatalf("test requires the application's UUIDv7 identity format, got %q", id)
+	}
+}
