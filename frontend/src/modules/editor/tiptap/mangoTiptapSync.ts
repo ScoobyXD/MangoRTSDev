@@ -517,6 +517,15 @@ export class MangoTiptapSync {
     return recovery;
   }
 
+  refreshCanonical(): Promise<void> {
+    const activeRecovery = this.recoverPromise;
+    if (!activeRecovery) return this.recover();
+    return activeRecovery.then(() => {
+      if (this.stopped) return;
+      return this.recover();
+    });
+  }
+
   private hasUnsavedLocalEdits(): boolean {
     return this.generation > this.acknowledgedGeneration
       || Boolean(this.snapshotProvider || this.latest || this.inFlight || this.unresolvedSaveFailureMessage);

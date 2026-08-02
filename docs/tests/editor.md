@@ -1,5 +1,17 @@
 # Editor Process Map
 
+## Process Story: visible editors subscribe before their canonical refresh
+
+A prepared Node, Project, or Logic Gate JSON text box enters the visible viewport
+↓
+Mango first opens the exact realtime scope for that document, then requests a fresh canonical snapshot
+↓
+If the near-viewport recovery is still running, the visible refresh waits for it and performs one trailing canonical read instead of treating the visible refresh as a duplicate
+↓
+An update committed between the earlier snapshot request and the realtime subscription is therefore recovered by the trailing read
+↓
+Repeated overlapping recovery callers still share their active request; only the explicit visible refresh guarantees the one post-subscription read
+
 ## Process Story: one unique identity for every editor block
 
 You open a Node, Project, or Logic Gate document

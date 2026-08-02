@@ -1199,6 +1199,59 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.doesNotMatch(communications, /mangoTiptap|tiptap_json|editor_format/);
 });
 
+test("visible refresh waits for an active recovery and then reads canonical state again", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+  let canonicalReads = 0;
+  let subscriptions = 0;
+  let releaseInitialRead: () => void = () => undefined;
+  let markInitialReadStarted: () => void = () => undefined;
+  const initialReadStarted = new Promise<void>((resolve) => { markInitialReadStarted = resolve; });
+  const initialReadBlocked = new Promise<void>((resolve) => { releaseInitialRead = resolve; });
+  const sync = new MangoTiptapSync({
+    companyID: "company-visible-race",
+    resourceType: "node",
+    resourceID: "node-visible-race",
+    documentID: "document-visible-race",
+    requestJSON: async <T>() => {
+      canonicalReads += 1;
+      if (canonicalReads === 1) {
+        markInitialReadStarted();
+        await initialReadBlocked;
+      }
+      return { revision: 0, schema_version: 1, document: createEmptyMangoTiptapDocument() } as T;
+    },
+    onDocument: () => undefined,
+    subscribeToCanonicalChange: () => {
+      subscriptions += 1;
+      return () => undefined;
+    },
+  });
+  try {
+    const initialRecovery = sync.start();
+    await initialReadStarted;
+    sync.setRealtimeVisible(true);
+    const visibleRefresh = sync.refreshCanonical();
+    releaseInitialRead();
+    await Promise.all([initialRecovery, visibleRefresh]);
+    assert.equal(subscriptions, 1);
+    assert.equal(canonicalReads, 2, "visibility queues one fresh canonical read after an in-flight recovery");
+  } finally {
+    releaseInitialRead();
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
 test("exact realtime scope exists only while the document is visibly eligible", async () => {
   const previous = {
     indexedDB: globalThis.indexedDB,
