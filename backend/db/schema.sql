@@ -5757,3 +5757,129 @@ comment on function mangorts_enforce_project_editor_text_limit() is
   'Caps the sum of current Project editor Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
 comment on function mangorts_enforce_logic_gate_editor_text_limit() is
   'Caps the sum of current Logic Gate editor Tiptap JSON at one GiB. Attachment object bytes and editor history do not count.';
+
+-- The permanent editor model is introduced additively so an application
+-- deployment can be rolled back before obsolete storage is removed.
+alter table node_textboxes
+  add column if not exists body_json jsonb,
+  add column if not exists revision bigint;
+
+create table if not exists project_textboxes (
+  company_id uuid not null,
+  project_id uuid not null,
+  textbox_id text not null,
+  body_json jsonb not null,
+  revision bigint not null default 0,
+  display_order bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  deleted_timestamp timestamptz,
+  primary key (company_id, project_id, textbox_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade,
+  constraint project_textboxes_id_chk check (btrim(textbox_id) <> ''),
+  constraint project_textboxes_revision_chk check (revision >= 0),
+  constraint project_textboxes_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  ),
+  constraint project_textboxes_timestamps_chk check (
+    updated_timestamp >= created_timestamp
+    and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
+  )
+);
+
+create index if not exists idx_project_textboxes_order
+  on project_textboxes(company_id, project_id, display_order, textbox_id)
+  where deleted_timestamp is null;
+
+create table if not exists logic_gate_textboxes (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  textbox_id text not null,
+  body_json jsonb not null,
+  revision bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  deleted_timestamp timestamptz,
+  primary key (company_id, logic_gate_id, textbox_id),
+  foreign key (company_id, logic_gate_id) references logic_gates(company_id, logic_gate_id) on delete cascade,
+  constraint logic_gate_textboxes_id_chk check (btrim(textbox_id) <> ''),
+  constraint logic_gate_textboxes_revision_chk check (revision >= 0),
+  constraint logic_gate_textboxes_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  ),
+  constraint logic_gate_textboxes_timestamps_chk check (
+    updated_timestamp >= created_timestamp
+    and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
+  )
+);
+
+create index if not exists idx_logic_gate_textboxes_gate
+  on logic_gate_textboxes(company_id, logic_gate_id, updated_timestamp desc, textbox_id)
+  where deleted_timestamp is null;
+
+create table if not exists node_textboxes_history (
+  company_id uuid not null,
+  node_id uuid not null,
+  textbox_id uuid not null,
+  batch_id uuid not null,
+  body_json jsonb not null,
+  display_order bigint not null default 0,
+  saved_by_user_id uuid,
+  saved_timestamp timestamptz not null default now(),
+  primary key (company_id, node_id, batch_id, textbox_id),
+  foreign key (company_id, node_id) references nodes(company_id, node_id) on delete cascade,
+  foreign key (saved_by_user_id) references users(user_id) on delete set null,
+  constraint node_textboxes_history_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  )
+);
+
+create table if not exists project_textboxes_history (
+  company_id uuid not null,
+  project_id uuid not null,
+  textbox_id text not null,
+  batch_id uuid not null,
+  body_json jsonb not null,
+  display_order bigint not null default 0,
+  saved_by_user_id uuid,
+  saved_timestamp timestamptz not null default now(),
+  primary key (company_id, project_id, batch_id, textbox_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade,
+  foreign key (saved_by_user_id) references users(user_id) on delete set null,
+  constraint project_textboxes_history_id_chk check (btrim(textbox_id) <> ''),
+  constraint project_textboxes_history_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  )
+);
+
+create table if not exists logic_gate_textboxes_history (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  textbox_id text not null,
+  batch_id uuid not null,
+  body_json jsonb not null,
+  saved_by_user_id uuid,
+  saved_timestamp timestamptz not null default now(),
+  primary key (company_id, logic_gate_id, batch_id, textbox_id),
+  foreign key (company_id, logic_gate_id) references logic_gates(company_id, logic_gate_id) on delete cascade,
+  foreign key (saved_by_user_id) references users(user_id) on delete set null,
+  constraint logic_gate_textboxes_history_id_chk check (btrim(textbox_id) <> ''),
+  constraint logic_gate_textboxes_history_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  )
+);

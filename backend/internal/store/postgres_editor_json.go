@@ -74,6 +74,7 @@ func (r *PostgresRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJ
 	if err != nil {
 		return EditorJSONSnapshot{}, err
 	}
+	return getPostgresEditorTextboxSnapshot(r, ref)
 	if active, activeErr := r.postgresEditorDomainActive(ref); activeErr != nil {
 		return EditorJSONSnapshot{}, activeErr
 	} else if active {
@@ -125,7 +126,7 @@ func (r *PostgresRepo) EnsureEditorJSONCollaborationDocument(ref EditorJSONDocum
 	if ref.ResourceType != EntityTypeProject && ref.ResourceType != EntityTypeLogicGate {
 		return EditorJSONSnapshot{}, ErrInvalid
 	}
-	return ensurePostgresEditorDomainCollaborationDocument(r, ref)
+	return ensurePostgresEditorTextboxDocument(r, ref)
 }
 
 type postgresEditorJSONOperation struct {
@@ -190,6 +191,7 @@ func (r *PostgresRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Ed
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
+	return commitPostgresEditorTextboxDocument(r, input)
 	if active, activeErr := r.postgresEditorDomainActive(input.Document); activeErr != nil {
 		return EditorJSONCommit{}, activeErr
 	} else if active {
@@ -322,6 +324,7 @@ func (r *PostgresRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Ed
 	if input.OperationID == "" || input.ClientID == "" || input.BaseRevision < 0 {
 		return EditorJSONCommit{}, ErrInvalid
 	}
+	return deletePostgresEditorTextboxDocument(r, input)
 	if active, activeErr := r.postgresEditorDomainActive(input.Document); activeErr != nil {
 		return EditorJSONCommit{}, activeErr
 	} else if active {
@@ -446,6 +449,7 @@ func (r *PostgresRepo) ListEditorJSONVersions(ref EditorJSONDocumentRef, limit i
 	if err != nil {
 		return nil, err
 	}
+	return []EditorJSONVersion{}, nil
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}

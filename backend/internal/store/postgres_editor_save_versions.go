@@ -204,11 +204,11 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 }
 
 func (r *PostgresRepo) CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error) {
-	return r.createEditorSaveVersion(input, EntityTypeNode)
+	return createPostgresEditorTextboxHistory(r, input, EntityTypeNode)
 }
 
 func (r *PostgresRepo) CreateLogicGateEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error) {
-	return r.createEditorSaveVersion(input, EntityTypeLogicGate)
+	return createPostgresEditorTextboxHistory(r, input, EntityTypeLogicGate)
 }
 
 func materializePostgresEditorCollaborationDocumentsForSaveTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string, now time.Time) error {
@@ -367,11 +367,11 @@ func selectCurrentEditorTextProjectionsTx(ctx context.Context, tx *sql.Tx, compa
 }
 
 func (r *PostgresRepo) ListNodeEditorSaveVersions(companyID, nodeID string) ([]domain.EditorSaveVersion, error) {
-	return r.listEditorSaveVersions(companyID, EntityTypeNode, nodeID)
+	return listPostgresEditorTextboxHistoryCompatible(r, companyID, EntityTypeNode, nodeID)
 }
 
 func (r *PostgresRepo) ListLogicGateEditorSaveVersions(companyID, logicGateID string) ([]domain.EditorSaveVersion, error) {
-	return r.listEditorSaveVersions(companyID, EntityTypeLogicGate, logicGateID)
+	return listPostgresEditorTextboxHistoryCompatible(r, companyID, EntityTypeLogicGate, logicGateID)
 }
 
 func (r *PostgresRepo) listEditorSaveVersions(companyID, resourceType, resourceID string) ([]domain.EditorSaveVersion, error) {
@@ -466,11 +466,11 @@ func scanEditorSaveVersions(rows *sql.Rows, resourceType string) ([]domain.Edito
 }
 
 func (r *PostgresRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error) {
-	return r.restoreEditorSaveVersion(input, EntityTypeNode)
+	return restorePostgresEditorTextboxHistoryCompatible(r, input, EntityTypeNode)
 }
 
 func (r *PostgresRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error) {
-	return r.restoreEditorSaveVersion(input, EntityTypeLogicGate)
+	return restorePostgresEditorTextboxHistoryCompatible(r, input, EntityTypeLogicGate)
 }
 
 func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreInput, resourceType string) (domain.EditorSaveVersion, error) {
