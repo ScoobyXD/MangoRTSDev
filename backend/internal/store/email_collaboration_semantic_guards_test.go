@@ -11,8 +11,8 @@ func TestPostgresEmailNodeWorkPathsAreOpenWhileCanonicalEmailRemainsProtected(t 
 		file      string
 		signature string
 	}{
-		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) createEditorSaveVersion"},
-		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) restoreEditorSaveVersion"},
+		{file: "postgres_editor_textbox_history.go", signature: "func createPostgresEditorTextboxHistory"},
+		{file: "postgres_editor_textbox_history.go", signature: "func restorePostgresEditorTextboxHistory"},
 		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) assignNodeToLogicGateStatusTx"},
 		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) MoveLogicGateNodeAssignment"},
 		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) RemoveLogicGateNodeAssignment"},

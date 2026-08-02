@@ -27,6 +27,24 @@ The permanent current tables are:
 `body_json` contains the Tiptap document and its `annotations` array. Node and
 Project rows have `display_order`. Logic Gate rows do not.
 
+## Retired legacy storage
+
+The current schema does not create these superseded tables:
+
+- `editor_json_documents`, `editor_json_operations`, and
+  `editor_json_versions`.
+- `project_editor_documents`, `project_editor_document_operations`, and
+  `project_editor_document_versions`.
+- `logic_gate_editor_documents`,
+  `logic_gate_editor_document_operations`, and
+  `logic_gate_editor_document_versions`.
+
+The backend current-document methods use only the three permanent textbox
+tables. PostgreSQL rejects the retirement migration if any legacy table still
+has rows, so a database that has not completed conversion cannot silently lose
+documents. Historical conversion and verification tools remain available for
+that pre-retirement work.
+
 ## UUID identity rule
 
 Node IDs and Node textbox IDs are stored in PostgreSQL `uuid` columns. The
@@ -153,6 +171,9 @@ No document body or credential was printed or stored during the audit.
 6. Only then run `scripts/apply_editor_textbox_cleanup.sql`. It removes obsolete
    current, operation, automatic-version, and legacy save rows, but keeps the
    three phase-2 projection tables.
+7. Apply `20260801_z_retire_legacy_editor_storage.sql` through the normal reviewed
+   migration workflow. It records the final state when cleanup already ran and
+   refuses to continue if any of the nine legacy tables is still nonempty.
 
 Rollback before step 6 is an application rollback. The old storage is still
 present. Step 6 is deliberately separate because dropping tables is not a safe

@@ -33,7 +33,7 @@ func TestEditorOwnerTextLimitArithmeticAndMessage(t *testing.T) {
 func TestEditorOwnerTextLimitDatabaseContract(t *testing.T) {
 	paths := []string{
 		"../../db/schema.sql",
-		"../../db/migrations/20260727_zzzz_editor_owner_text_limit.sql",
+		"../../db/migrations/20260801_z_retire_legacy_editor_storage.sql",
 	}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
@@ -44,27 +44,26 @@ func TestEditorOwnerTextLimitDatabaseContract(t *testing.T) {
 		for _, required := range []string{
 			"1073741824",
 			"editor_owner_text_limit_exceeded",
-			"trg_generic_editor_owner_text_limit",
 			"trg_node_editor_text_limit",
 			"trg_project_editor_text_limit",
 			"trg_logic_gate_editor_text_limit",
-			"octet_length(document.canonical_document::text)",
-			"octet_length(textbox.document_json::text)",
+			"octet_length(textbox.body_json::text)",
+			"from node_textboxes textbox",
+			"from project_textboxes textbox",
+			"from logic_gate_textboxes textbox",
 			"attachment object bytes are excluded",
 		} {
 			if !strings.Contains(text, required) {
 				t.Errorf("%s missing %q", path, required)
 			}
 		}
-		if strings.Contains(path, "zzzz_editor_owner_text_limit") {
-			for _, forbidden := range []string{
-				"editor_json_versions version",
-				"node_textbox_yjs_updates update",
-				"attachments attachment",
-			} {
-				if strings.Contains(text, forbidden) {
-					t.Errorf("%s incorrectly counts non-current storage %q", path, forbidden)
-				}
+		for _, forbidden := range []string{
+			"trg_generic_editor_owner_text_limit",
+			"mangorts_enforce_generic_editor_owner_text_limit()\nreturns trigger",
+			"octet_length(textbox.document_json::text)",
+		} {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("%s retains obsolete limit contract %q", path, forbidden)
 			}
 		}
 	}
