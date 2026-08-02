@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import type { Schema } from "@tiptap/pm/model";
 import { incrementEditorRuntimeMetric } from "../editorRuntimeMetrics.js";
 
 export const MANGO_TIPTAP_FORMAT = "mango-tiptap-json" as const;
@@ -53,6 +54,65 @@ export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidat
   } catch {
     return { valid: false, error: "document is not valid JSON" };
   }
+}
+
+type MangoTiptapAttributeSpecs = Record<string, { default?: unknown }> | undefined;
+
+function mangoTiptapJSONValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => mangoTiptapJSONValuesEqual(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && mangoTiptapJSONValuesEqual(left[key], right[key]));
+}
+
+function compactMangoTiptapAttributes(
+  attributes: Record<string, unknown> | undefined,
+  specs: MangoTiptapAttributeSpecs,
+): Record<string, unknown> | undefined {
+  if (!attributes) return undefined;
+  const compact: Record<string, unknown> = {};
+  Object.entries(attributes).forEach(([name, value]) => {
+    const spec = specs?.[name];
+    if (spec && Object.prototype.hasOwnProperty.call(spec, "default") && mangoTiptapJSONValuesEqual(value, spec.default)) return;
+    compact[name] = value;
+  });
+  return Object.keys(compact).length > 0 ? compact : undefined;
+}
+
+function compactMangoTiptapJSONContent(value: JSONContent, schema: Schema): JSONContent {
+  const compact: JSONContent = { ...value };
+  const attributes = compactMangoTiptapAttributes(value.attrs, value.type ? schema.nodes[value.type]?.spec.attrs : undefined);
+  if (attributes) compact.attrs = attributes;
+  else delete compact.attrs;
+  if (value.content) compact.content = value.content.map((child) => compactMangoTiptapJSONContent(child, schema));
+  if (value.marks) {
+    compact.marks = value.marks.map((mark) => {
+      const compactMark = { ...mark };
+      const markAttributes = compactMangoTiptapAttributes(mark.attrs, schema.marks[mark.type]?.spec.attrs);
+      if (markAttributes) compactMark.attrs = markAttributes;
+      else delete compactMark.attrs;
+      return compactMark;
+    });
+  }
+  return compact;
+}
+
+/**
+ * Removes only attributes equal to defaults declared by the active editor
+ * schema. ProseMirror restores those defaults when the JSON is reopened.
+ */
+export function compactMangoTiptapDocument(value: MangoTiptapDocument, schema: Schema): MangoTiptapDocument {
+  const result = validateMangoTiptapDocument(value);
+  if (!result.valid) throw new Error(result.error);
+  return { ...result.value, document: compactMangoTiptapJSONContent(result.value.document, schema) };
 }
 
 /** Used only by explicit export/legacy boundaries, never by the normal save path. */

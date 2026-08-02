@@ -38,8 +38,95 @@ func postgresEditorTextboxIDExpression(storage postgresEditorTextboxStorage, par
 	return parameter
 }
 
-func encodeEditorTextboxBody(document json.RawMessage, annotations []EditorJSONAnnotation) (json.RawMessage, error) {
+var mangoTiptapDefaultAttributes = func() map[string]map[string]any {
+	// Keep this list aligned with createMangoTiptapExtensions. The frontend
+	// reads these defaults directly from the active ProseMirror schema.
+	defaults := map[string]map[string]any{
+		"codeBlock":       {"language": nil},
+		"heading":         {"level": float64(1), "textAlign": nil, "indentLevel": float64(0)},
+		"paragraph":       {"textAlign": nil, "indentLevel": float64(0)},
+		"orderedList":     {"start": float64(1), "type": nil},
+		"taskItem":        {"checked": false},
+		"table":           {"style": nil},
+		"tableCell":       {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
+		"tableHeader":     {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
+		"mention":         {"userId": nil, "label": nil, "kind": "normal"},
+		"mangoEntityLink": {"entityType": "node", "entityId": nil, "label": nil},
+		"highlight":       {"color": nil},
+		"textStyle":       {"fontSize": nil, "color": nil},
+		"link":            {"href": nil, "target": "_blank", "rel": "noopener noreferrer nofollow", "class": nil, "title": nil},
+		"mangoAttachmentImage": {
+			"attachmentId": "", "filename": "", "mimeType": "",
+			"width": nil, "height": nil, "displayWidth": nil, "displayHeight": nil,
+			"alignment": "left", "position": "break", "layout": "content",
+			"alt": "", "title": "", "linkHref": "", "linkTarget": "", "linkRel": "", "linkTitle": "",
+		},
+	}
+	for _, nodeType := range []string{
+		"paragraph", "heading", "blockquote", "codeBlock", "horizontalRule",
+		"bulletList", "orderedList", "listItem", "taskList", "taskItem", "table",
+	} {
+		if defaults[nodeType] == nil {
+			defaults[nodeType] = map[string]any{}
+		}
+		defaults[nodeType]["blockId"] = nil
+	}
+	return defaults
+}()
+
+func compactMangoTiptapValue(value any) {
+	switch current := value.(type) {
+	case []any:
+		for _, child := range current {
+			compactMangoTiptapValue(child)
+		}
+	case map[string]any:
+		for _, child := range current {
+			compactMangoTiptapValue(child)
+		}
+		nodeType, _ := current["type"].(string)
+		attrs, ok := current["attrs"].(map[string]any)
+		if !ok {
+			return
+		}
+		for name, defaultValue := range mangoTiptapDefaultAttributes[nodeType] {
+			if value, ok := attrs[name]; ok && reflect.DeepEqual(value, defaultValue) {
+				delete(attrs, name)
+			}
+		}
+		if len(attrs) == 0 {
+			delete(current, "attrs")
+		}
+	}
+}
+
+func compactMangoTiptapRawValue(raw json.RawMessage) (json.RawMessage, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, ErrInvalid
+	}
+	compactMangoTiptapValue(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+func compactMangoTiptapJSON(document json.RawMessage) (json.RawMessage, error) {
 	canonical, err := ValidateMangoTiptapJSON(document)
+	if err != nil {
+		return nil, err
+	}
+	compact, err := compactMangoTiptapRawValue(canonical)
+	if err != nil {
+		return nil, err
+	}
+	return ValidateMangoTiptapJSON(compact)
+}
+
+func encodeEditorTextboxBody(document json.RawMessage, annotations []EditorJSONAnnotation) (json.RawMessage, error) {
+	canonical, err := compactMangoTiptapJSON(document)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +157,7 @@ func decodeEditorTextboxBody(body json.RawMessage) (json.RawMessage, []EditorJSO
 	if err != nil {
 		return nil, nil, err
 	}
-	document, err := ValidateMangoTiptapJSON(documentJSON)
+	document, err := compactMangoTiptapJSON(documentJSON)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -235,6 +322,8 @@ func editorJSONValuesEqual(left, right json.RawMessage) bool {
 	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
 		return false
 	}
+	compactMangoTiptapValue(leftValue)
+	compactMangoTiptapValue(rightValue)
 	return reflect.DeepEqual(leftValue, rightValue)
 }
 
@@ -243,6 +332,7 @@ func mangoTiptapBlockContentKey(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &block) != nil {
 		return string(raw)
 	}
+	compactMangoTiptapValue(block)
 	attrs, _ := block["attrs"].(map[string]any)
 	if attrs != nil {
 		delete(attrs, "blockId")
@@ -267,20 +357,20 @@ func mergeMangoTiptapDocuments(server, local json.RawMessage) (json.RawMessage, 
 	}
 	result := serverEnvelope
 	serverByID := make(map[string]json.RawMessage, len(serverEnvelope.Document.Content))
-	serverRaw := make(map[string]struct{}, len(serverEnvelope.Document.Content))
 	serverContent := make(map[string]struct{}, len(serverEnvelope.Document.Content))
 	for _, block := range serverEnvelope.Document.Content {
 		if id := mangoTiptapBlockID(block); id != "" {
 			serverByID[id] = block
 		}
-		serverRaw[string(block)] = struct{}{}
 		serverContent[mangoTiptapBlockContentKey(block)] = struct{}{}
 	}
 	for _, localBlock := range localEnvelope.Document.Content {
 		id := mangoTiptapBlockID(localBlock)
 		if id == "" {
-			if _, exists := serverRaw[string(localBlock)]; !exists {
+			contentKey := mangoTiptapBlockContentKey(localBlock)
+			if _, exists := serverContent[contentKey]; !exists {
 				result.Document.Content = append(result.Document.Content, localBlock)
+				serverContent[contentKey] = struct{}{}
 			}
 			continue
 		}
@@ -301,7 +391,7 @@ func mergeMangoTiptapDocuments(server, local json.RawMessage) (json.RawMessage, 
 	if err != nil {
 		return nil, err
 	}
-	return ValidateMangoTiptapJSON(encoded)
+	return compactMangoTiptapJSON(encoded)
 }
 
 func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef, body json.RawMessage, revision int64, now time.Time) error {

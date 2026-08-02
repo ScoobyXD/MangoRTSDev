@@ -11,6 +11,7 @@ import {
   readEditorSaveState,
 } from "../../../../frontend/src/modules/editor/editorSaveStatusStore.js";
 import {
+  compactMangoTiptapDocument,
   createEmptyMangoTiptapDocument,
   parseMangoTiptapDocument,
   serializeMangoTiptapDocument,
@@ -194,6 +195,85 @@ test("Mango validates only the versioned document envelope before Tiptap opens i
   assert.equal(validateMangoTiptapDocument(wrongVersion).valid, false);
   const wrongRoot = { ...createEmptyMangoTiptapDocument(), document: { type: "paragraph" } };
   assert.equal(validateMangoTiptapDocument(wrongRoot).valid, false);
+});
+
+test("schema-default compaction shortens the reported Node Text Box JSON and round trips exactly", () => {
+  const screenshotDocument: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: "970fa252-c954-4fc8-a5fa-7d5ba02807f3", textAlign: null, indentLevel: 0 },
+        content: [{ text: "this is a test test testS", type: "text" }],
+      }, {
+        type: "paragraph",
+        attrs: { blockId: "7c83bff9-24de-448c-a569-cdd951a7277c", textAlign: null, indentLevel: 0 },
+      }, {
+        type: "paragraph",
+        attrs: { blockId: "65aac248-d542-45c6-9f1a-b13be7fb8b82", textAlign: null, indentLevel: 0 },
+        content: [{ text: "s", type: "text" }, { type: "hardBreak" }, { type: "hardBreak" }],
+      }, {
+        type: "mangoAttachmentImage",
+        attrs: {
+          alt: "image.png", title: "image.png", width: 640, height: 360,
+          layout: "content", linkRel: "", filename: "image.png", linkHref: "",
+          mimeType: "image/png", position: "break", alignment: "left", linkTitle: "",
+          linkTarget: "", attachmentId: "019fc309-c4a2-7001-b819-35365e91c300",
+          displayWidth: 640, displayHeight: 360,
+        },
+      }, {
+        type: "paragraph",
+        attrs: { blockId: "3807418e-4311-4f94-9075-d9ce53afee0a", textAlign: null, indentLevel: 0 },
+      }],
+    },
+  };
+  const editor = new MangoTiptapEditorEngine({
+    extensions: createMangoTiptapExtensions({ editable: false }),
+    content: createEmptyMangoTiptapDocument().document,
+  });
+  try {
+    const expanded: MangoTiptapDocument = {
+      ...screenshotDocument,
+      document: editor.schema.nodeFromJSON(screenshotDocument.document).toJSON(),
+    };
+    const before = JSON.stringify(expanded);
+    const compact = compactMangoTiptapDocument(expanded, editor.schema);
+    const paragraphs = compact.document.content?.filter((node) => node.type === "paragraph") ?? [];
+    paragraphs.forEach((paragraph) => {
+      assert.deepEqual(Object.keys(paragraph.attrs ?? {}), ["blockId"]);
+    });
+    const image = compact.document.content?.find((node) => node.type === "mangoAttachmentImage");
+    assert.deepEqual(image?.attrs, {
+      attachmentId: "019fc309-c4a2-7001-b819-35365e91c300",
+      filename: "image.png",
+      mimeType: "image/png",
+      width: 640,
+      height: 360,
+      displayWidth: 640,
+      displayHeight: 360,
+      alt: "image.png",
+      title: "image.png",
+    });
+    assert.ok(before.length - JSON.stringify(compact).length > 200, "the example should lose more than 200 redundant JSON characters");
+    assert.deepEqual(editor.schema.nodeFromJSON(compact.document).toJSON(), expanded.document, "schema defaults must hydrate to the exact expanded document");
+    assert.equal(JSON.stringify(expanded), before, "compaction must not mutate the captured editor document");
+
+    const formattedExpanded: MangoTiptapDocument = {
+      ...richDocument(),
+      document: editor.schema.nodeFromJSON(richDocument().document).toJSON(),
+    };
+    const formattedCompact = compactMangoTiptapDocument(formattedExpanded, editor.schema);
+    assert.equal(formattedCompact.document.content?.[0]?.attrs?.textAlign, "center");
+    assert.equal(formattedCompact.document.content?.[0]?.attrs?.indentLevel, 1);
+    assert.equal(formattedCompact.document.content?.[2]?.attrs?.alignment, "center");
+    assert.equal(formattedCompact.document.content?.[2]?.attrs?.displayWidth, 320);
+    assert.equal(formattedCompact.document.content?.[0]?.content?.[1]?.marks?.find((mark) => mark.type === "link")?.attrs?.rel, "noopener");
+    assert.deepEqual(editor.schema.nodeFromJSON(formattedCompact.document).toJSON(), formattedExpanded.document);
+  } finally {
+    editor.destroy();
+  }
 });
 
 test("block ID normalization preserves the first ID and repairs missing or repeated IDs", () => {
