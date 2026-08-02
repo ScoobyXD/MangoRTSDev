@@ -41,8 +41,8 @@ begin
     select 1
       from editor_json_documents
      where resource_type = 'node'
-       and (resource_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         or document_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+       and (not pg_input_is_valid(resource_id, 'uuid')
+         or not pg_input_is_valid(document_id, 'uuid'))
   ) then
     raise exception 'editor_textbox_cutover_invalid_node_identity';
   end if;

@@ -25,6 +25,15 @@ The permanent current tables are:
 `body_json` contains the Tiptap document and its `annotations` array. Node and
 Project rows have `display_order`. Logic Gate rows do not.
 
+## UUID identity rule
+
+Node IDs and Node textbox IDs are stored in PostgreSQL `uuid` columns. The
+foundation migration accepts every value PostgreSQL recognizes as a UUID,
+including Mango's UUIDv7 IDs. A UUID version describes how an ID was generated;
+it is not an editor schema version and is not a reason to rewrite or reject an
+existing identity. The migration stops only when a legacy Node resource or
+document ID cannot be stored as a PostgreSQL UUID at all.
+
 ## Simple conflict rule
 
 When the submitted revision is stale, the backend compares top-level Tiptap
