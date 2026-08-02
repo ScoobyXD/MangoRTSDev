@@ -612,6 +612,9 @@ func (r *PostgresRepo) AddProjectInformation(input ProjectInformationInput) (dom
 	if err != nil {
 		return domain.ProjectInformation{}, err
 	}
+	if input.Type == projectSavedVersionType {
+		return r.addProjectTextboxHistory(input)
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -660,8 +663,15 @@ func scanProjectProjection(row interface{ Scan(dest ...any) error }) (domain.Pro
 func (r *PostgresRepo) listProjectInformation(companyID, projectID string) ([]domain.ProjectInformation, error) {
 	rows, err := r.db.QueryContext(context.Background(), `
 select company_id::text, information_id::text, project_id::text, type::text, information, created_timestamp, updated_timestamp
-from project_information
-where company_id=$1::uuid and project_id=$2::uuid
+from project_information information
+where information.company_id=$1::uuid and information.project_id=$2::uuid
+  and not (
+    information.type::text='Saved version'
+    and exists(select 1 from project_textboxes_history history
+      where history.company_id=information.company_id
+        and history.project_id=information.project_id
+        and history.batch_id=information.information_id)
+  )
 order by created_timestamp asc, information_id asc`, companyID, projectID)
 	if err != nil {
 		return nil, err
@@ -675,7 +685,15 @@ order by created_timestamp asc, information_id asc`, companyID, projectID)
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	history, err := r.listProjectTextboxHistory(companyID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, history...)
+	return items, nil
 }
 
 func (r *PostgresRepo) ListProjectProjections(companyID, projectID string) ([]domain.ProjectProjection, error) {

@@ -501,7 +501,7 @@ func (r *PostgresRepo) CreateNodeV2TextBox(input NodeV2CreateTextBoxInput) (Node
 	if err := tx.QueryRowContext(ctx, `select coalesce(min(display_order),0)-1024 from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null`, input.CompanyID, input.NodeID).Scan(&order); err != nil {
 		return NodeV2TextBoxMutationResult{}, fmt.Errorf("allocate Node v2 textbox order: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `insert into node_textboxes(company_id,node_id,textbox_id,document_json,plain_text,collaboration_epoch,created_by_user_id,updated_by_user_id,display_order,creation_idempotency_key) values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,'',$5::uuid,$6::uuid,$6::uuid,$7,$8)`, input.CompanyID, input.NodeID, textboxID, nodeV2EmptyDocument, epoch, input.ActorUserID, order, input.IdempotencyKey); err != nil {
+	if _, err := tx.ExecContext(ctx, `insert into node_textboxes(company_id,node_id,textbox_id,document_json,body_json,plain_text,collaboration_epoch,created_by_user_id,updated_by_user_id,display_order,creation_idempotency_key) values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,$4::jsonb||jsonb_build_object('annotations','[]'::jsonb),'',$5::uuid,$6::uuid,$6::uuid,$7,$8)`, input.CompanyID, input.NodeID, textboxID, nodeV2EmptyDocument, epoch, input.ActorUserID, order, input.IdempotencyKey); err != nil {
 		return NodeV2TextBoxMutationResult{}, fmt.Errorf("insert Node v2 textbox: %w", mapEditorOwnerTextLimitError(err))
 	}
 	// Yjs empty-state bytes are valid recovery seeds. The first collaborative
@@ -843,7 +843,7 @@ func (r *PostgresRepo) CheckpointNodeV2TextBox(input NodeV2CheckpointInput) (dom
 	if _, err := tx.ExecContext(ctx, `update node_textbox_yjs_updates set checkpointed_timestamp=coalesce(checkpointed_timestamp,now()),retain_until=coalesce(retain_until,now()+interval '7 days') where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and collaboration_epoch=$4::uuid and update_sequence<=$5`, input.CompanyID, input.NodeID, input.TextboxID, input.CollaborationEpoch, input.ThroughSequence); err != nil {
 		return domain.NodeV2TextBox{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `update node_textboxes set document_json=$4::jsonb,plain_text=$5,content_revision=content_revision+1,materialized_through_sequence=$6,updated_by_user_id=$7::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID, string(input.DocumentJSON), input.PlainText, input.ThroughSequence, input.ActorUserID); err != nil {
+	if _, err := tx.ExecContext(ctx, `update node_textboxes set document_json=$4::jsonb,body_json=$4::jsonb||jsonb_build_object('annotations',coalesce(body_json->'annotations','[]'::jsonb)),plain_text=$5,content_revision=content_revision+1,revision=revision+1,materialized_through_sequence=$6,updated_by_user_id=$7::uuid,updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.TextboxID, string(input.DocumentJSON), input.PlainText, input.ThroughSequence, input.ActorUserID); err != nil {
 		return domain.NodeV2TextBox{}, mapEditorOwnerTextLimitError(err)
 	}
 	box, err := postgresNodeV2TextBoxByID(ctx, tx, input.CompanyID, input.NodeID, input.TextboxID)
