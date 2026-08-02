@@ -1,5 +1,8 @@
-import type { EditorTextBlockContent } from "./editorProjection.js";
-const DEFAULT_NODE_TEXT_BLOCK_TITLE = "Hello I am a title";
+export type NodeTextBlockContent = {
+  document: string;
+  emailMessageID?: string;
+  emailAccent?: string;
+};
 
 export type NodeEmailChatHostBlock = {
   id: string;
@@ -16,24 +19,17 @@ export type NodeEmailOriginReference = {
   blockID?: string;
 };
 
-export function createOrdinaryNodeTextBlockContent(): EditorTextBlockContent {
-  return {
-    title: DEFAULT_NODE_TEXT_BLOCK_TITLE,
-    document: "",
-    attachments: [],
-  };
+export function createOrdinaryNodeTextBlockContent(): NodeTextBlockContent {
+  return { document: "" };
 }
 
 export function createEmailLinkedNodeTextBlockContent(input: {
-  title: string;
   document?: string;
   messageID: string;
   accent: string;
-}): EditorTextBlockContent {
+}): NodeTextBlockContent {
   return {
-    title: input.title,
     document: input.document ?? "",
-    attachments: [],
     emailMessageID: input.messageID.trim(),
     emailAccent: input.accent.trim(),
   };

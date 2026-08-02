@@ -42,9 +42,9 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 
 	upsertBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) UpsertCommunicationsEmailDraft")
 	for _, required := range []string{
-		"communications_email_drafts.personal_user_id is not distinct from excluded.personal_user_id",
-		"communications_email_drafts.personal_account_email is not distinct from excluded.personal_account_email",
-		"communications_email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id",
+		"email_drafts.personal_user_id is not distinct from excluded.personal_user_id",
+		"email_drafts.personal_account_email is not distinct from excluded.personal_account_email",
+		"email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id",
 	} {
 		if !strings.Contains(upsertBody, required) {
 			t.Fatalf("UpsertCommunicationsEmailDraft missing immutable scope guard %q", required)

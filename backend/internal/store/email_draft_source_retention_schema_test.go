@@ -7,69 +7,74 @@ import (
 )
 
 func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
-	runtimeRaw, err := os.ReadFile("postgres_email_drafts.go")
-	if err != nil {
-		t.Fatalf("read postgres_email_drafts.go: %v", err)
-	}
 	schemaRaw, err := os.ReadFile("../../db/schema.sql")
 	if err != nil {
 		t.Fatalf("read schema.sql: %v", err)
 	}
-	migrationRaw, err := os.ReadFile("../../db/migrations/20260713_email_thread_collaboration.sql")
+	migrationRaw, err := os.ReadFile("../../db/migrations/20260802_zz_v3_database_table_cutover.sql")
 	if err != nil {
-		t.Fatalf("read email collaboration migration: %v", err)
+		t.Fatalf("read V3 migration: %v", err)
+	}
+	runtimeRaw, err := os.ReadFile("postgres_email_drafts.go")
+	if err != nil {
+		t.Fatalf("read postgres_email_drafts.go: %v", err)
 	}
 
-	for name, raw := range map[string][]byte{
-		"runtime schema":   runtimeRaw,
-		"canonical schema": schemaRaw,
+	schema := strings.ToLower(string(schemaRaw))
+	draftTable := emailDraftCreateTableContract(t, schema)
+	for _, required := range []string{
+		"email_relationship_id uuid",
+		"source_email_message_id uuid",
+		"mailbox_scope_type text not null",
+		"foreign key (company_id, email_relationship_id)",
+		"references email_relationships(company_id, email_relationship_id)",
+		"send_claim_token text not null",
+		"send_idempotency_key text not null",
+		"sent_email_message_id uuid",
 	} {
-		draftTable := emailDraftCreateTableContract(t, strings.ToLower(string(raw)))
-		for _, forbidden := range []string{
-			"references user_email_connections",
-			"references shared_inboxes",
-		} {
-			if strings.Contains(draftTable, forbidden) {
-				t.Fatalf("%s retains unconditional draft source foreign key %q", name, forbidden)
-			}
+		if !strings.Contains(draftTable, required) {
+			t.Fatalf("canonical email_drafts missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"collaboration_id", "is_shared", "source_message_id text"} {
+		if strings.Contains(draftTable, forbidden) {
+			t.Fatalf("canonical email_drafts retained %q", forbidden)
 		}
 	}
 
-	for name, raw := range map[string][]byte{
-		"runtime schema":          runtimeRaw,
-		"canonical schema":        schemaRaw,
-		"collaboration migration": migrationRaw,
+	migration := strings.ToLower(strings.Join(strings.Fields(string(migrationRaw)), " "))
+	for _, required := range []string{
+		"create table email_drafts",
+		"email_relationship_id uuid",
+		"source_email_message_id uuid",
+		"drop table communications_email_drafts",
+		"insert into email_drafts(",
 	} {
-		sqlText := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-		for _, required := range []string{
-			"confrelid in ('user_email_connections'::regclass, 'shared_inboxes'::regclass)",
-			"alter table communications_email_drafts drop constraint %i",
-			"create or replace function mangorts_cleanup_private_personal_email_drafts()",
-			"where not is_shared and personal_user_id = old.user_id and personal_account_email = old.account_email",
-			"before delete on user_email_connections",
-			"create or replace function mangorts_cleanup_private_shared_email_drafts()",
-			"where not is_shared and company_id = old.company_id and shared_inbox_id = old.shared_inbox_id",
-			"before delete on shared_inboxes",
-		} {
-			if !strings.Contains(sqlText, required) {
-				t.Fatalf("%s missing email draft source-retention contract %q", name, required)
-			}
+		if !strings.Contains(migration, required) {
+			t.Fatalf("V3 migration missing draft cutover %q", required)
+		}
+	}
+
+	runtime := strings.ToLower(string(runtimeRaw))
+	for _, required := range []string{"email_relationship_id", "source_email_message_id", "from email_drafts"} {
+		if !strings.Contains(runtime, required) {
+			t.Fatalf("runtime draft store missing %q", required)
 		}
 	}
 }
 
 func emailDraftCreateTableContract(t *testing.T, sqlText string) string {
 	t.Helper()
-	const startNeedle = "create table if not exists communications_email_drafts ("
+	const startNeedle = "create table if not exists email_drafts ("
 	start := strings.Index(sqlText, startNeedle)
 	if start < 0 {
 		t.Fatalf("missing %q", startNeedle)
 	}
 	rest := sqlText[start:]
-	const endNeedle = "create index if not exists idx_communications_email_drafts_personal_updated"
+	const endNeedle = "create index if not exists idx_email_drafts_personal_updated"
 	end := strings.Index(rest, endNeedle)
 	if end < 0 {
-		t.Fatalf("communications_email_drafts table has no expected following index")
+		t.Fatalf("email_drafts table has no expected following index")
 	}
 	return rest[:end]
 }

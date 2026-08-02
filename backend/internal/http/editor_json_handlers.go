@@ -293,7 +293,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			"deduplicated": commit.Deduplicated,
 		})
 	case http.MethodPatch:
-		if ref.ResourceType != store.EntityTypeNode && ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject {
+		if ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject {
 			writeError(w, http.StatusMethodNotAllowed, "editor_metadata_not_supported")
 			return
 		}

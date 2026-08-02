@@ -208,7 +208,13 @@ const (
 	AttachmentRelationshipMigratedInlineImg = "migrated_inline_image"
 )
 
+type EmailRelationshipAttachmentResource struct {
+	ResourceType string
+	ResourceID   string
+}
+
 type AttachmentRepository interface {
+	GetEmailRelationshipAttachmentResource(companyID, emailRelationshipID string) (EmailRelationshipAttachmentResource, error)
 	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
 	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
 	GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
@@ -464,8 +470,8 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "email_draft"
 	case "email_signature", "email-signature":
 		return "email_signature"
-	case "attached_email", "attached-email":
-		return "attached_email"
+	case "email_relationship", "email-relationship":
+		return "email_relationship"
 	case "shared_inbox", "shared-inbox":
 		return "shared_inbox"
 	case "company_explorer_folder", "company-explorer-folder":

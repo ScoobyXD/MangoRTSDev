@@ -829,8 +829,8 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 				CompanyID: fixture.companyID, UserID: fixture.allowed.UserID, Role: domain.RoleCompanyUser,
 			}},
 		}
-		payload := attachmentDirectUploadIntentPayload("provider-attached-email-nonmember", "nonmember-company-hint", 4, directUploadTestSHA256Hex("nonmember-company-hint"))
-		payload["resourceType"] = "attached_email"
+		payload := attachmentDirectUploadIntentPayload("99999999-9999-4999-8999-999999999991", "nonmember-company-hint", 4, directUploadTestSHA256Hex("nonmember-company-hint"))
+		payload["resourceType"] = "email_relationship"
 		payload["relationshipKind"] = "email_attachment"
 		recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, nonmemberCompanyID)
 		if recorder.Code != http.StatusForbidden {
@@ -857,8 +857,8 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 			},
 			CompanyID: fixture.companyID, CompanyRole: domain.RoleCompanyUser,
 		}
-		payload := attachmentDirectUploadIntentPayload("provider-attached-email-conflict", "conflicting-company-hint", 4, directUploadTestSHA256Hex("conflicting-company-hint"))
-		payload["resourceType"] = "attached_email"
+		payload := attachmentDirectUploadIntentPayload("99999999-9999-4999-8999-999999999992", "conflicting-company-hint", 4, directUploadTestSHA256Hex("conflicting-company-hint"))
+		payload["resourceType"] = "email_relationship"
 		payload["relationshipKind"] = "email_attachment"
 		recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, secondCompanyID)
 		if recorder.Code < 400 {
@@ -870,7 +870,7 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 	})
 
 	t.Run("multi-company email resources use only the authorized hinted company", func(t *testing.T) {
-		for _, resourceType := range []string{"email_message", "attached_email"} {
+		for _, resourceType := range []string{"email_message", "email_relationship"} {
 			t.Run(resourceType, func(t *testing.T) {
 				fixture := newAttachmentDirectUploadTestFixture(t)
 				secondCompanyID := "22222222-2222-4222-8222-222222222222"
@@ -887,13 +887,17 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 					},
 				}
 				resourceID := fmt.Sprintf("personal:%s:provider-resource-%s", fixture.allowed.UserID, resourceType)
-				if resourceType == "attached_email" {
-					secondNode, err := fixture.repo.CreateNode(secondCompanyID, "Second-company attachment node")
+				if resourceType == "email_relationship" {
+					created, err := fixture.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+						CompanyID: secondCompanyID, PersonalUserID: fixture.allowed.UserID,
+						PersonalAccountEmail: fixture.allowed.Email, AccountEmail: fixture.allowed.Email,
+						CreatedByUserID: fixture.allowed.UserID,
+						Message:         domain.EmailMessageSnapshot{ID: "provider-resource-email-relationship", ThreadID: "provider-thread-email-relationship"},
+					})
 					if err != nil {
-						t.Fatalf("create second-company node: %v", err)
+						t.Fatalf("create second-company email relationship: %v", err)
 					}
-					grantAttachmentTestAccess(t, fixture.repo, secondCompanyID, secondNode.NodeID, fixture.allowed.UserID)
-					resourceID = fmt.Sprintf("node:%s:message:provider-resource-%s", secondNode.NodeID, resourceType)
+					resourceID = created.Collaboration.AttachedEmailInformationID
 				}
 				payload := attachmentDirectUploadIntentPayload(resourceID, "multi-company-"+resourceType, 4, directUploadTestSHA256Hex(resourceType))
 				payload["resourceType"] = resourceType

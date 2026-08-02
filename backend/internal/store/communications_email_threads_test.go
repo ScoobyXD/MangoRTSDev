@@ -144,25 +144,26 @@ func TestCommunicationsEmailThreadRejectsCrossThreadAndMissingSelectedMessage(t 
 }
 
 func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjections(t *testing.T) {
-	for _, path := range []string{
-		"../../db/schema.sql",
-		"../../db/migrations/20260719_persist_node_email_threads.sql",
-	} {
+	checks := map[string][]string{
+		"../../db/schema.sql": {
+			"create table if not exists email_threads", "create table if not exists email_messages",
+			"create table if not exists email_relationships", "rich_html_body text", "attachment_metadata jsonb",
+		},
+		"../../db/migrations/20260802_zz_v3_database_table_cutover.sql": {
+			"alter table communications_email_threads rename to email_threads",
+			"alter table communications_email_messages rename to email_messages",
+			"create table email_relationships", "rich_html_body", "attachment_metadata",
+		},
+	}
+	for path, required := range checks {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
 		source := strings.ToLower(string(raw))
-		for _, required := range []string{
-			"create table if not exists communications_email_threads",
-			"create table if not exists communications_email_messages",
-			"create table if not exists communications_node_email_threads",
-			"rich_html_body text",
-			"attachment_metadata jsonb",
-			"foreign key (company_id, email_thread_id)",
-		} {
-			if !strings.Contains(source, required) {
-				t.Fatalf("%s missing %q", path, required)
+		for _, fragment := range required {
+			if !strings.Contains(source, fragment) {
+				t.Fatalf("%s missing %q", path, fragment)
 			}
 		}
 		for _, forbidden := range []string{"attachment_bytes", "presigned_url", "object_url"} {
@@ -172,7 +173,6 @@ func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjection
 		}
 	}
 }
-
 func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111196"
@@ -328,20 +328,18 @@ func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
 		"../../db/schema.sql": {
 			"download_status text not null",
 			"download_complete boolean not null default false",
-			"create table if not exists communications_email_thread_download_jobs",
-			"idx_communications_email_thread_download_jobs_active_full",
-			"idx_communications_email_thread_download_jobs_active_message",
+			"create table if not exists email_thread_download_jobs",
+			"idx_email_thread_download_jobs_active_full",
+			"idx_email_thread_download_jobs_active_message",
 			"unique (company_id, email_thread_id, provider_message_id)",
 		},
-		"../../db/migrations/20260728_durable_email_thread_download_jobs.sql": {
-			"rename column hydration_status to download_status",
-			"rename column last_hydration_error to last_download_error",
-			"add column if not exists download_complete boolean not null default false",
-			"create table if not exists communications_email_thread_download_jobs",
-			"idx_communications_email_thread_download_jobs_active_full",
-			"idx_communications_email_thread_download_jobs_active_message",
-		},
-	}
+		"../../db/migrations/20260802_zz_v3_database_table_cutover.sql": {
+			"alter table communications_email_thread_download_jobs rename to email_thread_download_jobs",
+			"alter index idx_communications_email_thread_download_jobs_active_full",
+			"rename to idx_email_thread_download_jobs_active_full",
+			"alter index idx_communications_email_thread_download_jobs_active_message",
+			"rename to idx_email_thread_download_jobs_active_message",
+		}}
 	for path, required := range checks {
 		raw, err := os.ReadFile(path)
 		if err != nil {

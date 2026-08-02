@@ -10,7 +10,7 @@ import (
 func TestScanPayloadRewritesInlineImageDataURLIdempotently(t *testing.T) {
 	payload := `<p>before</p><img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("png-bytes")) + `"><p>after</p>`
 	location := PayloadLocation{
-		Table:         "node_projection_table",
+		Table:         "node_textboxes",
 		Column:        "information",
 		SourcePK:      "company-1|node-1|info-1",
 		CompanyID:     "company-1",
@@ -70,7 +70,7 @@ func TestScanPayloadRewritesDurableDataURLFieldToAttachmentReference(t *testing.
 func TestScanPayloadRewritesEmailAttachmentContent(t *testing.T) {
 	payload := `{"attachments":[{"filename":"large.txt","content_type":"text/plain","content":"` + base64.StdEncoding.EncodeToString([]byte("hello")) + `"}]}`
 
-	result := ScanPayload(PayloadLocation{Table: "communications_email_nodes", Column: "message", SourcePK: "pk", CompanyID: "company-1"}, payload, ScanOptions{})
+	result := ScanPayload(PayloadLocation{Table: "email_messages", Column: "message", SourcePK: "pk", CompanyID: "company-1"}, payload, ScanOptions{})
 	if len(result.EmbeddedFiles) != 1 {
 		t.Fatalf("embedded files = %d, want 1", len(result.EmbeddedFiles))
 	}
@@ -87,7 +87,7 @@ func TestScanPayloadRewritesEmailAttachmentContent(t *testing.T) {
 
 func TestScanPayloadReportsLargeBase64MarkerWithoutDecodedFile(t *testing.T) {
 	payload := strings.Repeat("x", 64) + " base64," + strings.Repeat("y", 64)
-	result := ScanPayload(PayloadLocation{Table: "node_projection_table", Column: "information", SourcePK: "pk"}, payload, ScanOptions{LargePayloadBytes: 32})
+	result := ScanPayload(PayloadLocation{Table: "node_textboxes", Column: "information", SourcePK: "pk"}, payload, ScanOptions{LargePayloadBytes: 32})
 	if !result.LargePayload || !result.HasSignal("large_payload_with_base64_marker") {
 		t.Fatalf("large=%v signals=%#v", result.LargePayload, result.Signals)
 	}
@@ -97,7 +97,7 @@ func TestScanPayloadReportsLargeBase64MarkerWithoutDecodedFile(t *testing.T) {
 }
 
 func TestDeterministicAttachmentIDIsStableAndUUIDShaped(t *testing.T) {
-	location := PayloadLocation{Table: "node_projection_table", Column: "information", SourcePK: "pk", CompanyID: "company-1"}
+	location := PayloadLocation{Table: "node_textboxes", Column: "information", SourcePK: "pk", CompanyID: "company-1"}
 	first := DeterministicAttachmentID(location, "abc123", 1)
 	second := DeterministicAttachmentID(location, "abc123", 1)
 	if first != second {

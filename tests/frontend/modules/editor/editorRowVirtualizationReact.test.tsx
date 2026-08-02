@@ -104,7 +104,7 @@ function nodeChatProjection(blockID: string, message = `Chat for ${blockID}`): N
   };
 }
 
-function nodeEmailProjection(blockID: string): NodeProjectionItem {
+function nodeEmailProjection(blockID: string, messageID = `thread-root-${blockID}`): NodeProjectionItem {
   const createdTimestamp = timestamp(62);
   return {
     company_id: COMPANY_ID,
@@ -113,7 +113,7 @@ function nodeEmailProjection(blockID: string): NodeProjectionItem {
     type: "Attached email",
     information: buildEditorAttachedEmailPayload({
       blockID,
-      messageID: `thread-root-${blockID}`,
+      messageID,
       threadID: `thread-${blockID}`,
       subject: `Email for ${blockID}`,
       from: "sender@example.test",
@@ -689,16 +689,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     }
     const emailLinkedProjection = nodeProjections(1)[0];
     assert.ok(emailLinkedProjection);
-    const emailLinkedPayload = JSON.parse(emailLinkedProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
-    emailLinkedProjection.information = TEXT_BLOCK_PREFIX + JSON.stringify({
-      ...emailLinkedPayload,
-      email_message_id: "message-node-block-0",
-      email_accent: "#2563eb",
-    });
     currentNodeProjectionItems = [
       emailLinkedProjection,
       nodeChatProjection("node-block-0"),
-      nodeEmailProjection("node-block-0"),
+      nodeEmailProjection("node-block-0", "message-node-block-0"),
     ];
     nodeRoot = createRoot(nodeContainer);
     await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });

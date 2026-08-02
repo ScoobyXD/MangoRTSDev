@@ -46,15 +46,13 @@ import {
   parseEditorTextBlockChats,
   type EditorAttachedEmail,
   type EditorChatAttachment,
-  type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "./editorProjection";
 import { editorChatEntityLinkPayloads, remapEditorChatEntityLinks, trimEditorChatDraft, type EditorChatEntityLink } from "./chatEntityLinks.js";
-import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
+import { generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
 import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
 import {
-  appendUniqueEditorAttachments,
   editorChatAttachmentsReadyForSubmit,
   failEditorChatAttachmentTransfer,
   resolveEditorChatAttachmentTransfer,
@@ -78,7 +76,7 @@ import { openEditorEntityLink } from "./editorEntityLinks";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
-import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
+import { createEmptyMangoTiptapDocument, serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import { groupNodeTimelineEventsByTextBlock } from "./nodeTimelineOrdering";
 import { EditorSavedTimestamp, EditorSaveStatusIcon, editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
 
@@ -129,6 +127,7 @@ import {
   createOrdinaryNodeTextBlockContent,
   defaultOpenTextBlockChatIDs,
   resolveLegacyEmailChatHostBlockID,
+  type NodeTextBlockContent,
 } from "./nodeTextBlockCreation";
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "./editorMentions";
 
@@ -519,7 +518,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const nodeAttachmentUploadFilesRef = useRef(new Map<string, { file: File; blockID: string; controller?: AbortController }>());
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
-  const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
+  const contentByBlockRef = useRef(new Map<string, NodeTextBlockContent>());
   const documentScrollMemoryRef = useRef(createEditorScrollMemory());
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
@@ -620,7 +619,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
   const textBlockProjectionSaveController = useMemo(
-    () => createTextBlockProjectionSaveController<EditorTextBlockContent>(),
+    () => createTextBlockProjectionSaveController<NodeTextBlockContent>(),
     [companyID, nodeID],
   );
 
@@ -1154,21 +1153,30 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     const serverRevisionByInformationID = new Map(loadedTextBlockProjections.map((item) => [item.information_id, item.revision ?? 1]));
+    const parsedAttachedEmails = parseEditorAttachedEmails(projections);
+    const emailByTextboxID = new Map(parsedAttachedEmails.flatMap((email) => email.blockID ? [[email.blockID, email] as const] : []));
+    const accentByMessageID = new Map<string, string>();
+    const usedEmailAccents = new Set<string>();
     const textBlocks = loadedTextBlockProjections.map((item) => {
       const content = parseEditorTextBlockContent(item.information);
+      const linkedEmail = emailByTextboxID.get(item.information_id);
+      const messageID = linkedEmail?.messageID.trim() ?? "";
+      let emailAccent = messageID ? accentByMessageID.get(messageID) : undefined;
+      if (messageID && !emailAccent) {
+        emailAccent = editorEmailMessageAccent(messageID, usedEmailAccents);
+        accentByMessageID.set(messageID, emailAccent);
+        usedEmailAccents.add(emailAccent.toLowerCase());
+      }
       return {
         id: item.information_id,
-        title: content.title,
         document: content.document,
-        attachments: content.attachments ?? [],
-        emailMessageID: content.emailMessageID,
-        emailAccent: content.emailAccent,
+        emailMessageID: messageID || undefined,
+        emailAccent,
         createdTimestamp: item.created_timestamp,
         updatedTimestamp: item.updated_timestamp,
         pending: false,
       };
     });
-    const parsedAttachedEmails = parseEditorAttachedEmails(projections);
     const parsedChatMessages = parseEditorTextBlockChats(projections);
     if (textBlockProjectionSaveController.hasAnyChangedOrSaveInProgress()) {
       setChatMessages(parsedChatMessages);
@@ -1176,10 +1184,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return;
     }
     setBlocks(textBlocks);
-    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent }]));
+    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { document: block.document, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent }]));
     textBlockProjectionSaveController.replaceBlocksAsHasNotChanged(textBlocks.map((block) => ({
       blockID: block.id,
-      content: { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent },
+      content: { document: block.document, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent },
       revision: serverRevisionByInformationID.get(block.id) ?? 0,
     })));
     setChatMessages(parsedChatMessages);
@@ -1381,18 +1389,26 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks, canEdit, rowVirtualizer.mountAndScrollToIndex]);
 
-  const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent, baseRevision: number) => {
-    if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_save_text_block_metadata");
+  const saveTextBlockProjection = useCallback(async (blockID: string, _content: NodeTextBlockContent, baseRevision: number) => {
+    if (!canEdit || !nodeID || !companyID || !author.userID) throw new Error("failed_to_create_node_textbox");
     if (!editorDataFormat.gate) throw new Error("editor_data_format_not_ready");
-    const response = await requestJSON<{ projection_revision?: number }>(
+    const emptyDocument = createEmptyMangoTiptapDocument();
+    const response = await requestJSON<{ revision?: number }>(
       `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
-        method: "PATCH",
-        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: generateStableInformationID(),
+          client_id: `node-textbox-create:${author.userID}`,
+          base_revision: baseRevision,
+          schema_version: emptyDocument.schema_version,
+          document: emptyDocument,
+          annotations: [],
+        }),
       },
     );
-    const revision = response?.projection_revision ?? 0;
-    if (!Number.isInteger(revision) || revision <= baseRevision) throw new Error("invalid_projection_revision_ack");
+    const revision = response?.revision ?? 0;
+    if (!Number.isInteger(revision) || revision <= baseRevision) throw new Error("invalid_textbox_revision_ack");
     onProjectionMutation();
     return { revision };
   }, [author.userID, canEdit, companyID, editorDataFormat.gate?.editor_format, nodeID, onProjectionMutation, requestJSON]);
@@ -1405,7 +1421,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     textBlockProjectionSaveController.configure({
       saveBlock: ({ blockID, content, baseRevision }) => saveTextBlockProjection(blockID, content, baseRevision),
       onBlockSaveInProgressChange: setTextBlockSaveInProgress,
-      onSaveError: (_blockID, cause) => onError(cause instanceof Error ? cause.message : "failed_to_save_text_block_metadata"),
+      onSaveError: (_blockID, cause) => onError(cause instanceof Error ? cause.message : "failed_to_create_node_textbox"),
     });
   }, [onError, saveTextBlockProjection, setTextBlockSaveInProgress, textBlockProjectionSaveController]);
 
@@ -1422,18 +1438,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => onRegisterSaveController(null);
   }, [flushAllTextBlockProjectionSaves, onRegisterSaveController]);
 
-  const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
-    if (!editorTextCanEdit) return;
-    contentByBlockRef.current.set(blockID, content);
-    textBlockProjectionSaveController.markHasChanged(blockID, content);
-    const existingTimer = saveTimersRef.current.get(blockID);
-    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
-    const timer = window.setTimeout(() => {
-      saveTimersRef.current.delete(blockID);
-      textBlockProjectionSaveController.startLatestContentSave(blockID);
-    }, EDITOR_AUTOSAVE_DELAY_MS);
-    saveTimersRef.current.set(blockID, timer);
-  }, [editorTextCanEdit, textBlockProjectionSaveController]);
 
   const createTextBlock = useCallback(() => {
     if (!editorTextCanEdit) return;
@@ -1446,9 +1450,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setBlocks((current) => [
       {
         id: blockID,
-        title: initialContent.title,
         document: "",
-        attachments: [],
         createdTimestamp: now,
         updatedTimestamp: now,
         pending: true,
@@ -1480,13 +1482,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!editorTextCanEdit || !cleanMessageID) return "";
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
+    const relationshipID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.messageID === cleanMessageID || email.id === cleanMessageID);
+    if (!sourceEmail) {
+      onError("email_relationship_source_not_found");
+      return "";
+    }
     const existingMessageAccent = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID)?.emailAccent?.trim() ?? "";
     const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
     const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
-      title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
       document: cleanQuote && typeof document !== "undefined" ? createEmailSelectionDocument(document, cleanQuote) : "",
       messageID: cleanMessageID,
       accent: emailAccent,
@@ -1496,9 +1502,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
     setBlocks((current) => [{
       id: blockID,
-      title: initialContent.title,
       document: initialContent.document,
-      attachments: [],
       emailMessageID: cleanMessageID,
       emailAccent,
       createdTimestamp: now,
@@ -1524,9 +1528,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     setActiveRowBlockID(blockID);
     setFocusedTextBlockID(blockID);
-    textBlockProjectionSaveController.startLatestContentSave(blockID);
+    void textBlockProjectionSaveController.saveLatestContent(blockID).then(async () => {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: EDITOR_ATTACHED_EMAIL_TYPE,
+          information: buildEditorAttachedEmailPayload({ ...sourceEmail, blockID }),
+          information_id: relationshipID,
+        }),
+      });
+      onProjectionMutation();
+    }).catch((cause) => {
+      onError(cause instanceof Error ? cause.message : "failed_to_link_email_textbox");
+    });
     return blockID;
-  }, [blocks, editorTextCanEdit, nodeAttachedEmails, textBlockProjectionSaveController]);
+  }, [blocks, companyID, editorTextCanEdit, nodeAttachedEmails, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
@@ -1543,13 +1560,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     createTextBlock();
   }, [blocks.length, canEdit, createTextBlock, editorSequence, loadedTextBlockProjections.length, nodeAttachedEmails.length, nodeID, projectionsLoaded]);
 
-  const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
+  const updateTextBlockContent = useCallback((blockID: string, patch: Partial<NodeTextBlockContent>) => {
     if (!canEdit) return;
-    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
-    const nextContent: EditorTextBlockContent = {
-      title: patch.title ?? existing.title,
+    const existing = contentByBlockRef.current.get(blockID) ?? { document: "" };
+    const nextContent: NodeTextBlockContent = {
       document: patch.document ?? existing.document,
-      attachments: patch.attachments ?? existing.attachments ?? [],
       emailMessageID: patch.emailMessageID ?? existing.emailMessageID,
       emailAccent: patch.emailAccent ?? existing.emailAccent,
     };
@@ -1557,8 +1572,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (block.id !== blockID) return block;
       return { ...block, ...nextContent };
     }));
-    if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) scheduleTextBlockSave(blockID, nextContent);
-  }, [canEdit, scheduleTextBlockSave]);
+    contentByBlockRef.current.set(blockID, nextContent);
+  }, [canEdit]);
 
 
   useEffect(() => {
@@ -1586,16 +1601,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       updateTextBlockContent(repair.blockID, { emailAccent: repair.accent });
     }
   }, [blocks, editorTextCanEdit, updateTextBlockContent]);
-
-  const appendTextBlockAttachments = useCallback((blockID: string, attachments: EditorChatAttachment[]) => {
-    if (!canEdit || attachments.length === 0) return;
-    const latest = contentByBlockRef.current.get(blockID);
-    if (!latest) return;
-    const latestAttachments = latest.attachments ?? [];
-    const mergedAttachments = appendUniqueEditorAttachments(latestAttachments, attachments);
-    if (mergedAttachments.length === latestAttachments.length) return;
-    updateTextBlockContent(blockID, { attachments: mergedAttachments });
-  }, [canEdit, updateTextBlockContent]);
 
   const uploadNodeAttachmentItem = useCallback(async (
     uploadID: string,
@@ -1628,7 +1633,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       });
       succeeded = true;
       if (uploadStillBelongsToCurrentNode()) {
-        appendTextBlockAttachments(pending.blockID, [attachment]);
         setNodeAttachmentUploads((current) => current.map((item) => (
           item.id === uploadID ? { ...item, attachmentID: attachment.attachmentID } : item
         )));
@@ -1640,7 +1644,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (succeeded) nodeAttachmentUploadFilesRef.current.delete(uploadID);
       else if (latest?.controller === controller) nodeAttachmentUploadFilesRef.current.set(uploadID, { ...latest, controller: undefined });
     }
-  }, [appendTextBlockAttachments, refreshNodeAttachments, requestJSON]);
+  }, [refreshNodeAttachments, requestJSON]);
 
   const addTextBlockAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     if (!canEdit) return;
@@ -2183,8 +2187,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
     if (typeof document === "undefined") return;
-    const sourceBlock = blocks.find((block) => block.id === image.blockID);
-    const sourceTitle = sourceBlock?.title.trim() || "Image";
+    const sourceTitle = "Image";
     const container = document.createElement("div");
     const maxWidth = 520;
     const width = Math.max(48, Math.min(image.width || 320, maxWidth));
@@ -2251,7 +2254,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     try {
       await onCreateNodeFromImage({
         title: buildEmailSelectionNodeTitle(cleanQuote, fallbackTitle),
-        blockTitle: "Email selection",
         document: selectionDocument,
       });
     } catch (cause) {

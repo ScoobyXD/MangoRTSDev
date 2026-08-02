@@ -59,7 +59,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	if nodeStart < 0 {
 		t.Fatal("canonical current node_textboxes block not found")
 	}
-	nodeEnd := strings.Index(schema[nodeStart:], "create table if not exists project_textboxes (")
+	nodeEnd := strings.Index(schema[nodeStart:], "\n);")
 	if nodeEnd < 0 {
 		t.Fatal("canonical current node_textboxes block not found")
 	}
@@ -81,12 +81,20 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 			t.Errorf("canonical node_textboxes retains obsolete column %s", forbidden)
 		}
 	}
+	for _, retired := range []string{
+		"node_information", "node_projection_table", "node_projection_seen_snapshots",
+		"communications_email_collaborations", "communications_email_collaboration_participants",
+		"communications_email_nodes", "communications_email_node_attachments", "communications_node_email_threads",
+	} {
+		if strings.Contains(schema, "create table if not exists "+retired+" (") {
+			t.Errorf("canonical schema creates V3-retired table %s", retired)
+		}
+	}
+
 	for _, required := range []string{
 		"body_json jsonb not null",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
-		"create table if not exists node_information",
-		"create table if not exists node_projection_table",
 		"create table if not exists project_information",
 		"create table if not exists project_projection_table",
 		"create table if not exists logic_gate_information",

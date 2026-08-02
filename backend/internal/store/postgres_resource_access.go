@@ -579,9 +579,10 @@ direct_targets(resource_type, resource_id) as (
     and not (
       item.target_type='`+EntityTypeNode+`'
       and exists (
-        select 1 from communications_email_collaborations collaboration
-        where collaboration.company_id=item.company_id
-          and collaboration.node_id=item.target_id
+        select 1 from email_relationships email_relationship
+        where email_relationship.company_id=item.company_id
+      and email_relationship.resource_type='node'
+      and email_relationship.resource_id=item.target_id
       )
     )
 ),
@@ -593,9 +594,10 @@ node_targets(resource_type, resource_id) as (
    and target.resource_id=assignment.logic_gate_id
   where assignment.company_id=$1::uuid
     and not exists (
-      select 1 from communications_email_collaborations collaboration
-      where collaboration.company_id=assignment.company_id
-        and collaboration.node_id=assignment.node_id
+      select 1 from email_relationships email_relationship
+      where email_relationship.company_id=assignment.company_id
+      and email_relationship.resource_type='node'
+      and email_relationship.resource_id=assignment.node_id
     )
 )
 select distinct resource_type, resource_id::text
@@ -612,9 +614,10 @@ from node_logic_gate_assignments assignment
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$2::uuid
   and not exists (
-    select 1 from communications_email_collaborations collaboration
-    where collaboration.company_id=assignment.company_id
-      and collaboration.node_id=assignment.node_id
+    select 1 from email_relationships email_relationship
+    where email_relationship.company_id=assignment.company_id
+      and email_relationship.resource_type='node'
+      and email_relationship.resource_id=assignment.node_id
   )
 order by assignment.node_id::text`, companyID, resourceID)
 	default:

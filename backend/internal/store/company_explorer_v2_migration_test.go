@@ -47,8 +47,6 @@ func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 		"create table if not exists company_explorer_subscriptions",
 		"folder_kind text not null",
 		"system_key text",
-		"scope_type text",
-		"scope_id text",
 	} {
 		if strings.Contains(normalized, forbidden) {
 			t.Fatalf("schema kept removed company explorer storage marker %q", forbidden)

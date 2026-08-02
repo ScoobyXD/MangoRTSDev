@@ -23,19 +23,19 @@ func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDr
 	if scope.scopeType == "shared" {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSelectColumns()+`
-from communications_email_drafts
+from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
-	and not is_shared
+	and email_relationship_id is null
 	and shared_inbox_id = $2::uuid
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID)
 	} else {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSelectColumns()+`
-from communications_email_drafts
+from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
-	and not is_shared
+	and email_relationship_id is null
 	and personal_user_id = $2::uuid
 	and personal_account_email = $3
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail)
@@ -78,22 +78,22 @@ func (r *PostgresRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraf
 	if scope.scopeType == "shared" {
 		draft, err = scanCommunicationsEmailDraft(r.db.QueryRow(`
 select `+communicationsEmailDraftSelectColumns()+`
-from communications_email_drafts
+from email_drafts
 where company_id = $1::uuid
 	and draft_id = $2
 	and shared_inbox_id = $3::uuid
 	and deleted_timestamp is null
-	and not is_shared`, scope.companyID, draftID, scope.sharedInboxID))
+	and email_relationship_id is null`, scope.companyID, draftID, scope.sharedInboxID))
 	} else {
 		draft, err = scanCommunicationsEmailDraft(r.db.QueryRow(`
 select `+communicationsEmailDraftSelectColumns()+`
-from communications_email_drafts
+from email_drafts
 where company_id = $1::uuid
 	and draft_id = $2
 	and personal_user_id = $3::uuid
 	and personal_account_email = $4
 	and deleted_timestamp is null
-	and not is_shared`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail))
+	and email_relationship_id is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail))
 	}
 	return draft, err
 }
@@ -109,87 +109,69 @@ func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailD
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
+	var sourceEmailMessageID string
+	if draft.SourceMessageID != "" {
+		rows, err := r.db.Query(`
+select distinct message.email_message_id::text
+from email_messages message
+join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+where message.company_id=$1::uuid and message.provider_message_id=$2
+ and (($3='personal' and thread.mailbox_scope_type='personal'
+       and thread.personal_user_id=nullif($4,'')::uuid and thread.personal_account_email=$5)
+   or ($3='shared' and thread.mailbox_scope_type='shared' and thread.shared_inbox_id=nullif($6,'')::uuid))
+limit 2`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
+			draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID)
+		if err != nil {
+			return domain.CommunicationsEmailDraft{}, err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return domain.CommunicationsEmailDraft{}, err
+			}
+			if sourceEmailMessageID != "" {
+				rows.Close()
+				return domain.CommunicationsEmailDraft{}, ErrInvalid
+			}
+			sourceEmailMessageID = id
+		}
+		if err := rows.Close(); err != nil {
+			return domain.CommunicationsEmailDraft{}, err
+		}
+		if sourceEmailMessageID == "" {
+			return domain.CommunicationsEmailDraft{}, ErrNotFound
+		}
+	}
 	saved, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
-insert into communications_email_drafts (
-  company_id,
-  draft_id,
-  personal_user_id,
-  personal_account_email,
-  shared_inbox_id,
-  created_by_user_id,
-  updated_by_user_id,
-  kind,
-  source_message_id,
-  account_email,
-  to_recipients,
-  cc_recipients,
-  bcc_recipients,
-  subject,
-  body_editor_html,
-  reply_to_message,
-  scheduled_send_timestamp,
-  created_timestamp,
-  updated_timestamp,
-  deleted_timestamp
+insert into email_drafts (
+ company_id,draft_id,email_relationship_id,source_email_message_id,mailbox_scope_type,
+ personal_user_id,personal_account_email,shared_inbox_id,sender_account_email,
+ created_by_user_id,updated_by_user_id,kind,to_recipients,cc_recipients,bcc_recipients,
+ subject,body_editor_html,scheduled_send_timestamp,created_timestamp,updated_timestamp,deleted_timestamp
 ) values (
-  $1::uuid,
-  $2,
-  nullif($3, '')::uuid,
-  nullif($4, ''),
-  nullif($5, '')::uuid,
-  nullif($6, '')::uuid,
-  nullif($7, '')::uuid,
-  $8,
-  $9,
-  $10,
-  $11,
-  $12,
-  $13,
-  $14,
-  $15,
-  coalesce(nullif($16, '')::jsonb, '{}'::jsonb),
-  $17,
-  now(),
-  now(),
-  null
+ $1::uuid,$2,null,nullif($3,'')::uuid,$4,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
+ nullif($9,'')::uuid,nullif($10,'')::uuid,$11,$12,$13,$14,$15,$16,$17,now(),now(),null
 )
-on conflict (company_id, draft_id) do update set
-	updated_by_user_id = excluded.updated_by_user_id,
-  kind = excluded.kind,
-  source_message_id = excluded.source_message_id,
-  account_email = excluded.account_email,
-  to_recipients = excluded.to_recipients,
-  cc_recipients = excluded.cc_recipients,
-  bcc_recipients = excluded.bcc_recipients,
-  subject = excluded.subject,
-  body_editor_html = excluded.body_editor_html,
-  reply_to_message = excluded.reply_to_message,
-	scheduled_send_timestamp = excluded.scheduled_send_timestamp,
-	updated_timestamp = now(),
-	deleted_timestamp = null
-where communications_email_drafts.personal_user_id is not distinct from excluded.personal_user_id
-	and communications_email_drafts.personal_account_email is not distinct from excluded.personal_account_email
-	and communications_email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id
-	and not communications_email_drafts.is_shared
+on conflict(company_id,draft_id) do update set
+ source_email_message_id=excluded.source_email_message_id,
+ updated_by_user_id=excluded.updated_by_user_id,kind=excluded.kind,
+ sender_account_email=excluded.sender_account_email,to_recipients=excluded.to_recipients,
+ cc_recipients=excluded.cc_recipients,bcc_recipients=excluded.bcc_recipients,
+ subject=excluded.subject,body_editor_html=excluded.body_editor_html,
+ scheduled_send_timestamp=excluded.scheduled_send_timestamp,
+ revision=email_drafts.revision+1,send_state='draft',updated_timestamp=now(),deleted_timestamp=null
+where email_drafts.email_relationship_id is null
+ and email_drafts.mailbox_scope_type=excluded.mailbox_scope_type
+ and email_drafts.personal_user_id is not distinct from excluded.personal_user_id
+ and email_drafts.personal_account_email is not distinct from excluded.personal_account_email
+ and email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id
 returning `+communicationsEmailDraftSelectColumns(),
-		draft.CompanyID,
-		draft.DraftID,
-		draft.PersonalUserID,
-		draft.PersonalAccountEmail,
-		draft.SharedInboxID,
-		draft.CreatedByUserID,
-		draft.UpdatedByUserID,
-		draft.Kind,
-		draft.SourceMessageID,
-		draft.AccountEmail,
-		draft.ToRecipients,
-		draft.CcRecipients,
-		draft.BccRecipients,
-		draft.Subject,
-		draft.BodyEditorHTML,
-		draft.ReplyToMessageJSON,
-		draft.ScheduledSendTimestamp,
-	))
+		draft.CompanyID, draft.DraftID, sourceEmailMessageID, draft.ScopeType,
+		draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID, draft.AccountEmail,
+		draft.CreatedByUserID, draft.UpdatedByUserID, draft.Kind, draft.ToRecipients,
+		draft.CcRecipients, draft.BccRecipients, draft.Subject, draft.BodyEditorHTML,
+		draft.ScheduledSendTimestamp))
 	if errors.Is(err, ErrNotFound) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
@@ -213,7 +195,7 @@ func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEm
 		return ErrInvalid
 	}
 	result, err := r.db.Exec(`
-update communications_email_drafts
+update email_drafts
 set deleted_timestamp = now(),
 	updated_timestamp = now(),
 	updated_by_user_id = nullif($3, '')::uuid
@@ -223,7 +205,7 @@ where company_id = $1::uuid
 	and personal_account_email is not distinct from nullif($5, '')
 	and shared_inbox_id is not distinct from nullif($6, '')::uuid
 	and deleted_timestamp is null
-	and not is_shared`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID)
+	and email_relationship_id is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID)
 	if err != nil {
 		return err
 	}
@@ -327,22 +309,19 @@ func (r *PostgresRepo) ensureCommunicationsEmailDraftsSchema() error {
 	if r == nil || r.db == nil {
 		return ErrInvalid
 	}
-	r.communicationsEmailDraftsSchemaOnce.Do(func() {
-		_, r.communicationsEmailDraftsSchemaErr = r.db.Exec(communicationsEmailDraftsSchemaSQL())
-	})
-	return r.communicationsEmailDraftsSchemaErr
+	return nil
 }
 
 func communicationsEmailDraftSelectColumns() string {
 	return `
 company_id::text,
 draft_id,
-case when shared_inbox_id is null then 'personal' else 'shared' end,
+mailbox_scope_type,
 coalesce(personal_user_id::text, ''),
 coalesce(personal_account_email, ''),
 coalesce(shared_inbox_id::text, ''),
-coalesce(collaboration_id::text, ''),
-is_shared,
+coalesce(email_relationship_id::text, ''),
+email_relationship_id is not null,
 revision,
 send_state,
 send_claim_token,
@@ -351,18 +330,18 @@ send_idempotency_grant_id,
 send_idempotency_timestamp,
 send_claimed_revision,
 send_claimed_timestamp,
-sent_message_id,
+sent_provider_message_id,
 coalesce(created_by_user_id::text, ''),
 coalesce(updated_by_user_id::text, ''),
 kind,
-source_message_id,
-account_email,
+coalesce(source_email_message_id::text, ''),
+sender_account_email,
 to_recipients,
 cc_recipients,
 bcc_recipients,
 subject,
 body_editor_html,
-coalesce(reply_to_message::text, '{}'),
+'{}',
 scheduled_send_timestamp,
 created_timestamp,
 updated_timestamp,
@@ -468,164 +447,4 @@ func scanCommunicationsEmailSignature(row interface{ Scan(dest ...any) error }) 
 		return domain.CommunicationsEmailSignature{}, ErrNotFound
 	}
 	return signature, err
-}
-
-func communicationsEmailDraftsSchemaSQL() string {
-	return `
-create table if not exists communications_email_drafts (
-  company_id uuid not null,
-  draft_id text not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  created_by_user_id uuid,
-  collaboration_id uuid,
-  is_shared boolean not null default false,
-  revision bigint not null default 1,
-  send_state text not null default 'draft',
-  send_claim_token text not null default '',
-  send_idempotency_key text not null default '',
-  send_idempotency_grant_id text not null default '',
-  send_idempotency_timestamp timestamptz,
-  send_claimed_revision bigint not null default 0,
-  send_claimed_timestamp timestamptz,
-  sent_message_id text not null default '',
-  updated_by_user_id uuid,
-  kind text not null default 'compose',
-  source_message_id text not null default '',
-  account_email text not null default '',
-  to_recipients text not null default '',
-  cc_recipients text not null default '',
-  bcc_recipients text not null default '',
-  subject text not null default '',
-  body_editor_html text not null default '',
-  reply_to_message jsonb not null default '{}'::jsonb,
-  scheduled_send_timestamp timestamptz,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  deleted_timestamp timestamptz,
-  primary key (company_id, draft_id),
-  constraint communications_email_drafts_draft_id_chk check (btrim(draft_id) <> ''),
-  constraint communications_email_drafts_kind_chk check (kind in ('compose', 'reply', 'forward')),
-  constraint communications_email_drafts_account_email_chk check (account_email = '' or account_email = lower(btrim(account_email))),
-  constraint communications_email_drafts_personal_account_email_chk check (personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email = lower(btrim(personal_account_email)))),
-  constraint communications_email_drafts_scope_chk check (
-    (personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or (personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null,
-  foreign key (updated_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_communications_email_drafts_personal_updated
-  on communications_email_drafts(company_id, personal_user_id, personal_account_email, updated_timestamp desc)
-  where deleted_timestamp is null and personal_user_id is not null;
-
-create index if not exists idx_communications_email_drafts_shared_updated
-  on communications_email_drafts(company_id, shared_inbox_id, updated_timestamp desc)
-  where deleted_timestamp is null and shared_inbox_id is not null;
-
-alter table communications_email_drafts add column if not exists collaboration_id uuid;
-alter table communications_email_drafts add column if not exists is_shared boolean not null default false;
-alter table communications_email_drafts add column if not exists revision bigint not null default 1;
-alter table communications_email_drafts add column if not exists send_state text not null default 'draft';
-alter table communications_email_drafts add column if not exists send_claim_token text not null default '';
-alter table communications_email_drafts add column if not exists send_idempotency_key text not null default '';
-alter table communications_email_drafts add column if not exists send_idempotency_grant_id text not null default '';
-alter table communications_email_drafts add column if not exists send_idempotency_timestamp timestamptz;
-alter table communications_email_drafts add column if not exists send_claimed_revision bigint not null default 0;
-alter table communications_email_drafts add column if not exists send_claimed_timestamp timestamptz;
-alter table communications_email_drafts add column if not exists sent_message_id text not null default '';
-
--- Shared drafts must retain their immutable mailbox identity and uncertain-send state
--- when a source is removed. Replace the unconditional source cascades with cleanup
--- triggers that preserve the historical delete behavior for ordinary private drafts.
-do $$
-declare
-  source_fk record;
-begin
-  for source_fk in
-    select conname
-    from pg_constraint
-    where conrelid = 'communications_email_drafts'::regclass
-      and contype = 'f'
-      and confrelid in ('user_email_connections'::regclass, 'shared_inboxes'::regclass)
-  loop
-    execute format('alter table communications_email_drafts drop constraint %I', source_fk.conname);
-  end loop;
-end $$;
-
-create or replace function mangorts_cleanup_private_personal_email_drafts()
-returns trigger language plpgsql as $$
-begin
-  delete from communications_email_drafts
-  where not is_shared
-    and personal_user_id = old.user_id
-    and personal_account_email = old.account_email;
-  return old;
-end;
-$$;
-
-drop trigger if exists trg_cleanup_private_email_drafts_personal_source on user_email_connections;
-create trigger trg_cleanup_private_email_drafts_personal_source
-before delete on user_email_connections
-for each row execute function mangorts_cleanup_private_personal_email_drafts();
-
-create or replace function mangorts_cleanup_private_shared_email_drafts()
-returns trigger language plpgsql as $$
-begin
-  delete from communications_email_drafts
-  where not is_shared
-    and company_id = old.company_id
-    and shared_inbox_id = old.shared_inbox_id;
-  return old;
-end;
-$$;
-
-drop trigger if exists trg_cleanup_private_email_drafts_shared_source on shared_inboxes;
-create trigger trg_cleanup_private_email_drafts_shared_source
-before delete on shared_inboxes
-for each row execute function mangorts_cleanup_private_shared_email_drafts();
-
-create unique index if not exists idx_communications_email_drafts_active_shared_source
-  on communications_email_drafts(company_id, collaboration_id, source_message_id)
-  where is_shared and deleted_timestamp is null and source_message_id <> '';
-
-create table if not exists communications_email_signatures (
-  company_id uuid not null,
-  signature_id text not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  name text not null default 'Default',
-  body_editor_html text not null default '',
-  is_default boolean not null default true,
-  created_by_user_id uuid,
-  updated_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, signature_id),
-  constraint communications_email_signatures_signature_id_chk check (btrim(signature_id) <> ''),
-  constraint communications_email_signatures_name_chk check (btrim(name) <> ''),
-  constraint communications_email_signatures_personal_account_email_chk check (personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email = lower(btrim(personal_account_email)))),
-  constraint communications_email_signatures_scope_chk check (
-    (personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or (personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (personal_user_id, personal_account_email) references user_email_connections(user_id, account_email) on delete cascade,
-  foreign key (company_id, shared_inbox_id) references shared_inboxes(company_id, shared_inbox_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null,
-  foreign key (updated_by_user_id) references users(user_id) on delete set null
-);
-
-create unique index if not exists idx_communications_email_signatures_personal_scope
-  on communications_email_signatures(company_id, personal_user_id, personal_account_email)
-  where personal_user_id is not null;
-
-create unique index if not exists idx_communications_email_signatures_shared_scope
-  on communications_email_signatures(company_id, shared_inbox_id)
-  where shared_inbox_id is not null;
-`
 }

@@ -821,9 +821,10 @@ select count(*), count(*) filter (
   where item.target_type='node'
     and exists (
       select 1
-      from communications_email_collaborations collaboration
-      where collaboration.company_id=item.company_id
-        and collaboration.node_id=item.target_id
+      from email_relationships email_relationship
+      where email_relationship.company_id=item.company_id
+        and email_relationship.resource_type='node'
+        and email_relationship.resource_id=item.target_id
     )
 )
 from company_explorer_items item

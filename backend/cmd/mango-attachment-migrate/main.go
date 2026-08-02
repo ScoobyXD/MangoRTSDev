@@ -240,9 +240,7 @@ func collectCandidateRows(ctx context.Context, db *sql.DB, cfg commandConfig) ([
 				rows.Close()
 				return nil, fmt.Errorf("scan %s.%s: %w", source.Table, source.Column, err)
 			}
-			if item.Location.ResourceType == "attached_email" {
-				item.Location.ResourceID = attachedEmailMigrationResourceID(item.Location.ResourceID, item.Location.MessageID)
-			}
+
 			items = append(items, item)
 		}
 		if err := rows.Err(); err != nil {
@@ -456,23 +454,17 @@ on conflict (migration_item_id) do nothing`,
 func updateSourcePayload(ctx context.Context, tx *sql.Tx, location migration.PayloadLocation, payload string) error {
 	parts := strings.Split(location.SourcePK, "|")
 	switch location.Table {
-	case "node_projection_table":
+	case "node_textboxes":
 		if len(parts) != 3 {
 			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
 		}
-		_, err := tx.ExecContext(ctx, `update node_projection_table set information=$4, updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid`, parts[0], parts[1], parts[2], payload)
+		_, err := tx.ExecContext(ctx, `update node_textboxes set body_json=$4::jsonb, updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, parts[0], parts[1], parts[2], payload)
 		return err
-	case "node_information":
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
-		}
-		_, err := tx.ExecContext(ctx, `update node_information set information=$3, updated_timestamp=now() where company_id=$1::uuid and information_id=$2::uuid`, parts[0], parts[1], payload)
-		return err
-	case "node_projection_seen_snapshots":
+	case "node_textbox_seen_snapshots":
 		if len(parts) != 4 {
 			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
 		}
-		_, err := tx.ExecContext(ctx, `update node_projection_seen_snapshots set information=$5, seen_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid and user_id=$4::uuid`, parts[0], parts[1], parts[2], parts[3], payload)
+		_, err := tx.ExecContext(ctx, `update node_textbox_seen_snapshots set body_json=$5::jsonb, seen_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and user_id=$4::uuid`, parts[0], parts[1], parts[2], parts[3], payload)
 		return err
 	case "node_content_changes":
 		if len(parts) != 2 {
@@ -504,23 +496,30 @@ func updateSourcePayload(ctx context.Context, tx *sql.Tx, location migration.Pay
 		}
 		_, err := tx.ExecContext(ctx, `update project_information set information=$3, updated_timestamp=now() where company_id=$1::uuid and information_id=$2::uuid`, parts[0], parts[1], payload)
 		return err
-	case "communications_email_nodes":
+	case "email_messages":
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
 		}
-		_, err := tx.ExecContext(ctx, `update communications_email_nodes set message=$3::jsonb, updated_timestamp=now() where company_id=$1::uuid and node_id=$2::uuid`, parts[0], parts[1], payload)
-		return err
-	case "communications_email_node_attachments":
-		if len(parts) != 4 {
+		switch location.Column {
+		case "attachment_metadata":
+			_, err := tx.ExecContext(ctx, `update email_messages set attachment_metadata=$3::jsonb, updated_timestamp=now() where company_id=$1::uuid and email_message_id=$2::uuid`, parts[0], parts[1], payload)
+			return err
+		case "rich_html_body":
+			_, err := tx.ExecContext(ctx, `update email_messages set rich_html_body=$3, updated_timestamp=now() where company_id=$1::uuid and email_message_id=$2::uuid`, parts[0], parts[1], payload)
+			return err
+		default:
+			return fmt.Errorf("apply is not supported for source column %s.%s", location.Table, location.Column)
+		}
+	case "email_drafts":
+		if len(parts) != 2 {
 			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
 		}
-		_, err := tx.ExecContext(ctx, `update communications_email_node_attachments set message=$5::jsonb, updated_timestamp=now() where company_id=$1::uuid and user_id=$2::uuid and message_id=$3 and node_id=$4::uuid`, parts[0], parts[1], parts[2], parts[3], payload)
+		_, err := tx.ExecContext(ctx, `update email_drafts set body_editor_html=$3, updated_timestamp=now() where company_id=$1::uuid and draft_id=$2`, parts[0], parts[1], payload)
 		return err
 	default:
 		return fmt.Errorf("apply is not supported for source table %s", location.Table)
 	}
 }
-
 func writeReport(rep report, reportPath string, stdout io.Writer) error {
 	raw, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
@@ -549,35 +548,25 @@ func candidateSources() []candidateSource {
 	}
 	return []candidateSource{
 		{
-			Table:  "node_projection_table",
-			Column: "information",
-			Query: `select company_id::text || '|' || node_id::text || '|' || information_id::text,
-       company_id::text, 'node', node_id::text, information_id::text, '', information
-from node_projection_table
+			Table:  "node_textboxes",
+			Column: "body_json",
+			Query: `select company_id::text || '|' || node_id::text || '|' || textbox_id::text,
+       company_id::text, 'node', node_id::text, textbox_id::text, '', body_json::text
+from node_textboxes
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("information") + `
+  and deleted_timestamp is null
+  and ` + pred("body_json::text") + `
 order by updated_timestamp desc
 limit $2`,
 		},
 		{
-			Table:  "node_information",
-			Column: "information",
-			Query: `select company_id::text || '|' || information_id::text,
-       company_id::text, 'node', node_id::text, information_id::text, '', information
-from node_information
+			Table:  "node_textbox_seen_snapshots",
+			Column: "body_json",
+			Query: `select company_id::text || '|' || node_id::text || '|' || textbox_id::text || '|' || user_id::text,
+       company_id::text, 'node', node_id::text, textbox_id::text, '', body_json::text
+from node_textbox_seen_snapshots
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("information") + `
-order by updated_timestamp desc
-limit $2`,
-		},
-		{
-			Table:  "node_projection_seen_snapshots",
-			Column: "information",
-			Query: `select company_id::text || '|' || node_id::text || '|' || information_id::text || '|' || user_id::text,
-       company_id::text, 'node', node_id::text, information_id::text, '', information
-from node_projection_seen_snapshots
-where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("information") + `
+  and ` + pred("body_json::text") + `
 order by seen_timestamp desc
 limit $2`,
 		},
@@ -585,7 +574,7 @@ limit $2`,
 			Table:  "node_content_changes",
 			Column: "text",
 			Query: `select company_id::text || '|' || change_id::text,
-       company_id::text, 'node', node_id::text, information_id::text, '', text
+       company_id::text, 'node', node_id::text, textbox_id::text, '', text
 from node_content_changes
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
   and ` + pred("text") + `
@@ -637,24 +626,36 @@ order by updated_timestamp desc
 limit $2`,
 		},
 		{
-			Table:  "communications_email_nodes",
-			Column: "message",
-			Query: `select company_id::text || '|' || node_id::text,
-       company_id::text, 'node', node_id::text, '', message_id, message::text
-from communications_email_nodes
+			Table:  "email_messages",
+			Column: "attachment_metadata",
+			Query: `select company_id::text || '|' || email_message_id::text,
+       company_id::text, 'email_message', email_message_id::text, '', provider_message_id, attachment_metadata::text
+from email_messages
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("message::text") + `
+  and ` + pred("attachment_metadata::text") + `
 order by updated_timestamp desc
 limit $2`,
 		},
 		{
-			Table:  "communications_email_node_attachments",
-			Column: "message",
-			Query: `select company_id::text || '|' || user_id::text || '|' || message_id || '|' || node_id::text,
-       company_id::text, 'attached_email', node_id::text, '', message_id, message::text
-from communications_email_node_attachments
+			Table:  "email_messages",
+			Column: "rich_html_body",
+			Query: `select company_id::text || '|' || email_message_id::text,
+       company_id::text, 'email_message', email_message_id::text, '', provider_message_id, rich_html_body
+from email_messages
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("message::text") + `
+  and ` + pred("rich_html_body") + `
+order by updated_timestamp desc
+limit $2`,
+		},
+		{
+			Table:  "email_drafts",
+			Column: "body_editor_html",
+			Query: `select company_id::text || '|' || draft_id,
+       company_id::text, 'email_draft', draft_id, '', '', body_editor_html
+from email_drafts
+where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
+  and deleted_timestamp is null
+  and ` + pred("body_editor_html") + `
 order by updated_timestamp desc
 limit $2`,
 		},
@@ -671,16 +672,6 @@ limit $2`,
 		},
 	}
 }
-
-func attachedEmailMigrationResourceID(nodeID, messageID string) string {
-	nodeID = strings.TrimSpace(nodeID)
-	messageID = strings.TrimSpace(messageID)
-	if nodeID == "" || messageID == "" {
-		return nodeID
-	}
-	return "node:" + url.QueryEscape(nodeID) + ":message:" + url.QueryEscape(messageID)
-}
-
 func deterministicUUID(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	bytes := append([]byte(nil), sum[:16]...)

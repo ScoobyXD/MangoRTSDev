@@ -387,7 +387,7 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 		t.Fatalf("postgres logic gate work read does not select projection priority")
 	}
 	for _, required := range []string{
-		"communications_email_nodes",
+		"email_relationships",
 		"resource_gvic_assignments",
 		"projection.status_rank",
 	} {
@@ -506,11 +506,17 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			"trg_logic_gate_work_version_assignments",
 			"trg_logic_gate_work_version_projection",
 			"trg_logic_gate_work_version_nodes",
-			"trg_logic_gate_work_version_email_origin",
 		} {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s missing Logic Gate fast-path contract %q", path, required)
 			}
+		}
+		emailTrigger := "trg_logic_gate_work_version_email_origin"
+		if strings.HasSuffix(path, "schema.sql") {
+			emailTrigger = "trg_logic_gate_work_version_email_relationships"
+		}
+		if !strings.Contains(normalized, emailTrigger) {
+			t.Fatalf("%s missing Logic Gate email fast-path contract %q", path, emailTrigger)
 		}
 	}
 }

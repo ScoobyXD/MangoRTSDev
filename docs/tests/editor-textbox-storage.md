@@ -112,13 +112,11 @@ not button-pressed history, and the new history tables intentionally have no
 `save_kind` column. The converter and cleanup discard those rows instead of
 mislabeling them as manual saves.
 
-## Kept for phase 2
+## Final V3 Node storage
 
-`node_projection_table`, `project_projection_table`, and
-`logic_gate_projection_table` remain in use for titles, attachments, timeline
-ordering, chat/email view data, and other metadata. Search keyword columns are
-also deferred. Those projections must not be removed by this cutover.
+`node_textboxes` is the only current Node textbox body store. It also owns user-controlled display order and has no title column. `node_textbox_chats` stores Node textbox comments/replies, `node_textbox_seen_snapshots` stores exact per-user baselines, and `node_content_changes.textbox_id` points to the permanent textbox.
 
+The V3 cutover removes `node_information`, `node_projection_table`, and `node_projection_seen_snapshots`. No current Node body, title, attachment array, chat payload, or attached-email payload is composed from those tables. Project and Logic Gate information/projection tables remain unchanged because this cutover does not replace them.
 ## Read-only development evidence
 
 The 2026-08-01 database-enforced read-only audit found:
@@ -135,46 +133,14 @@ The 2026-08-01 database-enforced read-only audit found:
 
 No document body or credential was printed or stored during the audit.
 
-## Rollout and rollback
+## V3 rollout and rollback
 
-1. Apply `20260801_editor_textbox_storage_foundation.sql`. It creates and
-   backfills the six permanent tables without deleting old data.
-2. Deploy the backend that writes the new current and history tables and includes
-   those six tables in Recycle Bin snapshots/restores.
-3. From `frontend`, run the converter with the database-enforced read-only role.
-   Dry-run is the default; it validates every selected active and recycled
-   document, resolves durable attachment metadata, and writes nothing:
+1. Back up the target database and stop old application writers during the reviewed maintenance window.
+2. Run `scripts/verify_editor_textbox_cutover.sql` with the database-enforced read-only role. Every reported blocker must be zero and every required V3-readiness assumption must be understood before a writer is used.
+3. Have a human operator apply `20260802_zz_v3_database_table_cutover.sql` through the normal migration workflow. The migration asserts the exact legacy schema, repairs only missing email rows from unambiguous fallback snapshots, validates every mapping, rewrites attachment identities, and drops all retired tables in one transaction.
+4. Deploy the V3 backend and frontend together. Old binaries must not run after the retired tables are dropped.
+5. Run the read-only verifier again, then run the application smoke tests for Node textbox create/edit/delete/reorder, comments, seen state, saved history, related email, drafts, attachments, permissions, realtime updates, and Recycle Bin restore.
 
-   ```powershell
-   npm run convert:editor-textbox-history -- --company-id <company-id> --host <host> --port 5432 --database <database> --user mangorts_readonly --sslmode require
-   ```
+`apply_editor_textbox_cleanup.sql` is deliberately retired and always aborts. Running it could otherwise create a partial state outside the strict V3 transaction.
 
-   Interactive runs always ask for the database password without displaying it,
-   so a stale `PGPASSWORD` or `DB_PASSWORD` cannot be reused accidentally. The
-   entered password is passed only to the converter child process; it is not
-   printed, written to a file, or retained in the parent shell. Non-interactive
-   automation must provide `PGPASSWORD` in its process environment.
-
-4. Review the counts, then rerun with a human-managed writer connection and the
-   explicit write confirmations. Do not give the writer credential to an agent:
-
-   ```powershell
-   npm run convert:editor-textbox-history -- --company-id <company-id> --host <host> --port 5432 --database <database> --user <writer-user> --sslmode require --apply --allow-write --confirm-database <database> --confirm-company-id <company-id>
-   ```
-
-   Apply is one guarded transaction. It inserts converted manual history, adds
-   converted current/history rows to recycle payloads, removes old save rows
-   from those payloads, and rolls everything back on any mismatch. It does not
-   enable editor JSON mode and does not run the destructive cleanup.
-5. Run `scripts/verify_editor_textbox_cutover.sql` with the read-only connection.
-   Every `blocker` count must be zero.
-6. Only then run `scripts/apply_editor_textbox_cleanup.sql`. It removes obsolete
-   current, operation, automatic-version, and legacy save rows, but keeps the
-   three phase-2 projection tables.
-7. Apply `20260801_z_retire_legacy_editor_storage.sql` through the normal reviewed
-   migration workflow. It records the final state when cleanup already ran and
-   refuses to continue if any of the nine legacy tables is still nonempty.
-
-Rollback before step 6 is an application rollback. The old storage is still
-present. Step 6 is deliberately separate because dropping tables is not a safe
-automatic rollback point.
+Rollback before the migration commits is the transaction rollback. After commit, rollback requires restoring the backup and the compatible pre-V3 application together; recreating retired tables by hand is not a supported rollback.

@@ -43,7 +43,6 @@ func (r *PostgresRepo) AnchorCleanNodeProjections(input NodeProjectionAnchorInpu
 	if companyID == "" || nodeID == "" || userID == "" {
 		return 0, ErrInvalid
 	}
-
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -54,47 +53,29 @@ func (r *PostgresRepo) AnchorCleanNodeProjections(input NodeProjectionAnchorInpu
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, `
-insert into node_projection_seen_snapshots as snapshot
-  (company_id, node_id, information_id, user_id, information, projection_updated_timestamp, seen_timestamp)
-select projection.company_id,
-       projection.node_id,
-       projection.information_id,
-       $3::uuid,
-       projection.information,
-       projection.updated_timestamp,
-       projection.updated_timestamp
-from node_projection_table projection
-left join node_projection_seen_snapshots current_snapshot
-  on current_snapshot.company_id=projection.company_id
- and current_snapshot.node_id=projection.node_id
- and current_snapshot.information_id=projection.information_id
- and current_snapshot.user_id=$3::uuid
-where projection.company_id=$1::uuid
-  and projection.node_id=$2::uuid
-  and projection.type='Text box'::information_type
-  and not exists (
-    select 1
-    from node_content_changes change
-    where change.company_id=projection.company_id
-      and change.node_id=projection.node_id
-      and change.information_id=projection.information_id
-      and change.actor_user_id is distinct from $3::uuid
-      and not exists (
-        select 1
-        from node_content_change_seen seen_change
-        where seen_change.company_id=change.company_id
-          and seen_change.change_id=change.change_id
-          and seen_change.user_id=$3::uuid
-      )
-      and (current_snapshot.seen_timestamp is null or change.created_timestamp >= current_snapshot.seen_timestamp)
-  )
-on conflict (company_id, node_id, information_id, user_id)
-do update set
-  information=excluded.information,
-  projection_updated_timestamp=excluded.projection_updated_timestamp,
-  seen_timestamp=excluded.seen_timestamp
-where snapshot.information is distinct from excluded.information
-   or snapshot.projection_updated_timestamp is distinct from excluded.projection_updated_timestamp`, companyID, nodeID, userID)
+insert into node_textbox_seen_snapshots as snapshot
+  (company_id,node_id,textbox_id,user_id,body_json,textbox_revision,textbox_updated_timestamp,seen_timestamp)
+select textbox.company_id,textbox.node_id,textbox.textbox_id,$3::uuid,
+       textbox.body_json,textbox.revision,textbox.updated_timestamp,textbox.updated_timestamp
+from node_textboxes textbox
+left join node_textbox_seen_snapshots current_snapshot
+  on current_snapshot.company_id=textbox.company_id and current_snapshot.node_id=textbox.node_id
+ and current_snapshot.textbox_id=textbox.textbox_id and current_snapshot.user_id=$3::uuid
+where textbox.company_id=$1::uuid and textbox.node_id=$2::uuid and textbox.deleted_timestamp is null
+ and not exists (
+  select 1 from node_content_changes change
+  where change.company_id=textbox.company_id and change.node_id=textbox.node_id
+   and change.textbox_id=textbox.textbox_id and change.actor_user_id is distinct from $3::uuid
+   and not exists (select 1 from node_content_change_seen seen_change
+    where seen_change.company_id=change.company_id and seen_change.change_id=change.change_id
+     and seen_change.user_id=$3::uuid)
+   and (current_snapshot.seen_timestamp is null or change.created_timestamp>=current_snapshot.seen_timestamp))
+on conflict(company_id,node_id,textbox_id,user_id) do update set
+ body_json=excluded.body_json,textbox_revision=excluded.textbox_revision,
+ textbox_updated_timestamp=excluded.textbox_updated_timestamp,seen_timestamp=excluded.seen_timestamp
+where snapshot.body_json is distinct from excluded.body_json
+ or snapshot.textbox_revision is distinct from excluded.textbox_revision
+ or snapshot.textbox_updated_timestamp is distinct from excluded.textbox_updated_timestamp`, companyID, nodeID, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -104,8 +85,7 @@ where snapshot.information is distinct from excluded.information
 	}
 	if affected == 0 {
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, nodeID).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, nodeID).Scan(&exists); err != nil {
 			return 0, err
 		}
 		if !exists {

@@ -556,7 +556,7 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeNode || input.Document.ResourceType == EntityTypeProject || input.Document.ResourceType == EntityTypeLogicGate {
+	if input.Document.ResourceType == EntityTypeProject || input.Document.ResourceType == EntityTypeLogicGate {
 		if err := deletePostgresEditorProjectionTx(ctx, tx, EditorDocumentRef{
 			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,
 			ResourceID: input.Document.ResourceID, DocumentID: input.Document.DocumentID,

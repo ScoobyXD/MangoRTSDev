@@ -12,8 +12,14 @@ psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 
 select current_database() as db, current_user as role, now() as ts;
 
 select to_regclass('public.nodes') as nodes,
-       to_regclass('public.node_information') as node_information,
-       to_regclass('public.node_projection_table') as node_projection_table,
+       to_regclass('public.node_textboxes') as node_textboxes,
+       to_regclass('public.node_textbox_chats') as node_textbox_chats,
+       to_regclass('public.node_textbox_seen_snapshots') as node_textbox_seen_snapshots,
+       to_regclass('public.email_threads') as email_threads,
+       to_regclass('public.email_messages') as email_messages,
+       to_regclass('public.email_relationships') as email_relationships,
+       to_regclass('public.email_drafts') as email_drafts,
+       to_regclass('public.email_thread_download_jobs') as email_thread_download_jobs,
        to_regclass('public.logic_gates') as logic_gates,
        to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table,
        to_regclass('public.company_explorer_folders') as company_explorer_folders,
@@ -30,11 +36,24 @@ order by conname;
 do $$
 begin
   if to_regclass('public.nodes') is null
-     or to_regclass('public.node_information') is null
-     or to_regclass('public.node_projection_table') is null
+     or to_regclass('public.node_textboxes') is null
+     or to_regclass('public.node_textbox_chats') is null
+     or to_regclass('public.node_textbox_seen_snapshots') is null
+     or to_regclass('public.email_threads') is null
+     or to_regclass('public.email_messages') is null
+     or to_regclass('public.email_relationships') is null
+     or to_regclass('public.email_drafts') is null
+     or to_regclass('public.email_thread_download_jobs') is null
      or to_regclass('public.logic_gates') is null
      or to_regclass('public.logic_gate_projection_table') is null then
-    raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
+    raise exception 'V3 canonical schema tables are missing; run the strict V3 migration before starting the application';
+  end if;
+  if to_regclass('public.node_information') is not null
+     or to_regclass('public.node_projection_table') is not null
+     or to_regclass('public.node_projection_seen_snapshots') is not null
+     or to_regclass('public.communications_email_collaborations') is not null
+     or to_regclass('public.communications_email_nodes') is not null then
+    raise exception 'retired pre-V3 tables still exist; complete the strict V3 migration before starting the application';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then
     raise exception 'missing constraint node_relationships_position_pair_chk; run apply_db_migrations';
@@ -96,4 +115,4 @@ begin
 end $$;
 SQL
 
-echo "✅ DB connectivity, canonical tables, node relationship guards, and Shared Triage schema verified"
+echo "✅ DB connectivity, V3 canonical tables, node relationship guards, and Shared Triage schema verified"
