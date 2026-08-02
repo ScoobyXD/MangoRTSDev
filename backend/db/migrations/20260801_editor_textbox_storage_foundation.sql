@@ -4,6 +4,10 @@
 -- operation, version, and information rows remain available for rollback until
 -- the cutover verification migration proves that every current document and
 -- every manual save was copied.
+--
+-- Legacy Node documents whose parent Node no longer exists stay in the legacy
+-- table for explicit review. Verification reports them and cleanup refuses to
+-- remove that table while any remain.
 
 alter table node_textboxes
   add column if not exists body_json jsonb,
@@ -70,6 +74,9 @@ select document.company_id,
        document.updated_timestamp,
        case when document.is_deleted then document.updated_timestamp end
   from editor_json_documents document
+  join nodes parent
+    on parent.company_id = document.company_id
+   and parent.node_id = document.resource_id::uuid
  where document.resource_type = 'node'
 on conflict (company_id, node_id, textbox_id) do nothing;
 

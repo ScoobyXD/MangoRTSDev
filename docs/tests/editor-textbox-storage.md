@@ -34,6 +34,18 @@ it is not an editor schema version and is not a reason to rewrite or reject an
 existing identity. The migration stops only when a legacy Node resource or
 document ID cannot be stored as a PostgreSQL UUID at all.
 
+## Missing parent Node rule
+
+The generic legacy document table did not require a Node document to have a
+matching row in `nodes`. The foundation migration copies only documents whose
+parent Node exists. A document without its parent stays unchanged in
+`editor_json_documents`; it is not silently deleted and no fake Node is made.
+
+The read-only verification script reports each missing-parent document as a
+blocker. The cleanup script refuses to drop legacy storage while any remain. A
+human must decide whether the Node should be restored or whether its unreachable
+legacy document is truly disposable before cleanup can continue.
+
 ## Simple conflict rule
 
 When the submitted revision is stale, the backend compares top-level Tiptap
