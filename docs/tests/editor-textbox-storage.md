@@ -133,6 +133,52 @@ The 2026-08-01 database-enforced read-only audit found:
 
 No document body or credential was printed or stored during the audit.
 
+## Pre-V3 missing Node textbox repair
+
+The V3 migration deliberately stops if an active legacy Node textbox projection
+does not already have the same `(company_id, node_id, textbox_id)` in
+`node_textboxes`. It never guesses that HTML is a current Tiptap body. If that
+guard reports missing rows, roll back the failed V3 transaction and run the
+reviewed prerequisite converter before retrying V3.
+
+The command is scoped to one company and only to active `Text box` projections
+that have no exact permanent row. It accepts only the
+`<!-- mango-node-text-block-v1 -->` envelope, converts its `document` with the
+production HTML-to-Tiptap converter, adds an empty annotations array, preserves
+the source IDs, revision, timestamps, and historical display ordering, and
+requires every inline image to have an active durable Node attachment identity.
+The old textbox title is intentionally ignored. Existing `node_textboxes` rows
+are never updated.
+
+Run from `frontend`. Keep the connection string only in the process environment
+as `MANGORTS_MIGRATION_DATABASE_URL`; do not paste it into a command, log, or
+repository file.
+
+```powershell
+npm run v3:node-textbox-backfill -- --mode inventory --company <company-uuid> --expected-count <reviewed-count>
+npm run v3:node-textbox-backfill -- --mode dry-run --company <company-uuid> --expected-count <reviewed-count>
+```
+
+Inventory and dry-run begin a database read-only transaction. Dry-run validates
+every body but prints only IDs, sizes, counts, and checksums, never document
+text. Review every result before authorizing a write.
+
+During the maintenance window, stop application writers and take a
+restore-tested backup. A human operator with the approved migration writer may
+then run:
+
+```powershell
+npm run v3:node-textbox-backfill -- --mode backfill --company <company-uuid> --expected-count <reviewed-count> --allow-write --backup-reference <restore-tested-backup> --confirm "BACKFILL V3 NODE TEXTBOXES <company-uuid> <reviewed-count>"
+```
+
+Backfill checks the exact pre-V3 source and permanent target column sets, locks
+the source, target, owner, and attachment tables against concurrent writes,
+converts all rows before inserting any row, verifies every insert by reading it
+back, and commits all rows together. Any count change, schema drift, bad
+envelope, missing parent, conflicting textbox ID, invalid document, or missing
+attachment identity rolls the whole transaction back. Re-running inventory
+must report zero missing rows before the strict V3 migration is retried.
+
 ## V3 rollout and rollback
 
 1. Back up the target database and stop old application writers during the reviewed maintenance window.
