@@ -69,6 +69,7 @@ import {
   MangoAttachmentImage,
   hideMangoTiptapPasteLoading,
   normalizeMangoTiptapBlockIDs,
+  repairMangoTiptapRecoveredDocument,
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
   showMangoTiptapPasteLoading,
@@ -854,6 +855,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       documentID,
       requestJSON,
       traceContext,
+      repairRecoveredDocument: repairMangoTiptapRecoveredDocument,
       subscribeToCanonicalChange: subscribeToCanonicalChange ?? ((recover, localClientID) => {
         const scope = realtimeEditorJSONScope(resourceType, resourceID, documentID);
         return subscribeRealtimeScope(attachmentContext?.apiBase ?? "", companyID, scope, {

@@ -78,6 +78,7 @@ export type MangoTiptapSyncOptions = {
   onError?: (cause: unknown) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
+  repairRecoveredDocument?: (document: MangoTiptapDocument) => MangoTiptapDocument;
   subscribeToCanonicalChange?: (recover: () => void, clientID: string) => () => void;
   batchMs?: number;
   maxBatchMs?: number;
@@ -553,13 +554,31 @@ export class MangoTiptapSync {
     const canonicalDocument = requireSnapshotDocument(canonical);
     this.revision = canonical.revision;
     if (record) {
-      this.latest = { ...record, annotations: record.annotations ?? [] };
+      const repairedDocument = this.options.repairRecoveredDocument?.(record.document) ?? record.document;
+      const repaired = repairedDocument !== record.document;
+      const recoveredRecord: MangoTiptapRecoveryRecord = {
+        ...record,
+        annotations: record.annotations ?? [],
+        ...(repaired ? {
+          document: repairedDocument,
+          operation_id: stableID(),
+          client_id: this.clientID,
+          captured_at: Date.now(),
+        } : {}),
+      };
+      this.latest = recoveredRecord;
       this.generation = Math.max(this.generation, record.generation);
       this.acknowledgedGeneration = Math.min(this.acknowledgedGeneration, Math.max(0, record.generation - 1));
       this.publishPendingCount();
       this.emitSaveState({ status: "pending", unresolvedFailure: Boolean(this.unresolvedSaveFailureMessage) });
-      this.options.onDocument(record.document, "recovery");
-      this.options.onAnnotations?.(record.annotations ?? [], "recovery");
+      if (repaired) {
+        editorTraceInstant(this.options.traceContext ?? null, "sync.recovery_repaired", "editor.recovery", {
+          generation: recoveredRecord.generation,
+        });
+        await this.persistRecordBestEffort(recoveredRecord);
+      }
+      this.options.onDocument(recoveredRecord.document, "recovery");
+      this.options.onAnnotations?.(recoveredRecord.annotations, "recovery");
       await this.drain();
       return;
     }

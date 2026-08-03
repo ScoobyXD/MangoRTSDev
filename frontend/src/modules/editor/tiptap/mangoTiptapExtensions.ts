@@ -15,6 +15,7 @@ import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntity
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
 import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
+import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -69,6 +70,37 @@ export function normalizeMangoTiptapBlockIDs(document: JSONContent): JSONContent
     return next;
   };
   return normalizeNode(document);
+}
+
+function restoreLegacyMangoEntityLinkTypes(document: JSONContent): JSONContent {
+  const restoreNode = (node: JSONContent): JSONContent => {
+    let next = node;
+    if (
+      node.type === "mangoEntityLink"
+      && !Object.prototype.hasOwnProperty.call(node.attrs ?? {}, "entityType")
+    ) {
+      next = { ...next, attrs: { ...next.attrs, entityType: "node" } };
+    }
+    if (node.content) {
+      let contentChanged = false;
+      const content = node.content.map((child) => {
+        const restored = restoreNode(child);
+        if (restored !== child) contentChanged = true;
+        return restored;
+      });
+      if (contentChanged) next = { ...next, content };
+    }
+    return next;
+  };
+  return restoreNode(document);
+}
+
+export function repairMangoTiptapRecoveredDocument(document: MangoTiptapDocument): MangoTiptapDocument {
+  const restoredDocument = restoreLegacyMangoEntityLinkTypes(document.document);
+  const normalizedDocument = normalizeMangoTiptapBlockIDs(restoredDocument);
+  return normalizedDocument === document.document
+    ? document
+    : { ...document, document: normalizedDocument };
 }
 
 type MangoBlockRange = { from: number; to: number };
