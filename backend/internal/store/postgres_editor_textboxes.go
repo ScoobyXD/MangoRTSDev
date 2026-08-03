@@ -42,16 +42,17 @@ var mangoTiptapDefaultAttributes = func() map[string]map[string]any {
 	// Keep this list aligned with createMangoTiptapExtensions. The frontend
 	// reads these defaults directly from the active ProseMirror schema.
 	defaults := map[string]map[string]any{
-		"codeBlock":       {"language": nil},
-		"heading":         {"level": float64(1), "textAlign": nil, "indentLevel": float64(0)},
-		"paragraph":       {"textAlign": nil, "indentLevel": float64(0)},
-		"orderedList":     {"start": float64(1), "type": nil},
-		"taskItem":        {"checked": false},
-		"table":           {"style": nil},
-		"tableCell":       {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
-		"tableHeader":     {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
-		"mention":         {"userId": nil, "label": nil, "kind": "normal"},
-		"mangoEntityLink": {"entityType": "node", "entityId": nil, "label": nil},
+		"codeBlock":   {"language": nil},
+		"heading":     {"level": float64(1), "textAlign": nil, "indentLevel": float64(0)},
+		"paragraph":   {"textAlign": nil, "indentLevel": float64(0)},
+		"orderedList": {"start": float64(1), "type": nil},
+		"taskItem":    {"checked": false},
+		"table":       {"style": nil},
+		"tableCell":   {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
+		"tableHeader": {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
+		"mention":     {"userId": nil, "label": nil, "kind": "normal"},
+		// entityType is required durable identity even when the schema defaults it to node.
+		"mangoEntityLink": {"entityId": nil, "label": nil},
 		"highlight":       {"color": nil},
 		"textStyle":       {"fontSize": nil, "color": nil},
 		"link":            {"href": nil, "target": "_blank", "rel": "noopener noreferrer nofollow", "class": nil, "title": nil},

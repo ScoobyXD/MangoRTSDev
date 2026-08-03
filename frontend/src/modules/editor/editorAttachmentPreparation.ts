@@ -1,3 +1,10 @@
+const EDITOR_ATTACHMENT_INFORMATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function durableEditorAttachmentInformationID(value: string | undefined): string | undefined {
+  const cleanValue = value?.trim() ?? "";
+  return EDITOR_ATTACHMENT_INFORMATION_ID_PATTERN.test(cleanValue) ? cleanValue : undefined;
+}
+
 export type EditorAttachmentMutationLifecycle = {
   begin: () => void;
   finish: (succeeded: boolean) => void;
